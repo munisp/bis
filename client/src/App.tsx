@@ -1,35 +1,73 @@
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import NotFound from "@/pages/NotFound";
 import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
-import Home from "./pages/Home";
 
+// Core pages
+import Dashboard from "@/pages/Dashboard";
+import Investigations from "@/pages/Investigations";
+import InvestigationDetail from "@/pages/InvestigationDetail";
+import Reports from "@/pages/Reports";
+import Alerts from "@/pages/Alerts";
+import Tenants from "@/pages/Tenants";
+import Settings from "@/pages/Settings";
+import NotFound from "@/pages/NotFound";
+
+// BIS feature pages
+import BiometricEnrollmentPage from "@/pages/bis/BiometricEnrollmentPage";
+import ContinuousMonitoringPage from "@/pages/bis/ContinuousMonitoringPage";
+import DrugScreeningPage from "@/pages/bis/DrugScreeningPage";
+import MVRCheckPage from "@/pages/bis/MVRCheckPage";
+import NigerianDataBundlePage from "@/pages/bis/NigerianDataBundlePage";
+import WorkAuthorizationPage from "@/pages/bis/WorkAuthorizationPage";
+import ZeroFootprintPage from "@/pages/bis/ZeroFootprintPage";
+
+// KYC / Onboarding / Monitoring
+import KYCVerificationPage from "@/pages/kyc/KYCVerificationPage";
+import MessagingChannelsPage from "@/pages/messaging/MessagingChannelsPage";
+import SocialMonitoringDashboard from "@/pages/monitoring/SocialMonitoringDashboard";
+import StakeholderOnboardingWizard from "@/pages/onboarding/StakeholderOnboardingWizard";
 
 function Router() {
   return (
     <Switch>
-      <Route path={"/"} component={Home} />
-      <Route path={"/404"} component={NotFound} />
-      {/* Final fallback route */}
+      {/* Core */}
+      <Route path="/" component={Dashboard} />
+      <Route path="/dashboard" component={Dashboard} />
+      <Route path="/investigations" component={Investigations} />
+      <Route path="/investigations/:id" component={InvestigationDetail} />
+      <Route path="/reports" component={Reports} />
+      <Route path="/alerts" component={Alerts} />
+      <Route path="/tenants" component={Tenants} />
+      <Route path="/settings" component={Settings} />
+
+      {/* BIS Feature Modules */}
+      <Route path="/biometric-enrollment" component={BiometricEnrollmentPage} />
+      <Route path="/continuous-monitoring" component={ContinuousMonitoringPage} />
+      <Route path="/drug-screening" component={DrugScreeningPage} />
+      <Route path="/mvr-check" component={MVRCheckPage} />
+      <Route path="/nigeria-data-bundle" component={NigerianDataBundlePage} />
+      <Route path="/work-authorization" component={WorkAuthorizationPage} />
+      <Route path="/zero-footprint" component={ZeroFootprintPage} />
+
+      {/* KYC / Onboarding / Intelligence */}
+      <Route path="/kyc-verification" component={KYCVerificationPage} />
+      <Route path="/messaging-channels" component={MessagingChannelsPage} />
+      <Route path="/social-monitoring" component={SocialMonitoringDashboard} />
+      <Route path="/onboarding" component={StakeholderOnboardingWizard} />
+
+      {/* Fallback */}
+      <Route path="/404" component={NotFound} />
       <Route component={NotFound} />
     </Switch>
   );
 }
 
-// NOTE: About Theme
-// - First choose a default theme according to your design style (dark or light bg), than change color palette in index.css
-//   to keep consistent foreground/background color across components
-// - If you want to make theme switchable, pass `switchable` ThemeProvider and use `useTheme` hook
-
 function App() {
   return (
     <ErrorBoundary>
-      <ThemeProvider
-        defaultTheme="light"
-        // switchable
-      >
+      <ThemeProvider defaultTheme="dark">
         <TooltipProvider>
           <Toaster />
           <Router />
