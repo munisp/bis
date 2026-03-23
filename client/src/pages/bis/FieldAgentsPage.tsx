@@ -1,15 +1,16 @@
 // FieldAgentsPage — Field agent management and incentive ledger
 // Design: Dark forensic intelligence theme, JetBrains Mono typography
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import BISLayout from '@/components/BISLayout';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import {
   Users, MapPin, Star, Shield, CheckCircle2, Clock, AlertTriangle,
-  Search, Plus, Award, X, Send, Navigation, ChevronDown
+  Search, Plus, Award, X, Send, Navigation, ChevronDown, Map, List
 } from 'lucide-react';
+import { MapView } from '@/components/Map';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -296,6 +297,27 @@ function DispatchTaskSheet({
   );
 }
 
+// ─── Agent locations (approximate city centres) ──────────────────────────────
+const AGENT_LOCATIONS: Record<string, { lat: number; lng: number }> = {
+  'a1': { lat: 6.6018,  lng: 3.3515  }, // Ikeja, Lagos
+  'a2': { lat: 6.1428,  lng: 6.7936  }, // Onitsha, Anambra
+  'a3': { lat: 12.0022, lng: 8.5920  }, // Kano
+  'a4': { lat: 6.4483,  lng: 7.5464  }, // Enugu
+  'a5': { lat: 4.8156,  lng: 7.0498  }, // Port Harcourt
+  'a6': { lat: 9.0765,  lng: 7.3986  }, // Abuja
+};
+
+const ACTIVE_TASK_PINS = [
+  { id: 'tp1', agentId: 'a1', label: 'Address Verification', lat: 6.4541, lng: 3.3947, priority: 'high' as const, subject: 'Emeka Okafor' },
+  { id: 'tp2', agentId: 'a3', label: 'Employer Verification', lat: 12.0422, lng: 8.5320, priority: 'medium' as const, subject: 'Fatima Al-Hassan' },
+  { id: 'tp3', agentId: 'a6', label: 'Physical Presence', lat: 9.0565, lng: 7.4986, priority: 'urgent' as const, subject: 'Zenith Logistics Ltd' },
+  { id: 'tp4', agentId: 'a2', label: 'Document Collection', lat: 6.1628, lng: 6.7736, priority: 'low' as const, subject: 'Ngozi Adeyemi' },
+];
+
+const TASK_PIN_COLORS: Record<string, string> = {
+  urgent: '#f87171', high: '#fb923c', medium: '#fbbf24', low: '#34d399',
+};
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function FieldAgentsPage() {
@@ -303,6 +325,9 @@ export default function FieldAgentsPage() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [dispatchAgent, setDispatchAgent] = useState<FieldAgent | null>(null);
   const [dispatchedTasks, setDispatchedTasks] = useState<string[]>([]);
+  const [viewMode, setViewMode] = useState<'table' | 'map'>('table');
+  const mapRef = useRef<google.maps.Map | null>(null);
+  const markersRef = useRef<google.maps.marker.AdvancedMarkerElement[]>([]);
 
   const filtered = MOCK_AGENTS.filter(a => {
     const matchSearch = a.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -330,14 +355,73 @@ export default function FieldAgentsPage() {
     setTimeout(() => setDispatchAgent(null), 2000);
   };
 
+  const handleMapReady = (map: google.maps.Map) => {
+    mapRef.current = map;
+    // Place agent markers
+    MOCK_AGENTS.forEach(agent => {
+      const pos = AGENT_LOCATIONS[agent.id];
+      if (!pos) return;
+      const el = document.createElement('div');
+      el.style.cssText = [
+        'width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;',
+        `background:${agent.status === 'active' ? '#22c55e' : '#6b7280'}22;`,
+        `border:2px solid ${agent.status === 'active' ? '#22c55e' : '#6b7280'};`,
+        "font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:700;",
+        `color:${agent.status === 'active' ? '#22c55e' : '#9ca3af'};`,
+      ].join('');
+      el.textContent = agent.name.split(' ').map((n: string) => n[0]).join('');
+      el.title = `${agent.name} (${agent.agentId}) — ${agent.state}`;
+      const marker = new google.maps.marker.AdvancedMarkerElement({
+        map, position: pos, content: el, title: agent.name,
+      });
+      markersRef.current.push(marker);
+    });
+    // Place task pins
+    ACTIVE_TASK_PINS.forEach(task => {
+      const el = document.createElement('div');
+      const c = TASK_PIN_COLORS[task.priority];
+      el.style.cssText = [
+        'padding:3px 7px;border-radius:4px;',
+        "font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:700;white-space:nowrap;",
+        `background:${c}22;border:1.5px solid ${c};color:${c};`,
+      ].join('');
+      el.textContent = `\u25CF ${task.label}`;
+      el.title = `${task.label} — ${task.subject} [${task.priority.toUpperCase()}]`;
+      const marker = new google.maps.marker.AdvancedMarkerElement({
+        map, position: { lat: task.lat, lng: task.lng }, content: el,
+      });
+      markersRef.current.push(marker);
+    });
+  };
+
   return (
     <BISLayout
       title="Field Agents"
       subtitle={`${MOCK_AGENTS.filter(a => a.status === 'active').length} active agents across Nigeria`}
       actions={
-        <Button size="sm" className="h-7 text-xs gap-1.5 font-mono">
-          <Plus size={12} /> Recruit Agent
-        </Button>
+        <div className="flex items-center gap-2">
+          <div className="flex rounded-md border border-border overflow-hidden">
+            <button
+              onClick={() => setViewMode('table')}
+              className={cn("px-3 py-1.5 text-[10px] font-mono flex items-center gap-1.5 transition-colors",
+                viewMode === 'table' ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              <List size={11} /> Table
+            </button>
+            <button
+              onClick={() => setViewMode('map')}
+              className={cn("px-3 py-1.5 text-[10px] font-mono flex items-center gap-1.5 transition-colors",
+                viewMode === 'map' ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              <Map size={11} /> Map
+            </button>
+          </div>
+          <Button size="sm" className="h-7 text-xs gap-1.5 font-mono">
+            <Plus size={12} /> Recruit Agent
+          </Button>
+        </div>
       }
     >
       {/* Stats */}
@@ -377,8 +461,66 @@ export default function FieldAgentsPage() {
         </select>
       </div>
 
+      {/* ── Map View ── */}
+      {viewMode === 'map' && (
+        <div className="mb-4">
+          <div className="bis-card overflow-hidden">
+            {/* Map legend */}
+            <div className="flex items-center gap-4 px-4 py-2 border-b border-border bg-muted/20 flex-wrap">
+              <span className="text-[9px] font-mono text-muted-foreground uppercase tracking-wider">Legend:</span>
+              <span className="flex items-center gap-1.5 text-[10px] font-mono text-emerald-400">
+                <span className="w-3 h-3 rounded-full border-2 border-emerald-400 bg-emerald-400/20" /> Active Agent
+              </span>
+              <span className="flex items-center gap-1.5 text-[10px] font-mono text-muted-foreground">
+                <span className="w-3 h-3 rounded-full border-2 border-muted-foreground bg-muted/20" /> Inactive Agent
+              </span>
+              {Object.entries(TASK_PIN_COLORS).map(([p, c]) => (
+                <span key={p} className="flex items-center gap-1.5 text-[10px] font-mono capitalize" style={{ color: c }}>
+                  <span className="w-2 h-2 rounded-sm" style={{ background: c + '33', border: `1.5px solid ${c}` }} /> {p} task
+                </span>
+              ))}
+            </div>
+            <MapView
+              className="h-[480px]"
+              initialCenter={{ lat: 9.0820, lng: 8.6753 }}
+              initialZoom={6}
+              onMapReady={handleMapReady}
+            />
+          </div>
+          {/* Active tasks list under map */}
+          <div className="bis-card p-4 mt-3">
+            <h3 className="text-xs font-mono text-muted-foreground uppercase tracking-wider mb-3 flex items-center gap-2">
+              <Navigation size={11} /> Active Dispatch Tasks ({ACTIVE_TASK_PINS.length})
+            </h3>
+            <div className="grid grid-cols-2 gap-2">
+              {ACTIVE_TASK_PINS.map(task => {
+                const agent = MOCK_AGENTS.find(a => a.id === task.agentId);
+                const c = TASK_PIN_COLORS[task.priority];
+                return (
+                  <div key={task.id} className="p-3 rounded-lg border border-border/50 bg-muted/10">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[10px] font-mono font-bold" style={{ color: c }}>
+                        {task.priority.toUpperCase()}
+                      </span>
+                      <span className="text-[9px] font-mono text-muted-foreground">
+                        {task.lat.toFixed(4)}, {task.lng.toFixed(4)}
+                      </span>
+                    </div>
+                    <p className="text-xs font-mono font-semibold text-foreground">{task.label}</p>
+                    <p className="text-[10px] font-mono text-muted-foreground mt-0.5">Subject: {task.subject}</p>
+                    {agent && (
+                      <p className="text-[10px] font-mono text-primary mt-0.5">{agent.name} · {agent.agentId}</p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Agent table */}
-      <div className="bis-card overflow-hidden">
+      <div className={cn("bis-card overflow-hidden", viewMode === 'map' && 'hidden')}>
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border">
