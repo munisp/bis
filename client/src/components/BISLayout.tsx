@@ -50,7 +50,7 @@ const navGroups: NavGroup[] = [
   },
   {
     label: 'SCREENING',
-    defaultOpen: false,
+    defaultOpen: true,
     items: [
       { label: 'MVR Check', href: '/mvr-check', icon: <Car size={15} /> },
       { label: 'Drug Screening', href: '/drug-screening', icon: <Pill size={15} /> },
@@ -60,7 +60,7 @@ const navGroups: NavGroup[] = [
   },
   {
     label: 'MONITORING',
-    defaultOpen: false,
+    defaultOpen: true,
     items: [
       { label: 'Continuous Monitoring', href: '/continuous-monitoring', icon: <Activity size={15} />, badge: 47, badgeVariant: 'destructive' },
       { label: 'Social Intelligence', href: '/social-monitoring', icon: <Globe size={15} /> },
@@ -69,18 +69,18 @@ const navGroups: NavGroup[] = [
   },
   {
     label: 'DATA SOURCES',
-    defaultOpen: false,
+    defaultOpen: true,
     items: [
       { label: 'Nigerian Data Bundle', href: '/nigeria-data-bundle', icon: <MapPin size={15} /> },
-      { label: 'Social Intelligence', href: '/social-monitoring', icon: <Globe size={15} /> },
+      { label: 'Field Agents', href: '/field-agents', icon: <Users size={15} /> },
+      { label: 'Data Sources', href: '/data-sources', icon: <Database size={15} /> },
     ],
   },
   {
     label: 'PLATFORM',
-    defaultOpen: false,
+    defaultOpen: true,
     items: [
       { label: 'Tenants & API Keys', href: '/tenants', icon: <Key size={15} /> },
-      { label: 'Onboarding', href: '/onboarding', icon: <Building2 size={15} /> },
       { label: 'Settings', href: '/settings', icon: <Settings size={15} /> },
     ],
   },

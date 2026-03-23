@@ -6,10 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
+import NewInvestigationSlideOver from "@/components/NewInvestigationSlideOver";
 import {
   Search, Plus, Filter, ChevronRight, User, Building2,
   Clock, CheckCircle2, AlertTriangle, Loader2, FileText
@@ -38,8 +36,6 @@ export default function Investigations() {
   const [tierFilter, setTierFilter] = useState<string>("all");
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [createOpen, setCreateOpen] = useState(false);
-  const [creating, setCreating] = useState(false);
-  const [newInv, setNewInv] = useState({ subjectName: "", subjectType: "individual", tier: "standard", notes: "" });
 
   const filtered = mockInvestigations.filter(inv => {
     const matchSearch = inv.subjectName.toLowerCase().includes(search.toLowerCase()) ||
@@ -49,16 +45,6 @@ export default function Investigations() {
     const matchType = typeFilter === "all" || inv.subjectType === typeFilter;
     return matchSearch && matchStatus && matchTier && matchType;
   });
-
-  const handleCreate = async () => {
-    if (!newInv.subjectName.trim()) { toast.error("Subject name is required"); return; }
-    setCreating(true);
-    await new Promise(r => setTimeout(r, 1200));
-    setCreating(false);
-    setCreateOpen(false);
-    toast.success(`Investigation created: BIS-2026-${String(mockInvestigations.length + 1).padStart(4, "0")}`);
-    setNewInv({ subjectName: "", subjectType: "individual", tier: "standard", notes: "" });
-  };
 
   const riskBar = (score: number) => {
     const color = score >= 80 ? "#f87171" : score >= 60 ? "#fb923c" : score >= 30 ? "#fbbf24" : "#34d399";
@@ -77,61 +63,9 @@ export default function Investigations() {
       title="Investigations"
       subtitle={`${filtered.length} of ${mockInvestigations.length} records`}
       actions={
-        <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-          <DialogTrigger asChild>
-            <Button size="sm" className="h-7 text-xs gap-1.5">
-              <Plus size={12} /> New Investigation
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle>Create Investigation</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-4 pt-2">
-              <div className="space-y-1.5">
-                <Label>Subject Name *</Label>
-                <Input placeholder="Full name or company name" value={newInv.subjectName}
-                  onChange={e => setNewInv(p => ({ ...p, subjectName: e.target.value }))} />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label>Subject Type</Label>
-                  <Select value={newInv.subjectType} onValueChange={v => setNewInv(p => ({ ...p, subjectType: v }))}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="individual">Individual</SelectItem>
-                      <SelectItem value="corporate">Corporate Entity</SelectItem>
-                      <SelectItem value="government">Government Agency</SelectItem>
-                      <SelectItem value="ngo">NGO / Non-Profit</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Investigation Tier</Label>
-                  <Select value={newInv.tier} onValueChange={v => setNewInv(p => ({ ...p, tier: v }))}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="basic">Basic — $25</SelectItem>
-                      <SelectItem value="standard">Standard — $75</SelectItem>
-                      <SelectItem value="comprehensive">Comprehensive — $150</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <div className="space-y-1.5">
-                <Label>Notes (optional)</Label>
-                <Textarea placeholder="Any context or special instructions..." rows={3}
-                  value={newInv.notes} onChange={e => setNewInv(p => ({ ...p, notes: e.target.value }))} />
-              </div>
-              <div className="flex justify-end gap-2 pt-2">
-                <Button variant="outline" size="sm" onClick={() => setCreateOpen(false)}>Cancel</Button>
-                <Button size="sm" onClick={handleCreate} disabled={creating}>
-                  {creating ? <><Loader2 size={12} className="animate-spin mr-1" />Creating...</> : "Create Investigation"}
-                </Button>
-              </div>
-            </div>
-          </DialogContent>
-        </Dialog>
+        <Button size="sm" className="h-7 text-xs gap-1.5" onClick={() => setCreateOpen(true)}>
+          <Plus size={12} /> New Investigation
+        </Button>
       }
     >
       {/* Filters */}
@@ -240,6 +174,10 @@ export default function Investigations() {
           </table>
         </div>
       </div>
+      <NewInvestigationSlideOver
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+      />
     </BISLayout>
   );
 }

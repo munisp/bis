@@ -1,20 +1,23 @@
 /**
  * BIS Messaging Channels Management Page
  * ========================================
- * Configure and manage WhatsApp, Telegram, USSD, and SMS channels
- * for reporting and monitoring in developing countries.
- *
- * Features:
- * - WhatsApp Business API configuration
- * - Telegram bot management
- * - USSD session monitoring (Africa's Talking)
- * - SMS gateway configuration
- * - Incoming report queue from all channels
- * - Channel analytics
+ * Configure and manage WhatsApp, Telegram, USSD, and SMS channels.
+ * Design: Dark forensic intelligence theme, JetBrains Mono typography
+ * Live feed: new incoming reports injected every 12 seconds via setInterval
  */
 
-import React, { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import BISLayout from '@/components/BISLayout';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
+import {
+  MessageSquare, Radio, Bell, CheckCircle2, Clock, AlertTriangle,
+  XCircle, Loader2, Phone, Hash, Wifi, WifiOff, Users, FileText,
+  ChevronDown, ChevronRight, X, Paperclip, Globe
+} from 'lucide-react';
+
+// ─── Types ───────────────────────────────────────────────────────────────────
 
 type Channel = 'whatsapp' | 'telegram' | 'ussd' | 'sms';
 type ReportStatus = 'new' | 'processing' | 'verified' | 'dismissed';
@@ -30,6 +33,7 @@ interface IncomingReport {
   language: string;
   attachments: number;
   linkedSubject?: string;
+  isNew?: boolean;
 }
 
 interface ChannelStats {
@@ -41,110 +45,149 @@ interface ChannelStats {
   isOnline: boolean;
 }
 
-// ─── Mock Data ────────────────────────────────────────────────────────────────
+// ─── Config ───────────────────────────────────────────────────────────────────
 
-const CHANNEL_STATS: ChannelStats[] = [
+const CHANNEL_CONFIG: Record<Channel, {
+  label: string; shortCode: string; color: string; textColor: string;
+  border: string; icon: React.ReactNode; description: string;
+}> = {
+  whatsapp: {
+    label: 'WhatsApp Business', shortCode: 'WA',
+    color: 'bg-emerald-500/15', textColor: 'text-emerald-400', border: 'border-emerald-500/30',
+    icon: <MessageSquare size={14} />,
+    description: 'Receive reports via WhatsApp. Supports text, images, voice notes, and documents.',
+  },
+  telegram: {
+    label: 'Telegram Bot', shortCode: 'TG',
+    color: 'bg-sky-500/15', textColor: 'text-sky-400', border: 'border-sky-500/30',
+    icon: <Globe size={14} />,
+    description: 'Anonymous reporting via Telegram bot. Supports media and document uploads.',
+  },
+  ussd: {
+    label: 'USSD Gateway', shortCode: 'US',
+    color: 'bg-violet-500/15', textColor: 'text-violet-400', border: 'border-violet-500/30',
+    icon: <Hash size={14} />,
+    description: 'Works on any phone without internet. Dial *347*BIS# to report.',
+  },
+  sms: {
+    label: 'SMS Gateway', shortCode: 'SM',
+    color: 'bg-amber-500/15', textColor: 'text-amber-400', border: 'border-amber-500/30',
+    icon: <Phone size={14} />,
+    description: 'Send reports via SMS to short code 34729. Works on MTN, Airtel, Glo.',
+  },
+};
+
+const STATUS_CONFIG: Record<ReportStatus, { label: string; color: string; icon: React.ReactNode }> = {
+  new:        { label: 'New',        color: 'text-blue-400',    icon: <Bell size={10} /> },
+  processing: { label: 'Processing', color: 'text-amber-400',   icon: <Loader2 size={10} className="animate-spin" /> },
+  verified:   { label: 'Verified',   color: 'text-emerald-400', icon: <CheckCircle2 size={10} /> },
+  dismissed:  { label: 'Dismissed',  color: 'text-muted-foreground', icon: <XCircle size={10} /> },
+};
+
+// ─── Seed Data ────────────────────────────────────────────────────────────────
+
+const SEED_REPORTS: IncomingReport[] = [
+  {
+    id: 'rpt_001', channel: 'whatsapp', sender: '+2348012345678',
+    content: 'I want to report a man called Emeka Okafor in Alaba International Market. He has been collecting money from traders promising to help them get NAFDAC registration but disappearing after collecting. He has collected from at least 10 people.',
+    receivedAt: new Date(Date.now() - 5 * 60000).toISOString(),
+    status: 'new', riskScore: 78, language: 'en', attachments: 2,
+  },
+  {
+    id: 'rpt_002', channel: 'ussd', sender: '+2347098765432',
+    content: 'USSD Report: Suspect=Bola Tinubu-Adeola, Location=Ikeja Lagos, Crime=Land fraud, Amount=2500000 NGN',
+    receivedAt: new Date(Date.now() - 18 * 60000).toISOString(),
+    status: 'processing', riskScore: 65, language: 'en', attachments: 0, linkedSubject: 'BIS-2026-0039',
+  },
+  {
+    id: 'rpt_003', channel: 'sms', sender: '+2348055443322',
+    content: 'Oga dis person wey I dey report na Fatima Abubakar for Kano. She dey use fake BVN to open account collect loan run away. Her phone number na 08033221144',
+    receivedAt: new Date(Date.now() - 45 * 60000).toISOString(),
+    status: 'verified', riskScore: 82, language: 'pidgin', attachments: 0,
+  },
+  {
+    id: 'rpt_004', channel: 'telegram', sender: '@anonymous_reporter_ng',
+    content: 'Sharing evidence of a Ponzi scheme operating through a WhatsApp group called "Guaranteed Returns NG". Admin is known as "Alhaji Profits". Screenshots attached.',
+    receivedAt: new Date(Date.now() - 2 * 3600000).toISOString(),
+    status: 'new', riskScore: 91, language: 'en', attachments: 5,
+  },
+  {
+    id: 'rpt_005', channel: 'sms', sender: '+2348099887766',
+    content: 'Report: Chioma Obi, Enugu State. She collects school fees from parents claiming to be a school proprietress but no school exists. Over 30 families affected.',
+    receivedAt: new Date(Date.now() - 3 * 3600000).toISOString(),
+    status: 'verified', riskScore: 74, language: 'en', attachments: 0,
+  },
+  {
+    id: 'rpt_006', channel: 'whatsapp', sender: '+2348023456789',
+    content: 'Alhaji Musa Danladi for Abuja dey collect money for visa processing. E don collect from 20+ people. None of them get visa. E dey use fake embassy letter.',
+    receivedAt: new Date(Date.now() - 5 * 3600000).toISOString(),
+    status: 'processing', riskScore: 88, language: 'pidgin', attachments: 3,
+  },
+];
+
+const SEED_STATS: ChannelStats[] = [
   { channel: 'whatsapp', totalReports: 1247, todayReports: 23, verifiedReports: 891, activeUsers: 342, isOnline: true },
   { channel: 'telegram', totalReports: 543, todayReports: 11, verifiedReports: 412, activeUsers: 156, isOnline: true },
   { channel: 'ussd', totalReports: 2891, todayReports: 67, verifiedReports: 1943, activeUsers: 0, isOnline: true },
   { channel: 'sms', totalReports: 4102, todayReports: 89, verifiedReports: 2876, activeUsers: 0, isOnline: true },
 ];
 
-const INCOMING_REPORTS: IncomingReport[] = [
-  {
-    id: 'rpt_001',
-    channel: 'whatsapp',
-    sender: '+2348012345678',
-    content: 'I want to report a man called Emeka Okafor in Alaba International Market. He has been collecting money from traders promising to help them get NAFDAC registration but disappearing after collecting. He has collected from at least 10 people.',
-    receivedAt: '2026-03-23T11:30:00Z',
-    status: 'new',
-    riskScore: 78,
-    language: 'en',
-    attachments: 2,
-    linkedSubject: undefined,
-  },
-  {
-    id: 'rpt_002',
-    channel: 'ussd',
-    sender: '+2347098765432',
-    content: 'USSD Report: Suspect=Bola Tinubu-Adeola, Location=Ikeja Lagos, Crime=Land fraud, Amount=2500000 NGN',
-    receivedAt: '2026-03-23T10:15:00Z',
-    status: 'processing',
-    riskScore: 65,
-    language: 'en',
-    attachments: 0,
-    linkedSubject: 'BIS-2026-0039',
-  },
-  {
-    id: 'rpt_003',
-    channel: 'sms',
-    sender: '+2348055443322',
-    content: 'Oga dis person wey I dey report na Fatima Abubakar for Kano. She dey use fake BVN to open account collect loan run away. Her phone number na 08033221144',
-    receivedAt: '2026-03-23T09:45:00Z',
-    status: 'verified',
-    riskScore: 82,
-    language: 'pidgin',
-    attachments: 0,
-    linkedSubject: undefined,
-  },
-  {
-    id: 'rpt_004',
-    channel: 'telegram',
-    sender: '@anonymous_reporter_ng',
-    content: 'Sharing evidence of a Ponzi scheme operating through a WhatsApp group called "Guaranteed Returns NG". Admin is known as "Alhaji Profits". Screenshots attached.',
-    receivedAt: '2026-03-23T08:00:00Z',
-    status: 'new',
-    riskScore: 91,
-    language: 'en',
-    attachments: 5,
-    linkedSubject: undefined,
-  },
+// ─── Live report generator pool ──────────────────────────────────────────────
+
+const LIVE_POOL: Omit<IncomingReport, 'id' | 'receivedAt' | 'status' | 'isNew'>[] = [
+  { channel: 'sms', sender: '+2348071234567', content: 'Fraud alert: Ibrahim Suleiman for Kaduna dey collect money for oil block allocation. Na scam. He don collect N5m from my uncle.', riskScore: 87, language: 'pidgin', attachments: 0 },
+  { channel: 'whatsapp', sender: '+2348034567890', content: 'I have evidence of a fake recruitment agency operating in Surulere. They collect N150,000 per applicant for jobs that don\'t exist. Name: Premium Jobs Ltd.', riskScore: 76, language: 'en', attachments: 2 },
+  { channel: 'telegram', sender: '@whistleblower_abj', content: 'Attaching documents showing diversion of government funds by a contractor in FCT. Amount: ₦850 million. Contractor: Zenith Construction Ltd.', riskScore: 93, language: 'en', attachments: 4 },
+  { channel: 'ussd', sender: '+2347056789012', content: 'USSD Report: Suspect=Ngozi Adichie-Obi, Location=Port Harcourt, Crime=Insurance fraud, Amount=3200000 NGN', riskScore: 69, language: 'en', attachments: 0 },
+  { channel: 'sms', sender: '+2348045678901', content: 'Tunde Bakare for Lagos Island dey sell fake land documents. He has sold same plot to 5 different buyers. CofO numbers are forged.', riskScore: 84, language: 'en', attachments: 0 },
+  { channel: 'whatsapp', sender: '+2348056789012', content: 'Cryptocurrency investment scam: "NaijaCoin Investment" promises 50% monthly returns. They have disappeared with over ₦200m from 500+ investors.', riskScore: 95, language: 'en', attachments: 1 },
 ];
 
-// ─── Channel Config ───────────────────────────────────────────────────────────
-
-const CHANNEL_CONFIG: Record<Channel, { icon: string; color: string; label: string; description: string }> = {
-  whatsapp: {
-    icon: '💬',
-    color: 'bg-green-500',
-    label: 'WhatsApp Business',
-    description: 'Receive reports via WhatsApp. Supports text, images, voice notes, and documents.',
-  },
-  telegram: {
-    icon: '✈️',
-    color: 'bg-blue-500',
-    label: 'Telegram Bot',
-    description: 'Anonymous reporting via Telegram bot. Supports media and document uploads.',
-  },
-  ussd: {
-    icon: '📟',
-    color: 'bg-purple-500',
-    label: 'USSD Gateway',
-    description: 'Works on any phone without internet. Dial *347*BIS# to report. Powered by Africa\'s Talking.',
-  },
-  sms: {
-    icon: '📱',
-    color: 'bg-orange-500',
-    label: 'SMS Gateway',
-    description: 'Send reports via SMS to short code 34729. Works on all networks including MTN, Airtel, Glo.',
-  },
-};
-
-const STATUS_CONFIG: Record<ReportStatus, { color: string; label: string }> = {
-  new: { color: 'bg-blue-100 text-blue-700', label: 'New' },
-  processing: { color: 'bg-yellow-100 text-yellow-700', label: 'Processing' },
-  verified: { color: 'bg-green-100 text-green-700', label: 'Verified' },
-  dismissed: { color: 'bg-gray-100 text-gray-500', label: 'Dismissed' },
-};
+let liveIdx = 0;
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 function MessagingChannelsPageInner() {
   const [activeTab, setActiveTab] = useState<'overview' | 'reports' | 'config' | 'ussd_flow'>('overview');
-  const [reports, setReports] = useState<IncomingReport[]>(INCOMING_REPORTS);
+  const [reports, setReports] = useState<IncomingReport[]>(SEED_REPORTS);
+  const [stats, setStats] = useState<ChannelStats[]>(SEED_STATS);
   const [selectedReport, setSelectedReport] = useState<IncomingReport | null>(null);
   const [filterChannel, setFilterChannel] = useState<Channel | 'all'>('all');
   const [filterStatus, setFilterStatus] = useState<ReportStatus | 'all'>('all');
+  const [isLive, setIsLive] = useState(true);
+  const [newCount, setNewCount] = useState(0);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Live feed injection
+  useEffect(() => {
+    if (!isLive) {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+      return;
+    }
+    intervalRef.current = setInterval(() => {
+      const template = LIVE_POOL[liveIdx % LIVE_POOL.length];
+      liveIdx++;
+      const newReport: IncomingReport = {
+        ...template,
+        id: `live_${Date.now()}`,
+        receivedAt: new Date().toISOString(),
+        status: 'new',
+        isNew: true,
+      };
+      setReports(prev => [newReport, ...prev.slice(0, 49)]);
+      setStats(prev => prev.map(s =>
+        s.channel === template.channel
+          ? { ...s, totalReports: s.totalReports + 1, todayReports: s.todayReports + 1 }
+          : s
+      ));
+      setNewCount(c => c + 1);
+      setTimeout(() => {
+        setReports(prev => prev.map(r => r.id === newReport.id ? { ...r, isNew: false } : r));
+      }, 4000);
+    }, 12000);
+
+    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
+  }, [isLive]);
 
   const filteredReports = reports.filter(r => {
     if (filterChannel !== 'all' && r.channel !== filterChannel) return false;
@@ -157,399 +200,417 @@ function MessagingChannelsPageInner() {
     setSelectedReport(null);
   };
 
+  const newReports = reports.filter(r => r.status === 'new').length;
+
+  const timeAgo = (iso: string) => {
+    const diff = Date.now() - new Date(iso).getTime();
+    const m = Math.floor(diff / 60000);
+    if (m < 1) return 'just now';
+    if (m < 60) return `${m}m ago`;
+    const h = Math.floor(m / 60);
+    if (h < 24) return `${h}h ago`;
+    return `${Math.floor(h / 24)}d ago`;
+  };
+
+  const riskColor = (score: number) =>
+    score >= 80 ? 'text-red-400' : score >= 60 ? 'text-amber-400' : score >= 30 ? 'text-yellow-400' : 'text-emerald-400';
+
+  const riskBg = (score: number) =>
+    score >= 80 ? '#f87171' : score >= 60 ? '#fb923c' : score >= 30 ? '#fbbf24' : '#34d399';
+
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <div className="bg-white border-b px-6 py-4">
-        <h1 className="text-xl font-bold text-gray-900">Reporting Channels</h1>
-        <p className="text-sm text-gray-500">WhatsApp · Telegram · USSD · SMS</p>
+    <>
+      {/* Stats row */}
+      <div className="grid grid-cols-4 gap-3 mb-5">
+        {stats.map(stat => {
+          const cfg = CHANNEL_CONFIG[stat.channel];
+          return (
+            <div key={stat.channel} className={cn("bis-card p-4 border", cfg.border)}>
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <span className={cn("text-xs font-mono font-semibold", cfg.textColor)}>{cfg.label}</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  {stat.isOnline
+                    ? <Wifi size={11} className="text-emerald-400" />
+                    : <WifiOff size={11} className="text-red-400" />}
+                  <span className={cn("text-[9px] font-mono", stat.isOnline ? "text-emerald-400" : "text-red-400")}>
+                    {stat.isOnline ? 'ONLINE' : 'OFFLINE'}
+                  </span>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-1 text-[10px] font-mono">
+                <div>
+                  <p className="text-muted-foreground">Total</p>
+                  <p className={cn("font-bold text-sm", cfg.textColor)}>{stat.totalReports.toLocaleString()}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Today</p>
+                  <p className="font-bold text-sm text-foreground">+{stat.todayReports}</p>
+                </div>
+              </div>
+            </div>
+          );
+        })}
       </div>
 
       {/* Tabs */}
-      <div className="px-6 pt-4">
-        <div className="flex gap-1 bg-gray-100 rounded-xl p-1 w-fit">
-          {(['overview', 'reports', 'config', 'ussd_flow'] as const).map(tab => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={`px-4 py-2 rounded-lg text-sm font-medium capitalize transition ${
-                activeTab === tab ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              {tab.replace('_', ' ')}
-              {tab === 'reports' && reports.filter(r => r.status === 'new').length > 0 && (
-                <span className="ml-1 bg-red-500 text-white text-xs rounded-full px-1.5">
-                  {reports.filter(r => r.status === 'new').length}
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
+      <div className="flex gap-1 mb-4 border-b border-border">
+        {(['overview', 'reports', 'config', 'ussd_flow'] as const).map(tab => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            className={cn(
+              "px-4 py-2 text-xs font-mono capitalize transition-all border-b-2 -mb-px",
+              activeTab === tab
+                ? "border-primary text-primary"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+            )}
+          >
+            {tab.replace('_', ' ')}
+            {tab === 'reports' && newReports > 0 && (
+              <span className="ml-1.5 bg-red-500 text-white text-[9px] rounded-full px-1.5 py-0.5">{newReports}</span>
+            )}
+          </button>
+        ))}
       </div>
 
-      <div className="p-6 space-y-4">
-
-        {/* ── Overview Tab ── */}
-        {activeTab === 'overview' && (
-          <>
-            <div className="grid grid-cols-2 gap-4">
-              {CHANNEL_STATS.map(stat => {
-                const config = CHANNEL_CONFIG[stat.channel];
-                return (
-                  <div key={stat.channel} className="bg-white rounded-xl border p-4">
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center gap-2">
-                        <div className={`w-8 h-8 ${config.color} rounded-lg flex items-center justify-center text-white text-sm`}>
-                          {config.icon}
-                        </div>
-                        <span className="font-medium text-sm text-gray-800">{config.label}</span>
-                      </div>
-                      <span className={`w-2 h-2 rounded-full ${stat.isOnline ? 'bg-green-500' : 'bg-red-500'}`} />
+      {/* ── Overview Tab ── */}
+      {activeTab === 'overview' && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            {stats.map(stat => {
+              const cfg = CHANNEL_CONFIG[stat.channel];
+              return (
+                <div key={stat.channel} className="bis-card p-5">
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className={cn("w-10 h-10 rounded-lg border flex items-center justify-center", cfg.color, cfg.border, cfg.textColor)}>
+                      {cfg.icon}
                     </div>
-                    <div className="grid grid-cols-2 gap-2 text-xs">
-                      <div>
-                        <p className="text-gray-400">Total Reports</p>
-                        <p className="font-bold text-gray-800">{stat.totalReports.toLocaleString()}</p>
-                      </div>
-                      <div>
-                        <p className="text-gray-400">Today</p>
-                        <p className="font-bold text-green-600">+{stat.todayReports}</p>
-                      </div>
-                      <div>
-                        <p className="text-gray-400">Verified</p>
-                        <p className="font-bold text-blue-600">{stat.verifiedReports.toLocaleString()}</p>
-                      </div>
-                      {stat.activeUsers > 0 && (
-                        <div>
-                          <p className="text-gray-400">Active Users</p>
-                          <p className="font-bold text-purple-600">{stat.activeUsers}</p>
-                        </div>
-                      )}
+                    <div>
+                      <p className="text-sm font-mono font-semibold text-foreground">{cfg.label}</p>
+                      <p className="text-[10px] text-muted-foreground">{cfg.description}</p>
                     </div>
                   </div>
-                );
-              })}
-            </div>
+                  <div className="grid grid-cols-3 gap-3 text-center">
+                    <div>
+                      <p className={cn("text-lg font-mono font-bold", cfg.textColor)}>{stat.totalReports.toLocaleString()}</p>
+                      <p className="text-[9px] font-mono text-muted-foreground uppercase">Total</p>
+                    </div>
+                    <div>
+                      <p className="text-lg font-mono font-bold text-foreground">{stat.verifiedReports.toLocaleString()}</p>
+                      <p className="text-[9px] font-mono text-muted-foreground uppercase">Verified</p>
+                    </div>
+                    <div>
+                      <p className="text-lg font-mono font-bold text-foreground">+{stat.todayReports}</p>
+                      <p className="text-[9px] font-mono text-muted-foreground uppercase">Today</p>
+                    </div>
+                  </div>
+                  {stat.activeUsers > 0 && (
+                    <div className="mt-3 flex items-center gap-1.5 text-[10px] font-mono text-muted-foreground">
+                      <Users size={10} />
+                      {stat.activeUsers} active users
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
 
-            {/* How to Report Instructions */}
-            <div className="bg-white rounded-xl border p-4">
-              <h3 className="font-semibold text-gray-800 mb-3">How to Report</h3>
-              <div className="space-y-3">
-                <div className="flex gap-3">
-                  <span className="text-xl">💬</span>
-                  <div>
-                    <p className="text-sm font-medium">WhatsApp</p>
-                    <p className="text-xs text-gray-500">Send a message to <strong>+234 800 BIS REPORT</strong> or scan the QR code</p>
-                  </div>
-                </div>
-                <div className="flex gap-3">
-                  <span className="text-xl">✈️</span>
-                  <div>
-                    <p className="text-sm font-medium">Telegram</p>
-                    <p className="text-xs text-gray-500">Message <strong>@BISReportBot</strong> — anonymous reporting supported</p>
-                  </div>
-                </div>
-                <div className="flex gap-3">
-                  <span className="text-xl">📟</span>
-                  <div>
-                    <p className="text-sm font-medium">USSD (No Internet Required)</p>
-                    <p className="text-xs text-gray-500">Dial <strong>*347*247#</strong> on any phone — works on MTN, Airtel, Glo, 9mobile</p>
-                  </div>
-                </div>
-                <div className="flex gap-3">
-                  <span className="text-xl">📱</span>
-                  <div>
-                    <p className="text-sm font-medium">SMS</p>
-                    <p className="text-xs text-gray-500">Send to short code <strong>34729</strong> — format: REPORT [Name] [Location] [Description]</p>
-                  </div>
-                </div>
+          {/* How to report */}
+          <div className="bis-card p-4">
+            <p className="text-xs font-mono text-muted-foreground uppercase tracking-wider mb-3">How to Submit Reports</p>
+            <div className="grid grid-cols-2 gap-3 text-xs font-mono">
+              <div className="space-y-1">
+                <p className="text-emerald-400 font-semibold">WhatsApp</p>
+                <p className="text-muted-foreground">Message: +234 700 BIS REPORT</p>
+                <p className="text-muted-foreground">Include: name, location, crime type</p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-sky-400 font-semibold">Telegram</p>
+                <p className="text-muted-foreground">Bot: @BISReportBot</p>
+                <p className="text-muted-foreground">Anonymous reporting supported</p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-violet-400 font-semibold">USSD</p>
+                <p className="text-muted-foreground">Dial: *347*BIS# (no internet needed)</p>
+                <p className="text-muted-foreground">Works on all Nigerian networks</p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-amber-400 font-semibold">SMS</p>
+                <p className="text-muted-foreground">Short code: 34729</p>
+                <p className="text-muted-foreground">Format: REPORT [name] [location] [crime]</p>
               </div>
             </div>
-          </>
-        )}
+          </div>
+        </div>
+      )}
 
-        {/* ── Reports Tab ── */}
-        {activeTab === 'reports' && (
-          <>
-            {/* Filters */}
-            <div className="flex gap-3">
-              <select
-                value={filterChannel}
-                onChange={e => setFilterChannel(e.target.value as any)}
-                className="border rounded-lg px-3 py-1.5 text-sm bg-white"
-              >
-                <option value="all">All Channels</option>
-                {Object.entries(CHANNEL_CONFIG).map(([key, val]) => (
-                  <option key={key} value={key}>{val.icon} {val.label}</option>
-                ))}
-              </select>
-              <select
-                value={filterStatus}
-                onChange={e => setFilterStatus(e.target.value as any)}
-                className="border rounded-lg px-3 py-1.5 text-sm bg-white"
-              >
-                <option value="all">All Statuses</option>
-                {Object.entries(STATUS_CONFIG).map(([key, val]) => (
-                  <option key={key} value={key}>{val.label}</option>
-                ))}
-              </select>
-            </div>
+      {/* ── Reports Tab ── */}
+      {activeTab === 'reports' && (
+        <>
+          <div className="flex flex-wrap gap-2 mb-4">
+            <select
+              value={filterChannel}
+              onChange={e => setFilterChannel(e.target.value as any)}
+              className="h-8 px-3 rounded-md border border-border bg-background text-xs font-mono text-foreground"
+            >
+              <option value="all">All Channels</option>
+              {Object.entries(CHANNEL_CONFIG).map(([k, v]) => (
+                <option key={k} value={k}>{v.label}</option>
+              ))}
+            </select>
+            <select
+              value={filterStatus}
+              onChange={e => setFilterStatus(e.target.value as any)}
+              className="h-8 px-3 rounded-md border border-border bg-background text-xs font-mono text-foreground"
+            >
+              <option value="all">All Status</option>
+              {Object.entries(STATUS_CONFIG).map(([k, v]) => (
+                <option key={k} value={k}>{v.label}</option>
+              ))}
+            </select>
+            <span className="text-xs font-mono text-muted-foreground self-center ml-auto">
+              {filteredReports.length} reports
+            </span>
+          </div>
 
-            {/* Report List */}
-            <div className="space-y-3">
-              {filteredReports.map(report => {
-                const channel = CHANNEL_CONFIG[report.channel];
-                const status = STATUS_CONFIG[report.status];
-                return (
-                  <div
-                    key={report.id}
-                    className="bg-white border rounded-xl p-4 cursor-pointer hover:border-green-300 transition"
-                    onClick={() => setSelectedReport(report)}
-                  >
-                    <div className="flex items-start justify-between gap-2 mb-2">
-                      <div className="flex items-center gap-2">
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${channel.color} text-white`}>
-                          {channel.icon} {channel.label}
+          <div className="space-y-2">
+            {filteredReports.map(report => {
+              const cfg = CHANNEL_CONFIG[report.channel];
+              const statusCfg = STATUS_CONFIG[report.status];
+              return (
+                <div
+                  key={report.id}
+                  onClick={() => setSelectedReport(report)}
+                  className={cn(
+                    "bis-card p-4 cursor-pointer hover:bg-muted/20 transition-all",
+                    report.isNew && "ring-1 ring-primary/30 bg-primary/5"
+                  )}
+                >
+                  <div className="flex items-start gap-3">
+                    <div className={cn("w-8 h-8 rounded-md border flex items-center justify-center text-[10px] font-mono font-bold flex-shrink-0", cfg.color, cfg.border, cfg.textColor)}>
+                      {cfg.shortCode}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
+                        <span className={cn("text-[10px] font-mono font-semibold", cfg.textColor)}>{cfg.label}</span>
+                        <span className="text-[10px] font-mono text-muted-foreground">{report.sender}</span>
+                        {report.isNew && (
+                          <span className="text-[9px] font-mono text-primary border border-primary/30 rounded px-1 animate-pulse">NEW</span>
+                        )}
+                        {report.linkedSubject && (
+                          <span className="text-[9px] font-mono text-blue-400 border border-blue-400/30 rounded px-1">
+                            {report.linkedSubject}
+                          </span>
+                        )}
+                        <span className="text-[10px] font-mono text-muted-foreground ml-auto">{timeAgo(report.receivedAt)}</span>
+                      </div>
+                      <p className="text-sm text-foreground/90 leading-relaxed line-clamp-2 mb-2">{report.content}</p>
+                      <div className="flex items-center gap-3">
+                        <span className={cn("flex items-center gap-1 text-[10px] font-mono", statusCfg.color)}>
+                          {statusCfg.icon} {statusCfg.label}
                         </span>
-                        <span className={`px-2 py-0.5 rounded-full text-xs ${status.color}`}>
-                          {status.label}
-                        </span>
-                        {report.language === 'pidgin' && (
-                          <span className="px-2 py-0.5 rounded-full text-xs bg-yellow-100 text-yellow-700">
-                            🇳🇬 Pidgin
+                        <div className="flex items-center gap-1.5">
+                          <div className="w-12 h-1 bg-muted rounded-full overflow-hidden">
+                            <div className="h-full rounded-full" style={{ width: `${report.riskScore}%`, backgroundColor: riskBg(report.riskScore) }} />
+                          </div>
+                          <span className={cn("text-[10px] font-mono font-bold", riskColor(report.riskScore))}>
+                            {report.riskScore}
+                          </span>
+                        </div>
+                        {report.attachments > 0 && (
+                          <span className="flex items-center gap-1 text-[10px] font-mono text-muted-foreground">
+                            <Paperclip size={9} /> {report.attachments}
+                          </span>
+                        )}
+                        {report.language !== 'en' && (
+                          <span className="text-[9px] font-mono text-amber-400 border border-amber-400/30 rounded px-1">
+                            {report.language.toUpperCase()}
                           </span>
                         )}
                       </div>
-                      <div className="flex items-center gap-2">
-                        {report.attachments > 0 && (
-                          <span className="text-xs text-gray-400">📎 {report.attachments}</span>
-                        )}
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
-                          report.riskScore >= 80 ? 'bg-red-100 text-red-700' :
-                          report.riskScore >= 60 ? 'bg-orange-100 text-orange-700' :
-                          'bg-gray-100 text-gray-600'
-                        }`}>
-                          {report.riskScore}
-                        </span>
-                      </div>
                     </div>
-                    <p className="text-sm text-gray-700 line-clamp-2">{report.content}</p>
-                    <div className="flex items-center justify-between mt-2 text-xs text-gray-400">
-                      <span>{report.sender}</span>
-                      <span>{new Date(report.receivedAt).toLocaleString()}</span>
-                    </div>
-                    {report.linkedSubject && (
-                      <div className="mt-2">
-                        <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">
-                          🔗 Linked: {report.linkedSubject}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Report Detail Modal */}
-            {selectedReport && (
-              <div className="fixed inset-0 bg-black/50 flex items-end justify-center z-50" onClick={() => setSelectedReport(null)}>
-                <div className="bg-white rounded-t-2xl w-full max-w-lg p-6 max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="font-bold text-gray-900">Report Details</h3>
-                    <button onClick={() => setSelectedReport(null)} className="text-gray-400 text-xl">✕</button>
-                  </div>
-
-                  <div className="space-y-3">
-                    <div className="bg-gray-50 rounded-xl p-4">
-                      <p className="text-sm text-gray-700">{selectedReport.content}</p>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3 text-sm">
-                      <div>
-                        <p className="text-gray-400 text-xs">Channel</p>
-                        <p className="font-medium">{CHANNEL_CONFIG[selectedReport.channel].label}</p>
-                      </div>
-                      <div>
-                        <p className="text-gray-400 text-xs">Sender</p>
-                        <p className="font-medium">{selectedReport.sender}</p>
-                      </div>
-                      <div>
-                        <p className="text-gray-400 text-xs">Risk Score</p>
-                        <p className="font-bold text-orange-600">{selectedReport.riskScore}/100</p>
-                      </div>
-                      <div>
-                        <p className="text-gray-400 text-xs">Language</p>
-                        <p className="font-medium capitalize">{selectedReport.language}</p>
-                      </div>
-                    </div>
-
-                    <div className="flex gap-2 flex-wrap">
-                      <button
-                        onClick={() => updateReportStatus(selectedReport.id, 'processing')}
-                        className="flex-1 bg-blue-600 text-white py-2 rounded-xl text-sm font-medium"
-                      >
-                        Start Investigation
-                      </button>
-                      <button
-                        onClick={() => updateReportStatus(selectedReport.id, 'verified')}
-                        className="flex-1 bg-green-600 text-white py-2 rounded-xl text-sm font-medium"
-                      >
-                        Mark Verified
-                      </button>
-                      <button
-                        onClick={() => updateReportStatus(selectedReport.id, 'dismissed')}
-                        className="flex-1 border border-gray-300 text-gray-600 py-2 rounded-xl text-sm font-medium"
-                      >
-                        Dismiss
-                      </button>
-                    </div>
+                    <ChevronRight size={14} className="text-muted-foreground flex-shrink-0 mt-1" />
                   </div>
                 </div>
+              );
+            })}
+            {filteredReports.length === 0 && (
+              <div className="bis-card p-12 text-center">
+                <MessageSquare size={32} className="mx-auto text-muted-foreground/30 mb-3" />
+                <p className="text-sm text-muted-foreground">No reports match your filters.</p>
               </div>
             )}
-          </>
-        )}
+          </div>
+        </>
+      )}
 
-        {/* ── Config Tab ── */}
-        {activeTab === 'config' && (
-          <div className="space-y-4">
-            {/* WhatsApp Config */}
-            <div className="bg-white border rounded-xl p-4">
-              <div className="flex items-center gap-2 mb-3">
-                <span className="text-xl">💬</span>
-                <h3 className="font-semibold">WhatsApp Business API</h3>
+      {/* ── Config Tab ── */}
+      {activeTab === 'config' && (
+        <div className="space-y-4">
+          {Object.entries(CHANNEL_CONFIG).map(([key, cfg]) => (
+            <div key={key} className={cn("bis-card p-5 border", cfg.border)}>
+              <div className="flex items-center gap-3 mb-4">
+                <div className={cn("w-9 h-9 rounded-lg border flex items-center justify-center", cfg.color, cfg.border, cfg.textColor)}>
+                  {cfg.icon}
+                </div>
+                <div className="flex-1">
+                  <p className="text-sm font-mono font-semibold text-foreground">{cfg.label}</p>
+                  <p className="text-[10px] text-muted-foreground">{cfg.description}</p>
+                </div>
+                <span className="text-[9px] font-mono text-emerald-400 border border-emerald-400/30 rounded px-2 py-0.5">ACTIVE</span>
               </div>
-              <div className="space-y-3">
-                <div>
-                  <label className="text-xs text-gray-500">Phone Number ID</label>
-                  <input type="text" placeholder="Enter WhatsApp Phone Number ID" className="w-full border rounded-lg px-3 py-2 text-sm mt-1" />
+              <div className="grid grid-cols-2 gap-3 text-xs font-mono">
+                <div className="space-y-1">
+                  <p className="text-muted-foreground uppercase tracking-wider text-[9px]">Endpoint</p>
+                  <p className="text-foreground/80">api.bis.ng/webhooks/{key}</p>
                 </div>
-                <div>
-                  <label className="text-xs text-gray-500">Access Token</label>
-                  <input type="password" placeholder="Meta Business API Token" className="w-full border rounded-lg px-3 py-2 text-sm mt-1" />
+                <div className="space-y-1">
+                  <p className="text-muted-foreground uppercase tracking-wider text-[9px]">Auth Token</p>
+                  <p className="text-foreground/80 font-mono">••••••••••••••••</p>
                 </div>
-                <div>
-                  <label className="text-xs text-gray-500">Webhook Verify Token</label>
-                  <input type="text" placeholder="Your webhook verification token" className="w-full border rounded-lg px-3 py-2 text-sm mt-1" />
-                </div>
-                <button className="w-full bg-green-600 text-white py-2 rounded-xl text-sm font-medium">
-                  Save WhatsApp Config
-                </button>
               </div>
             </div>
+          ))}
+        </div>
+      )}
 
-            {/* Telegram Config */}
-            <div className="bg-white border rounded-xl p-4">
-              <div className="flex items-center gap-2 mb-3">
-                <span className="text-xl">✈️</span>
-                <h3 className="font-semibold">Telegram Bot</h3>
-              </div>
-              <div className="space-y-3">
-                <div>
-                  <label className="text-xs text-gray-500">Bot Token</label>
-                  <input type="password" placeholder="Telegram Bot API Token" className="w-full border rounded-lg px-3 py-2 text-sm mt-1" />
+      {/* ── USSD Flow Tab ── */}
+      {activeTab === 'ussd_flow' && (
+        <div className="space-y-4">
+          <div className="bis-card p-5">
+            <p className="text-xs font-mono text-muted-foreground uppercase tracking-wider mb-4">USSD Menu Flow — *347*BIS#</p>
+            <div className="space-y-2 font-mono text-sm">
+              {[
+                { level: 0, text: 'Welcome to BIS Report Line\n1. Report a person\n2. Report a company\n3. Check report status\n4. Exit', color: 'text-foreground' },
+                { level: 1, text: '1. Report a person →\nEnter full name of suspect:', color: 'text-blue-400' },
+                { level: 2, text: 'Enter location (LGA/State):', color: 'text-blue-400' },
+                { level: 3, text: 'Select crime type:\n1. Fraud / 419\n2. Land scam\n3. Employment scam\n4. Other', color: 'text-blue-400' },
+                { level: 4, text: 'Report received. Reference: BIS-USSD-XXXX\nThank you for helping keep Nigeria safe.', color: 'text-emerald-400' },
+              ].map((step, i) => (
+                <div key={i} className="flex gap-3">
+                  <div className="flex flex-col items-center">
+                    <div className={cn("w-6 h-6 rounded-full border flex items-center justify-center text-[10px] font-bold flex-shrink-0", step.color, "border-current")}>
+                      {i + 1}
+                    </div>
+                    {i < 4 && <div className="w-px flex-1 bg-border my-1" />}
+                  </div>
+                  <div className="bis-card p-3 flex-1 mb-2">
+                    <pre className={cn("text-xs whitespace-pre-wrap", step.color)}>{step.text}</pre>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <input type="checkbox" id="anon" className="rounded" defaultChecked />
-                  <label htmlFor="anon" className="text-sm text-gray-600">Allow anonymous reporting</label>
-                </div>
-                <button className="w-full bg-blue-600 text-white py-2 rounded-xl text-sm font-medium">
-                  Save Telegram Config
-                </button>
-              </div>
+              ))}
             </div>
+          </div>
 
-            {/* USSD Config */}
-            <div className="bg-white border rounded-xl p-4">
-              <div className="flex items-center gap-2 mb-3">
-                <span className="text-xl">📟</span>
-                <h3 className="font-semibold">USSD Gateway (Africa's Talking)</h3>
+          <div className="bis-card p-4">
+            <p className="text-xs font-mono text-muted-foreground uppercase tracking-wider mb-2">USSD Statistics</p>
+            <div className="grid grid-cols-3 gap-3 text-center">
+              <div>
+                <p className="text-xl font-mono font-bold text-violet-400">2,891</p>
+                <p className="text-[9px] font-mono text-muted-foreground uppercase">Total Sessions</p>
               </div>
-              <div className="space-y-3">
-                <div>
-                  <label className="text-xs text-gray-500">Africa's Talking API Key</label>
-                  <input type="password" placeholder="AT API Key" className="w-full border rounded-lg px-3 py-2 text-sm mt-1" />
-                </div>
-                <div>
-                  <label className="text-xs text-gray-500">USSD Short Code</label>
-                  <input type="text" placeholder="e.g. *347*247#" className="w-full border rounded-lg px-3 py-2 text-sm mt-1" defaultValue="*347*247#" />
-                </div>
-                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-xs text-yellow-700">
-                  ⚠️ USSD sessions are limited to 182 characters per screen. The BIS USSD flow uses 5 screens to collect a complete report.
-                </div>
-                <button className="w-full bg-purple-600 text-white py-2 rounded-xl text-sm font-medium">
-                  Save USSD Config
-                </button>
+              <div>
+                <p className="text-xl font-mono font-bold text-foreground">67</p>
+                <p className="text-[9px] font-mono text-muted-foreground uppercase">Today</p>
+              </div>
+              <div>
+                <p className="text-xl font-mono font-bold text-emerald-400">94%</p>
+                <p className="text-[9px] font-mono text-muted-foreground uppercase">Completion Rate</p>
               </div>
             </div>
           </div>
-        )}
+        </div>
+      )}
 
-        {/* ── USSD Flow Tab ── */}
-        {activeTab === 'ussd_flow' && (
-          <div className="space-y-4">
-            <p className="text-sm text-gray-500">Preview the USSD menu flow that reporters experience when they dial *347*247#</p>
+      {/* ── Report Detail Modal ── */}
+      {selectedReport && (
+        <>
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40" onClick={() => setSelectedReport(null)} />
+          <div className="fixed inset-x-4 top-1/2 -translate-y-1/2 max-w-lg mx-auto z-50 bg-[#0d1117] border border-border rounded-xl shadow-2xl p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <p className="text-sm font-mono font-semibold text-foreground">Incoming Report</p>
+                <p className="text-[10px] font-mono text-muted-foreground">{selectedReport.id}</p>
+              </div>
+              <button onClick={() => setSelectedReport(null)} className="text-muted-foreground hover:text-foreground">
+                <X size={16} />
+              </button>
+            </div>
 
-            {[
-              {
-                screen: 1,
-                title: 'Welcome Screen',
-                content: 'CON Welcome to BIS Report\n\n1. Report a Person\n2. Report a Business\n3. Check Report Status\n4. Emergency (EFCC Hotline)',
-              },
-              {
-                screen: 2,
-                title: 'Subject Name',
-                content: 'CON Enter the full name of the person or business you are reporting:\n\n(Type name and press Send)',
-              },
-              {
-                screen: 3,
-                title: 'Location',
-                content: 'CON Enter the location (State and LGA):\n\n1. Lagos\n2. Abuja\n3. Kano\n4. Rivers\n5. Ogun\n6. Other (type name)',
-              },
-              {
-                screen: 4,
-                title: 'Crime Type',
-                content: 'CON Select the type of crime:\n\n1. Financial Fraud\n2. Land/Property Fraud\n3. Identity Theft\n4. Employment Scam\n5. Other',
-              },
-              {
-                screen: 5,
-                title: 'Confirmation',
-                content: 'END Thank you for your report.\n\nReference: BIS-RPT-2026-4821\n\nYour report is being reviewed. You will receive an SMS update within 24 hours.\n\nFor emergencies call: 0800-EFCC-NOW',
-              },
-            ].map(screen => (
-              <div key={screen.screen} className="bg-white border rounded-xl overflow-hidden">
-                <div className="bg-gray-800 text-white px-4 py-2 flex items-center justify-between">
-                  <span className="text-xs font-mono">Screen {screen.screen}: {screen.title}</span>
-                  <span className={`text-xs px-2 py-0.5 rounded ${
-                    screen.content.startsWith('CON') ? 'bg-blue-500' : 'bg-green-500'
-                  }`}>
-                    {screen.content.startsWith('CON') ? 'CONTINUE' : 'END'}
-                  </span>
+            <div className="space-y-3 mb-4">
+              <div className="grid grid-cols-2 gap-2 text-xs font-mono">
+                <div>
+                  <p className="text-muted-foreground uppercase text-[9px] tracking-wider">Channel</p>
+                  <p className={cn("font-semibold", CHANNEL_CONFIG[selectedReport.channel].textColor)}>
+                    {CHANNEL_CONFIG[selectedReport.channel].label}
+                  </p>
                 </div>
-                <div className="p-4 bg-gray-900">
-                  <pre className="text-green-400 text-xs font-mono whitespace-pre-wrap">
-                    {screen.content}
-                  </pre>
+                <div>
+                  <p className="text-muted-foreground uppercase text-[9px] tracking-wider">Sender</p>
+                  <p className="text-foreground">{selectedReport.sender}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground uppercase text-[9px] tracking-wider">Risk Score</p>
+                  <p className={cn("font-bold", riskColor(selectedReport.riskScore))}>{selectedReport.riskScore}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground uppercase text-[9px] tracking-wider">Language</p>
+                  <p className="text-foreground uppercase">{selectedReport.language}</p>
                 </div>
               </div>
-            ))}
 
-            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-700">
-              <p className="font-medium mb-1">📡 Network Coverage</p>
-              <p className="text-xs">This USSD code is registered on MTN, Airtel, Glo, and 9mobile Nigeria. Works in all 36 states including rural areas with 2G coverage.</p>
+              <div>
+                <p className="text-muted-foreground uppercase text-[9px] font-mono tracking-wider mb-1">Content</p>
+                <div className="bis-card p-3">
+                  <p className="text-sm text-foreground/90 leading-relaxed">{selectedReport.content}</p>
+                </div>
+              </div>
+
+              {selectedReport.attachments > 0 && (
+                <p className="text-xs font-mono text-muted-foreground flex items-center gap-1.5">
+                  <Paperclip size={11} /> {selectedReport.attachments} attachment{selectedReport.attachments > 1 ? 's' : ''}
+                </p>
+              )}
+            </div>
+
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" className="flex-1 text-xs font-mono"
+                onClick={() => updateReportStatus(selectedReport.id, 'dismissed')}>
+                Dismiss
+              </Button>
+              <Button variant="outline" size="sm" className="flex-1 text-xs font-mono text-amber-400 border-amber-400/30"
+                onClick={() => updateReportStatus(selectedReport.id, 'processing')}>
+                Start Processing
+              </Button>
+              <Button size="sm" className="flex-1 text-xs font-mono"
+                onClick={() => updateReportStatus(selectedReport.id, 'verified')}>
+                Verify & Link
+              </Button>
             </div>
           </div>
-        )}
-
-      </div>
-    </div>
+        </>
+      )}
+    </>
   );
 }
 
-
 export default function MessagingChannelsPage() {
+  const newReportsCount = 2; // shown in layout subtitle
   return (
-    <BISLayout>
+    <BISLayout
+      title="Messaging Channels"
+      subtitle="WhatsApp · Telegram · USSD · SMS"
+      actions={
+        <div className="flex items-center gap-2">
+          <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-emerald-500/40 bg-emerald-500/10 text-emerald-400 text-xs font-mono">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            LIVE
+          </span>
+        </div>
+      }
+    >
       <MessagingChannelsPageInner />
     </BISLayout>
   );

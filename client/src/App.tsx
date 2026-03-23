@@ -16,6 +16,8 @@ import NotFound from "@/pages/NotFound";
 
 // BIS feature pages
 import BiometricEnrollmentPage from "@/pages/bis/BiometricEnrollmentPage";
+import FieldAgentsPage from "@/pages/bis/FieldAgentsPage";
+import DataSourcesPage from "@/pages/bis/DataSourcesPage";
 import ContinuousMonitoringPage from "@/pages/bis/ContinuousMonitoringPage";
 import DrugScreeningPage from "@/pages/bis/DrugScreeningPage";
 import MVRCheckPage from "@/pages/bis/MVRCheckPage";
@@ -50,6 +52,8 @@ function Router() {
       <Route path="/nigeria-data-bundle" component={NigerianDataBundlePage} />
       <Route path="/work-authorization" component={WorkAuthorizationPage} />
       <Route path="/zero-footprint" component={ZeroFootprintPage} />
+      <Route path="/field-agents" component={FieldAgentsPage} />
+      <Route path="/data-sources" component={DataSourcesPage} />
 
       {/* KYC / Onboarding / Intelligence */}
       <Route path="/kyc-verification" component={KYCVerificationPage} />
