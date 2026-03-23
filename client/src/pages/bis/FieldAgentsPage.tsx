@@ -3,14 +3,15 @@
 
 import { useState } from 'react';
 import BISLayout from '@/components/BISLayout';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import {
   Users, MapPin, Star, Shield, CheckCircle2, Clock, AlertTriangle,
-  Search, Plus, TrendingUp, Award, Fingerprint, Smartphone
+  Search, Plus, Award, X, Send, Navigation, ChevronDown
 } from 'lucide-react';
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface FieldAgent {
   id: string;
@@ -26,27 +27,282 @@ interface FieldAgent {
   lastActive: string;
   status: 'active' | 'inactive' | 'suspended';
   verificationLevel: number;
+  phone: string;
 }
 
+interface DispatchTask {
+  agentId: string;
+  taskType: string;
+  subjectName: string;
+  subjectAddress: string;
+  subjectState: string;
+  subjectLGA: string;
+  subjectPhone: string;
+  gpsLat: string;
+  gpsLng: string;
+  linkedInvestigation: string;
+  instructions: string;
+  priority: 'low' | 'medium' | 'high' | 'urgent';
+  deadline: string;
+}
+
+// ─── Config ───────────────────────────────────────────────────────────────────
+
 const MOCK_AGENTS: FieldAgent[] = [
-  { id: 'a1', name: 'Adebayo Ogundimu', agentId: 'FA-NG-0142', state: 'Lagos', lga: 'Ikeja', tier: 'gold', completedTasks: 234, pendingTasks: 3, trustScore: 94, totalEarnings: 487500, lastActive: '2026-03-23T10:30:00Z', status: 'active', verificationLevel: 5 },
-  { id: 'a2', name: 'Ngozi Okafor', agentId: 'FA-NG-0089', state: 'Anambra', lga: 'Onitsha', tier: 'silver', completedTasks: 112, pendingTasks: 1, trustScore: 87, totalEarnings: 224000, lastActive: '2026-03-23T08:15:00Z', status: 'active', verificationLevel: 4 },
-  { id: 'a3', name: 'Musa Aliyu', agentId: 'FA-NG-0203', state: 'Kano', lga: 'Kano Municipal', tier: 'platinum', completedTasks: 389, pendingTasks: 5, trustScore: 98, totalEarnings: 892000, lastActive: '2026-03-23T11:00:00Z', status: 'active', verificationLevel: 5 },
-  { id: 'a4', name: 'Chidinma Eze', agentId: 'FA-NG-0067', state: 'Enugu', lga: 'Enugu North', tier: 'bronze', completedTasks: 45, pendingTasks: 0, trustScore: 72, totalEarnings: 67500, lastActive: '2026-03-22T14:00:00Z', status: 'active', verificationLevel: 3 },
-  { id: 'a5', name: 'Emeka Nwosu', agentId: 'FA-NG-0178', state: 'Rivers', lga: 'Port Harcourt', tier: 'silver', completedTasks: 98, pendingTasks: 2, trustScore: 81, totalEarnings: 196000, lastActive: '2026-03-21T09:00:00Z', status: 'inactive', verificationLevel: 4 },
-  { id: 'a6', name: 'Fatima Bello', agentId: 'FA-NG-0312', state: 'Abuja', lga: 'Garki', tier: 'gold', completedTasks: 187, pendingTasks: 4, trustScore: 91, totalEarnings: 374000, lastActive: '2026-03-23T09:45:00Z', status: 'active', verificationLevel: 5 },
+  { id: 'a1', name: 'Adebayo Ogundimu', agentId: 'FA-NG-0142', state: 'Lagos', lga: 'Ikeja', tier: 'gold', completedTasks: 234, pendingTasks: 3, trustScore: 94, totalEarnings: 487500, lastActive: '2026-03-23T10:30:00Z', status: 'active', verificationLevel: 5, phone: '+2348012345678' },
+  { id: 'a2', name: 'Ngozi Okafor', agentId: 'FA-NG-0089', state: 'Anambra', lga: 'Onitsha', tier: 'silver', completedTasks: 112, pendingTasks: 1, trustScore: 87, totalEarnings: 224000, lastActive: '2026-03-23T08:15:00Z', status: 'active', verificationLevel: 4, phone: '+2347098765432' },
+  { id: 'a3', name: 'Musa Aliyu', agentId: 'FA-NG-0203', state: 'Kano', lga: 'Kano Municipal', tier: 'platinum', completedTasks: 389, pendingTasks: 5, trustScore: 98, totalEarnings: 892000, lastActive: '2026-03-23T11:00:00Z', status: 'active', verificationLevel: 5, phone: '+2348033221100' },
+  { id: 'a4', name: 'Chidinma Eze', agentId: 'FA-NG-0067', state: 'Enugu', lga: 'Enugu North', tier: 'bronze', completedTasks: 45, pendingTasks: 0, trustScore: 72, totalEarnings: 67500, lastActive: '2026-03-22T14:00:00Z', status: 'active', verificationLevel: 3, phone: '+2348055443322' },
+  { id: 'a5', name: 'Emeka Nwosu', agentId: 'FA-NG-0178', state: 'Rivers', lga: 'Port Harcourt', tier: 'silver', completedTasks: 98, pendingTasks: 2, trustScore: 81, totalEarnings: 196000, lastActive: '2026-03-21T09:00:00Z', status: 'inactive', verificationLevel: 4, phone: '+2348099887766' },
+  { id: 'a6', name: 'Fatima Bello', agentId: 'FA-NG-0312', state: 'Abuja', lga: 'Garki', tier: 'gold', completedTasks: 187, pendingTasks: 4, trustScore: 91, totalEarnings: 374000, lastActive: '2026-03-23T09:45:00Z', status: 'active', verificationLevel: 5, phone: '+2348023456789' },
 ];
 
 const TIER_CONFIG = {
-  bronze:   { color: 'text-amber-700', bg: 'bg-amber-700/10 border-amber-700/30', icon: '⬡' },
-  silver:   { color: 'text-slate-400', bg: 'bg-slate-400/10 border-slate-400/30', icon: '⬡' },
-  gold:     { color: 'text-amber-400', bg: 'bg-amber-400/10 border-amber-400/30', icon: '⬡' },
-  platinum: { color: 'text-cyan-400',  bg: 'bg-cyan-400/10 border-cyan-400/30',   icon: '⬡' },
+  bronze:   { color: 'text-amber-700', bg: 'bg-amber-700/10 border-amber-700/30' },
+  silver:   { color: 'text-slate-400', bg: 'bg-slate-400/10 border-slate-400/30' },
+  gold:     { color: 'text-amber-400', bg: 'bg-amber-400/10 border-amber-400/30' },
+  platinum: { color: 'text-cyan-400',  bg: 'bg-cyan-400/10 border-cyan-400/30'   },
 };
+
+const TASK_TYPES = [
+  'Address Verification',
+  'Physical Presence Confirmation',
+  'Employer Verification',
+  'Reference Interview',
+  'Document Collection',
+  'Photograph Subject Property',
+  'Neighbor/Community Interview',
+  'Business Premises Inspection',
+];
+
+const NIGERIAN_STATES = [
+  'Abia', 'Adamawa', 'Akwa Ibom', 'Anambra', 'Bauchi', 'Bayelsa', 'Benue', 'Borno',
+  'Cross River', 'Delta', 'Ebonyi', 'Edo', 'Ekiti', 'Enugu', 'FCT', 'Gombe', 'Imo',
+  'Jigawa', 'Kaduna', 'Kano', 'Katsina', 'Kebbi', 'Kogi', 'Kwara', 'Lagos', 'Nasarawa',
+  'Niger', 'Ogun', 'Ondo', 'Osun', 'Oyo', 'Plateau', 'Rivers', 'Sokoto', 'Taraba',
+  'Yobe', 'Zamfara',
+];
+
+const PRIORITY_CONFIG = {
+  low:    { color: 'text-emerald-400', bg: 'bg-emerald-500/10 border-emerald-500/30', label: 'Low' },
+  medium: { color: 'text-amber-400',   bg: 'bg-amber-500/10 border-amber-500/30',   label: 'Medium' },
+  high:   { color: 'text-orange-400',  bg: 'bg-orange-500/10 border-orange-500/30',  label: 'High' },
+  urgent: { color: 'text-red-400',     bg: 'bg-red-500/10 border-red-500/30',        label: 'Urgent' },
+};
+
+// ─── Dispatch Task Sheet ──────────────────────────────────────────────────────
+
+function DispatchTaskSheet({
+  agent,
+  onClose,
+  onSubmit,
+}: {
+  agent: FieldAgent;
+  onClose: () => void;
+  onSubmit: (task: DispatchTask) => void;
+}) {
+  const [form, setForm] = useState<DispatchTask>({
+    agentId: agent.agentId,
+    taskType: TASK_TYPES[0],
+    subjectName: '',
+    subjectAddress: '',
+    subjectState: agent.state,
+    subjectLGA: agent.lga,
+    subjectPhone: '',
+    gpsLat: '',
+    gpsLng: '',
+    linkedInvestigation: '',
+    instructions: '',
+    priority: 'medium',
+    deadline: '',
+  });
+  const [submitted, setSubmitted] = useState(false);
+
+  const set = (k: keyof DispatchTask, v: string) => setForm(prev => ({ ...prev, [k]: v }));
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setSubmitted(true);
+    setTimeout(() => {
+      onSubmit(form);
+    }, 1500);
+  };
+
+  const inputCls = "h-8 text-xs font-mono bg-background border-border text-foreground placeholder:text-muted-foreground";
+  const labelCls = "text-[9px] font-mono text-muted-foreground uppercase tracking-wider mb-1 block";
+
+  return (
+    <>
+      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40" onClick={onClose} />
+      <div className="fixed right-0 top-0 h-full w-full max-w-md z-50 bg-[#0d1117] border-l border-border shadow-2xl flex flex-col">
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border flex-shrink-0">
+          <div>
+            <p className="text-sm font-mono font-semibold text-foreground flex items-center gap-2">
+              <Send size={13} className="text-primary" /> Dispatch Field Task
+            </p>
+            <p className="text-[10px] font-mono text-muted-foreground mt-0.5">
+              Assigned to: <span className="text-foreground">{agent.name}</span> · {agent.agentId}
+            </p>
+          </div>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X size={16} /></button>
+        </div>
+
+        {submitted ? (
+          <div className="flex-1 flex flex-col items-center justify-center gap-4 px-6">
+            <div className="w-16 h-16 rounded-full border border-emerald-500/40 bg-emerald-500/10 flex items-center justify-center">
+              <CheckCircle2 size={32} className="text-emerald-400" />
+            </div>
+            <div className="text-center">
+              <p className="text-sm font-mono font-semibold text-foreground mb-1">Task Dispatched</p>
+              <p className="text-xs font-mono text-muted-foreground">
+                {agent.name} has been notified via WhatsApp and the BIS Field App.
+              </p>
+              <p className="text-[10px] font-mono text-primary mt-2">
+                Task ID: BIS-TASK-{Date.now().toString().slice(-6)}
+              </p>
+            </div>
+          </div>
+        ) : (
+          <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+            {/* Task Type */}
+            <div>
+              <label className={labelCls}>Task Type</label>
+              <select
+                value={form.taskType}
+                onChange={e => set('taskType', e.target.value)}
+                className="w-full h-8 px-3 rounded-md border border-border bg-background text-xs font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              >
+                {TASK_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+
+            {/* Priority */}
+            <div>
+              <label className={labelCls}>Priority</label>
+              <div className="flex gap-2">
+                {(Object.entries(PRIORITY_CONFIG) as [DispatchTask['priority'], typeof PRIORITY_CONFIG.low][]).map(([key, cfg]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => set('priority', key)}
+                    className={cn(
+                      "flex-1 py-1.5 rounded-md border text-[10px] font-mono font-semibold transition-all",
+                      form.priority === key ? `${cfg.bg} ${cfg.color}` : "border-border text-muted-foreground hover:border-border/80"
+                    )}
+                  >
+                    {cfg.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Subject */}
+            <div className="border-t border-border/40 pt-3">
+              <p className="text-[9px] font-mono text-primary uppercase tracking-wider mb-3">Subject Details</p>
+              <div className="space-y-2">
+                <div>
+                  <label className={labelCls}>Full Name</label>
+                  <Input className={inputCls} placeholder="e.g. Emeka Okafor" value={form.subjectName}
+                    onChange={e => set('subjectName', e.target.value)} required />
+                </div>
+                <div>
+                  <label className={labelCls}>Address</label>
+                  <Input className={inputCls} placeholder="Street address" value={form.subjectAddress}
+                    onChange={e => set('subjectAddress', e.target.value)} required />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className={labelCls}>State</label>
+                    <select
+                      value={form.subjectState}
+                      onChange={e => set('subjectState', e.target.value)}
+                      className="w-full h-8 px-3 rounded-md border border-border bg-background text-xs font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                    >
+                      {NIGERIAN_STATES.map(s => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className={labelCls}>LGA</label>
+                    <Input className={inputCls} placeholder="Local Govt Area" value={form.subjectLGA}
+                      onChange={e => set('subjectLGA', e.target.value)} />
+                  </div>
+                </div>
+                <div>
+                  <label className={labelCls}>Phone (optional)</label>
+                  <Input className={inputCls} placeholder="+234..." value={form.subjectPhone}
+                    onChange={e => set('subjectPhone', e.target.value)} />
+                </div>
+              </div>
+            </div>
+
+            {/* GPS */}
+            <div className="border-t border-border/40 pt-3">
+              <p className="text-[9px] font-mono text-primary uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                <Navigation size={9} /> GPS Coordinates (optional)
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className={labelCls}>Latitude</label>
+                  <Input className={inputCls} placeholder="e.g. 6.5244" value={form.gpsLat}
+                    onChange={e => set('gpsLat', e.target.value)} />
+                </div>
+                <div>
+                  <label className={labelCls}>Longitude</label>
+                  <Input className={inputCls} placeholder="e.g. 3.3792" value={form.gpsLng}
+                    onChange={e => set('gpsLng', e.target.value)} />
+                </div>
+              </div>
+            </div>
+
+            {/* Investigation link */}
+            <div className="border-t border-border/40 pt-3">
+              <label className={labelCls}>Link to Investigation (optional)</label>
+              <Input className={inputCls} placeholder="e.g. BIS-2026-0042" value={form.linkedInvestigation}
+                onChange={e => set('linkedInvestigation', e.target.value)} />
+            </div>
+
+            {/* Deadline */}
+            <div>
+              <label className={labelCls}>Deadline</label>
+              <Input type="datetime-local" className={inputCls} value={form.deadline}
+                onChange={e => set('deadline', e.target.value)} required />
+            </div>
+
+            {/* Instructions */}
+            <div>
+              <label className={labelCls}>Special Instructions</label>
+              <textarea
+                className="w-full h-20 px-3 py-2 rounded-md border border-border bg-background text-xs font-mono text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-none"
+                placeholder="Additional instructions for the field agent..."
+                value={form.instructions}
+                onChange={e => set('instructions', e.target.value)}
+              />
+            </div>
+
+            {/* Submit */}
+            <div className="flex gap-2 pb-4">
+              <Button type="button" variant="outline" className="flex-1 text-xs font-mono" onClick={onClose}>
+                Cancel
+              </Button>
+              <Button type="submit" className="flex-1 text-xs font-mono gap-1.5">
+                <Send size={11} /> Dispatch Task
+              </Button>
+            </div>
+          </form>
+        )}
+      </div>
+    </>
+  );
+}
+
+// ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function FieldAgentsPage() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [dispatchAgent, setDispatchAgent] = useState<FieldAgent | null>(null);
+  const [dispatchedTasks, setDispatchedTasks] = useState<string[]>([]);
 
   const filtered = MOCK_AGENTS.filter(a => {
     const matchSearch = a.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -67,6 +323,11 @@ export default function FieldAgentsPage() {
     const h = Math.floor(m / 60);
     if (h < 24) return `${h}h ago`;
     return `${Math.floor(h / 24)}d ago`;
+  };
+
+  const handleDispatch = (task: DispatchTask) => {
+    setDispatchedTasks(prev => [...prev, task.agentId]);
+    setTimeout(() => setDispatchAgent(null), 2000);
   };
 
   return (
@@ -121,7 +382,7 @@ export default function FieldAgentsPage() {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border">
-              {['Agent', 'Location', 'Tier', 'Tasks', 'Trust Score', 'Earnings', 'Last Active', 'Status'].map(h => (
+              {['Agent', 'Location', 'Tier', 'Tasks', 'Trust Score', 'Earnings', 'Last Active', 'Status', ''].map(h => (
                 <th key={h} className="text-left px-4 py-3 text-[10px] font-mono font-semibold text-muted-foreground uppercase tracking-wider">{h}</th>
               ))}
             </tr>
@@ -129,8 +390,9 @@ export default function FieldAgentsPage() {
           <tbody>
             {filtered.map(agent => {
               const tier = TIER_CONFIG[agent.tier];
+              const hasDispatch = dispatchedTasks.includes(agent.agentId);
               return (
-                <tr key={agent.id} className="border-b border-border/50 hover:bg-muted/20 transition-colors cursor-pointer">
+                <tr key={agent.id} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
                   <td className="px-4 py-3">
                     <div>
                       <p className="font-mono text-xs font-semibold text-foreground">{agent.name}</p>
@@ -145,7 +407,7 @@ export default function FieldAgentsPage() {
                   </td>
                   <td className="px-4 py-3">
                     <span className={cn("text-xs font-mono font-semibold px-2 py-0.5 rounded border capitalize", tier.bg, tier.color)}>
-                      {tier.icon} {agent.tier}
+                      {agent.tier}
                     </span>
                   </td>
                   <td className="px-4 py-3">
@@ -177,6 +439,21 @@ export default function FieldAgentsPage() {
                       {agent.status.toUpperCase()}
                     </span>
                   </td>
+                  <td className="px-4 py-3">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={agent.status !== 'active'}
+                      onClick={() => setDispatchAgent(agent)}
+                      className={cn(
+                        "h-6 text-[10px] font-mono gap-1 whitespace-nowrap",
+                        hasDispatch && "text-emerald-400 border-emerald-400/40"
+                      )}
+                    >
+                      <Send size={9} />
+                      {hasDispatch ? 'Dispatched' : 'Dispatch Task'}
+                    </Button>
+                  </td>
                 </tr>
               );
             })}
@@ -205,6 +482,15 @@ export default function FieldAgentsPage() {
           ))}
         </div>
       </div>
+
+      {/* Dispatch Task Sheet */}
+      {dispatchAgent && (
+        <DispatchTaskSheet
+          agent={dispatchAgent}
+          onClose={() => setDispatchAgent(null)}
+          onSubmit={handleDispatch}
+        />
+      )}
     </BISLayout>
   );
 }

@@ -15,8 +15,9 @@ import { cn } from '@/lib/utils';
 import {
   Globe, Twitter, Facebook, Linkedin, AlertTriangle, TrendingUp,
   TrendingDown, Minus, Radio, Bell, Filter, RefreshCw, ExternalLink,
-  MessageSquare, Newspaper, Eye, ChevronDown, Zap, Activity
+  MessageSquare, Newspaper, Eye, ChevronDown, Zap, Activity, Link2, X, Search, CheckCircle2
 } from 'lucide-react';
+import { mockInvestigations } from '@/lib/mockData';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -158,6 +159,10 @@ export default function SocialMonitoringDashboard() {
   const [newCount, setNewCount] = useState(0);
   const [activeTab, setActiveTab] = useState<'feed' | 'analytics' | 'alerts'>('feed');
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Link-to-Investigation picker state
+  const [linkPickerMention, setLinkPickerMention] = useState<SocialMention | null>(null);
+  const [invSearch, setInvSearch] = useState('');
+  const [linkedMap, setLinkedMap] = useState<Record<string, string>>({});
 
   // Live feed injection
   useEffect(() => {
@@ -466,6 +471,72 @@ export default function SocialMonitoringDashboard() {
         </div>
       )}
 
+      {/* ── Link-to-Investigation Picker Modal ── */}
+      {linkPickerMention && (
+        <>
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40" onClick={() => setLinkPickerMention(null)} />
+          <div className="fixed inset-x-4 top-1/2 -translate-y-1/2 max-w-md mx-auto z-50 bg-[#0d1117] border border-border rounded-xl shadow-2xl p-5">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <p className="text-sm font-mono font-semibold text-foreground flex items-center gap-2"><Link2 size={13} className="text-primary" /> Link to Investigation</p>
+                <p className="text-[10px] font-mono text-muted-foreground mt-0.5 line-clamp-1">{linkPickerMention.content.slice(0, 60)}…</p>
+              </div>
+              <button onClick={() => setLinkPickerMention(null)} className="text-muted-foreground hover:text-foreground"><X size={15} /></button>
+            </div>
+            {/* Search */}
+            <div className="relative mb-3">
+              <Search size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <input
+                className="w-full h-8 pl-8 pr-3 rounded-md border border-border bg-background text-xs font-mono text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                placeholder="Search by ref or subject name…"
+                value={invSearch}
+                onChange={e => setInvSearch(e.target.value)}
+                autoFocus
+              />
+            </div>
+            {/* Investigation list */}
+            <div className="space-y-1.5 max-h-64 overflow-y-auto">
+              {mockInvestigations
+                .filter(inv =>
+                  inv.ref.toLowerCase().includes(invSearch.toLowerCase()) ||
+                  inv.subjectName.toLowerCase().includes(invSearch.toLowerCase())
+                )
+                .map(inv => {
+                  const isLinked = linkedMap[linkPickerMention.id] === inv.ref;
+                  const riskCls = inv.riskScore >= 80 ? 'text-red-400' : inv.riskScore >= 60 ? 'text-amber-400' : inv.riskScore >= 30 ? 'text-yellow-400' : 'text-emerald-400';
+                  return (
+                    <button
+                      key={inv.id}
+                      onClick={() => {
+                        setLinkedMap(prev => ({ ...prev, [linkPickerMention.id]: inv.ref }));
+                        setLinkPickerMention(null);
+                        setInvSearch('');
+                      }}
+                      className={cn(
+                        "w-full text-left p-3 rounded-lg border transition-all hover:bg-muted/30",
+                        isLinked ? "border-emerald-500/50 bg-emerald-500/10" : "border-border/50"
+                      )}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-xs font-mono font-semibold text-primary">{inv.ref}</p>
+                          <p className="text-[11px] font-mono text-foreground/80">{inv.subjectName}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className={cn("text-xs font-mono font-bold", riskCls)}>Risk {inv.riskScore}</p>
+                          <p className="text-[9px] font-mono text-muted-foreground capitalize">{inv.status}</p>
+                        </div>
+                        {isLinked && <CheckCircle2 size={14} className="text-emerald-400 ml-2 flex-shrink-0" />}
+                      </div>
+                    </button>
+                  );
+                })}
+            </div>
+            <p className="text-[9px] font-mono text-muted-foreground mt-3 text-center">Linking attaches this mention to the investigation's evidence log</p>
+          </div>
+        </>
+      )}
+
       {/* ── Alerts Tab ── */}
       {activeTab === 'alerts' && (
         <div className="space-y-3">
@@ -511,8 +582,12 @@ export default function SocialMonitoringDashboard() {
                   <span className={cn("text-xs font-mono font-bold", riskColor(mention.riskScore))}>
                     Risk: {mention.riskScore}
                   </span>
-                  <Button size="sm" variant="outline" className="h-6 text-[10px] font-mono ml-auto">
-                    Link to Investigation
+                  <Button size="sm" variant="outline" className={cn(
+                    "h-6 text-[10px] font-mono ml-auto gap-1",
+                    linkedMap[mention.id] ? "text-emerald-400 border-emerald-400/40" : ""
+                  )} onClick={() => setLinkPickerMention(mention)}>
+                    <Link2 size={9} />
+                    {linkedMap[mention.id] ? `Linked: ${linkedMap[mention.id]}` : 'Link to Investigation'}
                   </Button>
                   <Button size="sm" variant="destructive" className="h-6 text-[10px] font-mono">
                     Flag & Alert

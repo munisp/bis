@@ -1,13 +1,14 @@
 // BIS Dashboard — merges TourismPay BISDashboard + standalone BIS analytics
 // Design: Forensic Intelligence Dark — command center overview
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
 import {
   Shield, Search, CheckCircle, AlertTriangle, TrendingUp, RefreshCw,
   FileDown, Eye, Clock, Flag, Activity, Fingerprint, Users, Database,
-  Zap, BarChart3, ArrowUpRight, ArrowDownRight, ChevronRight
+  Zap, BarChart3, ArrowUpRight, ArrowDownRight, ChevronRight, Radio, MessageSquare
 } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import {
@@ -96,9 +97,48 @@ const sourceActivity = [
   { name: "FRSC", checks: 289 }, { name: "MTN", checks: 567 },
 ];
 
+// ─── Ticker seed data ─────────────────────────────────────────────────────
+const TICKER_SEED = [
+  { id: 't1', type: 'alert' as const, text: 'CRITICAL: Emeka Nwosu appears on OFAC SDN list — BIS-2026-0004', time: '11:02' },
+  { id: 't2', type: 'mention' as const, text: 'NEW MENTION: @lagosinsider tweets about Adebayo Okafor court appearance', time: '10:58' },
+  { id: 't3', type: 'report' as const, text: 'INCOMING REPORT via WhatsApp: Land fraud suspect in Ikeja, Lagos', time: '10:55' },
+  { id: 't4', type: 'alert' as const, text: 'HIGH: Fatima Al-Hassan classified as PEP — ward-level political official', time: '10:51' },
+  { id: 't5', type: 'mention' as const, text: 'NEW MENTION: Zenith Logistics Ltd mentioned in Punch investigative report', time: '10:47' },
+  { id: 't6', type: 'report' as const, text: 'INCOMING REPORT via USSD: Fraud suspect in Kano Municipal — N5M collected', time: '10:43' },
+  { id: 't7', type: 'alert' as const, text: 'MEDIUM: Zenith Logistics Ltd director has 2019 fraud charge on record', time: '10:39' },
+  { id: 't8', type: 'mention' as const, text: 'NEW MENTION: TikTok video circulating about Ponzi scheme operator in Abuja', time: '10:35' },
+];
+
+const TICKER_LIVE_POOL = [
+  { type: 'alert' as const, text: 'NEW FLAG: Ibrahim Musa — document tampering score 78.4% on passport scan' },
+  { type: 'mention' as const, text: 'NEW MENTION: Facebook post alleges fraud by Chidinma Eze in Enugu' },
+  { type: 'report' as const, text: 'INCOMING REPORT via Telegram: Cryptocurrency scam — 500+ victims, ₦200M' },
+  { type: 'alert' as const, text: 'CRITICAL: New INTERPOL Red Notice match for subject in BIS-2026-0011' },
+  { type: 'mention' as const, text: 'NEW MENTION: LinkedIn post exposes fake recruitment agency in Surulere' },
+  { type: 'report' as const, text: 'INCOMING REPORT via SMS: School fees fraud — 30 families affected in Enugu' },
+];
+
+let tickerLiveIdx = 0;
+
 export default function Dashboard() {
   const [, navigate] = useLocation();
   const [refreshing, setRefreshing] = useState(false);
+  const [tickerItems, setTickerItems] = useState(TICKER_SEED);
+  const tickerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    tickerRef.current = setInterval(() => {
+      const template = TICKER_LIVE_POOL[tickerLiveIdx % TICKER_LIVE_POOL.length];
+      tickerLiveIdx++;
+      const now = new Date();
+      const timeStr = `${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}`;
+      setTickerItems(prev => [
+        { id: `live_${Date.now()}`, ...template, time: timeStr },
+        ...prev.slice(0, 19),
+      ]);
+    }, 7000);
+    return () => { if (tickerRef.current) clearInterval(tickerRef.current); };
+  }, []);
 
   const handleRefresh = () => {
     setRefreshing(true);
@@ -119,6 +159,44 @@ export default function Dashboard() {
         </Button>
       }
     >
+      {/* ── Live Ticker Strip ── */}
+      <div className="mb-4 rounded-lg border border-border bg-card overflow-hidden">
+        <div className="flex items-center">
+          {/* Label */}
+          <div className="flex items-center gap-2 px-3 py-2 border-r border-border bg-muted/30 flex-shrink-0">
+            <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse" />
+            <span className="text-[9px] font-mono font-bold text-muted-foreground uppercase tracking-widest">LIVE FEED</span>
+          </div>
+          {/* Scrolling ticker */}
+          <div className="flex-1 overflow-hidden relative">
+            <div
+              className="flex gap-6 px-4 py-2 overflow-x-auto scrollbar-none"
+              style={{ scrollbarWidth: 'none' }}
+            >
+              {tickerItems.map(item => (
+                <div key={item.id} className="flex items-center gap-2 flex-shrink-0">
+                  <span className={cn(
+                    "text-[9px] font-mono font-bold rounded px-1.5 py-0.5 flex-shrink-0",
+                    item.type === 'alert' ? 'bg-red-500/20 text-red-400' :
+                    item.type === 'mention' ? 'bg-blue-500/20 text-blue-400' :
+                    'bg-emerald-500/20 text-emerald-400'
+                  )}>
+                    {item.type === 'alert' ? 'ALERT' : item.type === 'mention' ? 'SOCIAL' : 'REPORT'}
+                  </span>
+                  <span className="text-[10px] font-mono text-foreground/80 whitespace-nowrap">{item.text}</span>
+                  <span className="text-[9px] font-mono text-muted-foreground/50 flex-shrink-0">{item.time}</span>
+                  <span className="text-muted-foreground/20 flex-shrink-0">·</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          {/* Count */}
+          <div className="px-3 py-2 border-l border-border flex-shrink-0">
+            <span className="text-[9px] font-mono text-muted-foreground">{tickerItems.length} events</span>
+          </div>
+        </div>
+      </div>
+
       {/* ── Top Stats ── */}
       <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3 mb-6">
         <StatCard label="Total Investigations" value={dashboardStats.totalInvestigations.toLocaleString()} icon={<Search size={14} />} trend={12} color="blue" />
