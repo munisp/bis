@@ -135,7 +135,7 @@ function DispatchTaskSheet({
   return (
     <>
       <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40" onClick={onClose} />
-      <div className="fixed right-0 top-0 h-full w-full max-w-md z-50 bg-[#0d1117] border-l border-border shadow-2xl flex flex-col">
+      <div className="fixed right-0 top-0 h-full w-full max-w-md z-50 bg-popover border-l border-border shadow-2xl flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-border flex-shrink-0">
           <div>

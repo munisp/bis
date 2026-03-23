@@ -17,6 +17,9 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import Webcam from 'react-webcam';
 import BISLayout from '@/components/BISLayout';
+import KYCBatchUploadModal from '@/components/KYCBatchUploadModal';
+import { Button } from '@/components/ui/button';
+import { Upload } from 'lucide-react';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -256,7 +259,7 @@ const DOC_TYPES: Array<{ id: DocumentType; icon: string; color: string }> = [
   { id: 'voter_card', icon: '🗳️', color: 'bg-blue-50 border-blue-200' },
   { id: 'passport', icon: '📗', color: 'bg-purple-50 border-purple-200' },
   { id: 'drivers_license', icon: '🚗', color: 'bg-orange-50 border-orange-200' },
-  { id: 'cac_certificate', icon: '🏢', color: 'bg-gray-50 border-gray-200' },
+  { id: 'cac_certificate', icon: '🏢', color: 'bg-muted/50 border-border' },
 ];
 
 // ─── Progress Indicator ───────────────────────────────────────────────────────
@@ -504,18 +507,18 @@ function KYCVerificationPageInner() {
   // ─── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-muted/50 flex items-center justify-center p-4">
       <div className="w-full max-w-lg bg-white rounded-2xl shadow-xl overflow-hidden">
 
         {/* Header */}
-        <div className="bg-gradient-to-r from-green-600 to-emerald-700 p-6 text-white">
+        <div className="bg-gradient-to-r from-green-600 to-emerald-700 p-6 text-foreground">
           <div className="flex items-center justify-between mb-2">
             <h1 className="text-xl font-bold">{t.title}</h1>
             {/* Language Selector */}
             <select
               value={language}
               onChange={e => setLanguage(e.target.value as Language)}
-              className="bg-white/20 text-white text-sm rounded-lg px-2 py-1 border border-white/30"
+              className="bg-white/20 text-foreground text-sm rounded-lg px-2 py-1 border border-white/30"
             >
               <option value="en">EN</option>
               <option value="yo">YO</option>
@@ -541,17 +544,17 @@ function KYCVerificationPageInner() {
             <div className="text-center space-y-4">
               <div className="text-6xl mb-4">🔍</div>
               <h2 className="text-xl font-semibold text-gray-800">{t.title}</h2>
-              <p className="text-gray-500 text-sm">{t.subtitle}</p>
-              <div className="space-y-2 text-left bg-gray-50 rounded-xl p-4">
+              <p className="text-muted-foreground text-sm">{t.subtitle}</p>
+              <div className="space-y-2 text-left bg-muted/50 rounded-xl p-4">
                 {['📄 Document scan', '🤳 Liveness check', '🔗 Database verification'].map((item, i) => (
-                  <div key={i} className="flex items-center gap-2 text-sm text-gray-600">
+                  <div key={i} className="flex items-center gap-2 text-sm text-muted-foreground">
                     <span>{item}</span>
                   </div>
                 ))}
               </div>
               <button
                 onClick={() => setStep('document_type')}
-                className="w-full bg-green-600 text-white py-3 rounded-xl font-medium hover:bg-green-700 transition"
+                className="w-full bg-green-600 text-foreground py-3 rounded-xl font-medium hover:bg-green-700 transition"
               >
                 {t.continue} →
               </button>
@@ -583,15 +586,15 @@ function KYCVerificationPageInner() {
           {step === 'document_upload' && (
             <div className="space-y-4">
               <h2 className="text-lg font-semibold text-gray-800">{t.uploadDoc}</h2>
-              <p className="text-sm text-gray-500">{t.uploadInstructions}</p>
+              <p className="text-sm text-muted-foreground">{t.uploadInstructions}</p>
 
               <div
                 onClick={() => fileInputRef.current?.click()}
-                className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center cursor-pointer hover:border-green-400 hover:bg-green-50 transition"
+                className="border-2 border-dashed border-border rounded-xl p-8 text-center cursor-pointer hover:border-green-400 hover:bg-green-50 transition"
               >
                 <div className="text-4xl mb-2">📷</div>
-                <p className="text-gray-500 text-sm">Click to upload or take a photo</p>
-                <p className="text-gray-400 text-xs mt-1">JPG, PNG, PDF up to 10MB</p>
+                <p className="text-muted-foreground text-sm">Click to upload or take a photo</p>
+                <p className="text-muted-foreground text-xs mt-1">JPG, PNG, PDF up to 10MB</p>
               </div>
 
               <input
@@ -605,7 +608,7 @@ function KYCVerificationPageInner() {
 
               <button
                 onClick={() => setStep('document_type')}
-                className="w-full border border-gray-300 text-gray-600 py-2 rounded-xl text-sm hover:bg-gray-50"
+                className="w-full border border-border text-muted-foreground py-2 rounded-xl text-sm hover:bg-muted/50"
               >
                 ← {t.back}
               </button>
@@ -621,8 +624,8 @@ function KYCVerificationPageInner() {
               <div className="flex justify-center">
                 <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-green-600" />
               </div>
-              <p className="text-gray-600 font-medium">{t.processing}</p>
-              <p className="text-gray-400 text-sm">{t.extracting}</p>
+              <p className="text-muted-foreground font-medium">{t.processing}</p>
+              <p className="text-muted-foreground text-sm">{t.extracting}</p>
             </div>
           )}
 
@@ -652,7 +655,7 @@ function KYCVerificationPageInner() {
                 <div className="space-y-2">
                   {Object.entries(docResult.fields).slice(0, 6).map(([key, field]) => (
                     <div key={key} className="flex justify-between text-sm">
-                      <span className="text-gray-500 capitalize">{key.replace('_', ' ')}</span>
+                      <span className="text-muted-foreground capitalize">{key.replace('_', ' ')}</span>
                       <span className="font-medium text-gray-800">{field.value}</span>
                     </div>
                   ))}
@@ -662,7 +665,7 @@ function KYCVerificationPageInner() {
               <button
                 onClick={() => setStep('liveness_intro')}
                 disabled={docResult.isTampered}
-                className="w-full bg-green-600 text-white py-3 rounded-xl font-medium hover:bg-green-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full bg-green-600 text-foreground py-3 rounded-xl font-medium hover:bg-green-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {t.continue} →
               </button>
@@ -674,7 +677,7 @@ function KYCVerificationPageInner() {
             <div className="text-center space-y-4">
               <div className="text-5xl">🤳</div>
               <h2 className="text-lg font-semibold text-gray-800">{t.livenessTitle}</h2>
-              <p className="text-gray-500 text-sm">{t.livenessSubtitle}</p>
+              <p className="text-muted-foreground text-sm">{t.livenessSubtitle}</p>
               <div className="bg-blue-50 rounded-xl p-4 text-sm text-blue-700 text-left space-y-1">
                 <p>✓ Ensure good lighting on your face</p>
                 <p>✓ Remove glasses if possible</p>
@@ -684,7 +687,7 @@ function KYCVerificationPageInner() {
               <button
                 onClick={startLiveness}
                 disabled={loading}
-                className="w-full bg-green-600 text-white py-3 rounded-xl font-medium hover:bg-green-700 transition"
+                className="w-full bg-green-600 text-foreground py-3 rounded-xl font-medium hover:bg-green-700 transition"
               >
                 {loading ? '...' : t.startLiveness}
               </button>
@@ -710,7 +713,7 @@ function KYCVerificationPageInner() {
               </div>
 
               <div className="bg-green-50 border border-green-200 rounded-xl p-4 text-center">
-                <p className="text-sm text-gray-500 mb-1">
+                <p className="text-sm text-muted-foreground mb-1">
                   Step {currentChallenge + 1} of {challenge.challenges.length}
                 </p>
                 <p className="text-lg font-semibold text-green-800">
@@ -720,7 +723,7 @@ function KYCVerificationPageInner() {
 
               <button
                 onClick={captureFrame}
-                className="w-full bg-green-600 text-white py-3 rounded-xl font-medium hover:bg-green-700 transition"
+                className="w-full bg-green-600 text-foreground py-3 rounded-xl font-medium hover:bg-green-700 transition"
               >
                 ✓ Done
               </button>
@@ -733,7 +736,7 @@ function KYCVerificationPageInner() {
               <div className="flex justify-center">
                 <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-green-600" />
               </div>
-              <p className="text-gray-600 font-medium">{t.verifying}</p>
+              <p className="text-muted-foreground font-medium">{t.verifying}</p>
             </div>
           )}
 
@@ -743,20 +746,20 @@ function KYCVerificationPageInner() {
               <div className="flex justify-center">
                 <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600" />
               </div>
-              <p className="text-gray-600 font-medium">{t.faceMatch}</p>
+              <p className="text-muted-foreground font-medium">{t.faceMatch}</p>
             </div>
           )}
 
           {/* ── Step: Data Verification ── */}
           {step === 'data_verification' && (
             <div className="space-y-4 py-4">
-              <p className="text-gray-600 font-medium text-center">{t.dataVerification}</p>
+              <p className="text-muted-foreground font-medium text-center">{t.dataVerification}</p>
               <div className="space-y-3">
                 {Object.entries(verificationSteps).map(([source, status]) => (
-                  <div key={source} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl">
+                  <div key={source} className="flex items-center justify-between p-3 bg-muted/50 rounded-xl">
                     <span className="font-medium text-gray-700">{t[source] || source.toUpperCase()}</span>
                     <span>
-                      {status === 'pending' && <span className="text-gray-400 text-sm">Waiting...</span>}
+                      {status === 'pending' && <span className="text-muted-foreground text-sm">Waiting...</span>}
                       {status === 'checking' && <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600" />}
                       {status === 'done' && <span className="text-green-600 text-lg">✓</span>}
                       {status === 'failed' && <span className="text-red-600 text-lg">✗</span>}
@@ -786,16 +789,16 @@ function KYCVerificationPageInner() {
                   {decision.status === 'approved' ? t.approved :
                    decision.status === 'rejected' ? t.rejected : t.manualReview}
                 </h2>
-                <p className="text-sm text-gray-600">
+                <p className="text-sm text-muted-foreground">
                   {decision.status === 'approved' ? t.approvedMsg :
                    decision.status === 'rejected' ? t.rejectedMsg : t.manualMsg}
                 </p>
               </div>
 
               {/* Trust Score */}
-              <div className="bg-gray-50 rounded-xl p-4">
+              <div className="bg-muted/50 rounded-xl p-4">
                 <div className="flex justify-between items-center mb-2">
-                  <span className="text-sm font-medium text-gray-600">{t.riskScore}</span>
+                  <span className="text-sm font-medium text-muted-foreground">{t.riskScore}</span>
                   <span className={`text-lg font-bold ${
                     decision.riskScore >= 70 ? 'text-green-600' :
                     decision.riskScore >= 40 ? 'text-yellow-600' : 'text-red-600'
@@ -813,15 +816,15 @@ function KYCVerificationPageInner() {
               </div>
 
               {/* Reference ID */}
-              <div className="bg-gray-50 rounded-xl p-3 flex justify-between items-center">
-                <span className="text-sm text-gray-500">{t.refId}</span>
+              <div className="bg-muted/50 rounded-xl p-3 flex justify-between items-center">
+                <span className="text-sm text-muted-foreground">{t.refId}</span>
                 <span className="text-sm font-mono font-medium text-gray-800">{decision.referenceId}</span>
               </div>
 
               {decision.status !== 'approved' && (
                 <button
                   onClick={() => { setStep('intro'); setDocResult(null); setDecision(null); }}
-                  className="w-full border border-gray-300 text-gray-600 py-2 rounded-xl text-sm hover:bg-gray-50"
+                  className="w-full border border-border text-muted-foreground py-2 rounded-xl text-sm hover:bg-muted/50"
                 >
                   {t.tryAgain}
                 </button>
@@ -837,9 +840,19 @@ function KYCVerificationPageInner() {
 
 
 export default function KYCVerificationPage() {
+  const [batchOpen, setBatchOpen] = useState(false);
   return (
-    <BISLayout>
+    <BISLayout
+      title="KYC / KYB Verification"
+      subtitle="Identity verification and document authentication"
+      actions={
+        <Button size="sm" className="h-7 text-xs gap-1.5" onClick={() => setBatchOpen(true)}>
+          <Upload size={12} /> Bulk Upload
+        </Button>
+      }
+    >
       <KYCVerificationPageInner />
+      <KYCBatchUploadModal open={batchOpen} onClose={() => setBatchOpen(false)} />
     </BISLayout>
   );
 }

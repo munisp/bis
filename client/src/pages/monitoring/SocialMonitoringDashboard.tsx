@@ -475,7 +475,7 @@ export default function SocialMonitoringDashboard() {
       {linkPickerMention && (
         <>
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40" onClick={() => setLinkPickerMention(null)} />
-          <div className="fixed inset-x-4 top-1/2 -translate-y-1/2 max-w-md mx-auto z-50 bg-[#0d1117] border border-border rounded-xl shadow-2xl p-5">
+          <div className="fixed inset-x-4 top-1/2 -translate-y-1/2 max-w-md mx-auto z-50 bg-popover border border-border rounded-xl shadow-2xl p-5">
             <div className="flex items-center justify-between mb-3">
               <div>
                 <p className="text-sm font-mono font-semibold text-foreground flex items-center gap-2"><Link2 size={13} className="text-primary" /> Link to Investigation</p>

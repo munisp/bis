@@ -8,12 +8,13 @@ import {
   Activity, Users, Database, Settings, Bell, ChevronDown,
   ChevronRight, LogOut, Menu, X, AlertTriangle, Car, Pill,
   Briefcase, Globe, MapPin, MessageSquare, Building2, Eye,
-  UserCheck, BarChart3, Key, Zap, CheckCheck, ArrowRight
+  UserCheck, BarChart3, Key, Zap, CheckCheck, ArrowRight, Sun, Moon
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useLocation as useWouterLocation } from 'wouter';
+import { useTheme } from '@/contexts/ThemeContext';
 
 // ─── Nav config ───────────────────────────────────────────────────────────────
 
@@ -186,7 +187,7 @@ function NotificationPanel({
         onClick={onClose}
       />
       {/* Panel */}
-      <div className="fixed right-3 top-14 w-96 z-50 bg-[#0d1117] border border-border rounded-xl shadow-2xl flex flex-col max-h-[calc(100vh-5rem)] overflow-hidden">
+      <div className="fixed right-3 top-14 w-96 z-50 bg-popover border border-border rounded-xl shadow-2xl flex flex-col max-h-[calc(100vh-5rem)] overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0">
           <div className="flex items-center gap-2">
@@ -299,6 +300,7 @@ export default function BISLayout({ children, title, subtitle, actions }: BISLay
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [bellOpen, setBellOpen] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>(SEED_NOTIFICATIONS);
+  const { theme, toggleTheme } = useTheme();
 
   const unreadCount = notifications.filter(n => !n.read).length;
 
@@ -377,6 +379,19 @@ export default function BISLayout({ children, title, subtitle, actions }: BISLay
 
           <div className="flex items-center gap-2">
             {actions}
+
+            {/* Theme toggle */}
+            {toggleTheme && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                onClick={toggleTheme}
+                title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+              >
+                {theme === 'dark' ? <Sun size={13} /> : <Moon size={13} />}
+              </Button>
+            )}
 
             {/* Bell button */}
             <Button

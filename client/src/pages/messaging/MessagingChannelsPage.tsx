@@ -528,7 +528,7 @@ function MessagingChannelsPageInner() {
       {selectedReport && (
         <>
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40" onClick={() => setSelectedReport(null)} />
-          <div className="fixed inset-x-4 top-1/2 -translate-y-1/2 max-w-lg mx-auto z-50 bg-[#0d1117] border border-border rounded-xl shadow-2xl p-6">
+          <div className="fixed inset-x-4 top-1/2 -translate-y-1/2 max-w-lg mx-auto z-50 bg-popover border border-border rounded-xl shadow-2xl p-6">
             <div className="flex items-center justify-between mb-4">
               <div>
                 <p className="text-sm font-mono font-semibold text-foreground">Incoming Report</p>

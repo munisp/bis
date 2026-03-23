@@ -154,7 +154,7 @@ const DOCUMENT_REQUIREMENTS: Record<EntityType, DocumentUpload[]> = {
 };
 
 const STATUS_CONFIG: Record<OnboardingStatus, { label: string; color: string; icon: React.ReactNode; description: string }> = {
-  draft: { label: 'Draft', color: 'bg-gray-500/20 text-gray-400', icon: <Clock className="w-4 h-4" />, description: 'Application is being filled out' },
+  draft: { label: 'Draft', color: 'bg-muted/500/20 text-muted-foreground', icon: <Clock className="w-4 h-4" />, description: 'Application is being filled out' },
   awaiting_documents: { label: 'Awaiting Documents', color: 'bg-amber-500/20 text-amber-400', icon: <Upload className="w-4 h-4" />, description: 'Please upload required documents' },
   processing: { label: 'Processing', color: 'bg-blue-500/20 text-blue-400', icon: <RefreshCw className="w-4 h-4 animate-spin" />, description: 'Documents are being verified by our AI engine' },
   awaiting_stakeholders: { label: 'Awaiting Directors', color: 'bg-purple-500/20 text-purple-400', icon: <Users className="w-4 h-4" />, description: 'Waiting for directors/shareholders to complete KYC' },
@@ -310,13 +310,13 @@ function StakeholderOnboardingWizardInner() {
   // ── Render ───────────────────────────────────────────────────────────────────
 
   return (
-    <div className="min-h-screen bg-gray-950 text-gray-100 p-4 md:p-8">
+    <div className="min-h-screen bg-background text-foreground p-4 md:p-8">
       <div className="max-w-4xl mx-auto">
 
         {/* Header */}
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-white mb-2">Stakeholder Onboarding</h1>
-          <p className="text-gray-400">Register your organisation or complete your individual KYC</p>
+          <h1 className="text-3xl font-bold text-foreground mb-2">Stakeholder Onboarding</h1>
+          <p className="text-muted-foreground">Register your organisation or complete your individual KYC</p>
         </div>
 
         {/* Progress Bar */}
@@ -326,13 +326,13 @@ function StakeholderOnboardingWizardInner() {
               <div
                 key={s.id}
                 className={`flex items-center gap-1.5 text-xs font-medium transition-colors ${
-                  i <= step ? 'text-emerald-400' : 'text-gray-600'
+                  i <= step ? 'text-emerald-400' : 'text-muted-foreground'
                 }`}
               >
                 <div className={`w-7 h-7 rounded-full flex items-center justify-center border transition-colors ${
-                  i < step ? 'bg-emerald-500 border-emerald-500 text-white' :
+                  i < step ? 'bg-emerald-500 border-emerald-500 text-foreground' :
                   i === step ? 'border-emerald-400 text-emerald-400' :
-                  'border-gray-700 text-gray-600'
+                  'border-border text-muted-foreground'
                 }`}>
                   {i < step ? <CheckCircle2 className="w-4 h-4" /> : s.icon}
                 </div>
@@ -340,27 +340,27 @@ function StakeholderOnboardingWizardInner() {
               </div>
             ))}
           </div>
-          <Progress value={progressPercent} className="h-1.5 bg-gray-800" />
+          <Progress value={progressPercent} className="h-1.5 bg-muted" />
         </div>
 
         {/* ── Step 0: Entity Type Selection ── */}
         {step === 0 && (
           <div>
-            <h2 className="text-xl font-semibold text-white mb-2">What type of organisation are you?</h2>
-            <p className="text-gray-400 text-sm mb-6">Select the option that best describes your entity. This determines the required documents and onboarding flow.</p>
+            <h2 className="text-xl font-semibold text-foreground mb-2">What type of organisation are you?</h2>
+            <p className="text-muted-foreground text-sm mb-6">Select the option that best describes your entity. This determines the required documents and onboarding flow.</p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {ENTITY_TYPES.map(et => (
                 <button
                   key={et.value}
                   onClick={() => handleEntityTypeSelect(et.value as EntityType)}
-                  className="flex items-start gap-4 p-5 rounded-xl border border-gray-800 bg-gray-900 hover:border-emerald-500/50 hover:bg-gray-800 transition-all text-left group"
+                  className="flex items-start gap-4 p-5 rounded-xl border border-border bg-card hover:border-emerald-500/50 hover:bg-muted transition-all text-left group"
                 >
                   <span className="text-3xl">{et.icon}</span>
                   <div>
-                    <div className="font-semibold text-white group-hover:text-emerald-400 transition-colors">{et.label}</div>
-                    <div className="text-sm text-gray-500 mt-0.5">{et.description}</div>
+                    <div className="font-semibold text-foreground group-hover:text-emerald-400 transition-colors">{et.label}</div>
+                    <div className="text-sm text-muted-foreground mt-0.5">{et.description}</div>
                   </div>
-                  <ChevronRight className="w-5 h-5 text-gray-600 group-hover:text-emerald-400 ml-auto mt-0.5 transition-colors" />
+                  <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:text-emerald-400 ml-auto mt-0.5 transition-colors" />
                 </button>
               ))}
             </div>
@@ -369,9 +369,9 @@ function StakeholderOnboardingWizardInner() {
 
         {/* ── Step 1: Organisation Details ── */}
         {step === 1 && entityType && (
-          <Card className="bg-gray-900 border-gray-800">
+          <Card className="bg-card border-border">
             <CardHeader>
-              <CardTitle className="text-white flex items-center gap-2">
+              <CardTitle className="text-foreground flex items-center gap-2">
                 <Building2 className="w-5 h-5 text-emerald-400" />
                 Organisation Details
               </CardTitle>
@@ -382,49 +382,49 @@ function StakeholderOnboardingWizardInner() {
             <CardContent className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <Label className="text-gray-300">Legal Name *</Label>
+                  <Label className="text-muted-foreground">Legal Name *</Label>
                   <Input
                     {...register('legalName', { required: 'Legal name is required' })}
                     placeholder="As registered with CAC / government"
-                    className="bg-gray-800 border-gray-700 text-white mt-1"
+                    className="bg-muted border-border text-foreground mt-1"
                   />
                   {errors.legalName && <p className="text-red-400 text-xs mt-1">{errors.legalName.message}</p>}
                 </div>
                 <div>
-                  <Label className="text-gray-300">Trading Name</Label>
+                  <Label className="text-muted-foreground">Trading Name</Label>
                   <Input
                     {...register('tradingName')}
                     placeholder="If different from legal name"
-                    className="bg-gray-800 border-gray-700 text-white mt-1"
+                    className="bg-muted border-border text-foreground mt-1"
                   />
                 </div>
                 {entityType !== 'government_agency' && (
                   <>
                     <div>
-                      <Label className="text-gray-300">Registration Number *</Label>
+                      <Label className="text-muted-foreground">Registration Number *</Label>
                       <Input
                         {...register('registrationNumber', { required: 'Registration number is required' })}
                         placeholder={entityType === 'ngo' ? 'CAC Part C Number' : 'CAC RC Number'}
-                        className="bg-gray-800 border-gray-700 text-white mt-1"
+                        className="bg-muted border-border text-foreground mt-1"
                       />
                     </div>
                     <div>
-                      <Label className="text-gray-300">Tax ID (TIN)</Label>
+                      <Label className="text-muted-foreground">Tax ID (TIN)</Label>
                       <Input
                         {...register('taxId')}
                         placeholder="Federal Inland Revenue TIN"
-                        className="bg-gray-800 border-gray-700 text-white mt-1"
+                        className="bg-muted border-border text-foreground mt-1"
                       />
                     </div>
                   </>
                 )}
                 <div>
-                  <Label className="text-gray-300">Country *</Label>
+                  <Label className="text-muted-foreground">Country *</Label>
                   <Select onValueChange={v => setValue('countryCode', v)} defaultValue="NG">
-                    <SelectTrigger className="bg-gray-800 border-gray-700 text-white mt-1">
+                    <SelectTrigger className="bg-muted border-border text-foreground mt-1">
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent className="bg-gray-800 border-gray-700">
+                    <SelectContent className="bg-muted border-border">
                       <SelectItem value="NG">🇳🇬 Nigeria</SelectItem>
                       <SelectItem value="GH">🇬🇭 Ghana</SelectItem>
                       <SelectItem value="KE">🇰🇪 Kenya</SelectItem>
@@ -439,29 +439,29 @@ function StakeholderOnboardingWizardInner() {
                   </Select>
                 </div>
                 <div>
-                  <Label className="text-gray-300">State / Province</Label>
+                  <Label className="text-muted-foreground">State / Province</Label>
                   <Input
                     {...register('stateProvince')}
                     placeholder="e.g. Lagos, Abuja FCT"
-                    className="bg-gray-800 border-gray-700 text-white mt-1"
+                    className="bg-muted border-border text-foreground mt-1"
                   />
                 </div>
                 <div className="md:col-span-2">
-                  <Label className="text-gray-300">Business Address</Label>
+                  <Label className="text-muted-foreground">Business Address</Label>
                   <Input
                     {...register('address')}
                     placeholder="Full business address"
-                    className="bg-gray-800 border-gray-700 text-white mt-1"
+                    className="bg-muted border-border text-foreground mt-1"
                   />
                 </div>
                 {BUSINESS_CATEGORIES[entityType].length > 0 && (
                   <div>
-                    <Label className="text-gray-300">Business Category</Label>
+                    <Label className="text-muted-foreground">Business Category</Label>
                     <Select onValueChange={v => setValue('businessCategory', v)}>
-                      <SelectTrigger className="bg-gray-800 border-gray-700 text-white mt-1">
+                      <SelectTrigger className="bg-muted border-border text-foreground mt-1">
                         <SelectValue placeholder="Select category" />
                       </SelectTrigger>
-                      <SelectContent className="bg-gray-800 border-gray-700">
+                      <SelectContent className="bg-muted border-border">
                         {BUSINESS_CATEGORIES[entityType].map(cat => (
                           <SelectItem key={cat.value} value={cat.value}>{cat.label}</SelectItem>
                         ))}
@@ -470,32 +470,32 @@ function StakeholderOnboardingWizardInner() {
                   </div>
                 )}
                 <div>
-                  <Label className="text-gray-300">Website</Label>
+                  <Label className="text-muted-foreground">Website</Label>
                   <Input
                     {...register('website')}
                     placeholder="https://yourwebsite.com"
-                    className="bg-gray-800 border-gray-700 text-white mt-1"
+                    className="bg-muted border-border text-foreground mt-1"
                   />
                 </div>
                 {entityType !== 'government_agency' && (
                   <>
                     <div>
-                      <Label className="text-gray-300">Expected Monthly Volume (USD)</Label>
+                      <Label className="text-muted-foreground">Expected Monthly Volume (USD)</Label>
                       <Input
                         {...register('expectedMonthlyVolume')}
                         type="number"
                         placeholder="e.g. 50000"
-                        className="bg-gray-800 border-gray-700 text-white mt-1"
+                        className="bg-muted border-border text-foreground mt-1"
                       />
                     </div>
                   </>
                 )}
                 <div className="md:col-span-2">
-                  <Label className="text-gray-300">Use Case / Purpose</Label>
+                  <Label className="text-muted-foreground">Use Case / Purpose</Label>
                   <Textarea
                     {...register('useCase')}
                     placeholder="Describe how you intend to use the TourismPay platform..."
-                    className="bg-gray-800 border-gray-700 text-white mt-1"
+                    className="bg-muted border-border text-foreground mt-1"
                     rows={3}
                   />
                 </div>
@@ -506,9 +506,9 @@ function StakeholderOnboardingWizardInner() {
 
         {/* ── Step 2: Contact Person ── */}
         {step === 2 && (
-          <Card className="bg-gray-900 border-gray-800">
+          <Card className="bg-card border-border">
             <CardHeader>
-              <CardTitle className="text-white flex items-center gap-2">
+              <CardTitle className="text-foreground flex items-center gap-2">
                 <User className="w-5 h-5 text-emerald-400" />
                 Primary Contact
               </CardTitle>
@@ -517,37 +517,37 @@ function StakeholderOnboardingWizardInner() {
             <CardContent className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <Label className="text-gray-300">Full Name *</Label>
+                  <Label className="text-muted-foreground">Full Name *</Label>
                   <Input
                     {...register('contactName', { required: 'Contact name is required' })}
                     placeholder="First and last name"
-                    className="bg-gray-800 border-gray-700 text-white mt-1"
+                    className="bg-muted border-border text-foreground mt-1"
                   />
                 </div>
                 <div>
-                  <Label className="text-gray-300">Job Title</Label>
+                  <Label className="text-muted-foreground">Job Title</Label>
                   <Input
                     {...register('contactTitle')}
                     placeholder="e.g. CEO, Compliance Officer"
-                    className="bg-gray-800 border-gray-700 text-white mt-1"
+                    className="bg-muted border-border text-foreground mt-1"
                   />
                 </div>
                 <div>
-                  <Label className="text-gray-300">Email Address *</Label>
+                  <Label className="text-muted-foreground">Email Address *</Label>
                   <Input
                     {...register('contactEmail', { required: 'Email is required', pattern: { value: /\S+@\S+\.\S+/, message: 'Invalid email' } })}
                     type="email"
                     placeholder="contact@company.com"
-                    className="bg-gray-800 border-gray-700 text-white mt-1"
+                    className="bg-muted border-border text-foreground mt-1"
                   />
                   {errors.contactEmail && <p className="text-red-400 text-xs mt-1">{errors.contactEmail.message}</p>}
                 </div>
                 <div>
-                  <Label className="text-gray-300">Phone Number</Label>
+                  <Label className="text-muted-foreground">Phone Number</Label>
                   <Input
                     {...register('contactPhone')}
                     placeholder="+234 801 234 5678"
-                    className="bg-gray-800 border-gray-700 text-white mt-1"
+                    className="bg-muted border-border text-foreground mt-1"
                   />
                 </div>
               </div>
@@ -560,8 +560,8 @@ function StakeholderOnboardingWizardInner() {
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-xl font-semibold text-white">Directors & Shareholders</h2>
-                <p className="text-gray-400 text-sm mt-1">
+                <h2 className="text-xl font-semibold text-foreground">Directors & Shareholders</h2>
+                <p className="text-muted-foreground text-sm mt-1">
                   Add all directors and shareholders with ≥10% ownership. Each will receive an invitation to complete their individual KYC.
                 </p>
               </div>
@@ -571,33 +571,33 @@ function StakeholderOnboardingWizardInner() {
             </div>
 
             {stakeholders.length === 0 && (
-              <div className="border border-dashed border-gray-700 rounded-xl p-8 text-center">
-                <Users className="w-10 h-10 text-gray-600 mx-auto mb-3" />
-                <p className="text-gray-500 text-sm">No stakeholders added yet.</p>
-                <p className="text-gray-600 text-xs mt-1">Click "Add Person" to add directors and shareholders.</p>
+              <div className="border border-dashed border-border rounded-xl p-8 text-center">
+                <Users className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
+                <p className="text-muted-foreground text-sm">No stakeholders added yet.</p>
+                <p className="text-muted-foreground text-xs mt-1">Click "Add Person" to add directors and shareholders.</p>
               </div>
             )}
 
             {stakeholders.map((s, i) => (
-              <Card key={i} className="bg-gray-900 border-gray-800">
+              <Card key={i} className="bg-card border-border">
                 <CardContent className="pt-4">
                   <div className="flex items-center justify-between mb-3">
-                    <span className="text-sm font-medium text-gray-300">Person {i + 1}</span>
+                    <span className="text-sm font-medium text-muted-foreground">Person {i + 1}</span>
                     <button onClick={() => handleRemoveStakeholder(i)} className="text-red-400 hover:text-red-300">
                       <Trash2 className="w-4 h-4" />
                     </button>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                     <div>
-                      <Label className="text-gray-400 text-xs">Role</Label>
+                      <Label className="text-muted-foreground text-xs">Role</Label>
                       <Select
                         value={s.role}
                         onValueChange={v => setStakeholders(prev => prev.map((sh, j) => j === i ? { ...sh, role: v } : sh))}
                       >
-                        <SelectTrigger className="bg-gray-800 border-gray-700 text-white mt-1 h-9 text-sm">
+                        <SelectTrigger className="bg-muted border-border text-foreground mt-1 h-9 text-sm">
                           <SelectValue />
                         </SelectTrigger>
-                        <SelectContent className="bg-gray-800 border-gray-700">
+                        <SelectContent className="bg-muted border-border">
                           <SelectItem value="director">Director</SelectItem>
                           <SelectItem value="shareholder">Shareholder</SelectItem>
                           <SelectItem value="ubo">Ultimate Beneficial Owner</SelectItem>
@@ -606,47 +606,47 @@ function StakeholderOnboardingWizardInner() {
                       </Select>
                     </div>
                     <div className="md:col-span-2">
-                      <Label className="text-gray-400 text-xs">Full Name *</Label>
+                      <Label className="text-muted-foreground text-xs">Full Name *</Label>
                       <Input
                         value={s.fullName}
                         onChange={e => setStakeholders(prev => prev.map((sh, j) => j === i ? { ...sh, fullName: e.target.value } : sh))}
                         placeholder="Full legal name"
-                        className="bg-gray-800 border-gray-700 text-white mt-1 h-9 text-sm"
+                        className="bg-muted border-border text-foreground mt-1 h-9 text-sm"
                       />
                     </div>
                     <div>
-                      <Label className="text-gray-400 text-xs">Email</Label>
+                      <Label className="text-muted-foreground text-xs">Email</Label>
                       <Input
                         value={s.email}
                         onChange={e => setStakeholders(prev => prev.map((sh, j) => j === i ? { ...sh, email: e.target.value } : sh))}
                         placeholder="email@example.com"
-                        className="bg-gray-800 border-gray-700 text-white mt-1 h-9 text-sm"
+                        className="bg-muted border-border text-foreground mt-1 h-9 text-sm"
                       />
                     </div>
                     <div>
-                      <Label className="text-gray-400 text-xs">Phone (WhatsApp)</Label>
+                      <Label className="text-muted-foreground text-xs">Phone (WhatsApp)</Label>
                       <Input
                         value={s.phone}
                         onChange={e => setStakeholders(prev => prev.map((sh, j) => j === i ? { ...sh, phone: e.target.value } : sh))}
                         placeholder="+234 801 234 5678"
-                        className="bg-gray-800 border-gray-700 text-white mt-1 h-9 text-sm"
+                        className="bg-muted border-border text-foreground mt-1 h-9 text-sm"
                       />
                     </div>
                     <div>
-                      <Label className="text-gray-400 text-xs">Ownership %</Label>
+                      <Label className="text-muted-foreground text-xs">Ownership %</Label>
                       <Input
                         type="number"
                         value={s.ownershipPercentage}
                         onChange={e => setStakeholders(prev => prev.map((sh, j) => j === i ? { ...sh, ownershipPercentage: Number(e.target.value) } : sh))}
                         placeholder="0-100"
                         min={0} max={100}
-                        className="bg-gray-800 border-gray-700 text-white mt-1 h-9 text-sm"
+                        className="bg-muted border-border text-foreground mt-1 h-9 text-sm"
                       />
                     </div>
                   </div>
                   <div className="mt-2 flex items-center gap-2">
                     <div className="w-2 h-2 rounded-full bg-amber-400" />
-                    <span className="text-xs text-gray-500">Will receive a KYC invitation via {s.email ? 'email' : s.phone ? 'WhatsApp' : 'email/SMS'}</span>
+                    <span className="text-xs text-muted-foreground">Will receive a KYC invitation via {s.email ? 'email' : s.phone ? 'WhatsApp' : 'email/SMS'}</span>
                   </div>
                 </CardContent>
               </Card>
@@ -670,8 +670,8 @@ function StakeholderOnboardingWizardInner() {
         {step === 4 && entityType && (
           <div className="space-y-4">
             <div>
-              <h2 className="text-xl font-semibold text-white">Required Documents</h2>
-              <p className="text-gray-400 text-sm mt-1">Upload clear, high-resolution scans or photos of the following documents.</p>
+              <h2 className="text-xl font-semibold text-foreground">Required Documents</h2>
+              <p className="text-muted-foreground text-sm mt-1">Upload clear, high-resolution scans or photos of the following documents.</p>
             </div>
 
             {documents.map((doc) => (
@@ -680,20 +680,20 @@ function StakeholderOnboardingWizardInner() {
                 className={`flex items-center gap-4 p-4 rounded-xl border transition-colors ${
                   doc.status === 'uploaded' || doc.status === 'verified' ? 'border-emerald-500/30 bg-emerald-500/5' :
                   doc.status === 'rejected' ? 'border-red-500/30 bg-red-500/5' :
-                  'border-gray-800 bg-gray-900'
+                  'border-border bg-card'
                 }`}
               >
                 <div className="flex-1">
                   <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-white">{doc.name}</span>
+                    <span className="text-sm font-medium text-foreground">{doc.name}</span>
                     {doc.required ? (
                       <span className="text-xs text-red-400 bg-red-500/10 px-1.5 py-0.5 rounded">Required</span>
                     ) : (
-                      <span className="text-xs text-gray-500 bg-gray-800 px-1.5 py-0.5 rounded">Optional</span>
+                      <span className="text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded">Optional</span>
                     )}
                   </div>
                   {doc.file && (
-                    <p className="text-xs text-gray-500 mt-1">{doc.file.name} ({(doc.file.size / 1024).toFixed(0)} KB)</p>
+                    <p className="text-xs text-muted-foreground mt-1">{doc.file.name} ({(doc.file.size / 1024).toFixed(0)} KB)</p>
                   )}
                 </div>
                 <div className="flex items-center gap-2">
@@ -707,7 +707,7 @@ function StakeholderOnboardingWizardInner() {
                       accept=".pdf,.jpg,.jpeg,.png"
                       onChange={e => e.target.files?.[0] && handleDocumentUpload(doc.type, e.target.files[0])}
                     />
-                    <Button variant="outline" size="sm" className="border-gray-700 text-gray-300 hover:bg-gray-800 pointer-events-none">
+                    <Button variant="outline" size="sm" className="border-border text-muted-foreground hover:bg-muted pointer-events-none">
                       <Upload className="w-3.5 h-3.5 mr-1" />
                       {doc.status === 'pending' ? 'Upload' : 'Replace'}
                     </Button>
@@ -730,54 +730,54 @@ function StakeholderOnboardingWizardInner() {
           <div className="space-y-4">
             {status === 'draft' ? (
               <>
-                <h2 className="text-xl font-semibold text-white">Review & Submit</h2>
-                <p className="text-gray-400 text-sm">Please review your application before submitting.</p>
+                <h2 className="text-xl font-semibold text-foreground">Review & Submit</h2>
+                <p className="text-muted-foreground text-sm">Please review your application before submitting.</p>
 
-                <Card className="bg-gray-900 border-gray-800">
+                <Card className="bg-card border-border">
                   <CardContent className="pt-4 space-y-3">
                     <div className="flex justify-between text-sm">
-                      <span className="text-gray-400">Entity Type</span>
-                      <span className="text-white">{ENTITY_TYPES.find(e => e.value === entityType)?.label}</span>
+                      <span className="text-muted-foreground">Entity Type</span>
+                      <span className="text-foreground">{ENTITY_TYPES.find(e => e.value === entityType)?.label}</span>
                     </div>
                     <div className="flex justify-between text-sm">
-                      <span className="text-gray-400">Legal Name</span>
-                      <span className="text-white">{watch('legalName')}</span>
+                      <span className="text-muted-foreground">Legal Name</span>
+                      <span className="text-foreground">{watch('legalName')}</span>
                     </div>
                     <div className="flex justify-between text-sm">
-                      <span className="text-gray-400">Contact</span>
-                      <span className="text-white">{watch('contactName')} ({watch('contactEmail')})</span>
+                      <span className="text-muted-foreground">Contact</span>
+                      <span className="text-foreground">{watch('contactName')} ({watch('contactEmail')})</span>
                     </div>
                     <div className="flex justify-between text-sm">
-                      <span className="text-gray-400">Stakeholders</span>
-                      <span className="text-white">{stakeholders.length} person(s) added</span>
+                      <span className="text-muted-foreground">Stakeholders</span>
+                      <span className="text-foreground">{stakeholders.length} person(s) added</span>
                     </div>
                     <div className="flex justify-between text-sm">
-                      <span className="text-gray-400">Documents</span>
-                      <span className="text-white">{documents.filter(d => d.status === 'uploaded').length}/{documents.filter(d => d.required).length} required uploaded</span>
+                      <span className="text-muted-foreground">Documents</span>
+                      <span className="text-foreground">{documents.filter(d => d.status === 'uploaded').length}/{documents.filter(d => d.required).length} required uploaded</span>
                     </div>
                   </CardContent>
                 </Card>
 
                 {/* PEP Declaration */}
-                <div className="flex items-start gap-3 p-4 bg-gray-900 border border-gray-800 rounded-xl">
+                <div className="flex items-start gap-3 p-4 bg-card border border-border rounded-xl">
                   <Checkbox
                     id="pep"
                     onCheckedChange={v => setValue('pepDeclaration', v as boolean)}
                     className="mt-0.5"
                   />
-                  <label htmlFor="pep" className="text-sm text-gray-300 cursor-pointer">
+                  <label htmlFor="pep" className="text-sm text-muted-foreground cursor-pointer">
                     <strong>PEP Declaration:</strong> I confirm that neither I, nor any director or beneficial owner of this entity, is a Politically Exposed Person (PEP) or is subject to any sanctions.
                   </label>
                 </div>
 
                 {/* Terms */}
-                <div className="flex items-start gap-3 p-4 bg-gray-900 border border-gray-800 rounded-xl">
+                <div className="flex items-start gap-3 p-4 bg-card border border-border rounded-xl">
                   <Checkbox
                     id="terms"
                     onCheckedChange={v => setValue('agreedToTerms', v as boolean)}
                     className="mt-0.5"
                   />
-                  <label htmlFor="terms" className="text-sm text-gray-300 cursor-pointer">
+                  <label htmlFor="terms" className="text-sm text-muted-foreground cursor-pointer">
                     I agree to the <a href="/terms" className="text-emerald-400 underline">Terms of Service</a>, <a href="/privacy" className="text-emerald-400 underline">Privacy Policy</a>, and <a href="/aml-policy" className="text-emerald-400 underline">AML/CFT Policy</a>. I confirm that all information provided is accurate and complete.
                   </label>
                 </div>
@@ -785,7 +785,7 @@ function StakeholderOnboardingWizardInner() {
                 <Button
                   onClick={handleSubmit(handleSubmitApplication)}
                   disabled={submitting}
-                  className="w-full bg-emerald-600 hover:bg-emerald-500 text-white"
+                  className="w-full bg-emerald-600 hover:bg-emerald-500 text-foreground"
                   size="lg"
                 >
                   {submitting ? (
@@ -801,14 +801,14 @@ function StakeholderOnboardingWizardInner() {
                 <div className={`flex items-center gap-3 p-5 rounded-xl border ${STATUS_CONFIG[status].color.replace('text-', 'border-').replace('/20', '/30')} bg-opacity-10`}>
                   {STATUS_CONFIG[status].icon}
                   <div>
-                    <div className="font-semibold text-white">{STATUS_CONFIG[status].label}</div>
-                    <div className="text-sm text-gray-400">{STATUS_CONFIG[status].description}</div>
+                    <div className="font-semibold text-foreground">{STATUS_CONFIG[status].label}</div>
+                    <div className="text-sm text-muted-foreground">{STATUS_CONFIG[status].description}</div>
                   </div>
                 </div>
 
                 {referenceId && (
-                  <div className="flex items-center justify-between p-4 bg-gray-900 border border-gray-800 rounded-xl">
-                    <span className="text-gray-400 text-sm">Reference ID</span>
+                  <div className="flex items-center justify-between p-4 bg-card border border-border rounded-xl">
+                    <span className="text-muted-foreground text-sm">Reference ID</span>
                     <span className="font-mono text-emerald-400 font-semibold">{referenceId}</span>
                   </div>
                 )}
@@ -838,10 +838,10 @@ function StakeholderOnboardingWizardInner() {
         {/* Navigation Buttons */}
         {step > 0 && step < 5 && (
           <div className="flex justify-between mt-6">
-            <Button variant="outline" onClick={handleBack} className="border-gray-700 text-gray-300">
+            <Button variant="outline" onClick={handleBack} className="border-border text-muted-foreground">
               <ChevronLeft className="w-4 h-4 mr-1" /> Back
             </Button>
-            <Button onClick={handleNext} className="bg-emerald-600 hover:bg-emerald-500 text-white">
+            <Button onClick={handleNext} className="bg-emerald-600 hover:bg-emerald-500 text-foreground">
               Continue <ChevronRight className="w-4 h-4 ml-1" />
             </Button>
           </div>

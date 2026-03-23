@@ -23,7 +23,7 @@ export function ThemeProvider({
 }: ThemeProviderProps) {
   const [theme, setTheme] = useState<Theme>(() => {
     if (switchable) {
-      const stored = localStorage.getItem("theme");
+      const stored = localStorage.getItem("bis-theme");
       return (stored as Theme) || defaultTheme;
     }
     return defaultTheme;
@@ -33,12 +33,14 @@ export function ThemeProvider({
     const root = document.documentElement;
     if (theme === "dark") {
       root.classList.add("dark");
+      root.classList.remove("light");
     } else {
       root.classList.remove("dark");
+      root.classList.add("light");
     }
 
     if (switchable) {
-      localStorage.setItem("theme", theme);
+      localStorage.setItem("bis-theme", theme);
     }
   }, [theme, switchable]);
 
