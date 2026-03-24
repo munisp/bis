@@ -20,6 +20,8 @@ import BISLayout from '@/components/BISLayout';
 import KYCBatchUploadModal from '@/components/KYCBatchUploadModal';
 import { Button } from '@/components/ui/button';
 import { Upload } from 'lucide-react';
+import { trpc } from '@/lib/trpc';
+import { toast } from 'sonner';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -473,23 +475,24 @@ function KYCVerificationPageInner() {
     await getFinalDecision();
   };
 
-  const getFinalDecision = async () => {
-    setLoading(true);
-    try {
-      const res = await fetch('/api/kyc/decision', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': 'internal' },
-        body: JSON.stringify({
-          document_type: docType,
-          document_id: docResult?.documentId,
-          liveness_passed: livenessOk,
-          document_confidence: docResult?.overallConfidence,
-          is_tampered: docResult?.isTampered,
-        }),
+  const kycCreate = trpc.kyc.create.useMutation({
+    onSuccess: (record) => {
+      const riskScore = record.riskScore ?? 50;
+      const riskLevel: 'low' | 'medium' | 'high' =
+        riskScore < 30 ? 'low' : riskScore < 60 ? 'medium' : 'high';
+      setDecision({
+        status: record.status === 'passed' ? 'approved' : record.status === 'failed' ? 'rejected' : 'manual_review',
+        riskScore,
+        riskLevel,
+        reasons: [],
+        referenceId: record.referenceId,
+        verifiedFields: record.verifiedFields as string[],
       });
-      const data = await res.json();
-      setDecision(data);
-    } catch {
+      setLoading(false);
+      setStep('decision');
+    },
+    onError: (e) => {
+      toast.error(`KYC decision failed: ${e.message}`);
       setDecision({
         status: 'manual_review',
         riskScore: 50,
@@ -498,10 +501,23 @@ function KYCVerificationPageInner() {
         referenceId: `KYC-${Date.now()}`,
         verifiedFields: [],
       });
-    } finally {
       setLoading(false);
       setStep('decision');
-    }
+    },
+  });
+
+  const getFinalDecision = () => {
+    setLoading(true);
+    kycCreate.mutate({
+      subjectName: 'Unknown',
+      subjectType: 'individual',
+      documentType: docType ?? 'nin_slip',
+      documentId: docResult?.documentId ?? '',
+      livenessPassed: livenessOk,
+      documentConfidence: docResult?.overallConfidence,
+      isTampered: docResult?.isTampered,
+      verificationSteps: Object.entries(verificationSteps).map(([k, v]) => ({ source: k, status: v })),
+    });
   };
 
   // ─── Render ────────────────────────────────────────────────────────────────

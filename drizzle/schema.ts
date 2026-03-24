@@ -358,3 +358,47 @@ export const webhooks = pgTable("webhooks", {
 });
 export type Webhook = typeof webhooks.$inferSelect;
 export type InsertWebhook = typeof webhooks.$inferInsert;
+
+// ─── Platform Settings ────────────────────────────────────────────────────────
+export const platformSettings = pgTable("platform_settings", {
+  id: serial("id").primaryKey(),
+  namespace: varchar("namespace", { length: 64 }).notNull().default("default"),
+  key: varchar("key", { length: 128 }).notNull(),
+  value: json("value"),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+  updatedBy: varchar("updatedBy", { length: 255 }),
+});
+export type PlatformSetting = typeof platformSettings.$inferSelect;
+export type InsertPlatformSetting = typeof platformSettings.$inferInsert;
+
+// ─── Onboarding Applications ──────────────────────────────────────────────────
+export const onboardingApplicationStatusEnum = pgEnum("onboarding_application_status", [
+  "draft", "submitted", "awaiting_documents", "under_review", "approved", "rejected",
+]);
+export const onboardingApplications = pgTable("onboarding_applications", {
+  id: serial("id").primaryKey(),
+  referenceId: varchar("referenceId", { length: 64 }).notNull(),
+  entityType: varchar("entityType", { length: 32 }).notNull(),
+  legalName: varchar("legalName", { length: 255 }).notNull(),
+  tradingName: varchar("tradingName", { length: 255 }),
+  countryCode: varchar("countryCode", { length: 8 }),
+  stateProvince: varchar("stateProvince", { length: 128 }),
+  city: varchar("city", { length: 128 }),
+  address: text("address"),
+  website: varchar("website", { length: 255 }),
+  businessCategory: varchar("businessCategory", { length: 128 }),
+  contactName: varchar("contactName", { length: 255 }),
+  contactEmail: varchar("contactEmail", { length: 255 }),
+  contactPhone: varchar("contactPhone", { length: 64 }),
+  contactTitle: varchar("contactTitle", { length: 128 }),
+  useCase: text("useCase"),
+  pepDeclaration: boolean("pepDeclaration").default(false),
+  agreedToTerms: boolean("agreedToTerms").default(false),
+  status: onboardingApplicationStatusEnum("status").notNull().default("draft"),
+  stakeholders: json("stakeholders").$type<any[]>().default([]),
+  createdBy: varchar("createdBy", { length: 255 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+export type OnboardingApplication = typeof onboardingApplications.$inferSelect;
+export type InsertOnboardingApplication = typeof onboardingApplications.$inferInsert;

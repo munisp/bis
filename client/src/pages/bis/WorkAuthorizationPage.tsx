@@ -1,4 +1,6 @@
 import React, { useState } from "react";
+import { trpc } from "@/lib/trpc";
+import { toast } from "sonner";
 import {
   RiskBadge, StatusBadge, CountrySelector, DataEnvironmentBanner, SectionCard
 } from "../../components/bis/shared";
@@ -134,45 +136,58 @@ function WorkAuthorizationPageInner() {
   const isSameCountry = form.workCountry === form.nationality;
   const isECOWAS = ECOWAS_COUNTRIES.includes(form.nationality) && ["NG","GH","SN","CI","ML","BF"].includes(form.workCountry);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const computeWorkAuthResult = (): WorkAuthResult => {
+    let status: WorkAuthStatus = "authorized";
+    let notes = "";
+    if (isSameCountry) {
+      status = "not_applicable";
+      notes = `${nationalityCountry?.name ?? form.nationality} citizen — no work permit required in ${workCountry?.name ?? form.workCountry}.`;
+    } else if (isECOWAS && form.workCountry !== "US" && form.workCountry !== "GB") {
+      status = "authorized";
+      notes = `ECOWAS citizen — free movement applies. No formal work permit required.`;
+    } else if (!form.documentNumber) {
+      status = "pending";
+      notes = "No document number provided — manual verification required.";
+    } else if (form.documentExpiry && new Date(form.documentExpiry) < new Date()) {
+      status = "expired";
+      notes = "Document has expired. Subject must renew before employment.";
+    }
+    return {
+      subjectId: form.subjectId,
+      authType: form.authType,
+      status,
+      authorizedUntil: form.documentExpiry || undefined,
+      documentValid: status === "authorized" || status === "not_applicable",
+      documentExpiry: form.documentExpiry || undefined,
+      permitType: form.authType === "ng_cerpac" ? "CERPAC" : form.authType === "uk_right_to_work" ? "Share Code" : "Work Permit",
+      restrictions: status === "authorized" ? ["Specific employer only (if CERPAC)", "Must renew before expiry"] : [],
+      notes,
+      dataSource: form.workCountry === "NG" ? "NIS (Nigeria Immigration Service)" : form.workCountry === "GB" ? "UKVI" : "USCIS E-Verify",
+      verifiedAt: new Date().toISOString(),
+    };
+  };
+
+  const createScreening = trpc.screening.create.useMutation({
+    onSuccess: (record) => {
+      setResult((record.result as WorkAuthResult | null) ?? computeWorkAuthResult());
+      setLoading(false);
+    },
+    onError: (e) => { toast.error(`Check failed: ${e.message}`); setLoading(false); },
+  });
+
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    try {
-      await new Promise(r => setTimeout(r, 1800));
-      let status: WorkAuthStatus = "authorized";
-      let notes = "";
-
-      if (isSameCountry) {
-        status = "not_applicable";
-        notes = `${nationalityCountry?.name ?? form.nationality} citizen — no work permit required in ${workCountry?.name ?? form.workCountry}.`;
-      } else if (isECOWAS && form.workCountry !== "US" && form.workCountry !== "GB") {
-        status = "authorized";
-        notes = `ECOWAS citizen — free movement applies. No formal work permit required.`;
-      } else if (!form.documentNumber) {
-        status = "pending";
-        notes = "No document number provided — manual verification required.";
-      } else if (form.documentExpiry && new Date(form.documentExpiry) < new Date()) {
-        status = "expired";
-        notes = "Document has expired. Subject must renew before employment.";
-      }
-
-      const mockResult: WorkAuthResult = {
-        subjectId: form.subjectId,
-        authType: form.authType,
-        status,
-        authorizedUntil: form.documentExpiry || undefined,
-        documentValid: status === "authorized" || status === "not_applicable",
-        documentExpiry: form.documentExpiry || undefined,
-        permitType: form.authType === "ng_cerpac" ? "CERPAC" : form.authType === "uk_right_to_work" ? "Share Code" : "Work Permit",
-        restrictions: status === "authorized" ? ["Specific employer only (if CERPAC)", "Must renew before expiry"] : [],
-        notes,
-        dataSource: form.workCountry === "NG" ? "NIS (Nigeria Immigration Service)" : form.workCountry === "GB" ? "UKVI" : "USCIS E-Verify",
-        verifiedAt: new Date().toISOString(),
-      };
-      setResult(mockResult);
-    } finally {
-      setLoading(false);
-    }
+    const computed = computeWorkAuthResult();
+    createScreening.mutate({
+      type: "work_authorization",
+      subjectName: form.fullName || form.subjectId || "Unknown",
+      subjectType: "individual",
+      priority: "medium",
+      requestData: { ...form },
+      result: computed as any,
+      resultSummary: computed.notes,
+    });
   };
 
   return (

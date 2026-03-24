@@ -1,0 +1,26 @@
+CREATE TYPE "public"."onboarding_application_status" AS ENUM('draft', 'submitted', 'awaiting_documents', 'under_review', 'approved', 'rejected');--> statement-breakpoint
+CREATE TABLE "onboarding_applications" (
+	"id" serial PRIMARY KEY NOT NULL,
+	"referenceId" varchar(64) NOT NULL,
+	"entityType" varchar(32) NOT NULL,
+	"legalName" varchar(255) NOT NULL,
+	"tradingName" varchar(255),
+	"countryCode" varchar(8),
+	"stateProvince" varchar(128),
+	"city" varchar(128),
+	"address" text,
+	"website" varchar(255),
+	"businessCategory" varchar(128),
+	"contactName" varchar(255),
+	"contactEmail" varchar(255),
+	"contactPhone" varchar(64),
+	"contactTitle" varchar(128),
+	"useCase" text,
+	"pepDeclaration" boolean DEFAULT false,
+	"agreedToTerms" boolean DEFAULT false,
+	"status" "onboarding_application_status" DEFAULT 'draft' NOT NULL,
+	"stakeholders" json DEFAULT '[]'::json,
+	"createdBy" varchar(255),
+	"createdAt" timestamp DEFAULT now() NOT NULL,
+	"updatedAt" timestamp DEFAULT now() NOT NULL
+);

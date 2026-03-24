@@ -233,74 +233,52 @@ function StakeholderOnboardingWizardInner() {
     }, 1500);
   }, []);
 
-  const handleSubmitApplication = async (data: OnboardingForm) => {
+  const createOnboarding = trpc.onboarding.create.useMutation({
+    onSuccess: (record) => {
+      setApplicationId(String(record.id));
+      setReferenceId(record.referenceId);
+      setStatus('awaiting_documents');
+      setStep(5);
+      toast.success('Application submitted successfully!');
+      setSubmitting(false);
+    },
+    onError: (e) => {
+      toast.error(`Failed to submit application: ${e.message}`);
+      setSubmitting(false);
+    },
+  });
+
+  const handleSubmitApplication = (data: OnboardingForm) => {
     if (!data.agreedToTerms) {
       toast.error('Please agree to the Terms and Conditions');
       return;
     }
     setSubmitting(true);
-    try {
-      // Step 1: Create application
-      const response = await fetch('/api/onboarding/applications', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          entity_type: data.entityType,
-          legal_name: data.legalName,
-          trading_name: data.tradingName,
-          country_code: data.countryCode,
-          state_province: data.stateProvince,
-          city: data.city,
-          address: data.address,
-          website: data.website,
-          business_category: data.businessCategory,
-          contact_name: data.contactName,
-          contact_email: data.contactEmail,
-          contact_phone: data.contactPhone,
-          contact_title: data.contactTitle,
-          use_case: data.useCase,
-        }),
-      });
-      const app = await response.json();
-      setApplicationId(app.id);
-      setReferenceId(app.reference_id);
-
-      // Step 2: Add stakeholders
-      for (const s of stakeholders) {
-        if (s.fullName) {
-          await fetch(`/api/onboarding/applications/${app.id}/stakeholders`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              role: s.role,
-              full_name: s.fullName,
-              email: s.email,
-              phone: s.phone,
-              ownership_percentage: s.ownershipPercentage,
-            }),
-          });
-        }
-      }
-
-      // Step 3: Submit
-      await fetch(`/api/onboarding/applications/${app.id}/submit`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          application_id: app.id,
-          pep_declaration: data.pepDeclaration,
-          agreed_to_terms: true,
-        }),
-      });
-
-      setStatus('awaiting_documents');
-      setStep(5);
-      toast.success('Application submitted successfully!');
-    } catch (err) {
-      toast.error('Failed to submit application. Please try again.');
-    } finally {
-      setSubmitting(false);
-    }
+    createOnboarding.mutate({
+      entityType: data.entityType,
+      legalName: data.legalName,
+      tradingName: data.tradingName,
+      countryCode: data.countryCode,
+      stateProvince: data.stateProvince,
+      city: data.city,
+      address: data.address,
+      website: data.website,
+      businessCategory: data.businessCategory,
+      contactName: data.contactName,
+      contactEmail: data.contactEmail,
+      contactPhone: data.contactPhone,
+      contactTitle: data.contactTitle,
+      useCase: data.useCase,
+      pepDeclaration: data.pepDeclaration,
+      agreedToTerms: data.agreedToTerms,
+      stakeholders: stakeholders.filter(s => s.fullName).map(s => ({
+        role: s.role,
+        fullName: s.fullName,
+        email: s.email,
+        phone: s.phone,
+        ownershipPercentage: s.ownershipPercentage,
+      })),
+    });
   };
 
   // ── Progress ─────────────────────────────────────────────────────────────────

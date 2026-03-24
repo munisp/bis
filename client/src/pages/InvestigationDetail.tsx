@@ -234,22 +234,31 @@ export default function InvestigationDetail() {
 
   const riskColor = inv.riskScore >= 80 ? "#f87171" : inv.riskScore >= 60 ? "#fb923c" : inv.riskScore >= 30 ? "#fbbf24" : "#34d399";
 
-  const handleAddNote = async () => {
-    if (!note.trim()) return;
+  const addNoteMutation = trpc.investigations.addNote.useMutation({
+    onSuccess: (result) => {
+      const newItem: EvidenceItem = {
+        id: `note_${Date.now()}`,
+        type: 'analyst_note',
+        timestamp: result.timestamp,
+        title: 'Analyst Note',
+        body: note.trim(),
+        linkedBy: result.author,
+      };
+      setEvidenceItems(prev => [newItem, ...prev]);
+      setAddingNote(false);
+      setNote("");
+      toast.success("Note added to investigation evidence log");
+    },
+    onError: (e) => {
+      toast.error(`Failed to add note: ${e.message}`);
+      setAddingNote(false);
+    },
+  });
+
+  const handleAddNote = () => {
+    if (!note.trim() || !inv?.ref) return;
     setAddingNote(true);
-    await new Promise(r => setTimeout(r, 800));
-    const newItem: EvidenceItem = {
-      id: `note_${Date.now()}`,
-      type: 'analyst_note',
-      timestamp: new Date().toISOString(),
-      title: 'Analyst Note',
-      body: note.trim(),
-      linkedBy: 'analyst@bis.io',
-    };
-    setEvidenceItems(prev => [newItem, ...prev]);
-    setAddingNote(false);
-    setNote("");
-    toast.success("Note added to investigation evidence log");
+    addNoteMutation.mutate({ ref: inv.ref, note: note.trim() });
   };
 
   const handleDownloadReport = () => {

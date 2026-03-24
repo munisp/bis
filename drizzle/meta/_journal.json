@@ -22,6 +22,20 @@
       "when": 1774362694774,
       "tag": "0002_clean_gargoyle",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1774364809648,
+      "tag": "0003_marvelous_radioactive_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1774365581983,
+      "tag": "0004_noisy_groot",
+      "breakpoints": true
     }
   ]
 }

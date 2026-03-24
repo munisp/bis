@@ -1,4 +1,6 @@
 import React, { useState } from "react";
+import { trpc } from "@/lib/trpc";
+import { toast } from "sonner";
 import {
   RiskBadge, SectionCard, ConfidenceMeter, FieldAgentTimeline, ScoreGauge, EmptyState
 } from "../../components/bis/shared";
@@ -169,43 +171,66 @@ function ZeroFootprintPageInner() {
     }));
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const createScreening = trpc.screening.create.useMutation({
+    onSuccess: (record) => {
+      const checklist: ChecklistItem[] = selectedPillarData.flatMap((p, pi) =>
+        p.steps.map((step, si) => ({
+          step: pi * 10 + si + 1,
+          pillar: p.label,
+          action: step,
+          required: p.weight >= 15,
+          estimatedHours: p.estimatedHours / p.steps.length,
+          completed: false,
+        }))
+      );
+      const inv: ZeroFootprintInvestigation = {
+        investigationId: record.requestRef,
+        subjectId: form.subjectId,
+        subjectName: form.subjectName,
+        subjectAddress: form.subjectAddress,
+        country: "NG",
+        state: form.state,
+        lga: form.lga,
+        status: "processing",
+        startedAt: record.createdAt.toISOString(),
+        estimatedCompletionDays: totalDays,
+        compositeScore: 0,
+        confidenceLevel: 0,
+        riskLevel: "medium",
+        recommendation: "Investigation in progress",
+        fieldAgentStatus: "pending",
+        checklist,
+      };
+      setInvestigation(inv);
+      setLoading(false);
+      setView("active");
+    },
+    onError: (e) => { toast.error(`Failed: ${e.message}`); setLoading(false); },
+  });
+
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    await new Promise(r => setTimeout(r, 2000));
-
-    const checklist: ChecklistItem[] = selectedPillarData.flatMap((p, pi) =>
-      p.steps.map((step, si) => ({
-        step: pi * 10 + si + 1,
-        pillar: p.label,
-        action: step,
-        required: p.weight >= 15,
-        estimatedHours: p.estimatedHours / p.steps.length,
-        completed: false,
-      }))
-    );
-
-    const inv: ZeroFootprintInvestigation = {
-      investigationId: `ZF-${Date.now()}`,
-      subjectId: form.subjectId,
-      subjectName: form.subjectName,
-      subjectAddress: form.subjectAddress,
-      country: "NG",
-      state: form.state,
-      lga: form.lga,
-      status: "processing",
-      startedAt: new Date().toISOString(),
-      estimatedCompletionDays: totalDays,
-      compositeScore: 0,
-      confidenceLevel: 0,
-      riskLevel: "medium",
-      recommendation: "Investigation in progress",
-      fieldAgentStatus: "pending",
-      checklist,
-    };
-    setInvestigation(inv);
-    setLoading(false);
-    setView("active");
+    createScreening.mutate({
+      type: "zero_footprint",
+      subjectName: form.subjectName || form.subjectId || "Unknown",
+      subjectType: "individual",
+      priority: "high",
+      requestData: {
+        subjectId: form.subjectId,
+        subjectName: form.subjectName,
+        subjectAddress: form.subjectAddress,
+        state: form.state,
+        lga: form.lga,
+        phone: form.phone,
+        statedEmployer: form.statedEmployer,
+        statedIncome: form.statedIncome,
+        selectedPillars: form.selectedPillars,
+        fieldAgentZone: form.fieldAgentZone,
+        estimatedDays: totalDays,
+        notes: form.notes,
+      },
+    });
   };
 
   return (

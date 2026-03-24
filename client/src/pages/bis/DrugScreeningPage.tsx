@@ -1,4 +1,6 @@
 import React, { useState } from "react";
+import { trpc } from "@/lib/trpc";
+import { toast } from "sonner";
 import {
   RiskBadge, StatusBadge, ScoreGauge, CountrySelector,
   DataEnvironmentBanner, SectionCard, EmptyState
@@ -161,26 +163,45 @@ function DrugScreeningPageInner() {
     "hair_follicle": "hair", "oral_fluid": "oral_fluid",
   };
 
-  const handleSubmit = async () => {
-    setLoading(true);
-    try {
-      await new Promise(r => setTimeout(r, 1500));
+  const createScreening = trpc.screening.create.useMutation({
+    onSuccess: (record) => {
       const mockOrder: DrugTestOrder = {
-        orderId: `DS-${Date.now()}`,
+        orderId: record.requestRef,
         subjectId: form.subjectId,
         panel: form.panel,
         specimenType: specimenTypeForPanel[form.panel],
         status: "ordered",
         collectionSite: NIGERIA_COLLECTION_SITES.find(s => s.siteId === form.collectionSiteId),
-        orderedAt: new Date().toISOString(),
-        collectionDeadline: new Date(Date.now() + 72 * 3600 * 1000).toISOString(),
+        orderedAt: record.createdAt.toISOString(),
+        collectionDeadline: new Date(record.createdAt.getTime() + 72 * 3600 * 1000).toISOString(),
         labName: "Synlab Nigeria",
       };
       setOrder(mockOrder);
       setStep(4);
-    } finally {
       setLoading(false);
-    }
+    },
+    onError: (e) => { toast.error(`Order failed: ${e.message}`); setLoading(false); },
+  });
+
+  const handleSubmit = () => {
+    setLoading(true);
+    createScreening.mutate({
+      type: "drug",
+      subjectName: form.subjectName || form.subjectId || "Unknown",
+      subjectType: "individual",
+      priority: "medium",
+      requestData: {
+        subjectId: form.subjectId,
+        panel: form.panel,
+        specimenType: specimenTypeForPanel[form.panel],
+        country: form.country,
+        city: form.city,
+        purpose: form.purpose,
+        collectionSiteId: form.collectionSiteId,
+        scheduledDate: form.scheduledDate,
+        consentObtained: form.consentObtained,
+      },
+    });
   };
 
   const steps = [

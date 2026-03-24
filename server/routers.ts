@@ -19,6 +19,8 @@ import {
   monitors,
   screeningRequests,
   users,
+  platformSettings,
+  onboardingApplications,
 } from "../drizzle/schema";
 import {
   getDashboardStats,
@@ -219,6 +221,18 @@ const investigationsRouter = router({
       return { success: true };
     }),
 
+  addNote: protectedProcedure
+    .input(z.object({
+      ref: z.string(),
+      note: z.string().min(1),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      await writeAuditLog(db, { userId: ctx.user!.id, category: "investigation", action: `Note: ${input.note.slice(0, 80)}`, targetRef: input.ref });
+      return { success: true, timestamp: new Date().toISOString(), author: ctx.user!.name ?? ctx.user!.email ?? 'analyst' };
+    }),
+
   score: protectedProcedure
     .input(z.object({
       ref: z.string(),
@@ -315,6 +329,40 @@ const lookupRouter = router({
       return res.ok ? await res.json() : { status: "down" };
     } catch { return { status: "unreachable" }; }
   }),
+
+  nigerianDataBundle: protectedProcedure
+    .input(z.object({
+      fullName: z.string().optional(),
+      nin: z.string().optional(),
+      bvn: z.string().optional(),
+      phone: z.string().optional(),
+      dateOfBirth: z.string().optional(),
+      selectedSources: z.array(z.string()).min(1),
+    }))
+    .mutation(async ({ input }) => {
+      // Run checks against gateway for each selected source
+      const results = await Promise.allSettled(
+        input.selectedSources.map(async (sourceId) => {
+          try {
+            let endpoint = '';
+            if (sourceId === 'nimc_nin' && input.nin) endpoint = `/v1/nin/${input.nin}`;
+            else if (sourceId === 'bvn' && input.bvn) endpoint = `/v1/bvn/${input.bvn}`;
+            else if (sourceId === 'cac') endpoint = `/v1/cac/search?name=${encodeURIComponent(input.fullName ?? '')}`;
+            else if (sourceId === 'sanctions') endpoint = `/v1/sanctions/${encodeURIComponent(input.fullName ?? '')}`;
+            else if (sourceId === 'pep') endpoint = `/v1/pep/${encodeURIComponent(input.fullName ?? '')}`;
+            else if (sourceId === 'credit' && input.bvn) endpoint = `/v1/credit/${input.bvn}`;
+            if (!endpoint) return { sourceId, status: 'pending', data: {}, checkedAt: new Date().toISOString() };
+            const data = await gatewayFetch(endpoint);
+            return { sourceId, status: 'verified', data, checkedAt: new Date().toISOString() };
+          } catch (e: any) {
+            return { sourceId, status: 'error', message: e.message, data: {}, checkedAt: new Date().toISOString() };
+          }
+        })
+      );
+      return {
+        results: results.map(r => r.status === 'fulfilled' ? r.value : { sourceId: 'unknown', status: 'error', data: {}, checkedAt: new Date().toISOString() }),
+      };
+    }),
 });
 
 // ─── Alerts Router ────────────────────────────────────────────────────────────
@@ -350,6 +398,35 @@ const alertsRouter = router({
 // ─── KYC Router ───────────────────────────────────────────────────────────────
 
 const kycRouter = router({
+  // create: used by KYCVerificationPage to record a biometric KYC decision
+  create: protectedProcedure
+    .input(z.object({
+      subjectName: z.string().min(1),
+      subjectType: z.enum(["individual", "corporate"]).default("individual"),
+      documentType: z.string(),
+      documentId: z.string().optional(),
+      livenessPassed: z.boolean().optional(),
+      documentConfidence: z.number().optional(),
+      isTampered: z.boolean().optional(),
+      verificationSteps: z.array(z.object({ source: z.string(), status: z.string() })).optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      const riskScore = input.isTampered ? 85 : input.livenessPassed === false ? 75 : input.documentConfidence && input.documentConfidence < 0.5 ? 65 : 20;
+      const status = riskScore >= 80 ? "failed" : riskScore >= 60 ? "review" : "passed";
+      const referenceId = `KYC-${Date.now().toString(36).toUpperCase()}`;
+      const [record] = await db.insert(kycRecords).values({
+        subjectName: input.subjectName,
+        status,
+        riskScore,
+        createdBy: ctx.user!.id,
+      }).returning();
+      await writeAuditLog(db, { userId: ctx.user!.id, category: "kyc", action: `KYC biometric ${status}`, targetRef: input.subjectName });
+      await publishEvent("KYC_COMPLETED", input.subjectName, status === "failed" ? "high" : "info", { status, score: riskScore });
+      return { ...record, referenceId, verifiedFields: input.livenessPassed ? ["liveness", "document"] : ["document"] };
+    }),
+
   list: protectedProcedure
     .input(z.object({ limit: z.number().default(50), offset: z.number().default(0) }))
     .query(async ({ input }) => {
@@ -771,10 +848,15 @@ const screeningRouter = router({
       priority: z.enum(["low", "medium", "high", "critical"]).default("medium"),
       investigationId: z.number().optional(),
       requestData: z.record(z.string(), z.unknown()).optional(),
+      result: z.record(z.string(), z.unknown()).optional(),
+      resultSummary: z.string().optional(),
+      riskScore: z.number().optional(),
     }))
     .mutation(async ({ input, ctx }) => {
       const requestRef = `SCR-${Date.now().toString(36).toUpperCase()}`;
-      return createScreeningRequest({ ...input, requestRef, createdBy: ctx.user!.id });
+      const status = input.result ? "completed" : "pending";
+      const completedAt = input.result ? new Date() : undefined;
+      return createScreeningRequest({ ...input, requestRef, status, completedAt, processedBy: input.result ? ctx.user!.id : undefined, createdBy: ctx.user!.id });
     }),
   updateStatus: protectedProcedure
     .input(z.object({
@@ -788,6 +870,144 @@ const screeningRouter = router({
       const { id, ...data } = input;
       const extra = data.status === "completed" ? { completedAt: new Date(), processedBy: ctx.user!.id } : {};
       return updateScreeningRequest(id, { ...data, ...extra });
+    }),
+});
+
+// ─── Settings Router ─────────────────────────────────────────────────────────
+
+const settingsRouter = router({
+  get: protectedProcedure
+    .input(z.object({ namespace: z.string().default("default") }).optional())
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return {};
+      const ns = input?.namespace ?? "default";
+      const rows = await db.select().from(platformSettings).where(eq(platformSettings.namespace, ns));
+      return Object.fromEntries(rows.map(r => [r.key, r.value]));
+    }),
+
+  set: protectedProcedure
+    .input(z.object({
+      namespace: z.string().default("default"),
+      settings: z.record(z.string(), z.unknown()),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      const updatedBy = ctx.user?.email ?? ctx.user?.name ?? String(ctx.user?.id ?? "unknown");
+      for (const [key, value] of Object.entries(input.settings)) {
+        const existing = await db.select({ id: platformSettings.id })
+          .from(platformSettings)
+          .where(and(eq(platformSettings.namespace, input.namespace), eq(platformSettings.key, key)))
+          .limit(1);
+        if (existing.length > 0) {
+          await db.update(platformSettings)
+            .set({ value: value as any, updatedAt: new Date(), updatedBy })
+            .where(and(eq(platformSettings.namespace, input.namespace), eq(platformSettings.key, key)));
+        } else {
+          await db.insert(platformSettings).values({
+            namespace: input.namespace,
+            key,
+            value: value as any,
+            updatedBy,
+          });
+        }
+      }
+      await writeAuditLog(db, { userId: ctx.user?.id, category: "system", action: `Settings updated (${Object.keys(input.settings).join(", ")})`, targetRef: input.namespace });
+      return { success: true, updated: Object.keys(input.settings).length };
+    }),
+});
+
+// ─── Onboarding Router ──────────────────────────────────────────────────────
+
+const onboardingRouter = router({
+  create: protectedProcedure
+    .input(z.object({
+      entityType: z.string().min(1),
+      legalName: z.string().min(2),
+      tradingName: z.string().optional(),
+      countryCode: z.string().optional(),
+      stateProvince: z.string().optional(),
+      city: z.string().optional(),
+      address: z.string().optional(),
+      website: z.string().optional(),
+      businessCategory: z.string().optional(),
+      contactName: z.string().optional(),
+      contactEmail: z.string().optional(),
+      contactPhone: z.string().optional(),
+      contactTitle: z.string().optional(),
+      useCase: z.string().optional(),
+      pepDeclaration: z.boolean().optional(),
+      agreedToTerms: z.boolean().optional(),
+      stakeholders: z.array(z.object({
+        role: z.string(),
+        fullName: z.string(),
+        email: z.string().optional(),
+        phone: z.string().optional(),
+        ownershipPercentage: z.number().optional(),
+      })).optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      const referenceId = `OB-${Date.now().toString(36).toUpperCase()}`;
+      const [record] = await db.insert(onboardingApplications).values({
+        referenceId,
+        entityType: input.entityType,
+        legalName: input.legalName,
+        tradingName: input.tradingName,
+        countryCode: input.countryCode,
+        stateProvince: input.stateProvince,
+        city: input.city,
+        address: input.address,
+        website: input.website,
+        businessCategory: input.businessCategory,
+        contactName: input.contactName,
+        contactEmail: input.contactEmail,
+        contactPhone: input.contactPhone,
+        contactTitle: input.contactTitle,
+        useCase: input.useCase,
+        pepDeclaration: input.pepDeclaration ?? false,
+        agreedToTerms: input.agreedToTerms ?? false,
+        status: "submitted",
+        stakeholders: (input.stakeholders ?? []) as any[],
+        createdBy: String(ctx.user!.id),
+      }).returning();
+      await writeAuditLog(db, { userId: ctx.user!.id, category: "system", action: `Onboarding application submitted`, targetRef: referenceId });
+      await publishEvent("ONBOARDING_SUBMITTED", referenceId, "info", { legalName: input.legalName });
+      return record!;
+    }),
+
+  list: protectedProcedure
+    .input(z.object({ limit: z.number().default(50), offset: z.number().default(0) }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return { items: [], total: 0 };
+      const [items, countResult] = await Promise.all([
+        db.select().from(onboardingApplications).orderBy(desc(onboardingApplications.createdAt)).limit(input.limit).offset(input.offset),
+        db.select({ count: sql<number>`count(*)` }).from(onboardingApplications),
+      ]);
+      return { items, total: Number(countResult[0]?.count ?? 0) };
+    }),
+
+  get: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      const [record] = await db.select().from(onboardingApplications).where(eq(onboardingApplications.id, input.id)).limit(1);
+      if (!record) throw new TRPCError({ code: "NOT_FOUND" });
+      return record;
+    }),
+
+  updateStatus: protectedProcedure
+    .input(z.object({ id: z.number(), status: z.enum(["draft", "submitted", "awaiting_documents", "under_review", "approved", "rejected"]) }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      await db.update(onboardingApplications).set({ status: input.status, updatedAt: new Date() }).where(eq(onboardingApplications.id, input.id));
+      await writeAuditLog(db, { userId: ctx.user!.id, category: "system", action: `Onboarding status → ${input.status}`, targetRef: String(input.id) });
+      return { success: true };
     }),
 });
 
@@ -818,6 +1038,8 @@ export const appRouter = router({
   monitors: monitorsRouter,
   screening: screeningRouter,
   tenants: tenantsRouter,
+  settings: settingsRouter,
+  onboarding: onboardingRouter,
 });
 
 export type AppRouter = typeof appRouter;

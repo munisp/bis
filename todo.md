@@ -129,3 +129,35 @@
 - [x] Zero mockData imports remaining across entire client/src tree
 - [x] TypeScript: 0 errors
 - [x] Tests: 15/15 passing
+
+## Phase 9 — Final Production Pass (Stub Elimination)
+
+### New DB Tables
+- [x] platform_settings table — key/value store for settings persistence
+- [x] onboarding_applications table — multi-stakeholder onboarding records
+
+### New Server Procedures
+- [x] settingsRouter (settings.get, settings.set) — real DB persistence
+- [x] onboardingRouter (onboarding.create, list, get, updateStatus) — real DB persistence
+- [x] investigations.addNote — persists analyst notes to audit_log
+- [x] lookup.nigerianDataBundle — Nigerian phone/NIN/BVN data bundle lookup
+- [x] kyc.create — save KYC decision record to DB
+- [x] screening.create — extended with result/resultSummary fields
+
+### Frontend Wiring (Stub → Real tRPC)
+- [x] Settings.tsx — all save handlers wired to trpc.settings.set (namespace-scoped)
+- [x] DrugScreeningPage — handleSubmit wired to trpc.screening.create
+- [x] MVRCheckPage — handleSubmit wired to trpc.screening.create
+- [x] WorkAuthorizationPage — handleSubmit wired to trpc.screening.create
+- [x] ZeroFootprintPage — handleSubmit wired to trpc.screening.create
+- [x] BiometricEnrollmentPage — handleSubmit wired to trpc.screening.create
+- [x] NigerianDataBundlePage — handleRun wired to trpc.lookup.nigerianDataBundle
+- [x] KYCVerificationPage — getFinalDecision wired to trpc.kyc.create
+- [x] StakeholderOnboardingWizard — handleSubmitApplication wired to trpc.onboarding.create
+- [x] InvestigationDetail — handleAddNote wired to trpc.investigations.addNote
+
+### Quality Gates
+- [x] TypeScript: 0 errors
+- [x] Tests: 15/15 passing
+- [x] 0 remaining fetch('/api/...') calls to non-existent endpoints
+- [x] 0 remaining setTimeout stubs in critical form submission paths

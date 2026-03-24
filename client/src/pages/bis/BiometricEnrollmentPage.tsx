@@ -21,8 +21,9 @@
  */
 
 import { useState, useRef, useCallback, useEffect } from 'react';
+import { trpc } from '@/lib/trpc';
+import { toast } from 'sonner';
 import BISLayout from '@/components/BISLayout';
-// trpc replaced with mock data layer
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -486,25 +487,18 @@ function BiometricEnrollmentPageInner() {
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   // tRPC mutation for enrollment
-  // Mock mutation — replace with real API call in production
-  const enrollMutation = {
-    mutate: (payload: any) => {
-      setTimeout(() => {
-        enrollMutation._onSuccess({ bui: 'BUI-NG-2026-' + String(Date.now()).slice(-6), status: 'verified' });
-      }, 1500);
+  const enrollMutation = trpc.screening.create.useMutation({
+    onSuccess: (record) => {
+      setResult({ bui: record.requestRef, isDuplicate: false });
+      setStep('complete');
+      setSubmitting(false);
     },
-    _onSuccess: (data: any) => {},
-    isPending: false,
-  };
-  // Wire success handler
-  enrollMutation._onSuccess = (data: any) => {
-    setResult(data);
-    setStep('complete');
-  };
-  // Error handler
-  const _handleEnrollError = (err: any) => {
-    setErrors({ submit: err.message });
-  };
+    onError: (e) => {
+      setErrors({ submit: e.message });
+      toast.error(`Enrollment failed: ${e.message}`);
+      setSubmitting(false);
+    },
+  });
 
   const validateSubjectInfo = () => {
     const newErrors: Record<string, string> = {};
@@ -530,19 +524,24 @@ function BiometricEnrollmentPageInner() {
     setState(s => ({ ...s, gpsProof: proof }));
   };
 
-  const handleSubmit = async () => {
+  const handleSubmit = () => {
     setSubmitting(true);
     enrollMutation.mutate({
-      subjectInfo: state.subjectInfo,
-      faceImageB64: state.faceCapture?.imageB64 || '',
-      faceLivenessScore: state.faceCapture?.livenessScore || 0,
-      faceQualityScore: state.faceCapture?.qualityScore || 0,
-      fingerprintImageB64: state.fingerprintCapture?.imageB64,
-      gpsLat: state.gpsProof?.lat,
-      gpsLon: state.gpsProof?.lon,
-      gpsAccuracy: state.gpsProof?.accuracy,
+      type: 'biometric',
+      subjectName: state.subjectInfo.fullName || 'Unknown',
+      subjectType: 'individual',
+      priority: 'high',
+      requestData: {
+        subjectInfo: state.subjectInfo,
+        faceImageB64: state.faceCapture?.imageB64 || '',
+        faceLivenessScore: state.faceCapture?.livenessScore || 0,
+        faceQualityScore: state.faceCapture?.qualityScore || 0,
+        fingerprintImageB64: state.fingerprintCapture?.imageB64 || null,
+        gpsLat: state.gpsProof?.lat || null,
+        gpsLon: state.gpsProof?.lon || null,
+        gpsAccuracy: state.gpsProof?.accuracy || null,
+      },
     });
-    setSubmitting(false);
   };
 
   const updateSubjectInfo = (field: keyof SubjectInfo, value: string) => {

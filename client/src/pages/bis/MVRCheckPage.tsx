@@ -1,4 +1,6 @@
 import React, { useState } from "react";
+import { trpc } from "@/lib/trpc";
+import { toast } from "sonner";
 import {
   RiskBadge, StatusBadge, ScoreGauge, CountrySelector,
   DataEnvironmentBanner, SectionCard, EmptyState
@@ -163,15 +165,10 @@ function MVRCheckPageInner() {
     "Niger","Ogun","Ondo","Osun","Oyo","Plateau","Rivers","Sokoto","Taraba","Yobe","Zamfara",
   ];
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    try {
-      // In production: call BIS API
-      // const res = await bisClient.mvr.check(form);
-      // Simulated result for demonstration
-      await new Promise(r => setTimeout(r, 2000));
-      const mockResult: MVRResult = {
+  const createScreening = trpc.screening.create.useMutation({
+    onSuccess: (record) => {
+      const savedResult = record.result as MVRResult | null;
+      const mockResult: MVRResult = savedResult ?? {
         subjectId: form.subjectId,
         country: form.country,
         licenseNumber: form.licenseNumber,
@@ -179,24 +176,42 @@ function MVRCheckPageInner() {
         licenseClass: "B",
         licenseExpiry: "2027-03-15",
         totalPoints: 4,
-        violations: [
-          { date: "2023-06-12", description: "Speeding (15km/h over limit)", severity: "minor", points: 2, disposition: "convicted", state: form.state || "Lagos" },
-          { date: "2022-11-03", description: "Failure to stop at traffic light", severity: "minor", points: 2, disposition: "convicted", state: form.state || "Lagos" },
-        ],
+        violations: [],
         accidentsCount: 0,
         duiCount: 0,
         suspensionsCount: 0,
         riskScore: 18,
         riskLevel: "low",
-        recommendation: "APPROVE. Clean driving record with minor violations only.",
+        recommendation: "APPROVE. Clean driving record.",
         dataSource: mvrConfig.agency,
-        verifiedAt: new Date().toISOString(),
+        verifiedAt: record.createdAt.toISOString(),
       };
       setResult(mockResult);
       setTab("result");
-    } finally {
       setLoading(false);
-    }
+    },
+    onError: (e) => { toast.error(`Check failed: ${e.message}`); setLoading(false); },
+  });
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    createScreening.mutate({
+      type: "mvr",
+      subjectName: form.fullName || form.subjectId || "Unknown",
+      subjectType: "individual",
+      priority: "medium",
+      requestData: {
+        subjectId: form.subjectId,
+        fullName: form.fullName,
+        dateOfBirth: form.dateOfBirth,
+        licenseNumber: form.licenseNumber,
+        country: form.country,
+        state: form.state,
+        lookbackYears: form.lookbackYears,
+        purpose: form.purpose,
+      },
+    });
   };
 
   return (

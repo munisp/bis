@@ -1,4 +1,6 @@
 import React, { useState } from "react";
+import { trpc } from "@/lib/trpc";
+import { toast } from "sonner";
 import { SectionCard, StatusBadge, RiskBadge, ScoreGauge } from "../../components/bis/shared";
 import BISLayout from '@/components/BISLayout';
 
@@ -287,33 +289,39 @@ function NigerianDataBundlePageInner() {
     }));
   };
 
-  const handleRun = async (e: React.FormEvent) => {
+  const runBundle = trpc.lookup.nigerianDataBundle.useMutation({
+    onSuccess: (data) => {
+      const sourceResults: SourceResult[] = form.selectedSources.map((sourceId) => {
+        const match = data.results.find((r: any) => r.sourceId === sourceId);
+        if (match) return { ...match, status: match.status as SourceResult["status"] };
+        return {
+          sourceId,
+          status: "pending" as SourceResult["status"],
+          data: {},
+          checkedAt: new Date().toISOString(),
+        };
+      });
+      const verifiedCount = sourceResults.filter(r => r.status === "verified").length;
+      const score = sourceResults.length > 0 ? Math.round((verifiedCount / sourceResults.length) * 100) : 0;
+      setResults(sourceResults);
+      setOverallScore(score);
+      setLoading(false);
+      setView("results");
+    },
+    onError: (e) => { toast.error(`Bundle check failed: ${e.message}`); setLoading(false); },
+  });
+
+  const handleRun = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setLoading(true);
-    await new Promise(r => setTimeout(r, 2500));
-
-    const mockResults: SourceResult[] = form.selectedSources.map((sourceId, idx) => {
-      const statuses: SourceResult["status"][] = ["verified", "verified", "verified", "not_found", "verified"];
-      return {
-        sourceId,
-        status: statuses[idx % statuses.length],
-        data: {
-          "Full Name": form.fullName || "Adebayo Oluwaseun",
-          "Date of Birth": form.dateOfBirth || "1990-05-14",
-          "State of Origin": "Lagos",
-        },
-        message: statuses[idx % statuses.length] === "not_found" ? "No record found in this database" : undefined,
-        checkedAt: new Date().toISOString(),
-      };
+    runBundle.mutate({
+      fullName: form.fullName,
+      nin: form.nin,
+      bvn: form.bvn,
+      phone: form.phoneNumber,
+      dateOfBirth: form.dateOfBirth,
+      selectedSources: form.selectedSources,
     });
-
-    const verifiedCount = mockResults.filter(r => r.status === "verified").length;
-    const score = Math.round((verifiedCount / mockResults.length) * 100);
-
-    setResults(mockResults);
-    setOverallScore(score);
-    setLoading(false);
-    setView("results");
   };
 
   return (
