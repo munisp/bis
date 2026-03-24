@@ -8,7 +8,7 @@ import {
   Activity, Users, Database, Settings, Bell, ChevronDown,
   ChevronRight, LogOut, Menu, X, AlertTriangle, Car, Pill,
   Briefcase, Globe, MapPin, MessageSquare, Building2, Eye,
-  UserCheck, BarChart3, Key, Zap, CheckCheck, ArrowRight, Sun, Moon, ClipboardList, Wallet
+  UserCheck, BarChart3, Key, Zap, CheckCheck, ArrowRight, Sun, Moon, ClipboardList, Wallet, UserSearch, Shield
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -99,6 +99,14 @@ const BASE_NAV_GROUPS: NavGroup[] = [
       { label: 'Settings', href: '/settings', icon: <Settings size={15} /> },
       { label: 'Audit Log', href: '/audit-log', icon: <ClipboardList size={15} /> },
       { label: 'Developer Portal', href: '/developer', icon: <Key size={15} /> },
+    ],
+  },
+  {
+    label: 'QUICK TOOLS',
+    defaultOpen: true,
+    items: [
+      { label: 'QuickCheck', href: '/quickcheck', icon: <UserSearch size={15} /> },
+      { label: 'goAML STR Wizard', href: '/goaml', icon: <Shield size={15} /> },
     ],
   },
 ];

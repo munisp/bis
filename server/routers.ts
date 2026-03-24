@@ -9,6 +9,8 @@ import { storagePut } from "./storage";
 import { TRPCError } from "@trpc/server";
 import { adminProcedure, protectedProcedure, publicProcedure, router, writeProcedure } from "./_core/trpc";
 import { apiTokensRouter } from "./apiTokens";
+import { quickcheckRouter } from "./quickcheck";
+import { goamlRouter } from "./goaml";
 import { getDb } from "./db";
 import { evaluateAlertRules } from "./alertRules";
 import {
@@ -1785,6 +1787,8 @@ export const appRouter = router({
   onboarding: onboardingRouter,
   alertRules: alertRulesRouter,
   apiTokens: apiTokensRouter,
+  quickcheck: quickcheckRouter,
+  goaml: goamlRouter,
 });
 
 export type AppRouter = typeof appRouter;

@@ -1,0 +1,25 @@
+CREATE TYPE "public"."str_status" AS ENUM('draft', 'submitted', 'accepted', 'rejected', 'pending_review');--> statement-breakpoint
+CREATE TABLE "goaml_filings" (
+	"id" serial PRIMARY KEY NOT NULL,
+	"filingRef" varchar(32) NOT NULL,
+	"investigationRef" varchar(32),
+	"status" "str_status" DEFAULT 'draft' NOT NULL,
+	"reportType" varchar(32) DEFAULT 'STR' NOT NULL,
+	"subjectName" varchar(255) NOT NULL,
+	"subjectBvn" varchar(20),
+	"subjectNin" varchar(20),
+	"subjectAccountNumber" varchar(30),
+	"subjectBank" varchar(100),
+	"transactionDate" timestamp,
+	"transactionAmount" real,
+	"transactionCurrency" varchar(3) DEFAULT 'NGN',
+	"suspiciousActivity" text NOT NULL,
+	"narrativeDetails" text,
+	"goamlXml" text,
+	"goamlReferenceNumber" varchar(64),
+	"submittedAt" timestamp,
+	"createdBy" integer NOT NULL,
+	"createdAt" timestamp DEFAULT now() NOT NULL,
+	"updatedAt" timestamp DEFAULT now() NOT NULL,
+	CONSTRAINT "goaml_filings_filingRef_unique" UNIQUE("filingRef")
+);

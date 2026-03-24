@@ -594,3 +594,29 @@
 ### goAML & NPF Documents
 - [ ] Draft goAML integration technical spec (07-goaml-integration-spec.md)
 - [ ] Draft NPF pilot proposal letter (08-npf-pilot-proposal.md)
+
+## Phase 25 — Consumer/SME Use Cases & Marketing Update
+
+### Consumer/SME Platform Features
+- [ ] QuickCheck page — simple vetting UI for individuals/SMEs (no enterprise jargon)
+- [ ] Worker categories: House Help, Driver, Nanny, Security Guard, Artisan, Restaurant Staff, Contractor
+- [ ] QuickCheck workflow: name + phone/BVN → identity check + criminal record + adverse media → pass/flag/fail card
+- [ ] QuickCheck result: shareable PDF report (₦500–₦2,000 per check)
+- [ ] Add QuickCheck to BISLayout sidebar under a "Quick Tools" section
+- [ ] Add quickcheck.run tRPC procedure using existing screening infrastructure
+- [ ] Consumer pricing tier: Pay-per-check (₦500 basic, ₦1,500 standard, ₦3,000 premium)
+
+### Marketing Website Updates
+- [ ] Add "Individuals & Small Businesses" stakeholder card to marketing site
+- [ ] Add QuickCheck feature section with use cases (house help, driver, nanny, restaurant staff)
+- [ ] Update pricing section with consumer/SME tier
+- [ ] Add testimonial from a household employer perspective
+
+### Deployment
+- [ ] Deploy marketing website as permanent Manus static project
+
+### goAML STR Wizard
+- [ ] Implement STR Wizard UI in BIS platform (4-step modal from Investigation detail)
+- [ ] Add goaml_filings table migration
+- [ ] Add goaml.submitReport tRPC procedure (mock/stub — real API requires NFIU credentials)
+- [ ] Add "File STR" button to Investigation detail page

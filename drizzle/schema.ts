@@ -527,3 +527,34 @@ export const tokenUsageLog = pgTable("token_usage_log", {
 
 export type TokenUsageLog = typeof tokenUsageLog.$inferSelect;
 export type InsertTokenUsageLog = typeof tokenUsageLog.$inferInsert;
+
+// ─── goAML STR Filings ────────────────────────────────────────────────────────
+
+export const strStatusEnum = pgEnum("str_status", ["draft", "submitted", "accepted", "rejected", "pending_review"]);
+
+export const goamlFilings = pgTable("goaml_filings", {
+  id: serial("id").primaryKey(),
+  filingRef: varchar("filingRef", { length: 32 }).notNull().unique(),
+  investigationRef: varchar("investigationRef", { length: 32 }),
+  status: strStatusEnum("status").notNull().default("draft"),
+  reportType: varchar("reportType", { length: 32 }).notNull().default("STR"),
+  subjectName: varchar("subjectName", { length: 255 }).notNull(),
+  subjectBvn: varchar("subjectBvn", { length: 20 }),
+  subjectNin: varchar("subjectNin", { length: 20 }),
+  subjectAccountNumber: varchar("subjectAccountNumber", { length: 30 }),
+  subjectBank: varchar("subjectBank", { length: 100 }),
+  transactionDate: timestamp("transactionDate"),
+  transactionAmount: real("transactionAmount"),
+  transactionCurrency: varchar("transactionCurrency", { length: 3 }).default("NGN"),
+  suspiciousActivity: text("suspiciousActivity").notNull(),
+  narrativeDetails: text("narrativeDetails"),
+  goamlXml: text("goamlXml"),
+  goamlReferenceNumber: varchar("goamlReferenceNumber", { length: 64 }),
+  submittedAt: timestamp("submittedAt"),
+  createdBy: integer("createdBy").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+
+export type GoamlFiling = typeof goamlFilings.$inferSelect;
+export type InsertGoamlFiling = typeof goamlFilings.$inferInsert;
