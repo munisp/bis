@@ -13,7 +13,7 @@ import {
 
 // ─── Enums ────────────────────────────────────────────────────────────────────
 
-export const userRoleEnum = pgEnum("user_role", ["user", "admin", "analyst", "supervisor"]);
+export const userRoleEnum = pgEnum("user_role", ["user", "admin", "analyst", "supervisor", "auditor", "readonly"]);
 export const subjectTypeEnum = pgEnum("subject_type", ["individual", "corporate"]);
 export const tierEnum = pgEnum("tier", ["basic", "standard", "comprehensive"]);
 export const priorityEnum = pgEnum("priority", ["low", "medium", "high", "critical"]);
@@ -191,3 +191,170 @@ export const reports = pgTable("reports", {
 
 export type Report = typeof reports.$inferSelect;
 export type InsertReport = typeof reports.$inferInsert;
+
+// ─── Additional Enums ─────────────────────────────────────────────────────────
+
+export const agentStatusEnum = pgEnum("agent_status", ["active", "inactive", "suspended", "training"]);
+export const agentTierEnum = pgEnum("agent_tier", ["junior", "senior", "lead", "specialist"]);
+export const dataSourceStatusEnum = pgEnum("data_source_status", ["active", "degraded", "offline", "maintenance"]);
+export const dataSourceCategoryEnum = pgEnum("data_source_category", ["identity", "financial", "legal", "social", "biometric", "government", "commercial"]);
+export const monitorStatusEnum = pgEnum("monitor_status", ["active", "paused", "triggered", "expired"]);
+export const monitorTypeEnum = pgEnum("monitor_type", ["sanctions", "pep", "adverse_media", "social", "transaction", "biometric"]);
+export const screeningTypeEnum = pgEnum("screening_type", ["mvr", "drug", "work_authorization", "biometric", "zero_footprint"]);
+export const screeningStatusEnum = pgEnum("screening_status", ["pending", "processing", "completed", "failed", "review"]);
+
+// ─── Field Agents ─────────────────────────────────────────────────────────────
+
+export const fieldAgents = pgTable("field_agents", {
+  id: serial("id").primaryKey(),
+  agentCode: varchar("agentCode", { length: 32 }).notNull().unique(),
+  name: varchar("name", { length: 255 }).notNull(),
+  email: varchar("email", { length: 320 }).notNull().unique(),
+  phone: varchar("phone", { length: 20 }),
+  state: varchar("state", { length: 64 }),
+  lga: varchar("lga", { length: 64 }),
+  status: agentStatusEnum("status").notNull().default("active"),
+  tier: agentTierEnum("tier").notNull().default("junior"),
+  specializations: json("specializations").$type<string[]>().default([]),
+  tasksCompleted: integer("tasksCompleted").notNull().default(0),
+  tasksActive: integer("tasksActive").notNull().default(0),
+  rating: real("rating").default(0),
+  gpsLat: real("gpsLat"),
+  gpsLng: real("gpsLng"),
+  lastSeen: timestamp("lastSeen"),
+  notes: text("notes"),
+  createdBy: integer("createdBy").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+export type FieldAgent = typeof fieldAgents.$inferSelect;
+export type InsertFieldAgent = typeof fieldAgents.$inferInsert;
+
+// ─── Data Sources ─────────────────────────────────────────────────────────────
+
+export const dataSources = pgTable("data_sources", {
+  id: serial("id").primaryKey(),
+  code: varchar("code", { length: 64 }).notNull().unique(),
+  name: varchar("name", { length: 255 }).notNull(),
+  category: dataSourceCategoryEnum("category").notNull(),
+  status: dataSourceStatusEnum("status").notNull().default("active"),
+  provider: varchar("provider", { length: 128 }),
+  baseUrl: text("baseUrl"),
+  apiKeyRef: varchar("apiKeyRef", { length: 128 }),
+  description: text("description"),
+  recordCount: integer("recordCount").default(0),
+  lastSyncAt: timestamp("lastSyncAt"),
+  uptimePct: real("uptimePct").default(100),
+  avgResponseMs: integer("avgResponseMs").default(0),
+  requestsToday: integer("requestsToday").default(0),
+  requestsTotal: integer("requestsTotal").default(0),
+  enabled: boolean("enabled").notNull().default(true),
+  config: json("config"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+export type DataSource = typeof dataSources.$inferSelect;
+export type InsertDataSource = typeof dataSources.$inferInsert;
+
+// ─── Monitors ─────────────────────────────────────────────────────────────────
+
+export const monitors = pgTable("monitors", {
+  id: serial("id").primaryKey(),
+  monitorRef: varchar("monitorRef", { length: 32 }).notNull().unique(),
+  investigationId: integer("investigationId"),
+  subjectName: varchar("subjectName", { length: 255 }).notNull(),
+  subjectRef: varchar("subjectRef", { length: 64 }),
+  type: monitorTypeEnum("type").notNull(),
+  status: monitorStatusEnum("status").notNull().default("active"),
+  frequency: varchar("frequency", { length: 32 }).notNull().default("daily"),
+  lastCheckedAt: timestamp("lastCheckedAt"),
+  nextCheckAt: timestamp("nextCheckAt"),
+  alertCount: integer("alertCount").notNull().default(0),
+  lastAlertAt: timestamp("lastAlertAt"),
+  expiresAt: timestamp("expiresAt"),
+  config: json("config"),
+  createdBy: integer("createdBy").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+export type Monitor = typeof monitors.$inferSelect;
+export type InsertMonitor = typeof monitors.$inferInsert;
+
+// ─── Screening Requests ───────────────────────────────────────────────────────
+
+export const screeningRequests = pgTable("screening_requests", {
+  id: serial("id").primaryKey(),
+  requestRef: varchar("requestRef", { length: 32 }).notNull().unique(),
+  investigationId: integer("investigationId"),
+  type: screeningTypeEnum("type").notNull(),
+  status: screeningStatusEnum("status").notNull().default("pending"),
+  subjectName: varchar("subjectName", { length: 255 }).notNull(),
+  subjectType: subjectTypeEnum("subjectType").notNull().default("individual"),
+  priority: priorityEnum("priority").notNull().default("medium"),
+  requestData: json("requestData"),
+  result: json("result"),
+  resultSummary: text("resultSummary"),
+  riskScore: real("riskScore"),
+  processedBy: integer("processedBy"),
+  createdBy: integer("createdBy").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+  completedAt: timestamp("completedAt"),
+});
+export type ScreeningRequest = typeof screeningRequests.$inferSelect;
+export type InsertScreeningRequest = typeof screeningRequests.$inferInsert;
+
+// ─── Tenants ──────────────────────────────────────────────────────────────────
+
+export const tenantPlanEnum = pgEnum("tenant_plan", ["starter", "professional", "enterprise", "government"]);
+export const tenantStatusEnum = pgEnum("tenant_status", ["active", "suspended", "trial", "churned"]);
+export const keyStatusEnum = pgEnum("key_status", ["active", "revoked", "expired"]);
+export const webhookStatusEnum = pgEnum("webhook_status", ["active", "paused", "failed"]);
+
+export const tenants = pgTable("tenants", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(),
+  slug: varchar("slug", { length: 64 }).notNull().unique(),
+  plan: tenantPlanEnum("plan").notNull().default("starter"),
+  status: tenantStatusEnum("status").notNull().default("trial"),
+  contactEmail: varchar("contactEmail", { length: 255 }),
+  contactName: varchar("contactName", { length: 255 }),
+  country: varchar("country", { length: 64 }),
+  industry: varchar("industry", { length: 128 }),
+  monthlyQuota: integer("monthlyQuota").notNull().default(100),
+  usedThisMonth: integer("usedThisMonth").notNull().default(0),
+  ngnBalance: real("ngnBalance").notNull().default(0),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+export type Tenant = typeof tenants.$inferSelect;
+export type InsertTenant = typeof tenants.$inferInsert;
+
+export const apiKeys = pgTable("api_keys", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenantId").notNull(),
+  name: varchar("name", { length: 128 }).notNull(),
+  keyHash: varchar("keyHash", { length: 128 }).notNull().unique(),
+  keyPrefix: varchar("keyPrefix", { length: 16 }).notNull(),
+  status: keyStatusEnum("status").notNull().default("active"),
+  permissions: json("permissions").$type<string[]>().default([]),
+  lastUsedAt: timestamp("lastUsedAt"),
+  expiresAt: timestamp("expiresAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type ApiKey = typeof apiKeys.$inferSelect;
+export type InsertApiKey = typeof apiKeys.$inferInsert;
+
+export const webhooks = pgTable("webhooks", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenantId").notNull(),
+  url: text("url").notNull(),
+  status: webhookStatusEnum("status").notNull().default("active"),
+  events: json("events").$type<string[]>().default([]),
+  secret: varchar("secret", { length: 64 }),
+  failureCount: integer("failureCount").notNull().default(0),
+  lastDeliveredAt: timestamp("lastDeliveredAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type Webhook = typeof webhooks.$inferSelect;
+export type InsertWebhook = typeof webhooks.$inferInsert;

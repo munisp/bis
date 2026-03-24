@@ -1,4 +1,4 @@
-// BIS Alerts & AutoFlag History Page
+// Alerts — live tRPC-backed alert management
 // Design: Forensic Intelligence — dark/light semantic CSS variables
 import { useState } from "react";
 import { Link } from "wouter";
@@ -11,9 +11,9 @@ import { toast } from "sonner";
 import {
   Search, Filter, AlertTriangle, CheckCircle2,
   Bell, BellOff, ChevronDown, ChevronUp,
-  ExternalLink, Download, RefreshCw
+  ExternalLink, Download, RefreshCw, Loader2
 } from "lucide-react";
-import { mockAlerts, getStatusBadgeClass, formatDateTime } from "@/lib/mockData";
+import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
 
 const alertTypeColor: Record<string, string> = {
@@ -21,8 +21,13 @@ const alertTypeColor: Record<string, string> = {
   adverse_media:      "border-amber-500/20",
   criminal_record:    "border-orange-500/20",
   pep_match:          "border-purple-500/20",
+  pep_detected:       "border-purple-500/20",
   high_risk_score:    "border-red-500/20",
+  risk_threshold:     "border-red-500/20",
   duplicate_identity: "border-blue-500/20",
+  velocity:           "border-amber-500/20",
+  field_report:       "border-emerald-500/20",
+  system:             "border-border",
 };
 
 const alertTypeBg: Record<string, string> = {
@@ -30,29 +35,55 @@ const alertTypeBg: Record<string, string> = {
   adverse_media:      "bg-amber-500/5",
   criminal_record:    "bg-orange-500/5",
   pep_match:          "bg-purple-500/5",
+  pep_detected:       "bg-purple-500/5",
   high_risk_score:    "bg-red-500/5",
+  risk_threshold:     "bg-red-500/5",
   duplicate_identity: "bg-blue-500/5",
+  velocity:           "bg-amber-500/5",
+  field_report:       "bg-emerald-500/5",
 };
 
-const severityOrder = { critical: 0, high: 1, medium: 2, low: 3 };
+const severityOrder = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
 
-// Map subject refs to investigation IDs for deep-link
-const REF_TO_INV: Record<string, string> = {
-  "BIS-2026-0004": "4",
-  "BIS-2026-0007": "7",
-  "BIS-2026-0001": "1",
-  "BIS-2026-0002": "2",
-  "BIS-2026-0003": "3",
-};
+function formatDateTime(d: Date | string | null | undefined): string {
+  if (!d) return "—";
+  return new Date(d).toLocaleString();
+}
+
+function getStatusBadgeClass(status: string): string {
+  switch (status) {
+    case "new":       return "bg-red-500/10 text-red-400 border-red-500/20";
+    case "reviewed":  return "bg-amber-500/10 text-amber-400 border-amber-500/20";
+    case "dismissed": return "bg-muted/30 text-muted-foreground border-border";
+    case "resolved":  return "bg-emerald-500/10 text-emerald-400 border-emerald-500/20";
+    default:          return "bg-muted/30 text-muted-foreground border-border";
+  }
+}
 
 export default function Alerts() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [severityFilter, setSeverityFilter] = useState("all");
-  const [alerts, setAlerts] = useState(mockAlerts);
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
 
-  const toggleExpand = (id: string) => {
+  const utils = trpc.useUtils();
+  const { data: rawAlerts = [], isLoading, refetch } = trpc.alerts.list.useQuery({
+    unreadOnly: statusFilter === "new" ? true : false,
+    limit: 200,
+  });
+
+  const acknowledgeMutation = trpc.alerts.acknowledge.useMutation({
+    onSuccess: () => { toast.success("Alert acknowledged"); utils.alerts.list.invalidate(); },
+    onError: (e) => toast.error("Failed to acknowledge", { description: e.message }),
+  });
+
+  // dismiss = acknowledge with a note (no separate dismiss procedure — use acknowledge)
+  const dismissMutation = trpc.alerts.acknowledge.useMutation({
+    onSuccess: () => { toast.info("Alert dismissed"); utils.alerts.list.invalidate(); },
+    onError: (e: any) => toast.error("Failed to dismiss", { description: e.message }),
+  });
+
+  const toggleExpand = (id: number) => {
     setExpanded(prev => {
       const next = new Set(prev);
       next.has(id) ? next.delete(id) : next.add(id);
@@ -60,35 +91,26 @@ export default function Alerts() {
     });
   };
 
-  const filtered = alerts
-    .filter(a => {
-      const matchSearch =
-        a.subjectName.toLowerCase().includes(search.toLowerCase()) ||
-        a.subjectRef.toLowerCase().includes(search.toLowerCase()) ||
-        a.summary.toLowerCase().includes(search.toLowerCase());
-      const matchStatus = statusFilter === "all" || a.status === statusFilter;
+  const filtered = rawAlerts
+    .filter((a: any) => {
+      const text = `${a.title ?? ""} ${a.body ?? ""} ${a.investigationId ?? ""}`.toLowerCase();
+      const matchSearch = !search || text.includes(search.toLowerCase());
+      const matchStatus = statusFilter === "all" ||
+        (statusFilter === "new" && !a.acknowledged && !a.read) ||
+        (statusFilter === "reviewed" && a.acknowledged) ||
+        (statusFilter === "dismissed" && a.read && !a.acknowledged);
       const matchSeverity = severityFilter === "all" || a.severity === severityFilter;
       return matchSearch && matchStatus && matchSeverity;
     })
-    .sort((a, b) =>
+    .sort((a: any, b: any) =>
       (severityOrder[a.severity as keyof typeof severityOrder] ?? 99) -
       (severityOrder[b.severity as keyof typeof severityOrder] ?? 99)
     );
 
-  const handleAcknowledge = (id: string) => {
-    setAlerts(prev => prev.map(a => a.id === id ? { ...a, status: "reviewed" } : a));
-    toast.success("Alert acknowledged");
-  };
-
-  const handleDismiss = (id: string) => {
-    setAlerts(prev => prev.map(a => a.id === id ? { ...a, status: "dismissed" } : a));
-    toast.info("Alert dismissed");
-  };
-
   const handleExportCSV = () => {
-    const header = "ID,Type,Severity,Status,Subject,Ref,Source,Detected\n";
-    const rows = filtered.map(a =>
-      `${a.id},${a.alertType},${a.severity},${a.status},"${a.subjectName}",${a.subjectRef},${a.source},${a.detectedAt}`
+    const header = "ID,Type,Severity,Status,Title,InvestigationId,Detected\n";
+    const rows = filtered.map((a: any) =>
+      `${a.id},${a.type},${a.severity},${a.status},"${a.title ?? ""}",${a.investigationId ?? ""},${a.createdAt}`
     ).join("\n");
     const blob = new Blob([header + rows], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
@@ -100,8 +122,8 @@ export default function Alerts() {
     toast.success(`Exported ${filtered.length} alerts`);
   };
 
-  const unread = alerts.filter(a => a.status === "new").length;
-  const critical = alerts.filter(a => a.severity === "critical").length;
+  const unread = rawAlerts.filter((a: any) => !a.acknowledged && !a.read).length;
+  const critical = rawAlerts.filter((a: any) => a.severity === "critical").length;
 
   return (
     <BISLayout
@@ -112,10 +134,10 @@ export default function Alerts() {
           <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={handleExportCSV}>
             <Download size={11} /> Export CSV
           </Button>
-          <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => toast.success("Alert rules refreshed")}>
-            <RefreshCw size={11} /> Refresh
+          <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => refetch()}>
+            <RefreshCw size={11} className={isLoading ? "animate-spin" : ""} /> Refresh
           </Button>
-          <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => toast.info("Notification settings updated")}>
+          <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => toast.info("Alert rules configuration coming soon")}>
             <Bell size={11} /> Configure
           </Button>
         </div>
@@ -124,10 +146,10 @@ export default function Alerts() {
       {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
         {[
-          { label: "New", value: alerts.filter(a => a.status === "new").length, color: "text-red-400" },
-          { label: "Critical", value: alerts.filter(a => a.severity === "critical").length, color: "text-red-500" },
-          { label: "Reviewed", value: alerts.filter(a => a.status === "reviewed").length, color: "text-amber-400" },
-          { label: "Dismissed", value: alerts.filter(a => a.status === "dismissed").length, color: "text-muted-foreground" },
+          { label: "New", value: rawAlerts.filter((a: any) => !a.acknowledged && !a.read).length, color: "text-red-400" },
+          { label: "Critical", value: rawAlerts.filter((a: any) => a.severity === "critical").length, color: "text-red-500" },
+          { label: "Reviewed", value: rawAlerts.filter((a: any) => a.acknowledged).length, color: "text-amber-400" },
+          { label: "Dismissed", value: rawAlerts.filter((a: any) => a.read && !a.acknowledged).length, color: "text-muted-foreground" },
         ].map(stat => (
           <div key={stat.label} className="bis-card p-3">
             <div className={`text-2xl font-bold font-mono ${stat.color}`}>{stat.value}</div>
@@ -149,6 +171,7 @@ export default function Alerts() {
             <SelectItem value="new">New</SelectItem>
             <SelectItem value="reviewed">Reviewed</SelectItem>
             <SelectItem value="dismissed">Dismissed</SelectItem>
+            <SelectItem value="resolved">Resolved</SelectItem>
           </SelectContent>
         </Select>
         <Select value={severityFilter} onValueChange={setSeverityFilter}>
@@ -164,136 +187,154 @@ export default function Alerts() {
         <span className="text-xs text-muted-foreground ml-auto">{filtered.length} result{filtered.length !== 1 ? 's' : ''}</span>
       </div>
 
-      {/* Alert list */}
-      <div className="space-y-2">
-        {filtered.map(alert => {
-          const isExpanded = expanded.has(alert.id);
-          const invId = REF_TO_INV[alert.subjectRef];
-          return (
-            <div
-              key={alert.id}
-              className={cn(
-                "bis-card border transition-all",
-                alertTypeColor[alert.alertType] ?? "border-border",
-                alertTypeBg[alert.alertType] ?? "",
-                alert.status !== "new" ? "opacity-60" : ""
-              )}
-            >
-              {/* Main row */}
-              <div className="p-4">
-                <div className="flex items-start gap-3">
-                  <AlertTriangle
-                    size={15}
-                    className={
-                      alert.severity === "critical" ? "text-red-400 mt-0.5 shrink-0" :
-                      alert.severity === "high" ? "text-amber-400 mt-0.5 shrink-0" :
-                      "text-muted-foreground mt-0.5 shrink-0"
-                    }
-                  />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-sm font-semibold text-foreground capitalize">
-                        {alert.alertType.replace(/_/g, " ")}
-                      </span>
-                      <Badge
-                        variant="outline"
-                        className={cn(
-                          "text-[10px] h-4 px-1.5 capitalize",
-                          alert.severity === "critical" ? "border-red-500/40 text-red-400" :
-                          alert.severity === "high" ? "border-amber-500/40 text-amber-400" :
-                          "border-border"
-                        )}
-                      >
-                        {alert.severity}
-                      </Badge>
-                      <span className={`bis-badge ${getStatusBadgeClass(alert.status)}`}>{alert.status}</span>
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-1">{alert.summary}</p>
-                    <div className="flex items-center gap-3 mt-2 text-[10px] text-muted-foreground flex-wrap">
-                      <span className="font-mono font-semibold text-foreground/70">{alert.subjectRef}</span>
-                      <span>·</span>
-                      <span>{alert.subjectName}</span>
-                      <span>·</span>
-                      <span>{alert.source}</span>
-                      <span>·</span>
-                      <span>{formatDateTime(alert.detectedAt)}</span>
-                    </div>
-                  </div>
-                  {/* Actions */}
-                  <div className="flex items-center gap-1 shrink-0 flex-wrap justify-end">
-                    {invId && (
-                      <Link href={`/investigations/${invId}`}>
-                        <Button variant="outline" size="sm" className="h-6 text-[10px] px-2 gap-1 text-primary border-primary/30 hover:bg-primary/10">
-                          <ExternalLink size={9} /> View Investigation
-                        </Button>
-                      </Link>
-                    )}
-                    {alert.status === "new" && (
-                      <>
-                        <Button variant="outline" size="sm" className="h-6 text-[10px] px-2" onClick={() => handleAcknowledge(alert.id)}>
-                          <CheckCircle2 size={10} className="mr-1" />Ack
-                        </Button>
-                        <Button variant="ghost" size="sm" className="h-6 text-[10px] px-2" onClick={() => handleDismiss(alert.id)}>
-                          <BellOff size={10} className="mr-1" />Dismiss
-                        </Button>
-                      </>
-                    )}
-                    <Button
-                      variant="ghost" size="sm" className="h-6 text-[10px] px-1.5"
-                      onClick={() => toggleExpand(alert.id)}
-                    >
-                      {isExpanded ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
-                    </Button>
-                  </div>
-                </div>
-              </div>
+      {/* Loading */}
+      {isLoading && (
+        <div className="flex items-center justify-center py-12 text-muted-foreground">
+          <Loader2 size={20} className="animate-spin mr-2" /> Loading alerts…
+        </div>
+      )}
 
-              {/* Expanded detail */}
-              {isExpanded && (
-                <div className="border-t border-border/30 px-4 py-3 space-y-2 text-xs">
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    <div>
-                      <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-0.5">Alert ID</div>
-                      <div className="font-mono text-foreground">{alert.id}</div>
+      {/* Alert list */}
+      {!isLoading && (
+        <div className="space-y-2">
+          {filtered.map((alert: any) => {
+            const isExpanded = expanded.has(alert.id);
+            return (
+              <div
+                key={alert.id}
+                className={cn(
+                  "bis-card border transition-all",
+                  alertTypeColor[alert.type] ?? "border-border",
+                  alertTypeBg[alert.type] ?? "",
+                  (alert.acknowledged || alert.read) ? "opacity-60" : ""
+                )}
+              >
+                {/* Main row */}
+                <div className="p-4">
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle
+                      size={15}
+                      className={
+                        alert.severity === "critical" ? "text-red-400 mt-0.5 shrink-0" :
+                        alert.severity === "high" ? "text-amber-400 mt-0.5 shrink-0" :
+                        "text-muted-foreground mt-0.5 shrink-0"
+                      }
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-sm font-semibold text-foreground capitalize">
+                          {(alert.type ?? "").replace(/_/g, " ")}
+                        </span>
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            "text-[10px] h-4 px-1.5 capitalize",
+                            alert.severity === "critical" ? "border-red-500/40 text-red-400" :
+                            alert.severity === "high" ? "border-amber-500/40 text-amber-400" :
+                            "border-border"
+                          )}
+                        >
+                          {alert.severity}
+                        </Badge>
+                        <span className={`bis-badge ${getStatusBadgeClass(alert.acknowledged ? "reviewed" : alert.read ? "dismissed" : "new")}`}>{alert.acknowledged ? "reviewed" : alert.read ? "read" : "new"}</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1">{alert.title ?? "—"}</p>
+                      <div className="flex items-center gap-3 mt-2 text-[10px] text-muted-foreground flex-wrap">
+                        {alert.investigationId && (
+                          <>
+                            <span className="font-mono font-semibold text-foreground/70">INV-{alert.investigationId}</span>
+                            <span>·</span>
+                          </>
+                        )}
+                        <span>{formatDateTime(alert.createdAt)}</span>
+                      </div>
                     </div>
-                    <div>
-                      <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-0.5">Alert Type</div>
-                      <div className="capitalize text-foreground">{alert.alertType.replace(/_/g, " ")}</div>
-                    </div>
-                    <div>
-                      <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-0.5">Detected</div>
-                      <div className="font-mono text-foreground">{formatDateTime(alert.detectedAt)}</div>
-                    </div>
-                    <div>
-                      <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-0.5">Source</div>
-                      <div className="text-foreground">{alert.source}</div>
+                    {/* Actions */}
+                    <div className="flex items-center gap-1 shrink-0 flex-wrap justify-end">
+                      {alert.investigationId && (
+                        <Link href={`/investigations/${alert.investigationId}`}>
+                          <Button variant="outline" size="sm" className="h-6 text-[10px] px-2 gap-1 text-primary border-primary/30 hover:bg-primary/10">
+                            <ExternalLink size={9} /> View Investigation
+                          </Button>
+                        </Link>
+                      )}
+                      {!alert.acknowledged && (
+                        <>
+                          <Button
+                            variant="outline" size="sm" className="h-6 text-[10px] px-2"
+                            disabled={acknowledgeMutation.isPending}
+                            onClick={() => acknowledgeMutation.mutate({ id: alert.id })}
+                          >
+                            <CheckCircle2 size={10} className="mr-1" />Ack
+                          </Button>
+                          <Button
+                            variant="ghost" size="sm" className="h-6 text-[10px] px-2"
+                            disabled={dismissMutation.isPending}
+                            onClick={() => dismissMutation.mutate({ id: alert.id })}
+                          >
+                            <BellOff size={10} className="mr-1" />Dismiss
+                          </Button>
+                        </>
+                      )}
+                      <Button
+                        variant="ghost" size="sm" className="h-6 text-[10px] px-1.5"
+                        onClick={() => toggleExpand(alert.id)}
+                      >
+                        {isExpanded ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+                      </Button>
                     </div>
                   </div>
-                  <div>
-                    <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-0.5">Full Summary</div>
-                    <p className="text-foreground/80 leading-relaxed">{alert.summary}</p>
-                  </div>
-                  {invId && (
-                    <div className="pt-1">
-                      <Link href={`/investigations/${invId}`}>
-                        <Button size="sm" className="h-7 text-xs gap-1.5">
-                          <ExternalLink size={11} /> Open Investigation {alert.subjectRef}
-                        </Button>
-                      </Link>
-                    </div>
-                  )}
                 </div>
-              )}
+
+                {/* Expanded detail */}
+                {isExpanded && (
+                  <div className="border-t border-border/30 px-4 py-3 space-y-2 text-xs">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      <div>
+                        <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-0.5">Alert ID</div>
+                        <div className="font-mono text-foreground">{alert.id}</div>
+                      </div>
+                      <div>
+                        <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-0.5">Alert Type</div>
+                        <div className="capitalize text-foreground">{(alert.type ?? "").replace(/_/g, " ")}</div>
+                      </div>
+                      <div>
+                        <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-0.5">Detected</div>
+                        <div className="font-mono text-foreground">{formatDateTime(alert.createdAt)}</div>
+                      </div>
+                      <div>
+                        <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-0.5">Status</div>
+                        <div className="text-foreground capitalize">{alert.acknowledged ? "reviewed" : alert.read ? "read" : "new"}</div>
+                      </div>
+                    </div>
+                    {alert.body && (
+                      <div>
+                        <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-0.5">Full Message</div>
+                        <p className="text-foreground/80 leading-relaxed">{alert.body}</p>
+                      </div>
+                    )}
+                    {alert.investigationId && (
+                      <div className="pt-1">
+                        <Link href={`/investigations/${alert.investigationId}`}>
+                          <Button size="sm" className="h-7 text-xs gap-1.5">
+                            <ExternalLink size={11} /> Open Investigation
+                          </Button>
+                        </Link>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          {filtered.length === 0 && (
+            <div className="bis-card p-12 text-center text-muted-foreground text-sm">
+              <Bell size={24} className="mx-auto mb-3 opacity-30" />
+              No alerts match your filters.
             </div>
-          );
-        })}
-        {filtered.length === 0 && (
-          <div className="bis-card p-12 text-center text-muted-foreground text-sm">
-            <Bell size={24} className="mx-auto mb-3 opacity-30" />
-            No alerts match your filters.
-          </div>
-        )}
-      </div>
+          )}
+        </div>
+      )}
     </BISLayout>
   );
 }

@@ -1,8 +1,10 @@
 import { COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { billingRouter } from "./billing";
+import { tenantsRouter } from "./tenants";
 import { permifyWriteRelationship, permifyCheck } from "./permify";
 import { systemRouter } from "./_core/systemRouter";
+import { TRPCError } from "@trpc/server";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { getDb } from "./db";
 import {
@@ -12,8 +14,20 @@ import {
   auditLog,
   fieldTasks,
   reports,
+  fieldAgents,
+  dataSources,
+  monitors,
+  screeningRequests,
+  users,
 } from "../drizzle/schema";
-import { eq, desc, and, ilike, gte, lte, sql } from "drizzle-orm";
+import {
+  getDashboardStats,
+  getFieldAgents, createFieldAgent, updateFieldAgent, getFieldAgentById,
+  getDataSources, createDataSource, updateDataSource,
+  getMonitors, createMonitor, updateMonitor,
+  getScreeningRequests, createScreeningRequest, updateScreeningRequest,
+} from "./db";
+import { eq, desc, and, ilike, gte, lte, sql, count } from "drizzle-orm";
 import { z } from "zod";
 
 // ─── Service URLs ─────────────────────────────────────────────────────────────
@@ -551,20 +565,229 @@ const usersRouter = router({
   list: protectedProcedure
     .input(z.object({
       role: z.string().optional(),
+      search: z.string().optional(),
       limit: z.number().default(100),
-    }))
+    }).optional())
     .query(async ({ input }) => {
       const db = await getDb();
       if (!db) return [];
-      const { users } = await import("../drizzle/schema");
-      const conditions = [];
-      if (input.role) conditions.push(eq(users.role, input.role as any));
+      const conditions: any[] = [];
+      if (input?.role) conditions.push(eq(users.role, input.role as any));
+      if (input?.search) {
+        const s = `%${input.search}%`;
+        conditions.push(sql`(${users.name} ILIKE ${s} OR ${users.email} ILIKE ${s})`);
+      }
       return db
-        .select({ id: users.id, name: users.name, email: users.email, role: users.role })
+        .select({ id: users.id, name: users.name, email: users.email, role: users.role, createdAt: users.createdAt, lastSignedIn: users.lastSignedIn })
         .from(users)
         .where(conditions.length ? and(...conditions) : undefined)
         .orderBy(users.name)
-        .limit(input.limit);
+        .limit(input?.limit ?? 100);
+    }),
+  updateRole: protectedProcedure
+    .input(z.object({ id: z.number(), role: z.enum(["admin", "analyst", "supervisor", "auditor", "readonly"]) }))
+    .mutation(async ({ input, ctx }) => {
+      if (ctx.user.role !== "admin") throw new TRPCError({ code: "FORBIDDEN", message: "Admin only" });
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      await db.update(users).set({ role: input.role as any, updatedAt: new Date() }).where(eq(users.id, input.id));
+      await writeAuditLog(db, { userId: ctx.user.id, category: "user", action: `Role changed to ${input.role}`, targetRef: String(input.id) });
+      return { success: true };
+    }),
+  deactivate: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ input, ctx }) => {
+      if (ctx.user.role !== "admin") throw new TRPCError({ code: "FORBIDDEN", message: "Admin only" });
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      await db.update(users).set({ role: "readonly" as any, updatedAt: new Date() }).where(eq(users.id, input.id));
+      await writeAuditLog(db, { userId: ctx.user.id, category: "user", action: "User deactivated", targetRef: String(input.id) });
+      return { success: true };
+    }),
+});
+
+// ─── Dashboard Router ────────────────────────────────────────────────────────
+
+const dashboardRouter = router({
+  stats: protectedProcedure.query(async () => {
+    return getDashboardStats();
+  }),
+});
+
+// ─── Field Agents Router ──────────────────────────────────────────────────────
+
+const fieldAgentsRouter = router({
+  list: protectedProcedure
+    .input(z.object({
+      status: z.string().optional(),
+      state: z.string().optional(),
+      limit: z.number().min(1).max(200).default(50),
+      offset: z.number().min(0).default(0),
+    }).optional())
+    .query(async ({ input }) => {
+      return getFieldAgents(input);
+    }),
+  get: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .query(async ({ input }) => {
+      return getFieldAgentById(input.id);
+    }),
+  create: protectedProcedure
+    .input(z.object({
+      agentCode: z.string().min(3).max(32),
+      name: z.string().min(2).max(255),
+      email: z.string().email(),
+      phone: z.string().optional(),
+      state: z.string().optional(),
+      lga: z.string().optional(),
+      tier: z.enum(["junior", "senior", "lead", "specialist"]).default("junior"),
+      specializations: z.array(z.string()).optional(),
+      notes: z.string().optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      return createFieldAgent({ ...input, createdBy: ctx.user!.id });
+    }),
+  update: protectedProcedure
+    .input(z.object({
+      id: z.number(),
+      name: z.string().optional(),
+      phone: z.string().optional(),
+      state: z.string().optional(),
+      lga: z.string().optional(),
+      status: z.enum(["active", "inactive", "suspended", "training"]).optional(),
+      tier: z.enum(["junior", "senior", "lead", "specialist"]).optional(),
+      notes: z.string().optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const { id, ...data } = input;
+      return updateFieldAgent(id, data);
+    }),
+});
+
+// ─── Data Sources Router ──────────────────────────────────────────────────────
+
+const dataSourcesRouter = router({
+  seed: protectedProcedure
+    .mutation(async () => {
+      const { seedDataSources } = await import('./db');
+      return seedDataSources();
+    }),
+  list: protectedProcedure
+    .input(z.object({
+      status: z.string().optional(),
+      category: z.string().optional(),
+      enabled: z.boolean().optional(),
+    }).optional())
+    .query(async ({ input }) => {
+      return getDataSources(input);
+    }),
+  create: protectedProcedure
+    .input(z.object({
+      code: z.string().min(2).max(64),
+      name: z.string().min(2).max(255),
+      category: z.enum(["identity", "financial", "legal", "social", "biometric", "government", "commercial"]),
+      provider: z.string().optional(),
+      baseUrl: z.string().optional(),
+      description: z.string().optional(),
+      enabled: z.boolean().default(true),
+    }))
+    .mutation(async ({ input }) => {
+      return createDataSource(input);
+    }),
+  update: protectedProcedure
+    .input(z.object({
+      id: z.number(),
+      name: z.string().optional(),
+      status: z.enum(["active", "degraded", "offline", "maintenance"]).optional(),
+      enabled: z.boolean().optional(),
+      description: z.string().optional(),
+      uptimePct: z.number().optional(),
+      avgResponseMs: z.number().optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const { id, ...data } = input;
+      return updateDataSource(id, data);
+    }),
+});
+
+// ─── Monitors Router ──────────────────────────────────────────────────────────
+
+const monitorsRouter = router({
+  list: protectedProcedure
+    .input(z.object({
+      status: z.string().optional(),
+      type: z.string().optional(),
+      limit: z.number().min(1).max(200).default(50),
+      offset: z.number().min(0).default(0),
+    }).optional())
+    .query(async ({ input }) => {
+      return getMonitors(input);
+    }),
+  create: protectedProcedure
+    .input(z.object({
+      subjectName: z.string().min(2).max(255),
+      subjectRef: z.string().optional(),
+      investigationId: z.number().optional(),
+      type: z.enum(["sanctions", "pep", "adverse_media", "social", "transaction", "biometric"]),
+      frequency: z.string().default("daily"),
+      expiresAt: z.date().optional(),
+      config: z.record(z.string(), z.unknown()).optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const monitorRef = `MON-${Date.now().toString(36).toUpperCase()}`;
+      return createMonitor({ ...input, monitorRef, createdBy: ctx.user!.id });
+    }),
+  update: protectedProcedure
+    .input(z.object({
+      id: z.number(),
+      status: z.enum(["active", "paused", "triggered", "expired"]).optional(),
+      frequency: z.string().optional(),
+      expiresAt: z.date().optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const { id, ...data } = input;
+      return updateMonitor(id, data);
+    }),
+});
+
+// ─── Screening Router ─────────────────────────────────────────────────────────
+
+const screeningRouter = router({
+  list: protectedProcedure
+    .input(z.object({
+      type: z.string().optional(),
+      status: z.string().optional(),
+      limit: z.number().min(1).max(200).default(50),
+      offset: z.number().min(0).default(0),
+    }).optional())
+    .query(async ({ input }) => {
+      return getScreeningRequests(input);
+    }),
+  create: protectedProcedure
+    .input(z.object({
+      type: z.enum(["mvr", "drug", "work_authorization", "biometric", "zero_footprint"]),
+      subjectName: z.string().min(2).max(255),
+      subjectType: z.enum(["individual", "corporate"]).default("individual"),
+      priority: z.enum(["low", "medium", "high", "critical"]).default("medium"),
+      investigationId: z.number().optional(),
+      requestData: z.record(z.string(), z.unknown()).optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const requestRef = `SCR-${Date.now().toString(36).toUpperCase()}`;
+      return createScreeningRequest({ ...input, requestRef, createdBy: ctx.user!.id });
+    }),
+  updateStatus: protectedProcedure
+    .input(z.object({
+      id: z.number(),
+      status: z.enum(["pending", "processing", "completed", "failed", "review"]),
+      result: z.record(z.string(), z.unknown()).optional(),
+      resultSummary: z.string().optional(),
+      riskScore: z.number().optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const { id, ...data } = input;
+      const extra = data.status === "completed" ? { completedAt: new Date(), processedBy: ctx.user!.id } : {};
+      return updateScreeningRequest(id, { ...data, ...extra });
     }),
 });
 
@@ -589,6 +812,12 @@ export const appRouter = router({
   reports: reportsRouter,
   billing: billingRouter,
   users: usersRouter,
+  dashboard: dashboardRouter,
+  fieldAgents: fieldAgentsRouter,
+  dataSources: dataSourcesRouter,
+  monitors: monitorsRouter,
+  screening: screeningRouter,
+  tenants: tenantsRouter,
 });
 
 export type AppRouter = typeof appRouter;

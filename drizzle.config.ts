@@ -1,14 +1,16 @@
 import { defineConfig } from "drizzle-kit";
 
-const connectionString = process.env.DATABASE_URL;
-if (!connectionString) {
-  throw new Error("DATABASE_URL is required to run drizzle commands");
-}
+// BIS platform uses local PostgreSQL. Always use the local PG URL for migrations.
+const rawUrl = process.env.DATABASE_URL ?? "";
+const connectionString =
+  rawUrl.startsWith("postgresql") || rawUrl.startsWith("postgres")
+    ? rawUrl
+    : "postgresql://bis_user:bis_secure_2026@localhost:5432/bis_db";
 
 export default defineConfig({
   schema: "./drizzle/schema.ts",
   out: "./drizzle",
-  dialect: "mysql",
+  dialect: "postgresql",
   dbCredentials: {
     url: connectionString,
   },

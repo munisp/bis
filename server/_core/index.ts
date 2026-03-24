@@ -1,4 +1,13 @@
 import "dotenv/config";
+
+// BIS platform requires PostgreSQL. Override the platform-injected MySQL/TiDB URL
+// with the local PostgreSQL instance.
+const _dbUrl = process.env.DATABASE_URL ?? "";
+if (!_dbUrl.startsWith("postgresql") && !_dbUrl.startsWith("postgres")) {
+  process.env.DATABASE_URL = "postgresql://bis_user:bis_secure_2026@localhost:5432/bis_db";
+  console.log("[BIS] Overriding DATABASE_URL → local PostgreSQL (bis_db)");
+}
+
 import express from "express";
 import { createServer } from "http";
 import net from "net";

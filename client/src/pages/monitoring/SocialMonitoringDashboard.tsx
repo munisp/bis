@@ -17,7 +17,7 @@ import {
   TrendingDown, Minus, Radio, Bell, Filter, RefreshCw, ExternalLink,
   MessageSquare, Newspaper, Eye, ChevronDown, Zap, Activity, Link2, X, Search, CheckCircle2
 } from 'lucide-react';
-import { mockInvestigations } from '@/lib/mockData';
+import { trpc } from '@/lib/trpc';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -61,52 +61,6 @@ const SENTIMENT_CONFIG: Record<Sentiment, { label: string; color: string; icon: 
 
 // ─── Mock Seed Data ───────────────────────────────────────────────────────────
 
-const SEED_MENTIONS: SocialMention[] = [
-  {
-    id: 'm1', platform: 'twitter', author: 'Chukwudi Okonkwo', authorHandle: '@chukwudi_ok',
-    content: 'Just saw @AdekunleAdeyemi at the CBN fraud conference. Interesting presence given the ongoing investigation.',
-    publishedAt: new Date(Date.now() - 8 * 60000).toISOString(),
-    sentiment: 'negative', riskScore: 72, keywords: ['fraud', 'investigation', 'CBN'],
-    engagementCount: 234, isVerified: false, language: 'en',
-  },
-  {
-    id: 'm2', platform: 'news', author: 'Punch Nigeria', authorHandle: 'punchng.com',
-    content: 'EFCC arraigns Lagos businessman Adekunle Adeyemi over alleged N450m fraud involving real estate syndicate.',
-    publishedAt: new Date(Date.now() - 25 * 60000).toISOString(),
-    sentiment: 'critical', riskScore: 91, keywords: ['EFCC', 'fraud', 'arraign', 'N450m'],
-    engagementCount: 1842, isVerified: true, language: 'en',
-  },
-  {
-    id: 'm3', platform: 'facebook', author: 'Lagos Business Watch', authorHandle: 'LBW',
-    content: 'Community members in Lekki Phase 1 are warning others about a real estate developer who has collected deposits but not delivered properties.',
-    publishedAt: new Date(Date.now() - 45 * 60000).toISOString(),
-    sentiment: 'negative', riskScore: 68, keywords: ['real estate', 'deposit', 'Lekki'],
-    engagementCount: 567, isVerified: false, language: 'en',
-  },
-  {
-    id: 'm4', platform: 'linkedin', author: 'Adaeze Nwosu', authorHandle: 'adaeze-nwosu',
-    content: 'Proud to announce that Adeyemi Holdings has been cleared of all allegations. The company remains committed to delivering value.',
-    publishedAt: new Date(Date.now() - 2 * 3600000).toISOString(),
-    sentiment: 'positive', riskScore: 22, keywords: ['cleared', 'allegations'],
-    engagementCount: 89, isVerified: true, language: 'en',
-  },
-  {
-    id: 'm5', platform: 'whatsapp_group', author: 'Alaba Traders Forum', authorHandle: 'WhatsApp Group',
-    content: 'Una don hear say Adekunle don run? E collect money from 15 people for that Ikoyi property. Abeg warn your people.',
-    publishedAt: new Date(Date.now() - 3 * 3600000).toISOString(),
-    sentiment: 'critical', riskScore: 85, keywords: ['run', 'collect money', 'Ikoyi'],
-    engagementCount: 312, isVerified: false, language: 'pidgin',
-  },
-  {
-    id: 'm6', platform: 'twitter', author: 'Femi Adeyinka', authorHandle: '@fadeyinka',
-    content: 'The court hearing for the Adeyemi case has been adjourned to April 15. Justice delayed as usual.',
-    publishedAt: new Date(Date.now() - 5 * 3600000).toISOString(),
-    sentiment: 'neutral', riskScore: 45, keywords: ['court', 'adjourned', 'justice'],
-    engagementCount: 156, isVerified: false, language: 'en',
-  },
-];
-
-// ─── Live mention generator ───────────────────────────────────────────────────
 
 const LIVE_POOL: Omit<SocialMention, 'id' | 'publishedAt' | 'isNew'>[] = [
   {
@@ -152,7 +106,7 @@ let liveIdx = 0;
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function SocialMonitoringDashboard() {
-  const [mentions, setMentions] = useState<SocialMention[]>(SEED_MENTIONS);
+  const [mentions, setMentions] = useState<SocialMention[]>([]);
   const [filterPlatform, setFilterPlatform] = useState<Platform | 'all'>('all');
   const [filterSentiment, setFilterSentiment] = useState<Sentiment | 'all'>('all');
   const [isLive, setIsLive] = useState(true);
@@ -163,6 +117,8 @@ export default function SocialMonitoringDashboard() {
   const [linkPickerMention, setLinkPickerMention] = useState<SocialMention | null>(null);
   const [invSearch, setInvSearch] = useState('');
   const [linkedMap, setLinkedMap] = useState<Record<string, string>>({});
+  // Live investigations list for link picker
+  const { data: liveInvestigations = [] } = trpc.investigations.list.useQuery({ limit: 100 });
 
   // Live feed injection
   useEffect(() => {
@@ -496,12 +452,12 @@ export default function SocialMonitoringDashboard() {
             </div>
             {/* Investigation list */}
             <div className="space-y-1.5 max-h-64 overflow-y-auto">
-              {mockInvestigations
-                .filter(inv =>
-                  inv.ref.toLowerCase().includes(invSearch.toLowerCase()) ||
-                  inv.subjectName.toLowerCase().includes(invSearch.toLowerCase())
+              {(liveInvestigations as any[])
+                .filter((inv: any) =>
+                  (inv.ref ?? '').toLowerCase().includes(invSearch.toLowerCase()) ||
+                  (inv.subjectName ?? '').toLowerCase().includes(invSearch.toLowerCase())
                 )
-                .map(inv => {
+                .map((inv: any) => {
                   const isLinked = linkedMap[linkPickerMention.id] === inv.ref;
                   const riskCls = inv.riskScore >= 80 ? 'text-red-400' : inv.riskScore >= 60 ? 'text-amber-400' : inv.riskScore >= 30 ? 'text-yellow-400' : 'text-emerald-400';
                   return (

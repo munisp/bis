@@ -636,4 +636,71 @@ export const billingRouter = router({
         };
       }
     }),
+
+  getLedger: protectedProcedure
+    .input(
+      z.object({
+        tenantId: z.string().min(1),
+        limit: z.number().int().min(1).max(500).default(100),
+        type: z.enum(["all", "debit", "credit"]).default("all"),
+      })
+    )
+    .query(async ({ input }) => {
+      // Attempt to fetch transfer history from TigerBeetle HTTP proxy
+      try {
+        const res = await fetch(
+          `${process.env.TIGERBEETLE_HTTP_URL ?? "http://localhost:3001"}/accounts/transfers?id=${encodeURIComponent("tenant-" + input.tenantId)}&limit=${input.limit}`,
+          { signal: AbortSignal.timeout(5000) }
+        );
+        if (res.ok) {
+          const data = (await res.json()) as { transfers?: any[] };
+          const transfers = data.transfers ?? [];
+          const entries = transfers
+            .map((t: any) => ({
+              id: String(t.id),
+              type: t.credit_account_id?.startsWith("tenant-") ? "credit" : "debit",
+              amountKobo: Number(t.amount),
+              description: t.user_data_128 ? `Ref: ${t.user_data_128}` : `Transfer ${t.id}`,
+              investigationRef: t.code === 1 ? t.user_data_128 : undefined,
+              tier: t.code === 1 ? "standard" : undefined,
+              timestamp: t.timestamp ? new Date(Number(t.timestamp) / 1_000_000) : new Date(),
+              status: "posted" as const,
+            }))
+            .filter((e: any) => input.type === "all" || e.type === input.type);
+          return { entries, total: entries.length, source: "tigerbeetle" as const };
+        }
+      } catch (_) {
+        // TigerBeetle unavailable — fall through to DB audit log
+      }
+
+      // Fallback: read from audit_log table where category = 'billing'
+      const { getDb } = await import("./db");
+      const { auditLog } = await import("../drizzle/schema");
+      const { desc, sql: drizzleSql } = await import("drizzle-orm");
+      const db = await getDb();
+      if (!db) return { entries: [], total: 0, source: "unavailable" as const };
+      // Use system category with billing action prefix as fallback storage
+      const whereExpr = input.type !== "all"
+        ? drizzleSql`${auditLog.category} = 'system' AND ${auditLog.action} LIKE ${'billing_' + input.type + '%'}`
+        : drizzleSql`${auditLog.category} = 'system' AND ${auditLog.action} LIKE ${'billing_%'}`;
+      const rows = await db
+        .select()
+        .from(auditLog)
+        .where(whereExpr)
+        .orderBy(desc(auditLog.createdAt))
+        .limit(input.limit);
+
+      const entries = rows.map((r: typeof rows[number]) => ({
+        id: String(r.id),
+        type: (r.action === "credit" ? "credit" : "debit") as "debit" | "credit",
+        amountKobo: r.detail ? Number((r.detail as any).amountKobo ?? 0) : 0,
+        description: r.detail ? String((r.detail as any).description ?? r.action) : r.action,
+        investigationRef: r.detail ? String((r.detail as any).investigationRef ?? "") || undefined : undefined,
+        tier: r.detail ? String((r.detail as any).tier ?? "") || undefined : undefined,
+        timestamp: r.createdAt instanceof Date ? r.createdAt : new Date(r.createdAt),
+        status: "posted" as const,
+      }));
+
+      return { entries, total: entries.length, source: "audit_log" as const };
+    }),
 });

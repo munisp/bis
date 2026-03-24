@@ -3,6 +3,7 @@
 // Fields: subject type, tier, country, identifiers, purpose, priority, data sources
 
 import { useState } from "react";
+import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -90,7 +91,28 @@ const PRIORITIES = [
 
 export default function NewInvestigationSlideOver({ open, onClose, onCreated }: Props) {
   const [step, setStep] = useState(1);
-  const [creating, setCreating] = useState(false);
+  const utils = trpc.useUtils();
+  const createMutation = trpc.investigations.create.useMutation({
+    onSuccess: (data) => {
+      toast.success(`Investigation ${data.ref} created`, {
+        description: `Subject queued for processing`,
+      });
+      utils.investigations.list.invalidate();
+      utils.dashboard.stats.invalidate();
+      onCreated?.(data.ref);
+      onClose();
+      setStep(1);
+      setForm({
+        subjectName: "", subjectType: "individual", tier: "standard",
+        country: "Nigeria", nin: "", bvn: "", rcNumber: "", phone: "",
+        email: "", dob: "", address: "", purpose: "", priority: "normal",
+        dataSources: ["nimc", "bvn", "npf", "social"], notes: "",
+      });
+    },
+    onError: (err) => {
+      toast.error("Failed to create investigation", { description: err.message });
+    },
+  });
   const [form, setForm] = useState({
     subjectName: "",
     subjectType: "individual",
@@ -120,21 +142,20 @@ export default function NewInvestigationSlideOver({ open, onClose, onCreated }: 
   const handleCreate = async () => {
     if (!form.subjectName.trim()) { toast.error("Subject name is required"); return; }
     if (!form.purpose.trim()) { toast.error("Purpose / reason is required"); return; }
-    setCreating(true);
-    await new Promise(r => setTimeout(r, 1400));
-    const ref = `BIS-2026-${String(Math.floor(Math.random() * 9000) + 1000)}`;
-    setCreating(false);
-    toast.success(`Investigation ${ref} created — ${form.tier} tier`, {
-      description: `Subject: ${form.subjectName} · ${form.dataSources.length} data sources queued`,
-    });
-    onCreated?.(ref);
-    onClose();
-    setStep(1);
-    setForm({
-      subjectName: "", subjectType: "individual", tier: "standard",
-      country: "Nigeria", nin: "", bvn: "", rcNumber: "", phone: "",
-      email: "", dob: "", address: "", purpose: "", priority: "normal",
-      dataSources: ["nimc", "bvn", "npf", "social"], notes: "",
+    createMutation.mutate({
+      subjectName: form.subjectName,
+      subjectType: (form.subjectType === "government" || form.subjectType === "ngo") ? "individual" : form.subjectType as "individual" | "corporate",
+      tier: form.tier as "basic" | "standard" | "comprehensive",
+      country: form.country,
+      priority: (form.priority === "normal" ? "medium" : form.priority === "urgent" ? "critical" : form.priority) as "low" | "medium" | "high" | "critical",
+      purpose: form.purpose || undefined,
+      nin: form.nin || undefined,
+      bvn: form.bvn || undefined,
+      rcNumber: form.rcNumber || undefined,
+      phone: form.phone || undefined,
+      email: form.email || undefined,
+      address: form.address || undefined,
+      dataSources: form.dataSources,
     });
   };
 
@@ -472,10 +493,10 @@ export default function NewInvestigationSlideOver({ open, onClose, onCreated }: 
               <Button
                 size="sm"
                 onClick={handleCreate}
-                disabled={creating || !form.purpose}
+                disabled={createMutation.isPending || !form.purpose}
                 className="font-mono text-xs gap-1.5 min-w-36"
               >
-                {creating ? (
+                {createMutation.isPending ? (
                   <><Loader2 size={12} className="animate-spin" /> Creating...</>
                 ) : (
                   <><Zap size={12} /> Launch Investigation</>

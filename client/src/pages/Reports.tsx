@@ -1,4 +1,4 @@
-// Reports — Report Builder with template picker + generated reports list
+// Reports — live tRPC-backed report management
 // Design: Forensic Intelligence theme, semantic CSS variables
 
 import { useState } from "react";
@@ -11,31 +11,15 @@ import { cn } from "@/lib/utils";
 import {
   FileText, Download, Search, Plus, Eye, Loader2,
   CheckCircle2, Clock, AlertTriangle, BarChart3, Filter,
-  ChevronDown, ChevronUp, Shield, Users, Activity,
-  Layers, X, Sparkles, BookOpen
+  Shield, Users, Activity, Layers, X, Sparkles, BookOpen, RefreshCw
 } from "lucide-react";
-import { mockInvestigations, formatDate, formatDateTime } from "@/lib/mockData";
+import { trpc } from "@/lib/trpc";
 import ReportPreviewSlideOver from "@/components/ReportPreviewSlideOver";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type ReportFormat = "pdf" | "json" | "csv" | "xlsx";
-type ReportStatus = "ready" | "generating" | "failed";
+type ReportFormat = "pdf" | "json" | "csv" | "docx";
 type ReportType = "investigation" | "bulk" | "analytics" | "compliance" | "sanctions" | "due_diligence";
-
-interface Report {
-  id: string;
-  title: string;
-  type: ReportType;
-  format: ReportFormat;
-  status: ReportStatus;
-  size: string;
-  createdAt: string;
-  investigationRef?: string;
-  sections: string[];
-}
-
-// ─── Templates ────────────────────────────────────────────────────────────────
 
 interface ReportTemplate {
   id: ReportType;
@@ -47,6 +31,8 @@ interface ReportTemplate {
   formats: ReportFormat[];
   estimatedPages: string;
 }
+
+// ─── Templates ────────────────────────────────────────────────────────────────
 
 const TEMPLATES: ReportTemplate[] = [
   {
@@ -86,7 +72,7 @@ const TEMPLATES: ReportTemplate[] = [
     icon: <CheckCircle2 size={18} />,
     color: 'text-emerald-400',
     sections: ['Period Overview', 'KYC Metrics', 'Flagged Subjects', 'Regulatory Compliance', 'Recommendations'],
-    formats: ['pdf', 'xlsx'],
+    formats: ['pdf', 'docx'],
     estimatedPages: '6–10 pages',
   },
   {
@@ -96,7 +82,7 @@ const TEMPLATES: ReportTemplate[] = [
     icon: <Activity size={18} />,
     color: 'text-amber-400',
     sections: ['Risk Distribution', 'Tier Analysis', 'Country Breakdown', 'Processing Metrics', 'Trend Analysis'],
-    formats: ['pdf', 'xlsx'],
+    formats: ['pdf', 'docx'],
     estimatedPages: '8–12 pages',
   },
   {
@@ -106,23 +92,12 @@ const TEMPLATES: ReportTemplate[] = [
     icon: <Layers size={18} />,
     color: 'text-cyan-400',
     sections: ['All Investigation Records', 'Subject Data', 'Risk Scores', 'Status History'],
-    formats: ['csv', 'json', 'xlsx'],
+    formats: ['csv', 'json'],
     estimatedPages: 'N/A',
   },
 ];
 
-// ─── Mock data ────────────────────────────────────────────────────────────────
-
-const SEED_REPORTS: Report[] = [
-  { id: "r1", title: "Adebayo Okafor — KYC Summary", type: "investigation", format: "pdf", status: "ready", size: "2.4 MB", createdAt: "2026-03-12T14:30:00Z", investigationRef: "BIS-2026-0001", sections: ['Subject Profile', 'Document Verification', 'Biometric Match', 'Data Source Results', 'Risk Score'] },
-  { id: "r2", title: "Emeka Nwosu — Full Due Diligence", type: "due_diligence", format: "pdf", status: "ready", size: "3.1 MB", createdAt: "2026-03-20T09:00:00Z", investigationRef: "BIS-2026-0004", sections: ['Executive Summary', 'Subject Profile', 'Sanctions & PEP', 'Adverse Media', 'Risk Assessment'] },
-  { id: "r3", title: "Greenfield Agro Ltd — Sanctions Screening", type: "sanctions", format: "pdf", status: "ready", size: "1.8 MB", createdAt: "2026-03-16T17:00:00Z", investigationRef: "BIS-2026-0007", sections: ['Screening Summary', 'OFAC SDN Results', 'EFCC Watchlist'] },
-  { id: "r4", title: "March 2026 — Compliance Summary", type: "compliance", format: "pdf", status: "ready", size: "1.2 MB", createdAt: "2026-03-22T08:00:00Z", sections: ['Period Overview', 'KYC Metrics', 'Flagged Subjects', 'Regulatory Compliance'] },
-  { id: "r5", title: "Q1 2026 — Investigation Analytics", type: "analytics", format: "xlsx", status: "ready", size: "5.8 MB", createdAt: "2026-03-01T00:00:00Z", sections: ['Risk Distribution', 'Tier Analysis', 'Country Breakdown'] },
-  { id: "r6", title: "Bulk Export — All March Investigations", type: "bulk", format: "csv", status: "ready", size: "128 KB", createdAt: "2026-03-23T10:00:00Z", sections: ['All Investigation Records'] },
-];
-
-const TYPE_COLOR: Record<ReportType, string> = {
+const TYPE_COLOR: Record<string, string> = {
   investigation: 'text-blue-400',
   due_diligence: 'text-violet-400',
   sanctions:     'text-red-400',
@@ -131,7 +106,7 @@ const TYPE_COLOR: Record<ReportType, string> = {
   bulk:          'text-cyan-400',
 };
 
-const TYPE_LABEL: Record<ReportType, string> = {
+const TYPE_LABEL: Record<string, string> = {
   investigation: 'KYC Summary',
   due_diligence: 'Due Diligence',
   sanctions:     'Sanctions',
@@ -140,26 +115,47 @@ const TYPE_LABEL: Record<ReportType, string> = {
   bulk:          'Bulk Export',
 };
 
+function formatDateTime(d: Date | string | null | undefined): string {
+  if (!d) return "—";
+  return new Date(d).toLocaleString();
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function Reports() {
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
-  const [reports, setReports] = useState<Report[]>(SEED_REPORTS);
   const [builderOpen, setBuilderOpen] = useState(false);
-  const [previewReport, setPreviewReport] = useState<Report | null>(null);
+  const [previewReport, setPreviewReport] = useState<any | null>(null);
 
   // Builder state
   const [selectedTemplate, setSelectedTemplate] = useState<ReportTemplate | null>(null);
-  const [selectedInv, setSelectedInv] = useState<string>("");
+  const [selectedInvId, setSelectedInvId] = useState<string>("");
   const [selectedFormat, setSelectedFormat] = useState<ReportFormat>("pdf");
   const [includeSections, setIncludeSections] = useState<string[]>([]);
-  const [generating, setGenerating] = useState(false);
 
-  const filtered = reports.filter(r => {
-    const matchSearch = r.title.toLowerCase().includes(search.toLowerCase()) ||
-      (r.investigationRef || '').toLowerCase().includes(search.toLowerCase());
-    const matchType = typeFilter === "all" || r.type === typeFilter;
+  const utils = trpc.useUtils();
+
+  // Live data
+  const { data: reportList = [], isLoading, refetch } = trpc.reports.list.useQuery({ limit: 200 });
+  const { data: invList = [] } = trpc.investigations.list.useQuery({ limit: 100 });
+
+  const generateMutation = trpc.reports.generate.useMutation({
+    onSuccess: (data) => {
+      toast.success(`Report "${data.reportRef}" is generating`, {
+        description: "It will appear in the list when ready.",
+      });
+      utils.reports.list.invalidate();
+      setBuilderOpen(false);
+      setSelectedTemplate(null);
+    },
+    onError: (e) => toast.error("Failed to generate report", { description: e.message }),
+  });
+
+  const filtered = reportList.filter((r: any) => {
+    const matchSearch = (r.title ?? "").toLowerCase().includes(search.toLowerCase()) ||
+      (r.reportRef ?? "").toLowerCase().includes(search.toLowerCase());
+    const matchType = typeFilter === "all" || r.template === typeFilter;
     return matchSearch && matchType;
   });
 
@@ -167,7 +163,7 @@ export default function Reports() {
     setSelectedTemplate(t);
     setIncludeSections([...t.sections]);
     setSelectedFormat(t.formats[0]);
-    setSelectedInv('');
+    setSelectedInvId('');
   };
 
   const toggleSection = (s: string) => {
@@ -180,7 +176,7 @@ export default function Reports() {
 
   const handleGenerate = () => {
     if (!selectedTemplate) return;
-    if (needsInvestigation && !selectedInv) {
+    if (needsInvestigation && !selectedInvId) {
       toast.error('Please select an investigation reference.');
       return;
     }
@@ -188,47 +184,41 @@ export default function Reports() {
       toast.error('Please include at least one section.');
       return;
     }
-
-    setGenerating(true);
-    const inv = mockInvestigations.find(i => i.ref === selectedInv);
+    const inv = (invList as any[]).find((i: any) => String(i.id) === selectedInvId);
     const title = needsInvestigation && inv
       ? `${inv.subjectName} — ${selectedTemplate.label}`
       : selectedTemplate.label + ` — ${new Date().toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}`;
 
-    setTimeout(() => {
-      const newReport: Report = {
-        id: `r${Date.now()}`,
-        title,
-        type: selectedTemplate.id,
-        format: selectedFormat,
-        status: 'ready',
-        size: `${(Math.random() * 4 + 0.5).toFixed(1)} MB`,
-        createdAt: new Date().toISOString(),
-        investigationRef: selectedInv || undefined,
-        sections: includeSections,
-      };
-      setReports(prev => [newReport, ...prev]);
-      setGenerating(false);
-      setBuilderOpen(false);
-      setSelectedTemplate(null);
-      toast.success(`Report "${title}" generated successfully.`);
-    }, 2200);
+    generateMutation.mutate({
+      template: selectedTemplate.id,
+      title,
+      format: selectedFormat,
+      investigationId: selectedInvId ? Number(selectedInvId) : undefined,
+      sections: includeSections,
+    });
   };
 
-  const handleDownload = (r: Report) => {
-    toast.success(`Downloading ${r.title} (${r.format.toUpperCase()})…`);
+  const handleDownload = (r: any) => {
+    if (r.fileUrl) {
+      window.open(r.fileUrl, "_blank");
+    } else {
+      toast.info(`Report is ${r.status === "generating" ? "still generating" : "not yet available"}`);
+    }
   };
-
-  const inputCls = "h-8 text-xs font-mono bg-background border-border";
 
   return (
     <BISLayout
       title="Reports"
-      subtitle={`${reports.length} reports available`}
+      subtitle={`${reportList.length} report${reportList.length !== 1 ? 's' : ''} available`}
       actions={
-        <Button size="sm" className="h-7 text-xs gap-1.5" onClick={() => setBuilderOpen(v => !v)}>
-          <Sparkles size={12} /> Report Builder
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => refetch()}>
+            <RefreshCw size={11} className={isLoading ? "animate-spin" : ""} /> Refresh
+          </Button>
+          <Button size="sm" className="h-7 text-xs gap-1.5" onClick={() => setBuilderOpen(v => !v)}>
+            <Sparkles size={12} /> Report Builder
+          </Button>
+        </div>
       }
     >
       {/* ── Report Builder ── */}
@@ -297,16 +287,16 @@ export default function Reports() {
                 {needsInvestigation && (
                   <div>
                     <label className="text-[9px] font-mono text-muted-foreground uppercase tracking-wider block mb-1">
-                      Investigation Reference *
+                      Investigation *
                     </label>
                     <select
-                      value={selectedInv}
-                      onChange={e => setSelectedInv(e.target.value)}
+                      value={selectedInvId}
+                      onChange={e => setSelectedInvId(e.target.value)}
                       className="w-full h-8 px-2 rounded-md border border-border bg-background text-xs font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
                     >
                       <option value="">Select investigation…</option>
-                      {mockInvestigations.map(inv => (
-                        <option key={inv.id} value={inv.ref}>{inv.ref} — {inv.subjectName}</option>
+                      {(invList as any[]).map((inv: any) => (
+                        <option key={inv.id} value={String(inv.id)}>{inv.ref} — {inv.subjectName}</option>
                       ))}
                     </select>
                   </div>
@@ -335,10 +325,10 @@ export default function Reports() {
                 <Button
                   size="sm"
                   className="h-7 text-xs gap-1.5"
-                  disabled={generating || (!!needsInvestigation && !selectedInv) || includeSections.length === 0}
+                  disabled={generateMutation.isPending || (!!needsInvestigation && !selectedInvId) || includeSections.length === 0}
                   onClick={handleGenerate}
                 >
-                  {generating
+                  {generateMutation.isPending
                     ? <><Loader2 size={11} className="animate-spin" /> Generating…</>
                     : <><Sparkles size={11} /> Generate Report</>}
                 </Button>
@@ -372,90 +362,110 @@ export default function Reports() {
         </Select>
       </div>
 
-      {/* ── Reports table ── */}
-      <div className="bis-card overflow-hidden">
-        <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-border">
-              {['Report', 'Type', 'Sections', 'Format', 'Size', 'Created', ''].map(h => (
-                <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map(r => (
-              <tr key={r.id} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
-                <td className="px-4 py-3">
-                  <div>
-                    <p className="text-xs font-mono font-semibold text-foreground">{r.title}</p>
-                    {r.investigationRef && (
-                      <p className="text-[10px] font-mono text-primary mt-0.5">{r.investigationRef}</p>
-                    )}
-                  </div>
-                </td>
-                <td className="px-4 py-3">
-                  <span className={cn("text-[10px] font-mono font-semibold", TYPE_COLOR[r.type])}>
-                    {TYPE_LABEL[r.type]}
-                  </span>
-                </td>
-                <td className="px-4 py-3">
-                  <span className="text-[10px] font-mono text-muted-foreground">
-                    {r.sections.length} section{r.sections.length !== 1 ? 's' : ''}
-                  </span>
-                </td>
-                <td className="px-4 py-3">
-                  <span className="text-[10px] font-mono text-muted-foreground uppercase">{r.format}</span>
-                </td>
-                <td className="px-4 py-3">
-                  <span className="text-xs font-mono text-muted-foreground">{r.size}</span>
-                </td>
-                <td className="px-4 py-3">
-                  <span className="text-xs text-muted-foreground">{formatDateTime(r.createdAt)}</span>
-                </td>
-                <td className="px-4 py-3">
-                  <div className="flex items-center gap-1">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-6 text-xs gap-1"
-                      onClick={(e) => { e.stopPropagation(); setPreviewReport(r); }}
-                    >
-                      <Eye size={11} /> Preview
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-6 text-xs gap-1"
-                      onClick={() => handleDownload(r)}
-                    >
-                      <Download size={11} /> Download
-                    </Button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-            {filtered.length === 0 && (
-              <tr>
-                <td colSpan={7} className="px-4 py-12 text-center text-muted-foreground text-sm">
-                  No reports match your search.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+      {/* Loading */}
+      {isLoading && (
+        <div className="flex items-center justify-center py-12 text-muted-foreground">
+          <Loader2 size={20} className="animate-spin mr-2" /> Loading reports…
         </div>
+      )}
 
-        <div className="px-4 py-2.5 border-t border-border/50">
-          <span className="text-[10px] font-mono text-muted-foreground">
-            {filtered.length} of {reports.length} reports
-          </span>
+      {/* ── Reports table ── */}
+      {!isLoading && (
+        <div className="bis-card overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border">
+                  {['Report', 'Type', 'Sections', 'Format', 'Status', 'Created', ''].map(h => (
+                    <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((r: any) => (
+                  <tr key={r.id} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
+                    <td className="px-4 py-3">
+                      <div>
+                        <p className="text-xs font-mono font-semibold text-foreground">{r.title}</p>
+                        <p className="text-[10px] font-mono text-primary mt-0.5">{r.reportRef}</p>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={cn("text-[10px] font-mono font-semibold", TYPE_COLOR[r.template] ?? "text-muted-foreground")}>
+                        {TYPE_LABEL[r.template] ?? r.template}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="text-[10px] font-mono text-muted-foreground">
+                        {Array.isArray(r.sections) ? r.sections.length : 0} section{Array.isArray(r.sections) && r.sections.length !== 1 ? 's' : ''}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="text-[10px] font-mono text-muted-foreground uppercase">{r.format}</span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={cn(
+                        "text-[10px] font-mono font-semibold",
+                        r.status === "ready" ? "text-emerald-400" :
+                        r.status === "generating" ? "text-amber-400" : "text-red-400"
+                      )}>
+                        {r.status === "generating" && <Loader2 size={9} className="inline animate-spin mr-1" />}
+                        {r.status}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="text-xs text-muted-foreground">{formatDateTime(r.createdAt)}</span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 text-xs gap-1"
+                          onClick={(e) => { e.stopPropagation(); setPreviewReport(r); }}
+                        >
+                          <Eye size={11} /> Preview
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 text-xs gap-1"
+                          disabled={r.status !== "ready"}
+                          onClick={() => handleDownload(r)}
+                        >
+                          <Download size={11} /> Download
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {filtered.length === 0 && (
+                  <tr>
+                    <td colSpan={7} className="px-4 py-12 text-center text-muted-foreground text-sm">
+                      <FileText size={24} className="mx-auto mb-3 opacity-30" />
+                      No reports yet. Use the Report Builder to generate your first report.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="px-4 py-2.5 border-t border-border/50">
+            <span className="text-[10px] font-mono text-muted-foreground">
+              {filtered.length} of {reportList.length} reports
+            </span>
+          </div>
         </div>
-      </div>
-      <ReportPreviewSlideOver
-        report={previewReport}
-        onClose={() => setPreviewReport(null)}
-      />
+      )}
+
+      {/* Preview slide-over */}
+      {previewReport && (
+        <ReportPreviewSlideOver
+          report={previewReport}
+          onClose={() => setPreviewReport(null)}
+        />
+      )}
     </BISLayout>
   );
 }

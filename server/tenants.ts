@@ -1,0 +1,268 @@
+// server/tenants.ts — tRPC router for Tenants, API Keys, and Webhooks
+import { z } from "zod";
+import { router, protectedProcedure } from "./_core/trpc";
+import { getDb } from "./db";
+import {
+  tenants, apiKeys, webhooks,
+  type InsertTenant,
+} from "../drizzle/schema";
+import { eq, desc, and, count } from "drizzle-orm";
+import crypto from "crypto";
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function generateApiKey(): { raw: string; prefix: string; hash: string } {
+  const raw = `bisk_${crypto.randomBytes(24).toString("hex")}`;
+  const prefix = raw.slice(0, 12);
+  const hash = crypto.createHash("sha256").update(raw).digest("hex");
+  return { raw, prefix, hash };
+}
+
+// ─── Tenants Router ───────────────────────────────────────────────────────────
+
+export const tenantsRouter = router({
+  list: protectedProcedure
+    .input(z.object({
+      status: z.string().optional(),
+      plan: z.string().optional(),
+      search: z.string().optional(),
+      limit: z.number().min(1).max(200).default(50),
+      offset: z.number().min(0).default(0),
+    }).optional())
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return { rows: [], total: 0 };
+      const rows = await db.select().from(tenants)
+        .orderBy(desc(tenants.createdAt))
+        .limit(input?.limit ?? 50)
+        .offset(input?.offset ?? 0);
+      const [{ c }] = await db.select({ c: count() }).from(tenants);
+      return { rows, total: Number(c) };
+    }),
+
+  get: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return null;
+      const [row] = await db.select().from(tenants).where(eq(tenants.id, input.id));
+      return row ?? null;
+    }),
+
+  create: protectedProcedure
+    .input(z.object({
+      name: z.string().min(2).max(255),
+      slug: z.string().min(2).max(64).regex(/^[a-z0-9-]+$/),
+      plan: z.enum(["starter", "professional", "enterprise", "government"]).default("starter"),
+      contactEmail: z.string().email().optional(),
+      contactName: z.string().optional(),
+      country: z.string().optional(),
+      industry: z.string().optional(),
+      monthlyQuota: z.number().min(1).default(100),
+    }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      const [row] = await db.insert(tenants).values({
+        ...input,
+        status: "trial",
+        usedThisMonth: 0,
+        ngnBalance: 0,
+      } as InsertTenant).returning();
+      return row;
+    }),
+
+  update: protectedProcedure
+    .input(z.object({
+      id: z.number(),
+      name: z.string().min(2).max(255).optional(),
+      plan: z.enum(["starter", "professional", "enterprise", "government"]).optional(),
+      status: z.enum(["active", "suspended", "trial", "churned"]).optional(),
+      contactEmail: z.string().email().optional(),
+      contactName: z.string().optional(),
+      country: z.string().optional(),
+      industry: z.string().optional(),
+      monthlyQuota: z.number().min(1).optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      const { id, ...data } = input;
+      const [row] = await db.update(tenants)
+        .set({ ...data, updatedAt: new Date() })
+        .where(eq(tenants.id, id))
+        .returning();
+      return row;
+    }),
+
+  suspend: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      await db.update(tenants)
+        .set({ status: "suspended", updatedAt: new Date() })
+        .where(eq(tenants.id, input.id));
+      return { success: true };
+    }),
+
+  reactivate: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      await db.update(tenants)
+        .set({ status: "active", updatedAt: new Date() })
+        .where(eq(tenants.id, input.id));
+      return { success: true };
+    }),
+
+  // ── API Keys ────────────────────────────────────────────────────────────────
+
+  listKeys: protectedProcedure
+    .input(z.object({ tenantId: z.number() }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return [];
+      return db.select().from(apiKeys)
+        .where(eq(apiKeys.tenantId, input.tenantId))
+        .orderBy(desc(apiKeys.createdAt));
+    }),
+
+  createKey: protectedProcedure
+    .input(z.object({
+      tenantId: z.number(),
+      name: z.string().min(2).max(128),
+      permissions: z.array(z.string()).default([]),
+      expiresAt: z.date().optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      const { raw, prefix, hash } = generateApiKey();
+      const [row] = await db.insert(apiKeys).values({
+        tenantId: input.tenantId,
+        name: input.name,
+        keyHash: hash,
+        keyPrefix: prefix,
+        status: "active",
+        permissions: input.permissions,
+        expiresAt: input.expiresAt,
+      }).returning();
+      // Return the raw key ONCE — it will never be shown again
+      return { ...row, rawKey: raw };
+    }),
+
+  revokeKey: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      await db.update(apiKeys)
+        .set({ status: "revoked" })
+        .where(eq(apiKeys.id, input.id));
+      return { success: true };
+    }),
+
+  rotateKey: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      const { raw, prefix, hash } = generateApiKey();
+      const [row] = await db.update(apiKeys)
+        .set({ keyHash: hash, keyPrefix: prefix, status: "active" })
+        .where(eq(apiKeys.id, input.id))
+        .returning();
+      return { ...row, rawKey: raw };
+    }),
+
+  // ── Webhooks ────────────────────────────────────────────────────────────────
+
+  listWebhooks: protectedProcedure
+    .input(z.object({ tenantId: z.number() }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return [];
+      return db.select().from(webhooks)
+        .where(eq(webhooks.tenantId, input.tenantId))
+        .orderBy(desc(webhooks.createdAt));
+    }),
+
+  createWebhook: protectedProcedure
+    .input(z.object({
+      tenantId: z.number(),
+      url: z.string().url(),
+      events: z.array(z.string()).default([]),
+    }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      const secret = crypto.randomBytes(20).toString("hex");
+      const [row] = await db.insert(webhooks).values({
+        tenantId: input.tenantId,
+        url: input.url,
+        events: input.events,
+        secret,
+        status: "active",
+        failureCount: 0,
+      }).returning();
+      return row;
+    }),
+
+  updateWebhook: protectedProcedure
+    .input(z.object({
+      id: z.number(),
+      url: z.string().url().optional(),
+      events: z.array(z.string()).optional(),
+      status: z.enum(["active", "paused", "failed"]).optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      const { id, ...data } = input;
+      const [row] = await db.update(webhooks)
+        .set(data)
+        .where(eq(webhooks.id, id))
+        .returning();
+      return row;
+    }),
+
+  deleteWebhook: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      await db.delete(webhooks).where(eq(webhooks.id, input.id));
+      return { success: true };
+    }),
+
+  testWebhook: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      const [wh] = await db.select().from(webhooks).where(eq(webhooks.id, input.id));
+      if (!wh) throw new Error("Webhook not found");
+      try {
+        const res = await fetch(wh.url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-BIS-Signature": `sha256=${crypto.createHmac("sha256", wh.secret ?? "").update(JSON.stringify({ event: "ping" })).digest("hex")}`,
+          },
+          body: JSON.stringify({ event: "ping", timestamp: new Date().toISOString() }),
+          signal: AbortSignal.timeout(5000),
+        });
+        await db.update(webhooks)
+          .set({ lastDeliveredAt: new Date(), failureCount: 0 })
+          .where(eq(webhooks.id, input.id));
+        return { success: res.ok, status: res.status };
+      } catch (err) {
+        await db.update(webhooks)
+          .set({ failureCount: (wh.failureCount ?? 0) + 1 })
+          .where(eq(webhooks.id, input.id));
+        return { success: false, status: 0 };
+      }
+    }),
+});

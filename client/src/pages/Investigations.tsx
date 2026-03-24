@@ -16,10 +16,7 @@ import {
   X, SlidersHorizontal, ArrowUpDown, ArrowUp, ArrowDown,
   ChevronDown, ChevronUp, Bookmark, BookmarkCheck, Trash2, Download, RefreshCw
 } from "lucide-react";
-import {
-  mockInvestigations, InvestigationStatus,
-  InvestigationTier, getStatusBadgeClass, formatDateTime
-} from "@/lib/mockData";
+import { InvestigationStatus, InvestigationTier, getStatusBadgeClass, formatDateTime } from "@/lib/bisUtils";
 import { trpc } from "@/lib/trpc";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -60,7 +57,7 @@ const statusIcon: Record<InvestigationStatus, React.ReactNode> = {
   draft:      <FileText size={12} className="text-muted-foreground" />,
 };
 
-const COUNTRIES = Array.from(new Set(mockInvestigations.map(i => i.country))).sort();
+// Countries list is static; live filter options come from the DB
 const LIVE_COUNTRIES = ['Nigeria', 'Ghana', 'Kenya', 'South Africa', 'Egypt', 'Ethiopia', 'Tanzania', 'Uganda', 'Senegal', 'Cameroon', 'Rwanda', 'Zambia', 'Zimbabwe', 'Mozambique', 'Angola', 'Ivory Coast', 'Mali', 'Burkina Faso', 'Niger', 'Chad', 'Benin', 'Togo', 'Sierra Leone', 'Liberia', 'Guinea', 'Gambia', 'Mauritania', 'Gabon', 'Congo', 'DRC', 'Sudan', 'Somalia', 'Eritrea', 'Djibouti', 'Comoros', 'Madagascar', 'Mauritius', 'Seychelles', 'Botswana', 'Namibia', 'Lesotho', 'Swaziland', 'Malawi', 'Burundi', 'South Sudan', 'Central African Republic', 'Equatorial Guinea', 'Sao Tome and Principe', 'Cape Verde'].sort();
 
 // ─── Sparkline ────────────────────────────────────────────────────────────────
@@ -175,12 +172,9 @@ export default function Investigations() {
   });
   const utils = trpc.useUtils();
 
-  // Use live data when available, fall back to mock
-  const sourceList = (liveData?.items && liveData.items.length > 0)
-    ? liveData.items
-    : mockInvestigations;
-  const isLive = !!(liveData?.items && liveData.items.length > 0);
-  const totalCount = isLive ? (liveData?.total ?? 0) : mockInvestigations.length;
+  // Always use live data from tRPC
+  const sourceList = liveData?.items ?? [];
+  const totalCount = liveData?.total ?? 0;
 
   // Saved presets (localStorage)
   const [userPresets, setUserPresets] = useState<Preset[]>(() => {
@@ -280,7 +274,7 @@ export default function Investigations() {
   const filtered = useMemo(() => {
     // When using live data, server-side filtering already applied; only do client-side sort + date filter
     const { typeFilter, dateFrom, dateTo } = filters;
-    let list = (sourceList as typeof mockInvestigations).filter(inv => {
+    let list = (sourceList as any[]).filter((inv: any) => {
       const matchType    = typeFilter === 'all' || (inv as any).subjectType === typeFilter;
       const updatedAt = (inv as any).updatedAt;
       const matchDateFrom = dateFrom === '' || new Date(updatedAt) >= new Date(dateFrom);
@@ -328,10 +322,7 @@ export default function Investigations() {
   return (
     <BISLayout
       title="Investigations"
-      subtitle={isLive
-        ? `${filtered.length} shown · ${totalCount} total in DB`
-        : `${filtered.length} of ${mockInvestigations.length} records (mock data)`
-      }
+      subtitle={`${filtered.length} shown · ${totalCount} total in DB`}
       actions={
         <div className="flex items-center gap-2">
           {liveLoading && <Loader2 size={13} className="animate-spin text-muted-foreground" />}
@@ -481,7 +472,7 @@ export default function Investigations() {
                 className="w-full h-7 px-2 rounded-md border border-border bg-background text-xs font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
               >
                 <option value="all">All Countries</option>
-                {COUNTRIES.map(c => <option key={c} value={c}>{c}</option>)}
+                {LIVE_COUNTRIES.map((c: string) => <option key={c} value={c}>{c}</option>)}
               </select>
             </div>
             <div>
@@ -587,14 +578,14 @@ export default function Investigations() {
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1.5">
-                      {statusIcon[inv.status]}
-                      <span className={`bis-badge ${getStatusBadgeClass(inv.status)}`}>{inv.status}</span>
+                      {statusIcon[inv.status as InvestigationStatus]}
+                      <span className={`bis-badge ${getStatusBadgeClass(inv.status as InvestigationStatus)}`}>{inv.status}</span>
                     </div>
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1.5">
                       <span className="text-xs capitalize text-muted-foreground">{inv.tier}</span>
-                      <span className="text-[10px] font-mono text-muted-foreground/60">{tierPrice[inv.tier]}</span>
+                      <span className="text-[10px] font-mono text-muted-foreground/60">{tierPrice[inv.tier as InvestigationTier] ?? ''}</span>
                     </div>
                   </td>
                   <td className="px-4 py-3 w-40">{riskBar((inv as any).riskScore ?? 0, String((inv as any).id ?? (inv as any).ref))}</td>
@@ -622,7 +613,7 @@ export default function Investigations() {
         </div>
 
         {/* Pagination controls (live mode only) */}
-        {isLive && totalCount > PAGE_SIZE && (
+        {totalCount > PAGE_SIZE && (
           <div className="px-4 py-2 border-t border-border/50 flex items-center gap-2">
             <Button size="sm" variant="outline" className="h-6 text-xs" disabled={page === 0} onClick={() => setPage(p => p - 1)}>
               ← Prev
@@ -638,10 +629,7 @@ export default function Investigations() {
 
         <div className="px-4 py-2.5 border-t border-border/50 flex items-center justify-between">
           <span className="text-[10px] font-mono text-muted-foreground">
-            {isLive
-              ? <>Showing {filtered.length} of {totalCount} investigations <span className="text-emerald-400/70">(live DB)</span></>
-              : `Showing ${filtered.length} of ${mockInvestigations.length} investigations (mock)`
-            }
+            <>Showing {filtered.length} of {totalCount} investigations <span className="text-emerald-400/70">(live DB)</span></>
           </span>
           {activeFilterCount > 0 && (
             <span className="text-[10px] font-mono text-primary">

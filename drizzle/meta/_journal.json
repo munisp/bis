@@ -1,26 +1,26 @@
 {
   "version": "7",
-  "dialect": "mysql",
+  "dialect": "postgresql",
   "entries": [
     {
       "idx": 0,
-      "version": "5",
-      "when": 1774318156460,
-      "tag": "0000_steep_sister_grimm",
+      "version": "7",
+      "when": 1774358318818,
+      "tag": "0000_initial_schema",
       "breakpoints": true
     },
     {
       "idx": 1,
-      "version": "5",
-      "when": 1774318867193,
-      "tag": "0001_smooth_hammerhead",
+      "version": "7",
+      "when": 1774361945144,
+      "tag": "0001_early_thunderbolt_ross",
       "breakpoints": true
     },
     {
       "idx": 2,
-      "version": "5",
-      "when": 1774353485850,
-      "tag": "0002_far_the_initiative",
+      "version": "7",
+      "when": 1774362694774,
+      "tag": "0002_clean_gargoyle",
       "breakpoints": true
     }
   ]

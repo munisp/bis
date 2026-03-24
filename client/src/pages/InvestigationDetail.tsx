@@ -16,9 +16,7 @@ import {
   ChevronDown, UserCheck
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import {
-  mockInvestigations, mockAlerts, getStatusBadgeClass, formatDateTime, formatDate
-} from "@/lib/mockData";
+import { getStatusBadgeClass, formatDateTime, formatDate } from "@/lib/bisUtils";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/lib/trpc";
 
@@ -84,58 +82,6 @@ interface EvidenceItem {
   status?: string;
   location?: string;
 }
-
-const MOCK_EVIDENCE: EvidenceItem[] = [
-  {
-    id: 'ev1', type: 'alert', timestamp: '2026-03-20T09:00:00Z',
-    title: 'OFAC SDN List Match — 94% Confidence',
-    body: 'Subject appears on OFAC Specially Designated Nationals list under Executive Order 13224. Automated kill-switch triggered.',
-    source: 'OFAC SDN API', riskScore: 94, status: 'escalated',
-  },
-  {
-    id: 'ev2', type: 'social_mention', timestamp: '2026-03-19T14:30:00Z',
-    title: 'Adverse Media — Punch Newspaper',
-    body: 'Subject mentioned in investigative report on procurement fraud at Lagos State Ministry of Works. Article by Segun Adeyemi. Engagement: 1,247 reactions.',
-    source: '@PunchNigeria', riskScore: 78, linkedBy: 'analyst@bis.io',
-  },
-  {
-    id: 'ev3', type: 'incoming_report', timestamp: '2026-03-19T10:15:00Z',
-    title: 'WhatsApp Report — Land Fraud Allegation',
-    body: 'Anonymous report via WhatsApp: Subject allegedly sold same plot of land in Lekki Phase 1 to 3 different buyers. Documents attached. Reporter claims to be one of the victims.',
-    source: '+234 801 *** 5678', attachments: 3, riskScore: 82,
-  },
-  {
-    id: 'ev4', type: 'field_task', timestamp: '2026-03-18T16:00:00Z',
-    title: 'Address Verification — Completed',
-    body: 'Field agent FA-NG-0142 (Adebayo Ogundimu) confirmed subject\'s residential address at 14B Bourdillon Road, Ikoyi, Lagos. Subject was present. 4 photographs taken. GPS-signed proof attached.',
-    source: 'FA-NG-0142', attachments: 4, status: 'completed', location: 'Ikoyi, Lagos',
-  },
-  {
-    id: 'ev5', type: 'social_mention', timestamp: '2026-03-17T08:45:00Z',
-    title: 'Twitter/X Mention — @lagosinsider',
-    body: 'Thread by @lagosinsider (12.4K followers) alleging subject is connected to a procurement cartel. Thread has 847 retweets and 2,341 likes. Sentiment: Critical.',
-    source: '@lagosinsider', riskScore: 71, linkedBy: 'social_monitor_ai',
-  },
-  {
-    id: 'ev6', type: 'incoming_report', timestamp: '2026-03-16T13:20:00Z',
-    title: 'USSD Report — Fraud Allegation',
-    body: 'USSD session report: Subject collected ₦2.5M from reporter claiming to facilitate government contract. No contract materialised. Reporter filed formal complaint.',
-    source: 'USSD *347*BIS#', riskScore: 75,
-  },
-  {
-    id: 'ev7', type: 'analyst_note', timestamp: '2026-03-15T11:00:00Z',
-    title: 'Analyst Note — Cross-reference with BIS-2026-0002',
-    body: 'Subject appears to share a registered address with Zenith Logistics Ltd (BIS-2026-0002). Director cross-check in progress. Possible shell company relationship.',
-    linkedBy: 'senior_analyst@bis.io',
-  },
-  {
-    id: 'ev8', type: 'field_task', timestamp: '2026-03-14T09:30:00Z',
-    title: 'Employer Verification — Completed',
-    body: 'Field agent FA-NG-0312 (Fatima Bello) conducted employer verification at Zenith House, Victoria Island. HR confirmed subject was employed 2019–2022. Departure was voluntary.',
-    source: 'FA-NG-0312', status: 'completed', location: 'Victoria Island, Lagos',
-  },
-];
-
 const EVIDENCE_TYPE_CONFIG: Record<EvidenceType, { label: string; color: string; bg: string; icon: React.ReactNode }> = {
   alert:           { label: 'ALERT',    color: 'text-red-400',     bg: 'bg-red-500/10 border-red-500/30',     icon: <AlertTriangle size={11} /> },
   social_mention:  { label: 'SOCIAL',   color: 'text-blue-400',    bg: 'bg-blue-500/10 border-blue-500/30',   icon: <MessageSquare size={11} /> },
@@ -162,9 +108,9 @@ export default function InvestigationDetail() {
     { enabled: !!params.id }
   );
 
-  // ── Fall back to mock data when DB is unavailable or ref not found
-  const inv = (liveInv as typeof mockInvestigations[0] | null) ?? mockInvestigations.find(i => i.id === params.id) ?? mockInvestigations[0];
-  const relatedAlerts = mockAlerts.filter(a => a.subjectRef === inv.ref);
+  // Use live data; show loading skeleton while fetching
+  const inv = liveInv as any | null;
+  const relatedAlerts: any[] = [];
   const [note, setNote] = useState("");
   const [addingNote, setAddingNote] = useState(false);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
@@ -215,17 +161,17 @@ export default function InvestigationDetail() {
     source: a.category,
     linkedBy: a.userEmail ?? undefined,
   }));
-  const [evidenceItems, setEvidenceItems] = useState<EvidenceItem[]>(MOCK_EVIDENCE);
-  // Merge live audit items at top when available
+  const [evidenceItems, setEvidenceItems] = useState<EvidenceItem[]>([]);
+  // Use live audit items; fall back to empty list
   const mergedEvidence: EvidenceItem[] = liveEvidenceItems.length > 0
-    ? [...liveEvidenceItems, ...evidenceItems.filter(e => !e.id.startsWith('ev'))]
+    ? liveEvidenceItems
     : evidenceItems;
   const [evidenceFilter, setEvidenceFilter] = useState<EvidenceType | 'all'>('all');
-  const [currentStatus, setCurrentStatus] = useState<string>(inv.status);
+  const [currentStatus, setCurrentStatus] = useState<string>((inv as any)?.status ?? 'pending');
   // Live assignee state — seed from live data or mock, updated by assign mutation
   const [assignedToId, setAssignedToId] = useState<string>("");
   const [assignedToName, setAssignedToName] = useState<string>(
-    (liveInv as any)?.assignedTo ? String((liveInv as any).assignedTo) : (inv as any).assignedTo ?? ""
+    (liveInv as any)?.assignedTo ? String((liveInv as any).assignedTo) : ""
   );
 
   // ── Live users list for assignee dropdown ─────────────────────────────────
@@ -463,7 +409,7 @@ export default function InvestigationDetail() {
       <div className="flex gap-1 mb-4 border-b border-border">
         {([
           { id: 'overview', label: 'Overview' },
-          { id: 'evidence', label: `Evidence (${evidenceItems.length})` },
+          { id: 'evidence', label: `Evidence (${mergedEvidence.length})` },
           { id: 'timeline', label: 'Processing Log' },
         ] as const).map(tab => (
           <button
@@ -585,7 +531,7 @@ export default function InvestigationDetail() {
                 <Globe size={14} className="text-primary" /> Data Sources
               </h3>
               <div className="flex flex-wrap gap-1.5">
-                {inv.dataSources.length > 0 ? inv.dataSources.map(src => (
+                {(inv?.dataSources ?? []).length > 0 ? (inv?.dataSources ?? []).map((src: string) => (
                   <Badge key={src} variant="outline" className="text-[10px] h-5 px-2 font-mono">{src}</Badge>
                 )) : <span className="text-xs text-muted-foreground">None yet</span>}
               </div>
@@ -598,7 +544,7 @@ export default function InvestigationDetail() {
               </h3>
               <div className="space-y-2">
                 {(Object.entries(EVIDENCE_TYPE_CONFIG) as [EvidenceType, typeof EVIDENCE_TYPE_CONFIG.alert][]).map(([type, cfg]) => {
-                  const count = evidenceItems.filter(e => e.type === type).length;
+                  const count = mergedEvidence.filter(e => e.type === type).length;
                   if (count === 0) return null;
                   return (
                     <button
@@ -632,10 +578,10 @@ export default function InvestigationDetail() {
                 evidenceFilter === 'all' ? "border-primary text-primary bg-primary/10" : "border-border text-muted-foreground hover:text-foreground"
               )}
             >
-              All ({evidenceItems.length})
+              All ({mergedEvidence.length})
             </button>
             {(Object.entries(EVIDENCE_TYPE_CONFIG) as [EvidenceType, typeof EVIDENCE_TYPE_CONFIG.alert][]).map(([type, cfg]) => {
-              const count = evidenceItems.filter(e => e.type === type).length;
+              const count = mergedEvidence.filter(e => e.type === type).length;
               if (count === 0) return null;
               return (
                 <button

@@ -46,7 +46,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-// ─── Mock transaction history (TigerBeetle doesn't expose history via HTTP proxy) ──
+// ─── Ledger entry type (mirrors tRPC billing.getLedger response) ──────────────
 interface LedgerEntry {
   id: string;
   type: "debit" | "credit";
@@ -57,17 +57,6 @@ interface LedgerEntry {
   timestamp: Date;
   status: "posted" | "pending";
 }
-
-const MOCK_TRANSACTIONS: LedgerEntry[] = [
-  { id: "tb-001", type: "debit",  amountKobo: 150_000, description: "Investigation BIS-2026-4821", investigationRef: "BIS-2026-4821", tier: "standard", timestamp: new Date(Date.now() - 1 * 3600_000), status: "posted" },
-  { id: "tb-002", type: "debit",  amountKobo: 500_000, description: "Investigation BIS-2026-4820", investigationRef: "BIS-2026-4820", tier: "premium",  timestamp: new Date(Date.now() - 3 * 3600_000), status: "posted" },
-  { id: "tb-003", type: "credit", amountKobo: 5_000_000, description: "Account top-up — REF/2026/0032", timestamp: new Date(Date.now() - 6 * 3600_000), status: "posted" },
-  { id: "tb-004", type: "debit",  amountKobo: 50_000,  description: "Investigation BIS-2026-4819", investigationRef: "BIS-2026-4819", tier: "basic",    timestamp: new Date(Date.now() - 12 * 3600_000), status: "posted" },
-  { id: "tb-005", type: "debit",  amountKobo: 150_000, description: "Investigation BIS-2026-4818", investigationRef: "BIS-2026-4818", tier: "standard", timestamp: new Date(Date.now() - 24 * 3600_000), status: "posted" },
-  { id: "tb-006", type: "credit", amountKobo: 10_000_000, description: "Account top-up — REF/2026/0031", timestamp: new Date(Date.now() - 48 * 3600_000), status: "posted" },
-  { id: "tb-007", type: "debit",  amountKobo: 500_000, description: "Investigation BIS-2026-4817", investigationRef: "BIS-2026-4817", tier: "premium",  timestamp: new Date(Date.now() - 72 * 3600_000), status: "posted" },
-  { id: "tb-008", type: "debit",  amountKobo: 50_000,  description: "Investigation BIS-2026-4816", investigationRef: "BIS-2026-4816", tier: "basic",    timestamp: new Date(Date.now() - 96 * 3600_000), status: "posted" },
-];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -163,22 +152,36 @@ export default function BillingPage() {
     },
   });
 
+  // ── Live ledger from tRPC ─────────────────────────────────────────────────
+  const { data: ledgerData, isLoading: ledgerLoading, refetch: refetchLedger } =
+    trpc.billing.getLedger.useQuery({ tenantId, limit: 100 });
+  const allTransactions: LedgerEntry[] = (ledgerData?.entries ?? []).map((e: any) => ({
+    id: e.id,
+    type: e.type as "debit" | "credit",
+    amountKobo: e.amountKobo,
+    description: e.description,
+    investigationRef: e.investigationRef,
+    tier: e.tier,
+    timestamp: new Date(e.timestamp),
+    status: e.status as "posted" | "pending",
+  }));
+
   // ── Derived state ───────────────────────────────────────────────────────────────
   const balanceKobo = balance?.balanceKobo ?? 0;
   const balanceAvailable = balance?.available ?? false;
 
   const totalDebits = useMemo(
-    () => MOCK_TRANSACTIONS.filter((t) => t.type === "debit").reduce((s, t) => s + t.amountKobo, 0),
-    []
+    () => allTransactions.filter((t) => t.type === "debit").reduce((s, t) => s + t.amountKobo, 0),
+    [allTransactions]
   );
   const totalCredits = useMemo(
-    () => MOCK_TRANSACTIONS.filter((t) => t.type === "credit").reduce((s, t) => s + t.amountKobo, 0),
-    []
+    () => allTransactions.filter((t) => t.type === "credit").reduce((s, t) => s + t.amountKobo, 0),
+    [allTransactions]
   );
 
   const filteredTx = useMemo(
-    () => filterType === "all" ? MOCK_TRANSACTIONS : MOCK_TRANSACTIONS.filter((t) => t.type === filterType),
-    [filterType]
+    () => filterType === "all" ? allTransactions : allTransactions.filter((t) => t.type === filterType),
+    [filterType, allTransactions]
   );
 
   const handleTopUp = () => {
@@ -294,7 +297,7 @@ export default function BillingPage() {
               <div>
                 <p className="text-xs text-slate-400 uppercase tracking-wider mb-1">Total Debits (30d)</p>
                 <p className="text-2xl font-bold text-red-400 font-mono">{formatNGN(totalDebits)}</p>
-                <p className="text-xs text-slate-500 mt-1">{MOCK_TRANSACTIONS.filter((t) => t.type === "debit").length} investigations</p>
+                <p className="text-xs text-slate-500 mt-1">{allTransactions.filter((t) => t.type === "debit").length} investigations</p>
               </div>
               <div className="p-2 rounded-lg bg-red-500/10">
                 <TrendingDown className="h-5 w-5 text-red-400" />
@@ -310,7 +313,7 @@ export default function BillingPage() {
               <div>
                 <p className="text-xs text-slate-400 uppercase tracking-wider mb-1">Total Credits (30d)</p>
                 <p className="text-2xl font-bold text-blue-400 font-mono">{formatNGN(totalCredits)}</p>
-                <p className="text-xs text-slate-500 mt-1">{MOCK_TRANSACTIONS.filter((t) => t.type === "credit").length} top-ups</p>
+                <p className="text-xs text-slate-500 mt-1">{allTransactions.filter((t) => t.type === "credit").length} top-ups</p>
               </div>
               <div className="p-2 rounded-lg bg-blue-500/10">
                 <TrendingUp className="h-5 w-5 text-blue-400" />

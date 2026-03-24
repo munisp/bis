@@ -8,44 +8,16 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { trpc } from "@/lib/trpc";
 import {
-  Search, Plus, X, Shield, UserCheck, UserX, Edit2,
-  CheckCircle2, Clock, AlertTriangle, Key, Eye, EyeOff,
-  Mail, Globe, Lock, Unlock, MoreHorizontal, Users
+  Search, Plus, X, UserCheck, UserX, Edit2,
+  CheckCircle2, Clock, AlertTriangle, Lock, Unlock, Users,
+  RefreshCw, Loader2, Mail
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type UserRole = "admin" | "supervisor" | "analyst" | "viewer" | "api_only";
-type UserStatus = "active" | "inactive" | "suspended" | "pending";
-
-interface BISUser {
-  id: string;
-  name: string;
-  email: string;
-  role: UserRole;
-  status: UserStatus;
-  lastLogin: string;
-  lastIp: string;
-  createdAt: string;
-  mfaEnabled: boolean;
-  investigationsCount: number;
-  reportsCount: number;
-}
-
-// ─── Mock data ────────────────────────────────────────────────────────────────
-
-const SEED_USERS: BISUser[] = [
-  { id: "u1", name: "Operator Admin",  email: "admin@bis.platform",       role: "admin",      status: "active",    lastLogin: "2026-03-24T09:02:00Z", lastIp: "197.210.54.12", createdAt: "2025-01-10", mfaEnabled: true,  investigationsCount: 847, reportsCount: 203 },
-  { id: "u2", name: "Amaka Obi",       email: "amaka.obi@bis.platform",   role: "analyst",    status: "active",    lastLogin: "2026-03-24T08:47:00Z", lastIp: "41.58.22.100",  createdAt: "2025-03-15", mfaEnabled: true,  investigationsCount: 312, reportsCount: 88  },
-  { id: "u3", name: "Chidi Nwosu",     email: "chidi.nwosu@bis.platform", role: "analyst",    status: "active",    lastLogin: "2026-03-24T08:30:00Z", lastIp: "102.89.47.3",   createdAt: "2025-03-20", mfaEnabled: false, investigationsCount: 289, reportsCount: 71  },
-  { id: "u4", name: "Fatima Bello",    email: "fatima.bello@bis.platform",role: "supervisor", status: "active",    lastLogin: "2026-03-24T07:55:00Z", lastIp: "197.211.60.44", createdAt: "2025-02-01", mfaEnabled: true,  investigationsCount: 521, reportsCount: 142 },
-  { id: "u5", name: "Emeka Okafor",    email: "emeka.okafor@bis.platform",role: "analyst",    status: "inactive",  lastLogin: "2026-02-14T14:22:00Z", lastIp: "41.76.108.55",  createdAt: "2025-04-10", mfaEnabled: false, investigationsCount: 47,  reportsCount: 12  },
-  { id: "u6", name: "Ngozi Adeyemi",   email: "ngozi.a@bis.platform",     role: "viewer",     status: "active",    lastLogin: "2026-03-23T16:10:00Z", lastIp: "197.210.54.99", createdAt: "2025-06-01", mfaEnabled: false, investigationsCount: 0,   reportsCount: 5   },
-  { id: "u7", name: "API Integration", email: "api@bis.platform",         role: "api_only",   status: "active",    lastLogin: "2026-03-24T09:01:00Z", lastIp: "10.0.0.1",      createdAt: "2025-01-10", mfaEnabled: false, investigationsCount: 0,   reportsCount: 0   },
-  { id: "u8", name: "Bola Adeleke",    email: "bola.a@bis.platform",      role: "analyst",    status: "suspended", lastLogin: "2026-03-10T11:00:00Z", lastIp: "41.58.22.200",  createdAt: "2025-05-20", mfaEnabled: false, investigationsCount: 83,  reportsCount: 22  },
-  { id: "u9", name: "Yusuf Musa",      email: "yusuf.m@bis.platform",     role: "analyst",    status: "pending",   lastLogin: "—",                    lastIp: "—",             createdAt: "2026-03-20", mfaEnabled: false, investigationsCount: 0,   reportsCount: 0   },
-];
+type UserRole = "admin" | "supervisor" | "analyst" | "auditor" | "readonly";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -53,20 +25,13 @@ const ROLE_CONFIG: Record<UserRole, { label: string; color: string; bg: string }
   admin:     { label: "Admin",      color: "text-red-400",     bg: "bg-red-500/15 border-red-500/30" },
   supervisor:{ label: "Supervisor", color: "text-violet-400",  bg: "bg-violet-500/15 border-violet-500/30" },
   analyst:   { label: "Analyst",    color: "text-primary",     bg: "bg-primary/15 border-primary/30" },
-  viewer:    { label: "Viewer",     color: "text-muted-foreground", bg: "bg-muted border-border" },
-  api_only:  { label: "API Only",   color: "text-amber-400",   bg: "bg-amber-500/15 border-amber-500/30" },
+  auditor:   { label: "Auditor",    color: "text-amber-400",   bg: "bg-amber-500/15 border-amber-500/30" },
+  readonly:  { label: "Read Only",  color: "text-muted-foreground", bg: "bg-muted border-border" },
 };
 
-const STATUS_CONFIG: Record<UserStatus, { label: string; color: string; icon: React.ReactNode }> = {
-  active:    { label: "Active",    color: "text-emerald-500", icon: <CheckCircle2 size={11} /> },
-  inactive:  { label: "Inactive",  color: "text-muted-foreground", icon: <Clock size={11} /> },
-  suspended: { label: "Suspended", color: "text-red-500",     icon: <AlertTriangle size={11} /> },
-  pending:   { label: "Pending",   color: "text-amber-500",   icon: <Clock size={11} /> },
-};
-
-function relTime(iso: string): string {
-  if (iso === "—") return "—";
-  const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+function relTime(date: Date | null | undefined): string {
+  if (!date) return "—";
+  const diff = Math.floor((Date.now() - new Date(date).getTime()) / 1000);
   if (diff < 60)    return `${diff}s ago`;
   if (diff < 3600)  return `${Math.floor(diff / 60)}m ago`;
   if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
@@ -76,16 +41,24 @@ function relTime(iso: string): string {
 // ─── Edit Role Modal ──────────────────────────────────────────────────────────
 
 function EditRoleModal({
-  user, onSave, onClose
-}: { user: BISUser; onSave: (id: string, role: UserRole) => void; onClose: () => void }) {
-  const [role, setRole] = useState<UserRole>(user.role);
+  user,
+  onSave,
+  onClose,
+  isPending,
+}: {
+  user: { id: number; name: string | null; email: string | null; role: string };
+  onSave: (id: number, role: UserRole) => void;
+  onClose: () => void;
+  isPending: boolean;
+}) {
+  const [role, setRole] = useState<UserRole>(user.role as UserRole);
   return (
     <>
       <div className="fixed inset-0 bg-black/50 z-40" onClick={onClose} />
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
         <div className="bg-popover border border-border rounded-xl shadow-2xl w-full max-w-sm p-5">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-sm font-semibold text-foreground">Edit Role — {user.name}</h3>
+            <h3 className="text-sm font-semibold text-foreground">Edit Role — {user.name ?? "User"}</h3>
             <button onClick={onClose}><X size={14} className="text-muted-foreground" /></button>
           </div>
           <p className="text-xs text-muted-foreground mb-4">{user.email}</p>
@@ -107,8 +80,9 @@ function EditRoleModal({
             ))}
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" size="sm" className="flex-1 h-8 text-xs" onClick={onClose}>Cancel</Button>
-            <Button size="sm" className="flex-1 h-8 text-xs" onClick={() => { onSave(user.id, role); onClose(); }}>
+            <Button variant="outline" size="sm" className="flex-1 h-8 text-xs" onClick={onClose} disabled={isPending}>Cancel</Button>
+            <Button size="sm" className="flex-1 h-8 text-xs gap-1" disabled={isPending} onClick={() => onSave(user.id, role)}>
+              {isPending ? <Loader2 size={11} className="animate-spin" /> : null}
               Save Role
             </Button>
           </div>
@@ -122,10 +96,9 @@ function EditRoleModal({
 
 function InviteModal({ onClose }: { onClose: () => void }) {
   const [email, setEmail] = useState("");
-  const [role, setRole] = useState<UserRole>("analyst");
   const handleInvite = () => {
     if (!email.trim()) { toast.error("Enter an email address"); return; }
-    toast.success(`Invitation sent to ${email}`);
+    toast.info(`Invitation link for ${email} — user must sign in via Manus OAuth to be added to the platform.`);
     onClose();
   };
   return (
@@ -137,30 +110,22 @@ function InviteModal({ onClose }: { onClose: () => void }) {
             <h3 className="text-sm font-semibold text-foreground">Invite User</h3>
             <button onClick={onClose}><X size={14} className="text-muted-foreground" /></button>
           </div>
+          <p className="text-xs text-muted-foreground mb-4">
+            Users are added to the platform when they sign in via Manus OAuth for the first time. Share the platform URL with the user and they will appear here after first login.
+          </p>
           <div className="space-y-3 mb-5">
             <div>
-              <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider block mb-1">Email Address</label>
+              <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider block mb-1">Email Address (reference)</label>
               <div className="relative">
                 <Mail size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
                 <Input className="pl-8 h-8 text-sm" placeholder="analyst@bis.platform" value={email} onChange={e => setEmail(e.target.value)} />
               </div>
             </div>
-            <div>
-              <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider block mb-1">Role</label>
-              <Select value={role} onValueChange={v => setRole(v as UserRole)}>
-                <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {(Object.keys(ROLE_CONFIG) as UserRole[]).map(r => (
-                    <SelectItem key={r} value={r}>{ROLE_CONFIG[r].label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
           </div>
           <div className="flex gap-2">
             <Button variant="outline" size="sm" className="flex-1 h-8 text-xs" onClick={onClose}>Cancel</Button>
             <Button size="sm" className="flex-1 h-8 text-xs gap-1" onClick={handleInvite}>
-              <Mail size={11} /> Send Invite
+              <Mail size={11} /> Note Invite
             </Button>
           </div>
         </div>
@@ -172,62 +137,65 @@ function InviteModal({ onClose }: { onClose: () => void }) {
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function UserManagementPage() {
-  const [users, setUsers] = useState<BISUser[]>(SEED_USERS);
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState("all");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [editUser, setEditUser] = useState<BISUser | null>(null);
+  const [editUser, setEditUser] = useState<{ id: number; name: string | null; email: string | null; role: string } | null>(null);
   const [showInvite, setShowInvite] = useState(false);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  const filtered = users.filter(u => {
-    const q = search.toLowerCase();
-    const matchSearch = !q || u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q);
-    const matchRole   = roleFilter   === "all" || u.role   === roleFilter;
-    const matchStatus = statusFilter === "all" || u.status === statusFilter;
-    return matchSearch && matchRole && matchStatus;
+  const utils = trpc.useUtils();
+
+  const { data: allUsers = [], isLoading, refetch } = trpc.users.list.useQuery({
+    search: search || undefined,
+    role: roleFilter !== "all" ? roleFilter : undefined,
+    limit: 200,
   });
 
-  const handleRoleSave = (id: string, role: UserRole) => {
-    setUsers(prev => prev.map(u => u.id === id ? { ...u, role } : u));
-    toast.success("Role updated successfully");
-  };
+  const updateRoleMut = trpc.users.updateRole.useMutation({
+    onSuccess: () => {
+      toast.success("Role updated successfully");
+      utils.users.list.invalidate();
+      setEditUser(null);
+    },
+    onError: (e) => toast.error(e.message),
+  });
 
-  const toggleStatus = (id: string, current: UserStatus) => {
-    const next: UserStatus = current === "active" ? "suspended" : "active";
-    setUsers(prev => prev.map(u => u.id === id ? { ...u, status: next } : u));
-    toast.success(`User ${next === "active" ? "reactivated" : "suspended"}`);
-  };
-
-  const activateUser = (id: string) => {
-    setUsers(prev => prev.map(u => u.id === id ? { ...u, status: "active" } : u));
-    toast.success("User activated — invitation email sent");
-  };
+  const deactivateMut = trpc.users.deactivate.useMutation({
+    onSuccess: () => {
+      toast.success("User deactivated (set to read-only)");
+      utils.users.list.invalidate();
+    },
+    onError: (e) => toast.error(e.message),
+  });
 
   const stats = {
-    total:  users.length,
-    active: users.filter(u => u.status === "active").length,
-    mfa:    users.filter(u => u.mfaEnabled).length,
-    suspended: users.filter(u => u.status === "suspended").length,
+    total:    allUsers.length,
+    admins:   allUsers.filter(u => u.role === "admin").length,
+    analysts: allUsers.filter(u => u.role === "analyst").length,
+    readonly: allUsers.filter(u => u.role === "readonly").length,
   };
 
   return (
     <BISLayout
       title="User Management"
-      subtitle={`${filtered.length} of ${users.length} users`}
+      subtitle={`${allUsers.length} platform users`}
       actions={
-        <Button size="sm" className="h-7 text-xs gap-1.5" onClick={() => setShowInvite(true)}>
-          <Plus size={12} /> Invite User
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" className="h-7 text-xs gap-1.5" onClick={() => refetch()}>
+            <RefreshCw size={11} /> Refresh
+          </Button>
+          <Button size="sm" className="h-7 text-xs gap-1.5" onClick={() => setShowInvite(true)}>
+            <Plus size={12} /> Invite User
+          </Button>
+        </div>
       }
     >
       {/* ── Stats ── */}
       <div className="grid grid-cols-4 gap-3 mb-4">
         {[
-          { label: "Total Users",  value: stats.total,     color: "text-foreground" },
-          { label: "Active",       value: stats.active,    color: "text-emerald-500" },
-          { label: "MFA Enabled",  value: stats.mfa,       color: "text-primary" },
-          { label: "Suspended",    value: stats.suspended, color: "text-red-500" },
+          { label: "Total Users",  value: stats.total,    color: "text-foreground" },
+          { label: "Admins",       value: stats.admins,   color: "text-red-400" },
+          { label: "Analysts",     value: stats.analysts, color: "text-primary" },
+          { label: "Read Only",    value: stats.readonly, color: "text-muted-foreground" },
         ].map(s => (
           <div key={s.label} className="bis-card p-3">
             <p className={cn("text-xl font-bold font-mono", s.color)}>{s.value}</p>
@@ -252,16 +220,6 @@ export default function UserManagementPage() {
             ))}
           </SelectContent>
         </Select>
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="h-8 w-36 text-xs"><SelectValue placeholder="Status" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Status</SelectItem>
-            <SelectItem value="active">Active</SelectItem>
-            <SelectItem value="inactive">Inactive</SelectItem>
-            <SelectItem value="suspended">Suspended</SelectItem>
-            <SelectItem value="pending">Pending</SelectItem>
-          </SelectContent>
-        </Select>
       </div>
 
       {/* ── Table ── */}
@@ -270,118 +228,114 @@ export default function UserManagementPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border">
-                {["User", "Role", "Status", "Last Login", "IP Address", "MFA", "Activity", "Actions"].map(h => (
+                {["User", "Role", "Last Signed In", "Member Since", "Actions"].map(h => (
                   <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider whitespace-nowrap">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {filtered.map(user => {
-                const rc = ROLE_CONFIG[user.role];
-                const sc = STATUS_CONFIG[user.status];
-                return (
-                  <tr key={user.id} className="border-b border-border/50 hover:bg-muted/30 transition-colors">
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2.5">
-                        <div className={cn(
-                          "w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0",
-                          rc.bg, rc.color
-                        )}>
-                          {user.name.split(" ").map(n => n[0]).join("").slice(0, 2)}
-                        </div>
-                        <div>
-                          <div className="text-sm font-medium text-foreground">{user.name}</div>
-                          <div className="text-[10px] text-muted-foreground font-mono">{user.email}</div>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className={cn("text-[10px] font-mono rounded px-2 py-0.5 border", rc.bg, rc.color)}>
-                        {rc.label}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className={cn("flex items-center gap-1 text-xs font-mono", sc.color)}>
-                        {sc.icon}
-                        {sc.label}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="text-xs font-mono text-foreground">{relTime(user.lastLogin)}</div>
-                      <div className="text-[10px] font-mono text-muted-foreground/60">{user.lastLogin === "—" ? "" : new Date(user.lastLogin).toLocaleDateString("en-GB")}</div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="text-xs font-mono text-muted-foreground">{user.lastIp}</span>
-                    </td>
-                    <td className="px-4 py-3">
-                      {user.mfaEnabled
-                        ? <span className="flex items-center gap-1 text-[10px] font-mono text-emerald-500"><Lock size={10} /> Enabled</span>
-                        : <span className="flex items-center gap-1 text-[10px] font-mono text-muted-foreground"><Unlock size={10} /> Disabled</span>}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="text-[10px] font-mono text-muted-foreground">
-                        <span className="text-foreground">{user.investigationsCount}</span> inv ·{" "}
-                        <span className="text-foreground">{user.reportsCount}</span> rep
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => setEditUser(user)}
-                          className="p-1.5 rounded hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
-                          title="Edit role"
-                        >
-                          <Edit2 size={12} />
-                        </button>
-                        {user.status === "pending" ? (
-                          <button
-                            onClick={() => activateUser(user.id)}
-                            className="p-1.5 rounded hover:bg-emerald-500/10 transition-colors text-emerald-500"
-                            title="Activate user"
-                          >
-                            <UserCheck size={12} />
-                          </button>
-                        ) : (
-                          <button
-                            onClick={() => toggleStatus(user.id, user.status)}
-                            className={cn(
-                              "p-1.5 rounded transition-colors",
-                              user.status === "active"
-                                ? "text-muted-foreground hover:bg-red-500/10 hover:text-red-400"
-                                : "text-emerald-400 hover:bg-emerald-500/10"
-                            )}
-                            title={user.status === "active" ? "Suspend user" : "Reactivate user"}
-                          >
-                            {user.status === "active" ? <UserX size={12} /> : <UserCheck size={12} />}
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-              {filtered.length === 0 && (
+              {isLoading ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-12 text-center">
+                  <td colSpan={5} className="px-4 py-12 text-center">
                     <div className="flex flex-col items-center gap-2 text-muted-foreground">
-                      <Users size={24} className="opacity-30" />
-                      <p className="text-sm">No users match your filters.</p>
+                      <Loader2 size={20} className="animate-spin opacity-50" />
+                      <p className="text-xs">Loading users…</p>
                     </div>
                   </td>
                 </tr>
+              ) : allUsers.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="px-4 py-12 text-center">
+                    <div className="flex flex-col items-center gap-2 text-muted-foreground">
+                      <Users size={24} className="opacity-30" />
+                      <p className="text-sm">No users found. Users appear here after their first login.</p>
+                    </div>
+                  </td>
+                </tr>
+              ) : (
+                allUsers.map(user => {
+                  const role = (user.role ?? "readonly") as UserRole;
+                  const rc = ROLE_CONFIG[role] ?? ROLE_CONFIG.readonly;
+                  return (
+                    <tr key={user.id} className="border-b border-border/50 hover:bg-muted/30 transition-colors">
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2.5">
+                          <div className={cn(
+                            "w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0",
+                            rc.bg, rc.color
+                          )}>
+                            {(user.name ?? user.email ?? "?").split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase()}
+                          </div>
+                          <div>
+                            <div className="text-sm font-medium text-foreground">{user.name ?? "—"}</div>
+                            <div className="text-[10px] text-muted-foreground font-mono">{user.email ?? "—"}</div>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={cn("text-[10px] font-mono rounded px-2 py-0.5 border", rc.bg, rc.color)}>
+                          {rc.label}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="text-xs font-mono text-foreground">{relTime(user.lastSignedIn)}</div>
+                        {user.lastSignedIn && (
+                          <div className="text-[10px] font-mono text-muted-foreground/60">
+                            {new Date(user.lastSignedIn).toLocaleDateString("en-GB")}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="text-xs font-mono text-muted-foreground">
+                          {user.createdAt ? new Date(user.createdAt).toLocaleDateString("en-GB") : "—"}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => setEditUser(user)}
+                            className="p-1.5 rounded hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
+                            title="Edit role"
+                          >
+                            <Edit2 size={12} />
+                          </button>
+                          {role === "admin" || role === "analyst" || role === "supervisor" || role === "auditor" ? (
+                            <button
+                              onClick={() => deactivateMut.mutate({ id: user.id })}
+                              disabled={deactivateMut.isPending}
+                              className="p-1.5 rounded hover:bg-red-500/10 transition-colors text-muted-foreground hover:text-red-400"
+                              title="Deactivate user (set read-only)"
+                            >
+                              <UserX size={12} />
+                            </button>
+                          ) : (
+                            <span className="p-1.5 text-muted-foreground/40" title="Already read-only">
+                              <Lock size={12} />
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
         </div>
         <div className="px-4 py-2.5 border-t border-border/50">
           <span className="text-[10px] font-mono text-muted-foreground">
-            {filtered.length} of {users.length} users · Role changes are logged to the Audit Log
+            {allUsers.length} users · Role changes are logged to the Audit Log
           </span>
         </div>
       </div>
 
       {editUser && (
-        <EditRoleModal user={editUser} onSave={handleRoleSave} onClose={() => setEditUser(null)} />
+        <EditRoleModal
+          user={editUser}
+          onSave={(id, role) => updateRoleMut.mutate({ id, role })}
+          onClose={() => setEditUser(null)}
+          isPending={updateRoleMut.isPending}
+        />
       )}
       {showInvite && <InviteModal onClose={() => setShowInvite(false)} />}
     </BISLayout>

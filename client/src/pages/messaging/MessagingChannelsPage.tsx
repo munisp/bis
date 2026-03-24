@@ -86,52 +86,6 @@ const STATUS_CONFIG: Record<ReportStatus, { label: string; color: string; icon: 
 
 // ─── Seed Data ────────────────────────────────────────────────────────────────
 
-const SEED_REPORTS: IncomingReport[] = [
-  {
-    id: 'rpt_001', channel: 'whatsapp', sender: '+2348012345678',
-    content: 'I want to report a man called Emeka Okafor in Alaba International Market. He has been collecting money from traders promising to help them get NAFDAC registration but disappearing after collecting. He has collected from at least 10 people.',
-    receivedAt: new Date(Date.now() - 5 * 60000).toISOString(),
-    status: 'new', riskScore: 78, language: 'en', attachments: 2,
-  },
-  {
-    id: 'rpt_002', channel: 'ussd', sender: '+2347098765432',
-    content: 'USSD Report: Suspect=Bola Tinubu-Adeola, Location=Ikeja Lagos, Crime=Land fraud, Amount=2500000 NGN',
-    receivedAt: new Date(Date.now() - 18 * 60000).toISOString(),
-    status: 'processing', riskScore: 65, language: 'en', attachments: 0, linkedSubject: 'BIS-2026-0039',
-  },
-  {
-    id: 'rpt_003', channel: 'sms', sender: '+2348055443322',
-    content: 'Oga dis person wey I dey report na Fatima Abubakar for Kano. She dey use fake BVN to open account collect loan run away. Her phone number na 08033221144',
-    receivedAt: new Date(Date.now() - 45 * 60000).toISOString(),
-    status: 'verified', riskScore: 82, language: 'pidgin', attachments: 0,
-  },
-  {
-    id: 'rpt_004', channel: 'telegram', sender: '@anonymous_reporter_ng',
-    content: 'Sharing evidence of a Ponzi scheme operating through a WhatsApp group called "Guaranteed Returns NG". Admin is known as "Alhaji Profits". Screenshots attached.',
-    receivedAt: new Date(Date.now() - 2 * 3600000).toISOString(),
-    status: 'new', riskScore: 91, language: 'en', attachments: 5,
-  },
-  {
-    id: 'rpt_005', channel: 'sms', sender: '+2348099887766',
-    content: 'Report: Chioma Obi, Enugu State. She collects school fees from parents claiming to be a school proprietress but no school exists. Over 30 families affected.',
-    receivedAt: new Date(Date.now() - 3 * 3600000).toISOString(),
-    status: 'verified', riskScore: 74, language: 'en', attachments: 0,
-  },
-  {
-    id: 'rpt_006', channel: 'whatsapp', sender: '+2348023456789',
-    content: 'Alhaji Musa Danladi for Abuja dey collect money for visa processing. E don collect from 20+ people. None of them get visa. E dey use fake embassy letter.',
-    receivedAt: new Date(Date.now() - 5 * 3600000).toISOString(),
-    status: 'processing', riskScore: 88, language: 'pidgin', attachments: 3,
-  },
-];
-
-const SEED_STATS: ChannelStats[] = [
-  { channel: 'whatsapp', totalReports: 1247, todayReports: 23, verifiedReports: 891, activeUsers: 342, isOnline: true },
-  { channel: 'telegram', totalReports: 543, todayReports: 11, verifiedReports: 412, activeUsers: 156, isOnline: true },
-  { channel: 'ussd', totalReports: 2891, todayReports: 67, verifiedReports: 1943, activeUsers: 0, isOnline: true },
-  { channel: 'sms', totalReports: 4102, todayReports: 89, verifiedReports: 2876, activeUsers: 0, isOnline: true },
-];
-
 // ─── Live report generator pool ──────────────────────────────────────────────
 
 const LIVE_POOL: Omit<IncomingReport, 'id' | 'receivedAt' | 'status' | 'isNew'>[] = [
@@ -149,8 +103,8 @@ let liveIdx = 0;
 
 function MessagingChannelsPageInner() {
   const [activeTab, setActiveTab] = useState<'overview' | 'reports' | 'config' | 'ussd_flow'>('overview');
-  const [reports, setReports] = useState<IncomingReport[]>(SEED_REPORTS);
-  const [stats, setStats] = useState<ChannelStats[]>(SEED_STATS);
+  const [reports, setReports] = useState<IncomingReport[]>([]);
+  const [stats, setStats] = useState<ChannelStats[]>([]);
   const [selectedReport, setSelectedReport] = useState<IncomingReport | null>(null);
   const [filterChannel, setFilterChannel] = useState<Channel | 'all'>('all');
   const [filterStatus, setFilterStatus] = useState<ReportStatus | 'all'>('all');

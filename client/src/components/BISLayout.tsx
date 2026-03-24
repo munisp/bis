@@ -1,7 +1,7 @@
-// BISLayout — Persistent sidebar + header with notification bell slide-over
+// BISLayout.tsx — Global shell for BIS Platform
 // Design: Forensic Intelligence Dark theme, JetBrains Mono typography
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link, useLocation } from 'wouter';
 import {
   LayoutDashboard, Search, FileText, Fingerprint, ShieldCheck,
@@ -15,6 +15,8 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useLocation as useWouterLocation } from 'wouter';
 import { useTheme } from '@/contexts/ThemeContext';
+import { trpc } from '@/lib/trpc';
+import { useAuth } from '@/_core/hooks/useAuth';
 
 // ─── Nav config ───────────────────────────────────────────────────────────────
 
@@ -32,15 +34,16 @@ interface NavGroup {
   defaultOpen?: boolean;
 }
 
-const navGroups: NavGroup[] = [
+// Static nav structure — badges are injected dynamically below
+const BASE_NAV_GROUPS: NavGroup[] = [
   {
     label: 'INTELLIGENCE',
     defaultOpen: true,
     items: [
       { label: 'Dashboard', href: '/', icon: <LayoutDashboard size={15} /> },
-      { label: 'Investigations', href: '/investigations', icon: <Search size={15} />, badge: 143 },
+      { label: 'Investigations', href: '/investigations', icon: <Search size={15} /> },
       { label: 'Reports', href: '/reports', icon: <FileText size={15} /> },
-      { label: 'Alerts', href: '/alerts', icon: <AlertTriangle size={15} />, badge: 5, badgeVariant: 'destructive' },
+      { label: 'Alerts', href: '/alerts', icon: <AlertTriangle size={15} />, badgeVariant: 'destructive' },
     ],
   },
   {
@@ -66,7 +69,7 @@ const navGroups: NavGroup[] = [
     label: 'MONITORING',
     defaultOpen: true,
     items: [
-      { label: 'Continuous Monitoring', href: '/continuous-monitoring', icon: <Activity size={15} />, badge: 47, badgeVariant: 'destructive' },
+      { label: 'Continuous Monitoring', href: '/continuous-monitoring', icon: <Activity size={15} />, badgeVariant: 'destructive' },
       { label: 'Social Intelligence', href: '/social-monitoring', icon: <Globe size={15} /> },
       { label: 'Messaging Channels', href: '/messaging-channels', icon: <MessageSquare size={15} /> },
     ],
@@ -93,7 +96,7 @@ const navGroups: NavGroup[] = [
   },
 ];
 
-// ─── Notification data ────────────────────────────────────────────────────────
+// ─── Notification type ────────────────────────────────────────────────────────
 
 type NotifSeverity = 'critical' | 'high' | 'medium' | 'low';
 
@@ -107,25 +110,19 @@ interface Notification {
   read: boolean;
 }
 
-const SEED_NOTIFICATIONS: Notification[] = [
-  { id: 'n1', severity: 'critical', title: 'OFAC SDN Match — BIS-2026-0004', body: 'Emeka Nwosu appears on OFAC Specially Designated Nationals list at 94% confidence.', time: '11:02', ref: 'BIS-2026-0004', read: false },
-  { id: 'n2', severity: 'high', title: 'PEP Classification — BIS-2026-0007', body: 'Fatima Al-Hassan has been classified as a Politically Exposed Person (ward-level official).', time: '10:51', ref: 'BIS-2026-0007', read: false },
-  { id: 'n3', severity: 'high', title: 'Adverse Media — BIS-2026-0002', body: 'Zenith Logistics Ltd director mentioned in Punch investigative report on procurement fraud.', time: '10:47', ref: 'BIS-2026-0002', read: false },
-  { id: 'n4', severity: 'medium', title: 'Document Anomaly — BIS-2026-0011', body: 'Passport scan for Ibrahim Musa shows tampering score of 78.4%. Manual review required.', time: '10:30', ref: 'BIS-2026-0011', read: false },
-  { id: 'n5', severity: 'medium', title: 'Incoming Report — Fraud Allegation', body: 'WhatsApp report: Land fraud suspect in Ikeja, Lagos. ₦5M collected from 3 victims.', time: '10:15', ref: undefined, read: false },
-  { id: 'n6', severity: 'high', title: 'INTERPOL Red Notice Match', body: 'New INTERPOL Red Notice match detected for subject in BIS-2026-0011. Cross-border alert issued.', time: '09:58', ref: 'BIS-2026-0011', read: true },
-  { id: 'n7', severity: 'low', title: 'Field Task Completed — FA-NG-0142', body: 'Address verification for Emeka Okafor completed by Adebayo Ogundimu. GPS-signed proof attached.', time: '09:30', ref: 'BIS-2026-0004', read: true },
-  { id: 'n8', severity: 'medium', title: 'Credit Score Decline — BIS-2026-0009', body: 'Subject\'s CRC credit score dropped from 612 to 512 in the last 30 days. 2 new delinquencies.', time: '09:00', ref: 'BIS-2026-0009', read: true },
-  { id: 'n9', severity: 'low', title: 'KYC Batch Completed', body: '134 KYC verifications completed today. Pass rate: 94.2%. 8 manual reviews pending.', time: '08:30', ref: undefined, read: true },
-  { id: 'n10', severity: 'critical', title: 'Sanctions List Updated', body: 'OFAC SDN list updated with 23 new entries. Automated re-screening of active subjects in progress.', time: '08:00', ref: undefined, read: true },
-];
-
 const SEVERITY_CONFIG: Record<NotifSeverity, { color: string; bg: string; dot: string }> = {
   critical: { color: 'text-red-400',     bg: 'bg-red-500/10 border-red-500/30',     dot: 'bg-red-400' },
   high:     { color: 'text-orange-400',  bg: 'bg-orange-500/10 border-orange-500/30', dot: 'bg-orange-400' },
   medium:   { color: 'text-amber-400',   bg: 'bg-amber-500/10 border-amber-500/30',  dot: 'bg-amber-400' },
   low:      { color: 'text-emerald-400', bg: 'bg-emerald-500/10 border-emerald-500/30', dot: 'bg-emerald-400' },
 };
+
+function alertSeverityToNotif(severity: string): NotifSeverity {
+  if (severity === 'critical') return 'critical';
+  if (severity === 'high') return 'high';
+  if (severity === 'medium') return 'medium';
+  return 'low';
+}
 
 // ─── NavGroup sub-component ───────────────────────────────────────────────────
 
@@ -148,7 +145,7 @@ function NavGroupItem({ group, currentPath }: { group: NavGroup; currentPath: st
               <div className={cn('nav-item', currentPath === item.href && 'active')}>
                 <span className="text-sidebar-foreground/50 group-hover:text-sidebar-foreground">{item.icon}</span>
                 <span className="flex-1 text-sm">{item.label}</span>
-                {item.badge !== undefined && (
+                {item.badge !== undefined && item.badge !== 0 && (
                   <Badge
                     variant={item.badgeVariant ?? 'secondary'}
                     className="text-[10px] h-4 px-1.5 font-mono"
@@ -185,10 +182,7 @@ function NotificationPanel({
   return (
     <>
       {/* Backdrop */}
-      <div
-        className="fixed inset-0 z-40"
-        onClick={onClose}
-      />
+      <div className="fixed inset-0 z-40" onClick={onClose} />
       {/* Panel */}
       <div className="fixed right-3 top-14 w-96 z-50 bg-popover border border-border rounded-xl shadow-2xl flex flex-col max-h-[calc(100vh-5rem)] overflow-hidden">
         {/* Header */}
@@ -219,6 +213,12 @@ function NotificationPanel({
 
         {/* Notification list */}
         <div className="overflow-y-auto flex-1">
+          {notifications.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+              <Bell size={24} className="mb-2 opacity-30" />
+              <p className="text-xs font-mono">No notifications</p>
+            </div>
+          )}
           {notifications.map(notif => {
             const cfg = SEVERITY_CONFIG[notif.severity];
             return (
@@ -230,11 +230,9 @@ function NotificationPanel({
                 )}
               >
                 <div className="flex items-start gap-3">
-                  {/* Severity dot */}
                   <div className="mt-1.5 flex-shrink-0">
                     <span className={cn("w-2 h-2 rounded-full block", cfg.dot, !notif.read && "animate-pulse")} />
                   </div>
-
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-0.5">
                       <span className={cn("text-[9px] font-mono font-bold uppercase rounded px-1 py-0.5 border", cfg.bg, cfg.color)}>
@@ -244,15 +242,10 @@ function NotificationPanel({
                     </div>
                     <p className="text-xs font-mono font-semibold text-foreground leading-tight">{notif.title}</p>
                     <p className="text-[11px] text-muted-foreground mt-0.5 leading-snug line-clamp-2">{notif.body}</p>
-
-                    {/* Actions */}
                     <div className="flex items-center gap-2 mt-1.5">
                       {notif.ref && (
                         <button
-                          onClick={() => {
-                            onNavigate('/investigations');
-                            onClose();
-                          }}
+                          onClick={() => { onNavigate('/investigations'); onClose(); }}
                           className="flex items-center gap-1 text-[10px] font-mono text-primary hover:text-primary/80 transition-colors"
                         >
                           <ArrowRight size={9} /> View {notif.ref}
@@ -302,18 +295,79 @@ export default function BISLayout({ children, title, subtitle, actions }: BISLay
   const [, navigate] = useWouterLocation();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [bellOpen, setBellOpen] = useState(false);
-  const [notifications, setNotifications] = useState<Notification[]>(SEED_NOTIFICATIONS);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
   const { theme, toggleTheme } = useTheme();
+  const { user } = useAuth();
 
-  const unreadCount = notifications.filter(n => !n.read).length;
+  // ── Live dashboard stats for nav badges ──────────────────────────────────
+  const { data: stats } = trpc.dashboard.stats.useQuery(undefined, {
+    refetchInterval: 30_000,
+    staleTime: 15_000,
+  });
+
+  // ── Live unread alerts for notification panel ─────────────────────────────
+  const { data: alertsData } = trpc.alerts.list.useQuery(
+    { unreadOnly: true, limit: 20 },
+    { refetchInterval: 30_000, staleTime: 15_000 }
+  );
+
+  // Sync live alerts into notification state
+  useEffect(() => {
+    if (!alertsData) return;
+    setNotifications(
+      alertsData.map((a: any) => ({
+        id: String(a.id),
+        severity: alertSeverityToNotif(a.severity),
+        title: a.title,
+        body: a.body ?? '',
+        time: new Date(a.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        ref: a.investigationRef ?? undefined,
+        read: !!a.acknowledged,
+      }))
+    );
+  }, [alertsData]);
+
+  // ── Mark alert read via tRPC ──────────────────────────────────────────────
+  const utils = trpc.useUtils();
+  const markReadMutation = trpc.alerts.acknowledge.useMutation({
+    onSuccess: () => utils.alerts.list.invalidate(),
+  });
 
   const markRead = (id: string) => {
     setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+    markReadMutation.mutate({ id: parseInt(id, 10) });
   };
 
   const markAllRead = () => {
     setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+    notifications
+      .filter(n => !n.read)
+      .forEach(n => markReadMutation.mutate({ id: parseInt(n.id, 10) }));
   };
+
+  // ── Build nav groups with live badges ────────────────────────────────────
+  const navGroups: NavGroup[] = BASE_NAV_GROUPS.map(group => ({
+    ...group,
+    items: group.items.map(item => {
+      if (item.href === '/investigations' && stats?.activeInvestigations) {
+        return { ...item, badge: stats.activeInvestigations };
+      }
+      if (item.href === '/alerts' && stats?.alertsToday) {
+        return { ...item, badge: stats.alertsToday };
+      }
+      if (item.href === '/continuous-monitoring' && stats?.activeMonitors) {
+        return { ...item, badge: stats.activeMonitors };
+      }
+      return item;
+    }),
+  }));
+
+  const unreadCount = notifications.filter(n => !n.read).length;
+
+  // ── User identity ─────────────────────────────────────────────────────────
+  const displayName = user?.name ?? 'Operator';
+  const displayEmail = user?.openId ? `${user.openId.slice(0, 8)}…` : 'bis.platform';
+  const initials = displayName.split(' ').map((w: string) => w[0]).join('').slice(0, 2).toUpperCase();
 
   return (
     <div className="flex h-screen bg-background overflow-hidden">
@@ -343,15 +397,15 @@ export default function BISLayout({ children, title, subtitle, actions }: BISLay
           ))}
         </nav>
 
-        {/* Footer */}
+        {/* Footer — live user identity */}
         <div className="border-t border-sidebar-border p-3">
           <div className="flex items-center gap-2 px-2 py-2 rounded-md hover:bg-sidebar-accent transition-colors cursor-pointer">
             <div className="w-7 h-7 rounded-full bg-primary/20 border border-primary/30 flex items-center justify-center">
-              <span className="text-[10px] font-bold text-primary">OP</span>
+              <span className="text-[10px] font-bold text-primary">{initials}</span>
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs font-medium text-sidebar-foreground truncate">Operator Admin</div>
-              <div className="text-[10px] text-sidebar-foreground/40 font-mono truncate">admin@bis.platform</div>
+              <div className="text-xs font-medium text-sidebar-foreground truncate">{displayName}</div>
+              <div className="text-[10px] text-sidebar-foreground/40 font-mono truncate">{displayEmail}</div>
             </div>
             <LogOut size={12} className="text-sidebar-foreground/40 hover:text-sidebar-foreground" />
           </div>

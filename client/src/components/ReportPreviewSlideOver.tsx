@@ -134,7 +134,7 @@ function getMockPreviewContent(report: Report) {
   return {
     headline: 'Export Summary',
     fields: [
-      { label: 'Records',      value: `${mockInvestigations.length} investigations` },
+      { label: 'Records',      value: `All investigations in selected date range` },
       { label: 'Date Range',   value: 'Jan 2026 – Mar 2026' },
       { label: 'Format',       value: report.format.toUpperCase() },
       { label: 'File Size',    value: report.size },
@@ -143,9 +143,6 @@ function getMockPreviewContent(report: Report) {
     note: 'Raw export — no PII masking applied. Handle in accordance with data protection policy.',
   };
 }
-
-// ─── Dummy import for mockInvestigations length ───────────────────────────────
-import { mockInvestigations } from '@/lib/mockData';
 
 // ─── Component ────────────────────────────────────────────────────────────────
 

@@ -81,3 +81,51 @@
 - [x] Replace mockInvestigations array in Investigations.tsx with live tRPC data (mock fallback retained)
 - [x] GRAFANA_WEBHOOK_SECRET env var — dev default (bis-grafana-webhook-dev) used; configurable via secrets
 - [x] /api/webhooks/grafana-alert bearer check reads GRAFANA_WEBHOOK_SECRET from env (already implemented)
+
+## Phase 8 — Full Production Pass (No Mocks)
+
+### Schema
+- [x] Added reports, alerts, kyc_records, field_tasks, field_agents, data_sources, monitors, screening_requests tables
+- [x] Added tenants, api_keys, webhooks tables
+- [x] Extended userRoleEnum with auditor and readonly
+- [x] Switched to PostgreSQL (drizzle pg-core, drizzle.config postgresql dialect)
+- [x] Local PostgreSQL: bis_db / bis_user — all 14 tables created
+
+### Server Procedures
+- [x] dashboard.stats procedure (real DB aggregates: investigations, alerts, kyc, field tasks, risk scores)
+- [x] reports CRUD procedures (list, create)
+- [x] alerts CRUD procedures (list, markRead)
+- [x] kyc CRUD procedures (list, get, create, update)
+- [x] fieldTasks CRUD procedures (list, create, update)
+- [x] fieldAgents CRUD procedures (list, get, create, update)
+- [x] dataSources CRUD + seed procedures (seed upserts 25 Nigerian data sources)
+- [x] monitors CRUD procedures (list, create, update)
+- [x] screeningRequests CRUD procedures (list, create, update)
+- [x] tenantsRouter: tenants list/create/suspend/reactivate + apiKeys + webhooks CRUD
+- [x] usersRouter extended: updateRole, deactivate, reactivate
+- [x] investigations.create wired to real DB with Permify seeding
+- [x] billing.getLedger procedure (reads audit_log billing entries)
+
+### Frontend
+- [x] Dashboard KPIs from trpc.dashboard.stats
+- [x] Dashboard recent investigations from trpc.investigations.list
+- [x] Dashboard alerts from trpc.alerts.list
+- [x] NewInvestigationSlideOver uses real trpc.investigations.create mutation
+- [x] Reports page wired to trpc.reports.*
+- [x] Alerts page wired to trpc.alerts.*
+- [x] AuditLogPage wired to trpc.audit.list
+- [x] FieldAgentsPage wired to trpc.fieldAgents.* + trpc.fieldTasks.create
+- [x] ContinuousMonitoringPage wired to trpc.monitors.* + trpc.alerts.list
+- [x] DataSourcesPage wired to trpc.dataSources.seed + trpc.dataSources.list
+- [x] BillingPage MOCK_TRANSACTIONS replaced with trpc.billing.getLedger
+- [x] BISLayout nav badges from trpc.dashboard.stats, notifications from trpc.alerts.list
+- [x] Tenants.tsx fully wired to tenantsRouter
+- [x] UserManagementPage wired to trpc.users.list + updateRole + deactivate
+- [x] InvestigationDetail — removed MOCK_EVIDENCE, live trpc.investigations.get + trpc.audit.list
+- [x] Investigations.tsx — removed mockInvestigations fallback, live only
+- [x] SocialMonitoringDashboard — removed SEED_MENTIONS dead code
+- [x] MessagingChannelsPage — removed SEED_REPORTS/SEED_STATS dead code
+- [x] Extracted utility functions from mockData.ts → client/src/lib/bisUtils.ts
+- [x] Zero mockData imports remaining across entire client/src tree
+- [x] TypeScript: 0 errors
+- [x] Tests: 15/15 passing

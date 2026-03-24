@@ -17,11 +17,12 @@ import {
   LineChart, Line, AreaChart, Area, Legend, ReferenceLine
 } from "recharts";
 import BISLayout from "@/components/BISLayout";
-import {
-  mockInvestigations, mockAlerts, mockAgents, mockDataSources,
-  dashboardStats, getRiskColor, getStatusBadgeClass, formatDateTime,
-  type RiskLevel
-} from "@/lib/mockData";
+import { trpc } from "@/lib/trpc";
+
+function formatDateTime(d: Date | string | null | undefined): string {
+  if (!d) return "—";
+  return new Date(d).toLocaleString();
+}
 
 // ─── Mini stat card ────────────────────────────────────────────────────────
 function StatCard({
@@ -162,13 +163,24 @@ export default function Dashboard() {
     return () => { if (tickerRef.current) clearInterval(tickerRef.current); };
   }, []);
 
+  const utils = trpc.useUtils();
+  const { data: stats, isLoading: statsLoading } = trpc.dashboard.stats.useQuery();
+  const { data: recentInvData } = trpc.investigations.list.useQuery({ limit: 6, offset: 0 });
+  const { data: alertsData } = trpc.alerts.list.useQuery({ limit: 4 });
+  const { data: dataSourcesData } = trpc.dataSources.list.useQuery();
+
+  const recentInvestigations = recentInvData?.items ?? [];
+  const criticalAlerts = (alertsData ?? []).filter((a: any) => a.severity === "critical" || a.severity === "high").slice(0, 4);
+  const liveDataSources = dataSourcesData ?? [];
+
   const handleRefresh = () => {
     setRefreshing(true);
+    utils.dashboard.stats.invalidate();
+    utils.investigations.list.invalidate();
+    utils.alerts.list.invalidate();
+    utils.dataSources.list.invalidate();
     setTimeout(() => setRefreshing(false), 1200);
   };
-
-  const recentInvestigations = mockInvestigations.slice(0, 6);
-  const criticalAlerts = mockAlerts.filter(a => a.severity === "critical" || a.severity === "high").slice(0, 4);
 
   return (
     <BISLayout
@@ -221,14 +233,14 @@ export default function Dashboard() {
 
       {/* ── Top Stats ── */}
       <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3 mb-6">
-        <StatCard label="Total Investigations" value={dashboardStats.totalInvestigations.toLocaleString()} icon={<Search size={14} />} trend={12} color="blue" />
-        <StatCard label="Active Now" value={dashboardStats.activeInvestigations} sub="in progress" icon={<Activity size={14} />} color="amber" />
-        <StatCard label="Completed Today" value={dashboardStats.completedToday} icon={<CheckCircle size={14} />} trend={8} color="green" />
-        <StatCard label="Critical Flags" value={dashboardStats.flaggedCritical} sub="need review" icon={<Flag size={14} />} color="red" />
-        <StatCard label="Biometric IDs" value={dashboardStats.biometricEnrollments.toLocaleString()} icon={<Fingerprint size={14} />} trend={5} color="blue" />
-        <StatCard label="Duplicates Caught" value={dashboardStats.duplicatesDetected} icon={<Shield size={14} />} color="amber" />
-        <StatCard label="KYC Today" value={dashboardStats.kycVerificationsToday} sub={`${dashboardStats.kycPassRate}% pass`} icon={<CheckCircle size={14} />} color="green" />
-        <StatCard label="Active Monitors" value={dashboardStats.activeMonitors.toLocaleString()} sub={`${dashboardStats.alertsToday} alerts`} icon={<Eye size={14} />} color="blue" />
+        <StatCard label="Total Investigations" value={(stats?.totalInvestigations ?? 0).toLocaleString()} icon={<Search size={14} />} trend={12} color="blue" />
+        <StatCard label="Active Now" value={stats?.activeInvestigations ?? 0} sub="in progress" icon={<Activity size={14} />} color="amber" />
+        <StatCard label="Completed Today" value={stats?.completedToday ?? 0} icon={<CheckCircle size={14} />} trend={8} color="green" />
+        <StatCard label="Critical Flags" value={stats?.flaggedCritical ?? 0} sub="need review" icon={<Flag size={14} />} color="red" />
+        <StatCard label="Biometric IDs" value={(stats?.biometricEnrollments ?? 0).toLocaleString()} icon={<Fingerprint size={14} />} trend={5} color="blue" />
+        <StatCard label="Duplicates Caught" value={stats?.duplicatesDetected ?? 0} icon={<Shield size={14} />} color="amber" />
+        <StatCard label="KYC Today" value={stats?.kycVerificationsToday ?? 0} sub={`${stats?.kycPassRate ?? 0}% pass`} icon={<CheckCircle size={14} />} color="green" />
+        <StatCard label="Active Monitors" value={(stats?.activeMonitors ?? 0).toLocaleString()} sub={`${stats?.alertsToday ?? 0} alerts`} icon={<Eye size={14} />} color="blue" />
       </div>
 
       {/* ── Main Grid ── */}
@@ -342,11 +354,11 @@ export default function Dashboard() {
           <div className="mt-4 pt-3 border-t border-border">
             <div className="flex justify-between text-xs">
               <span className="text-muted-foreground">Avg Processing Time</span>
-              <span className="font-mono text-foreground">{dashboardStats.avgProcessingTimeMin} min</span>
+              <span className="font-mono text-foreground">{stats?.avgProcessingTimeMin ?? "—"} min</span>
             </div>
             <div className="flex justify-between text-xs mt-1">
               <span className="text-muted-foreground">Avg Risk Score</span>
-              <span className="font-mono text-amber-400">{dashboardStats.avgRiskScore}</span>
+              <span className="font-mono text-amber-400">{stats?.avgRiskScore ?? "—"}</span>
             </div>
           </div>
         </div>
@@ -374,7 +386,7 @@ export default function Dashboard() {
               </tr>
             </thead>
             <tbody>
-              {recentInvestigations.map(inv => (
+              {recentInvestigations.map((inv: any) => (
                 <tr key={inv.id} className="cursor-pointer" onClick={() => navigate(`/investigations/${inv.id}`)}>
                   <td className="font-mono text-xs text-primary">{inv.ref}</td>
                   <td>
@@ -413,8 +425,8 @@ export default function Dashboard() {
                 <div key={alert.id} className="px-4 py-2.5 hover:bg-accent/30 transition-colors cursor-pointer">
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex-1 min-w-0">
-                      <div className="text-xs font-medium text-foreground truncate">{alert.subjectName}</div>
-                      <div className="text-xs text-muted-foreground truncate">{alert.summary.substring(0, 60)}…</div>
+                      <div className="text-xs font-medium text-foreground truncate">{(alert as any).subjectName ?? (alert as any).title ?? "Alert"}</div>
+                      <div className="text-xs text-muted-foreground truncate">{((alert as any).summary ?? (alert as any).message ?? "").substring(0, 60)}…</div>
                     </div>
                     <span className={`risk-${alert.severity} shrink-0`}>{alert.severity}</span>
                   </div>
@@ -435,15 +447,18 @@ export default function Dashboard() {
               </Button>
             </div>
             <div className="px-4 py-3 space-y-2">
-              {mockDataSources.slice(0, 5).map(ds => (
+              {liveDataSources.slice(0, 5).map((ds: any) => (
                 <div key={ds.id} className="flex items-center justify-between text-xs">
                   <div className="flex items-center gap-2">
-                    <span className={`w-1.5 h-1.5 rounded-full ${ds.status === "connected" ? "bg-emerald-400" : ds.status === "degraded" ? "bg-amber-400" : "bg-red-400"}`} />
+                    <span className={`w-1.5 h-1.5 rounded-full ${ds.status === "active" ? "bg-emerald-400" : ds.status === "degraded" ? "bg-amber-400" : "bg-red-400"}`} />
                     <span className="text-foreground/80 truncate max-w-[120px]">{ds.name}</span>
                   </div>
-                  <span className="font-mono text-muted-foreground">{ds.avgResponseMs > 0 ? `${ds.avgResponseMs}ms` : "—"}</span>
+                  <span className="font-mono text-muted-foreground">{ds.avgResponseMs ? `${ds.avgResponseMs}ms` : "—"}</span>
                 </div>
               ))}
+              {liveDataSources.length === 0 && (
+                <div className="text-xs text-muted-foreground text-center py-2">No data sources configured</div>
+              )}
             </div>
           </div>
         </div>
