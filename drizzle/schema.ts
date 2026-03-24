@@ -407,3 +407,44 @@ export const onboardingApplications = pgTable("onboarding_applications", {
 });
 export type OnboardingApplication = typeof onboardingApplications.$inferSelect;
 export type InsertOnboardingApplication = typeof onboardingApplications.$inferInsert;
+
+// ─── Alert Rules ──────────────────────────────────────────────────────────────
+
+export const alertRuleMetricEnum = pgEnum("alert_rule_metric", [
+  "risk_score",
+  "sanctions_confidence",
+  "pep_confidence",
+  "adverse_media_count",
+  "duplicate_identity_score",
+  "velocity_hourly",
+  "velocity_daily",
+  "credit_score",
+]);
+
+export const alertRuleOperatorEnum = pgEnum("alert_rule_operator", [
+  "gt",
+  "gte",
+  "lt",
+  "lte",
+  "eq",
+  "neq",
+]);
+
+export const alertRules = pgTable("alert_rules", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(),
+  description: text("description"),
+  metric: alertRuleMetricEnum("metric").notNull(),
+  operator: alertRuleOperatorEnum("operator").notNull().default("gte"),
+  threshold: real("threshold").notNull(),
+  severity: severityEnum("severity").notNull().default("high"),
+  enabled: boolean("enabled").notNull().default(true),
+  autoEscalate: boolean("autoEscalate").notNull().default(false),
+  notifyOwner: boolean("notifyOwner").notNull().default(true),
+  createdBy: varchar("createdBy", { length: 255 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+
+export type AlertRule = typeof alertRules.$inferSelect;
+export type InsertAlertRule = typeof alertRules.$inferInsert;

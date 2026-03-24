@@ -23,6 +23,7 @@ import {
   users,
   platformSettings,
   onboardingApplications,
+  alertRules,
 } from "../drizzle/schema";
 import {
   getDashboardStats,
@@ -467,6 +468,44 @@ const alertsRouter = router({
     await db.update(alerts).set({ read: true });
     return { success: true };
   }),
+
+  escalate: protectedProcedure
+    .input(z.object({
+      id: z.number(),
+      agentId: z.string(),
+      agentName: z.string(),
+      instructions: z.string().optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      // Mark alert as acknowledged
+      await db.update(alerts)
+        .set({ acknowledged: true, acknowledgedBy: ctx.user!.id, acknowledgedAt: new Date(), read: true })
+        .where(eq(alerts.id, input.id));
+      // Fetch the alert to build task details
+      const [alert] = await db.select().from(alerts).where(eq(alerts.id, input.id)).limit(1);
+      // Dispatch a critical field task for the agent
+      const taskRef = `ESCL-${Date.now().toString(36).toUpperCase()}`;
+      await db.insert(fieldTasks).values({
+        taskRef,
+        agentId: input.agentId,
+        agentName: input.agentName,
+        taskType: "surveillance" as any,
+        priority: "critical" as any,
+        status: "dispatched" as any,
+        subjectName: alert?.subjectRef ?? `Alert #${input.id}`,
+        instructions: input.instructions ?? `ESCALATED: ${alert?.body ?? ''}`,
+        createdBy: ctx.user!.id,
+      });
+      // Notify owner
+      await notifyOwner({
+        title: `🚨 Alert Escalated: #${input.id}`,
+        content: `Alert "${alert?.title ?? ''}" (severity: ${alert?.severity ?? 'unknown'}) has been escalated to agent ${input.agentName} by ${ctx.user!.name ?? ctx.user!.email ?? 'analyst'}.`,
+      });
+      await writeAuditLog(db, { userId: ctx.user!.id, category: "alert", action: `Alert escalated to agent ${input.agentName}`, targetRef: `alert-${input.id}` });
+      return { success: true };
+    }),
 });
 
 // ─── KYC Router ───────────────────────────────────────────────────────────────
@@ -1251,6 +1290,75 @@ const onboardingRouter = router({
     }),
 });
 
+// ─── Alert Rules Router ─────────────────────────────────────────────────────
+
+const alertRulesRouter = router({
+  list: protectedProcedure
+    .input(z.object({ enabled: z.boolean().optional() }).optional())
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return [];
+      const conditions: any[] = [];
+      if (input?.enabled !== undefined) conditions.push(eq(alertRules.enabled, input.enabled));
+      return db.select().from(alertRules)
+        .where(conditions.length ? and(...conditions) : undefined)
+        .orderBy(desc(alertRules.createdAt));
+    }),
+
+  create: protectedProcedure
+    .input(z.object({
+      name: z.string().min(2).max(255),
+      description: z.string().optional(),
+      metric: z.enum(["risk_score", "sanctions_confidence", "pep_confidence", "adverse_media_count", "duplicate_identity_score", "velocity_hourly", "velocity_daily", "credit_score"]),
+      operator: z.enum(["gt", "gte", "lt", "lte", "eq", "neq"]).default("gte"),
+      threshold: z.number(),
+      severity: z.enum(["info", "low", "medium", "high", "critical"]).default("high"),
+      enabled: z.boolean().default(true),
+      autoEscalate: z.boolean().default(false),
+      notifyOwner: z.boolean().default(true),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      const [rule] = await db.insert(alertRules).values({
+        ...input,
+        createdBy: String(ctx.user!.id),
+      }).returning();
+      await writeAuditLog(db, { userId: ctx.user!.id, category: "system", action: `Alert rule created: ${input.name}`, targetRef: `rule-${rule.id}` });
+      return rule;
+    }),
+
+  update: protectedProcedure
+    .input(z.object({
+      id: z.number(),
+      name: z.string().optional(),
+      description: z.string().optional(),
+      threshold: z.number().optional(),
+      severity: z.enum(["info", "low", "medium", "high", "critical"]).optional(),
+      enabled: z.boolean().optional(),
+      autoEscalate: z.boolean().optional(),
+      notifyOwner: z.boolean().optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      const { id, ...data } = input;
+      await db.update(alertRules).set({ ...data, updatedAt: new Date() }).where(eq(alertRules.id, id));
+      await writeAuditLog(db, { userId: ctx.user!.id, category: "system", action: `Alert rule updated: ${id}`, targetRef: `rule-${id}` });
+      return { success: true };
+    }),
+
+  delete: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      await db.delete(alertRules).where(eq(alertRules.id, input.id));
+      await writeAuditLog(db, { userId: ctx.user!.id, category: "system", action: `Alert rule deleted: ${input.id}`, targetRef: `rule-${input.id}` });
+      return { success: true };
+    }),
+});
+
 // ─── App Router ───────────────────────────────────────────────────────────────
 
 export const appRouter = router({
@@ -1280,6 +1388,7 @@ export const appRouter = router({
   tenants: tenantsRouter,
   settings: settingsRouter,
   onboarding: onboardingRouter,
+  alertRules: alertRulesRouter,
 });
 
 export type AppRouter = typeof appRouter;

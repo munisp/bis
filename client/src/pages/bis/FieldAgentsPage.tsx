@@ -256,6 +256,22 @@ export default function FieldAgentsPage() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [dispatchAgent, setDispatchAgent] = useState<any | null>(null);
   const [viewMode, setViewMode] = useState<'table' | 'map'>('table');
+  const [recruitOpen, setRecruitOpen] = useState(false);
+  const [recruitForm, setRecruitForm] = useState({
+    agentCode: '', name: '', email: '', phone: '',
+    state: '', lga: '', tier: 'junior' as string, notes: '',
+  });
+
+  const utils = trpc.useUtils();
+  const recruitMutation = trpc.fieldAgents.create.useMutation({
+    onSuccess: () => {
+      toast.success('Agent recruited', { description: `${recruitForm.name} has been added to the network.` });
+      setRecruitOpen(false);
+      setRecruitForm({ agentCode: '', name: '', email: '', phone: '', state: '', lga: '', tier: 'junior', notes: '' });
+      utils.fieldAgents.list.invalidate();
+    },
+    onError: (e: any) => toast.error('Recruitment failed', { description: e.message }),
+  });
   const mapRef = useRef<google.maps.Map | null>(null);
   const markersRef = useRef<google.maps.marker.AdvancedMarkerElement[]>([]);
 
@@ -346,7 +362,7 @@ export default function FieldAgentsPage() {
               <Map size={11} /> Map
             </button>
           </div>
-          <Button size="sm" className="h-7 text-xs gap-1.5 font-mono" onClick={() => toast.info('Agent recruitment form coming soon')}>
+          <Button size="sm" className="h-7 text-xs gap-1.5 font-mono" onClick={() => setRecruitOpen(true)}>
             <Plus size={12} /> Recruit Agent
           </Button>
         </div>
@@ -557,6 +573,103 @@ export default function FieldAgentsPage() {
       {/* Dispatch Task Sheet */}
       {dispatchAgent && (
         <DispatchTaskSheet agent={dispatchAgent} onClose={() => setDispatchAgent(null)} />
+      )}
+
+      {/* Recruit Agent Sheet */}
+      {recruitOpen && (
+        <>
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40" onClick={() => setRecruitOpen(false)} />
+          <div className="fixed right-0 top-0 h-full w-full max-w-md z-50 bg-popover border-l border-border shadow-2xl flex flex-col">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border flex-shrink-0">
+              <div>
+                <p className="text-sm font-mono font-semibold text-foreground flex items-center gap-2">
+                  <Plus size={13} className="text-primary" /> Recruit Field Agent
+                </p>
+                <p className="text-[10px] font-mono text-muted-foreground mt-0.5">Add a new agent to the BIS network</p>
+              </div>
+              <button onClick={() => setRecruitOpen(false)} className="text-muted-foreground hover:text-foreground"><X size={16} /></button>
+            </div>
+            <form
+              className="flex-1 overflow-y-auto px-5 py-4 space-y-4"
+              onSubmit={e => {
+                e.preventDefault();
+                recruitMutation.mutate({
+                  agentCode: recruitForm.agentCode,
+                  name: recruitForm.name,
+                  email: recruitForm.email,
+                  phone: recruitForm.phone || undefined,
+                  state: recruitForm.state || undefined,
+                  lga: recruitForm.lga || undefined,
+                  tier: recruitForm.tier as any,
+                  notes: recruitForm.notes || undefined,
+                });
+              }}
+            >
+              {([
+                { k: 'agentCode', label: 'Agent Code', placeholder: 'e.g. BIS-LOS-042', required: true },
+                { k: 'name',      label: 'Full Name',  placeholder: 'e.g. Chukwuemeka Obi', required: true },
+                { k: 'email',     label: 'Email',      placeholder: 'agent@example.com', required: true },
+                { k: 'phone',     label: 'Phone',      placeholder: '+234 801 234 5678' },
+                { k: 'lga',       label: 'LGA',        placeholder: 'Local Government Area' },
+              ] as any[]).map(f => (
+                <div key={f.k}>
+                  <label className="text-[9px] font-mono text-muted-foreground uppercase tracking-wider mb-1 block">
+                    {f.label}{f.required && <span className="text-red-400 ml-0.5">*</span>}
+                  </label>
+                  <Input
+                    className="h-8 text-xs font-mono bg-background border-border"
+                    placeholder={f.placeholder}
+                    required={f.required}
+                    value={(recruitForm as any)[f.k]}
+                    onChange={e => setRecruitForm(prev => ({ ...prev, [f.k]: e.target.value }))}
+                  />
+                </div>
+              ))}
+              <div>
+                <label className="text-[9px] font-mono text-muted-foreground uppercase tracking-wider mb-1 block">State</label>
+                <select
+                  value={recruitForm.state}
+                  onChange={e => setRecruitForm(prev => ({ ...prev, state: e.target.value }))}
+                  className="w-full h-8 px-3 rounded-md border border-border bg-background text-xs font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                >
+                  <option value="">Select state…</option>
+                  {NIGERIAN_STATES.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-[9px] font-mono text-muted-foreground uppercase tracking-wider mb-1 block">Tier</label>
+                <div className="flex gap-2">
+                  {(['junior','senior','lead','specialist'] as const).map(t => (
+                    <button key={t} type="button"
+                      onClick={() => setRecruitForm(prev => ({ ...prev, tier: t }))}
+                      className={cn(
+                        'flex-1 py-1.5 rounded-md border text-[10px] font-mono font-semibold transition-all capitalize',
+                        recruitForm.tier === t
+                          ? `${TIER_CONFIG[t].bg} ${TIER_CONFIG[t].color}`
+                          : 'border-border text-muted-foreground hover:border-border/80'
+                      )}
+                    >{t}</button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="text-[9px] font-mono text-muted-foreground uppercase tracking-wider mb-1 block">Notes</label>
+                <textarea
+                  className="w-full h-20 px-3 py-2 rounded-md border border-border bg-background text-xs font-mono text-foreground resize-none focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-muted-foreground"
+                  placeholder="Optional notes about this agent…"
+                  value={recruitForm.notes}
+                  onChange={e => setRecruitForm(prev => ({ ...prev, notes: e.target.value }))}
+                />
+              </div>
+              <div className="flex gap-2 pt-2">
+                <Button type="button" variant="outline" className="flex-1 text-xs font-mono" onClick={() => setRecruitOpen(false)}>Cancel</Button>
+                <Button type="submit" className="flex-1 text-xs font-mono gap-1.5" disabled={recruitMutation.isPending}>
+                  {recruitMutation.isPending ? <><Loader2 size={11} className="animate-spin" /> Recruiting…</> : <><Plus size={11} /> Add Agent</>}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </>
       )}
     </BISLayout>
   );

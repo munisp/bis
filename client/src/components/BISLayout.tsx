@@ -45,6 +45,7 @@ const BASE_NAV_GROUPS: NavGroup[] = [
       { label: 'Investigations', href: '/investigations', icon: <Search size={15} /> },
       { label: 'Reports', href: '/reports', icon: <FileText size={15} /> },
       { label: 'Alerts', href: '/alerts', icon: <AlertTriangle size={15} />, badgeVariant: 'destructive' },
+      { label: 'Alert Rules', href: '/alert-rules', icon: <Zap size={15} /> },
     ],
   },
   {

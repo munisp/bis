@@ -15,6 +15,10 @@ import {
 } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Zap } from "lucide-react";
 
 const alertTypeColor: Record<string, string> = {
   sanctions_hit:      "border-red-500/20",
@@ -96,6 +100,35 @@ export default function Alerts() {
     onSuccess: () => { toast.info("Alert dismissed"); utils.alerts.list.invalidate(); },
     onError: (e: any) => toast.error("Failed to dismiss", { description: e.message }),
   });
+
+  // Escalation state
+  const [escalateAlert, setEscalateAlert] = useState<any | null>(null);
+  const [escalateAgentId, setEscalateAgentId] = useState("");
+  const [escalateInstructions, setEscalateInstructions] = useState("");
+
+  const { data: fieldAgents = [] } = trpc.fieldAgents.list.useQuery({ status: "active", limit: 100 });
+
+  const escalateMutation = trpc.alerts.escalate.useMutation({
+    onSuccess: () => {
+      toast.success("Alert escalated", { description: "Critical field task dispatched and owner notified." });
+      setEscalateAlert(null);
+      setEscalateAgentId("");
+      setEscalateInstructions("");
+      utils.alerts.list.invalidate();
+    },
+    onError: (e: any) => toast.error("Escalation failed", { description: e.message }),
+  });
+
+  const handleEscalate = () => {
+    if (!escalateAlert || !escalateAgentId) return;
+    const agent = (fieldAgents as any[]).find((a: any) => a.agentId === escalateAgentId);
+    escalateMutation.mutate({
+      id: escalateAlert.id,
+      agentId: escalateAgentId,
+      agentName: agent?.name ?? escalateAgentId,
+      instructions: escalateInstructions || undefined,
+    });
+  };
 
   const toggleExpand = (id: number) => {
     setExpanded(prev => {
@@ -297,6 +330,15 @@ export default function Alerts() {
                       )}
                       {getAlertStatus(alert) === "new" && (
                         <>
+                          {(alert.severity === "critical" || alert.severity === "high") && (
+                            <Button
+                              variant="outline" size="sm"
+                              className="h-6 text-[10px] px-2 text-red-400 border-red-500/30 hover:bg-red-500/10"
+                              onClick={() => { setEscalateAlert(alert); setEscalateAgentId(""); setEscalateInstructions(""); }}
+                            >
+                              <Zap size={10} className="mr-1" />Escalate
+                            </Button>
+                          )}
                           <Button
                             variant="outline" size="sm" className="h-6 text-[10px] px-2"
                             disabled={acknowledgeMutation.isPending}
@@ -381,6 +423,63 @@ export default function Alerts() {
           )}
         </div>
       )}
+      {/* Escalation Dialog */}
+      <Dialog open={!!escalateAlert} onOpenChange={open => { if (!open) setEscalateAlert(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-400">
+              <Zap size={16} /> Escalate Alert
+            </DialogTitle>
+          </DialogHeader>
+          {escalateAlert && (
+            <div className="space-y-4 py-2">
+              <div className="bis-card p-3 rounded-lg bg-red-500/5 border border-red-500/20">
+                <p className="text-xs font-semibold text-foreground capitalize">{(escalateAlert.type ?? "").replace(/_/g, " ")}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">{escalateAlert.title}</p>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Assign to Field Agent <span className="text-red-400">*</span></Label>
+                <Select value={escalateAgentId} onValueChange={setEscalateAgentId}>
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue placeholder="Select active agent…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(fieldAgents as any[]).map((a: any) => (
+                      <SelectItem key={a.agentId} value={a.agentId}>
+                        {a.name} — {a.state ?? "N/A"} ({a.tier})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Additional Instructions</Label>
+                <Textarea
+                  className="text-xs h-20 resize-none"
+                  placeholder="Optional: specific instructions for the agent…"
+                  value={escalateInstructions}
+                  onChange={e => setEscalateInstructions(e.target.value)}
+                />
+              </div>
+              <p className="text-[10px] text-muted-foreground">
+                This will dispatch a <strong>critical</strong> surveillance task, acknowledge the alert, and notify the platform owner.
+              </p>
+            </div>
+          )}
+          <DialogFooter className="gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setEscalateAlert(null)}>Cancel</Button>
+            <Button
+              size="sm"
+              className="bg-red-500 hover:bg-red-600 text-white"
+              disabled={!escalateAgentId || escalateMutation.isPending}
+              onClick={handleEscalate}
+            >
+              {escalateMutation.isPending ? <Loader2 size={12} className="animate-spin mr-1" /> : <Zap size={12} className="mr-1" />}
+              Escalate Now
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </BISLayout>
   );
 }

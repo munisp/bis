@@ -348,3 +348,32 @@
 
 ### Archive
 - [ ] Comprehensive project archive v16 generated
+
+## Phase 17 — Next Steps (Round 8)
+
+### Escalation Workflow
+- [x] Add alerts.escalate mutation (acknowledge + dispatch critical field task + notify owner + audit log)
+- [x] Add Escalate button on critical/high new alerts in Alerts.tsx
+- [x] Escalation dialog with agent selector and optional instructions
+- [x] Owner notification via notifyOwner() on escalation
+
+### Agent Recruitment Form
+- [x] Add recruitOpen state and recruitMutation to FieldAgentsPage
+- [x] Replace recruitment toast stub with real setRecruitOpen(true)
+- [x] Build full slide-over with agentCode, name, email, phone, state, lga, tier, notes fields
+- [x] Wire to trpc.fieldAgents.create mutation with cache invalidation
+
+### Alert Rules Configuration Page
+- [x] Add alert_rules table to drizzle schema and push migration
+- [x] Add alertRulesRouter (list, create, update, delete) to server/routers.ts
+- [x] Add alertRules to appRouter
+- [x] Build AlertRulesPage with stats, rule list, create/edit dialog, delete confirm dialog
+- [x] Register /alert-rules route in App.tsx
+- [x] Add Alert Rules nav item to INTELLIGENCE group in BISLayout
+
+### Tests
+- [x] Write phase17.test.ts with 11 tests covering alertRules CRUD, alerts.escalate, fieldAgents.create
+- [x] All 26 tests pass (3 test files)
+
+### Archive
+- [ ] Comprehensive project archive v17 generated (>= 17 MB)

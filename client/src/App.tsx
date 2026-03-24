@@ -38,6 +38,7 @@ const StakeholderOnboardingWizard = lazy(() => import("@/pages/onboarding/Stakeh
 const OnboardingAdminPage         = lazy(() => import("@/pages/admin/OnboardingAdminPage"));
 const UsersAdminPage              = lazy(() => import("@/pages/admin/UsersAdminPage"));
 const ScreeningRecordsPage        = lazy(() => import("@/pages/screening/ScreeningRecordsPage"));
+const AlertRulesPage               = lazy(() => import("@/pages/AlertRulesPage"));
 
 // ─── Page loading skeleton ────────────────────────────────────────────────────
 
@@ -91,6 +92,7 @@ function Router() {
         <Route path="/admin/onboarding" component={OnboardingAdminPage} />
         <Route path="/admin/users" component={UsersAdminPage} />
         <Route path="/screening-records" component={ScreeningRecordsPage} />
+        <Route path="/alert-rules" component={AlertRulesPage} />
 
         {/* Fallback */}
         <Route path="/404" component={NotFound} />
