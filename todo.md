@@ -72,3 +72,12 @@
 - [x] InvestigationDetail subject card replaced with live trpc.investigations.get query (with mock fallback)
 - [x] InvestigationDetail evidence items merged with live trpc.audit.list (targetRef filter)
 - [x] Processing Log tab wired to live audit entries; risk score from live investigation record
+
+## Phase 7 — Paystack Webhook, Live Investigations List, Grafana Secret
+
+- [x] POST /api/webhooks/paystack with x-paystack-signature HMAC-SHA512 validation
+- [x] Auto-credit TigerBeetle on charge.success event via creditTenantAccount helper + notifyOwner
+- [x] Investigations list page wired to live trpc.investigations.list with search/filter/pagination
+- [x] Replace mockInvestigations array in Investigations.tsx with live tRPC data (mock fallback retained)
+- [x] GRAFANA_WEBHOOK_SECRET env var — dev default (bis-grafana-webhook-dev) used; configurable via secrets
+- [x] /api/webhooks/grafana-alert bearer check reads GRAFANA_WEBHOOK_SECRET from env (already implemented)

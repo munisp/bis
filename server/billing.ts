@@ -77,6 +77,44 @@ async function ensureRevenueAccount(): Promise<void> {
   ]);
 }
 
+// ─── Exported server-side helpers (used by Express webhook routes) ─────────────
+
+/**
+ * Directly credit a tenant's TigerBeetle account.
+ * Used by the Paystack webhook to auto-credit on charge.success without going
+ * through tRPC (which requires an authenticated session).
+ */
+export async function creditTenantAccount(opts: {
+  tenantId: string;
+  amountKobo: number;
+  reference: string;
+}): Promise<{ transferId: string; recorded: boolean }> {
+  const transferId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  if (!TB_URL) {
+    console.warn("[Billing] TIGERBEETLE_URL not set — credit not recorded in ledger");
+    return { transferId, recorded: false };
+  }
+  try {
+    await Promise.all([ensureRevenueAccount(), ensureAccount(opts.tenantId)]);
+    await tbPost("/transfers/create", [
+      {
+        id: transferId,
+        debit_account_id: ACCOUNT_REVENUE,
+        credit_account_id: ACCOUNT_TENANT_PREFIX + opts.tenantId,
+        amount: opts.amountKobo,
+        ledger: LEDGER_NGN,
+        code: 2, // credit / top-up
+        user_data_32: Math.floor(Date.now() / 1000),
+        user_data_128: opts.reference,
+      },
+    ]);
+    return { transferId, recorded: true };
+  } catch (err) {
+    console.error("[Billing] creditTenantAccount error:", err);
+    return { transferId, recorded: false };
+  }
+}
+
 // ─── tRPC Router ──────────────────────────────────────────────────────────────
 
 export const billingRouter = router({

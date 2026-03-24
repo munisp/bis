@@ -8,6 +8,8 @@ import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { notifyOwner } from "./notification";
+import { creditTenantAccount } from "../billing";
+import crypto from "crypto";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -90,6 +92,73 @@ async function startServer() {
     } catch (err) {
       console.error("[GrafanaWebhook] Error:", err);
       res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // ── Paystack charge webhook ───────────────────────────────────────────────
+  // Receives charge.success events from Paystack and auto-credits the tenant's
+  // TigerBeetle account. Validates x-paystack-signature (HMAC-SHA512).
+  // Must be registered BEFORE the json body-parser so we can read the raw body.
+  app.post("/api/webhooks/paystack", express.raw({ type: "application/json" }), async (req, res) => {
+    try {
+      const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY ?? "";
+      const signature = req.headers["x-paystack-signature"] as string | undefined;
+
+      // Validate HMAC-SHA512 signature when secret is configured
+      if (PAYSTACK_SECRET && signature) {
+        const expected = crypto
+          .createHmac("sha512", PAYSTACK_SECRET)
+          .update(req.body as Buffer)
+          .digest("hex");
+        if (expected !== signature) {
+          console.warn("[PaystackWebhook] Invalid signature — request rejected");
+          res.status(401).json({ error: "Invalid signature" });
+          return;
+        }
+      } else if (PAYSTACK_SECRET && !signature) {
+        // Secret configured but no signature header — reject
+        res.status(401).json({ error: "Missing x-paystack-signature header" });
+        return;
+      }
+      // If PAYSTACK_SECRET is not set, allow through (dev/test mode)
+
+      const body = JSON.parse((req.body as Buffer).toString("utf8")) as {
+        event?: string;
+        data?: {
+          reference?: string;
+          amount?: number; // kobo
+          status?: string;
+          metadata?: { tenant_id?: string; [key: string]: unknown };
+          customer?: { email?: string };
+        };
+      };
+
+      console.log(`[PaystackWebhook] event=${body.event} ref=${body.data?.reference}`);
+
+      if (body.event === "charge.success" && body.data?.status === "success") {
+        const reference = body.data.reference ?? "";
+        const amountKobo = body.data.amount ?? 0;
+        // tenant_id is passed in Paystack metadata during initiation
+        const tenantId = String(body.data.metadata?.tenant_id ?? body.data.customer?.email ?? "unknown");
+
+        if (amountKobo > 0 && tenantId !== "unknown") {
+          const result = await creditTenantAccount({ tenantId, amountKobo, reference });
+          console.log(`[PaystackWebhook] Credited tenant=${tenantId} amount=${amountKobo} kobo recorded=${result.recorded} transferId=${result.transferId}`);
+
+          // Notify platform owner
+          await notifyOwner({
+            title: `Payment Received — ₦${(amountKobo / 100).toLocaleString()}`,
+            content: `Tenant **${tenantId}** topped up ₦${(amountKobo / 100).toLocaleString()} via Paystack.\nReference: \`${reference}\`\nTigerBeetle transfer: \`${result.transferId}\` (recorded=${result.recorded})`,
+          });
+        }
+      }
+
+      // Always return 200 to acknowledge receipt
+      res.status(200).json({ received: true });
+    } catch (err) {
+      console.error("[PaystackWebhook] Error:", err);
+      // Still return 200 to prevent Paystack from retrying on server errors
+      res.status(200).json({ received: true, error: "Processing error" });
     }
   });
 

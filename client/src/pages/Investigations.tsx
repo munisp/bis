@@ -14,12 +14,13 @@ import {
   Search, Plus, Filter, ChevronRight, User, Building2,
   Clock, CheckCircle2, AlertTriangle, Loader2, FileText,
   X, SlidersHorizontal, ArrowUpDown, ArrowUp, ArrowDown,
-  ChevronDown, ChevronUp, Bookmark, BookmarkCheck, Trash2, Download
+  ChevronDown, ChevronUp, Bookmark, BookmarkCheck, Trash2, Download, RefreshCw
 } from "lucide-react";
 import {
   mockInvestigations, InvestigationStatus,
   InvestigationTier, getStatusBadgeClass, formatDateTime
 } from "@/lib/mockData";
+import { trpc } from "@/lib/trpc";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -60,6 +61,7 @@ const statusIcon: Record<InvestigationStatus, React.ReactNode> = {
 };
 
 const COUNTRIES = Array.from(new Set(mockInvestigations.map(i => i.country))).sort();
+const LIVE_COUNTRIES = ['Nigeria', 'Ghana', 'Kenya', 'South Africa', 'Egypt', 'Ethiopia', 'Tanzania', 'Uganda', 'Senegal', 'Cameroon', 'Rwanda', 'Zambia', 'Zimbabwe', 'Mozambique', 'Angola', 'Ivory Coast', 'Mali', 'Burkina Faso', 'Niger', 'Chad', 'Benin', 'Togo', 'Sierra Leone', 'Liberia', 'Guinea', 'Gambia', 'Mauritania', 'Gabon', 'Congo', 'DRC', 'Sudan', 'Somalia', 'Eritrea', 'Djibouti', 'Comoros', 'Madagascar', 'Mauritius', 'Seychelles', 'Botswana', 'Namibia', 'Lesotho', 'Swaziland', 'Malawi', 'Burundi', 'South Sudan', 'Central African Republic', 'Equatorial Guinea', 'Sao Tome and Principe', 'Cape Verde'].sort();
 
 // ─── Sparkline ────────────────────────────────────────────────────────────────
 
@@ -154,9 +156,31 @@ export default function Investigations() {
   const [presetsOpen, setPresetsOpen] = useState(false);
   const [saveNameInput, setSaveNameInput] = useState('');
   const [activePresetId, setActivePresetId] = useState<string | null>(null);
+  const [page, setPage] = useState(0);
+  const PAGE_SIZE = 50;
 
   // Filters
   const [filters, setFilters] = useState<FilterState>(EMPTY_FILTERS);
+
+  // ── Live data from tRPC ────────────────────────────────────────────────────
+  const { data: liveData, isLoading: liveLoading, refetch: refetchList } = trpc.investigations.list.useQuery({
+    search: filters.search || undefined,
+    status: filters.statusFilter !== 'all' ? filters.statusFilter : undefined,
+    tier: filters.tierFilter !== 'all' ? filters.tierFilter : undefined,
+    country: filters.countryFilter !== 'all' ? filters.countryFilter : undefined,
+    minRisk: filters.riskMin !== '' ? Number(filters.riskMin) : undefined,
+    maxRisk: filters.riskMax !== '' ? Number(filters.riskMax) : undefined,
+    limit: PAGE_SIZE,
+    offset: page * PAGE_SIZE,
+  });
+  const utils = trpc.useUtils();
+
+  // Use live data when available, fall back to mock
+  const sourceList = (liveData?.items && liveData.items.length > 0)
+    ? liveData.items
+    : mockInvestigations;
+  const isLive = !!(liveData?.items && liveData.items.length > 0);
+  const totalCount = isLive ? (liveData?.total ?? 0) : mockInvestigations.length;
 
   // Saved presets (localStorage)
   const [userPresets, setUserPresets] = useState<Preset[]>(() => {
@@ -254,36 +278,26 @@ export default function Investigations() {
   };
 
   const filtered = useMemo(() => {
-    const { search, statusFilter, tierFilter, typeFilter, countryFilter, riskMin, riskMax, dateFrom, dateTo } = filters;
-    let list = mockInvestigations.filter(inv => {
-      const q = search.toLowerCase();
-      const matchSearch = !q ||
-        inv.subjectName.toLowerCase().includes(q) ||
-        inv.ref.toLowerCase().includes(q) ||
-        inv.country.toLowerCase().includes(q) ||
-        (inv.subjectType && inv.subjectType.toLowerCase().includes(q));
-      const matchStatus  = statusFilter  === 'all' || inv.status     === statusFilter;
-      const matchTier    = tierFilter    === 'all' || inv.tier       === tierFilter;
-      const matchType    = typeFilter    === 'all' || inv.subjectType === typeFilter;
-      const matchCountry = countryFilter === 'all' || inv.country    === countryFilter;
-      const matchRiskMin = riskMin === '' || inv.riskScore >= Number(riskMin);
-      const matchRiskMax = riskMax === '' || inv.riskScore <= Number(riskMax);
-      const matchDateFrom = dateFrom === '' || new Date(inv.updatedAt) >= new Date(dateFrom);
-      const matchDateTo   = dateTo   === '' || new Date(inv.updatedAt) <= new Date(dateTo + 'T23:59:59');
-      return matchSearch && matchStatus && matchTier && matchType &&
-             matchCountry && matchRiskMin && matchRiskMax && matchDateFrom && matchDateTo;
+    // When using live data, server-side filtering already applied; only do client-side sort + date filter
+    const { typeFilter, dateFrom, dateTo } = filters;
+    let list = (sourceList as typeof mockInvestigations).filter(inv => {
+      const matchType    = typeFilter === 'all' || (inv as any).subjectType === typeFilter;
+      const updatedAt = (inv as any).updatedAt;
+      const matchDateFrom = dateFrom === '' || new Date(updatedAt) >= new Date(dateFrom);
+      const matchDateTo   = dateTo   === '' || new Date(updatedAt) <= new Date(dateTo + 'T23:59:59');
+      return matchType && matchDateFrom && matchDateTo;
     });
 
     return [...list].sort((a, b) => {
-      let va: string | number = a[sortKey] as string | number;
-      let vb: string | number = b[sortKey] as string | number;
+      let va: string | number = (a as any)[sortKey] as string | number;
+      let vb: string | number = (b as any)[sortKey] as string | number;
       if (typeof va === 'string') va = va.toLowerCase();
       if (typeof vb === 'string') vb = vb.toLowerCase();
       if (va < vb) return sortDir === 'asc' ? -1 : 1;
       if (va > vb) return sortDir === 'asc' ? 1 : -1;
       return 0;
     });
-  }, [filters, sortKey, sortDir]);
+  }, [sourceList, filters, sortKey, sortDir]);
 
   const riskBar = (score: number, id: string) => {
     const color = score >= 80 ? "#f87171" : score >= 60 ? "#fb923c" : score >= 30 ? "#fbbf24" : "#34d399";
@@ -314,9 +328,16 @@ export default function Investigations() {
   return (
     <BISLayout
       title="Investigations"
-      subtitle={`${filtered.length} of ${mockInvestigations.length} records`}
+      subtitle={isLive
+        ? `${filtered.length} shown · ${totalCount} total in DB`
+        : `${filtered.length} of ${mockInvestigations.length} records (mock data)`
+      }
       actions={
         <div className="flex items-center gap-2">
+          {liveLoading && <Loader2 size={13} className="animate-spin text-muted-foreground" />}
+          <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5" onClick={() => refetchList()}>
+            <RefreshCw size={11} /> Refresh
+          </Button>
           <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5" onClick={handleExportCSV}>
             <Download size={11} /> Export CSV
           </Button>
@@ -544,9 +565,9 @@ export default function Investigations() {
             <tbody>
               {filtered.map(inv => (
                 <tr
-                  key={inv.id}
+                  key={(inv as any).id ?? (inv as any).ref}
                   className="border-b border-border/50 hover:bg-muted/30 transition-colors cursor-pointer"
-                  onClick={() => navigate(`/investigations/${inv.id}`)}
+                  onClick={() => navigate(`/investigations/${(inv as any).ref ?? (inv as any).id}`)}
                 >
                   <td className="px-4 py-3">
                     <span className="font-mono text-xs text-primary">{inv.ref}</span>
@@ -576,9 +597,9 @@ export default function Investigations() {
                       <span className="text-[10px] font-mono text-muted-foreground/60">{tierPrice[inv.tier]}</span>
                     </div>
                   </td>
-                  <td className="px-4 py-3 w-40">{riskBar(inv.riskScore, inv.id)}</td>
+                  <td className="px-4 py-3 w-40">{riskBar((inv as any).riskScore ?? 0, String((inv as any).id ?? (inv as any).ref))}</td>
                   <td className="px-4 py-3">
-                    <span className="text-xs text-muted-foreground">{formatDateTime(inv.updatedAt)}</span>
+                    <span className="text-xs text-muted-foreground">{formatDateTime((inv as any).updatedAt)}</span>
                   </td>
                   <td className="px-4 py-3">
                     <ChevronRight size={14} className="text-muted-foreground" />
@@ -600,9 +621,27 @@ export default function Investigations() {
           </table>
         </div>
 
+        {/* Pagination controls (live mode only) */}
+        {isLive && totalCount > PAGE_SIZE && (
+          <div className="px-4 py-2 border-t border-border/50 flex items-center gap-2">
+            <Button size="sm" variant="outline" className="h-6 text-xs" disabled={page === 0} onClick={() => setPage(p => p - 1)}>
+              ← Prev
+            </Button>
+            <span className="text-[10px] font-mono text-muted-foreground">
+              Page {page + 1} / {Math.ceil(totalCount / PAGE_SIZE)}
+            </span>
+            <Button size="sm" variant="outline" className="h-6 text-xs" disabled={(page + 1) * PAGE_SIZE >= totalCount} onClick={() => setPage(p => p + 1)}>
+              Next →
+            </Button>
+          </div>
+        )}
+
         <div className="px-4 py-2.5 border-t border-border/50 flex items-center justify-between">
           <span className="text-[10px] font-mono text-muted-foreground">
-            Showing {filtered.length} of {mockInvestigations.length} investigations
+            {isLive
+              ? <>Showing {filtered.length} of {totalCount} investigations <span className="text-emerald-400/70">(live DB)</span></>
+              : `Showing ${filtered.length} of ${mockInvestigations.length} investigations (mock)`
+            }
           </span>
           {activeFilterCount > 0 && (
             <span className="text-[10px] font-mono text-primary">
@@ -618,6 +657,7 @@ export default function Investigations() {
       <NewInvestigationSlideOver
         open={createOpen}
         onClose={() => setCreateOpen(false)}
+        onCreated={() => { utils.investigations.list.invalidate(); refetchList(); }}
       />
     </BISLayout>
   );
