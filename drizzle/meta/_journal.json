@@ -78,6 +78,13 @@
       "when": 1774385671666,
       "tag": "0010_stiff_boom_boom",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1774388033663,
+      "tag": "0011_square_colonel_america",
+      "breakpoints": true
     }
   ]
 }

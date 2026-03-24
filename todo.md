@@ -538,5 +538,33 @@
 - [x] Verify server-side adminProcedure guards match frontend visibility
 
 ### Archive
-- [ ] Comprehensive archive v22 generated with seed script included
-  (pending checkpoint + zip)
+- [x] Comprehensive archive v22 generated with seed script included (bis-pwa-archive-v22-20260324.zip, 67 MB)
+
+## Phase 23 — Demo Read-only, E2E Tests, Metered API Tokens, OpenClaw
+
+### Demo Read-only Mode
+- [ ] Add DEMO_MODE flag to server context
+- [ ] Block all mutation procedures in demo mode with "Read-only in demo" error
+- [ ] Show toast on frontend when mutation is blocked in demo mode
+
+### Playwright E2E Tests
+- [ ] Install Playwright and configure playwright.config.ts
+- [ ] E2E test: New Investigation wizard → detail view
+- [ ] E2E test: KYC biometric submit → list view
+- [ ] E2E test: Alert Rule create + Run Now
+- [ ] E2E test: Field Agent dispatch → task visible
+- [ ] E2E test: Dashboard stats load
+
+### Metered API Token System
+- [ ] api_tokens table in schema (tenantId, name, token hash, prefix, scopes, rateLimit, usageCount, lastUsed)
+- [ ] token_usage_log table (tokenId, endpoint, method, statusCode, latencyMs, createdAt)
+- [ ] POST /api/v1/* Express middleware — validate Bearer token, enforce rate limit, log usage
+- [ ] trpc.apiTokens.* procedures (list, create, revoke, usageStats)
+- [ ] Developer API token management UI page (/developer)
+- [ ] Usage dashboard with per-endpoint metrics
+
+### OpenClaw Integration
+- [ ] Research OpenClaw agent capabilities and API
+- [ ] Design OpenClaw integration architecture
+- [ ] Implement OpenClaw webhook receiver endpoint
+- [ ] Wire OpenClaw intelligence into investigation risk scoring

@@ -467,3 +467,63 @@ export const ruleEvaluations = pgTable("rule_evaluations", {
 });
 export type RuleEvaluation = typeof ruleEvaluations.$inferSelect;
 export type InsertRuleEvaluation = typeof ruleEvaluations.$inferInsert;
+
+// ─── Developer API Tokens ─────────────────────────────────────────────────────
+
+export const apiTokenScopeEnum = pgEnum("api_token_scope", [
+  "investigations:read",
+  "investigations:write",
+  "kyc:read",
+  "kyc:write",
+  "alerts:read",
+  "alerts:write",
+  "reports:read",
+  "reports:write",
+  "screening:read",
+  "screening:write",
+  "field_agents:read",
+  "field_agents:write",
+  "audit:read",
+  "data_sources:read",
+  "admin:read",
+  "admin:write",
+]);
+
+export const apiTokens = pgTable("api_tokens", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenantId"),
+  name: varchar("name", { length: 255 }).notNull(),
+  /** Displayed prefix only — e.g. "bisk_live_AbCd" */
+  prefix: varchar("prefix", { length: 20 }).notNull(),
+  /** SHA-256 hash of the full token — never store plaintext */
+  tokenHash: varchar("tokenHash", { length: 64 }).notNull().unique(),
+  scopes: json("scopes").$type<string[]>().notNull().default([]),
+  /** Requests per minute limit */
+  rateLimit: integer("rateLimit").notNull().default(60),
+  usageCount: integer("usageCount").notNull().default(0),
+  lastUsedAt: timestamp("lastUsedAt"),
+  expiresAt: timestamp("expiresAt"),
+  active: boolean("active").notNull().default(true),
+  createdBy: integer("createdBy"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+
+export type ApiToken = typeof apiTokens.$inferSelect;
+export type InsertApiToken = typeof apiTokens.$inferInsert;
+
+// ─── Token Usage Log ──────────────────────────────────────────────────────────
+
+export const tokenUsageLog = pgTable("token_usage_log", {
+  id: serial("id").primaryKey(),
+  tokenId: integer("tokenId").notNull().references(() => apiTokens.id, { onDelete: "cascade" }),
+  endpoint: varchar("endpoint", { length: 255 }).notNull(),
+  method: varchar("method", { length: 10 }).notNull().default("GET"),
+  statusCode: integer("statusCode"),
+  latencyMs: integer("latencyMs"),
+  ipAddress: varchar("ipAddress", { length: 45 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type TokenUsageLog = typeof tokenUsageLog.$inferSelect;
+export type InsertTokenUsageLog = typeof tokenUsageLog.$inferInsert;

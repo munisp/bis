@@ -6,6 +6,9 @@ export type TrpcContext = {
   req: CreateExpressContextOptions["req"];
   res: CreateExpressContextOptions["res"];
   user: User | null;
+  /** True when the request is being served under the demo fallback user.
+   *  Mutation procedures should reject with a friendly read-only error. */
+  isDemo: boolean;
 };
 
 // Demo admin user injected when no Manus session is present.
@@ -26,22 +29,24 @@ export async function createContext(
   opts: CreateExpressContextOptions
 ): Promise<TrpcContext> {
   let user: User | null = null;
+  let isDemo = false;
 
   try {
     user = await sdk.authenticateRequest(opts.req);
-  } catch (error) {
-    // Authentication is optional for public procedures.
+  } catch {
     user = null;
   }
 
   // Fall back to demo admin so the platform is fully explorable without login.
   if (!user) {
     user = DEMO_USER;
+    isDemo = true;
   }
 
   return {
     req: opts.req,
     res: opts.res,
     user,
+    isDemo,
   };
 }

@@ -7,7 +7,8 @@ import { systemRouter } from "./_core/systemRouter";
 import { notifyOwner } from "./_core/notification";
 import { storagePut } from "./storage";
 import { TRPCError } from "@trpc/server";
-import { adminProcedure, protectedProcedure, publicProcedure, router } from "./_core/trpc";
+import { adminProcedure, protectedProcedure, publicProcedure, router, writeProcedure } from "./_core/trpc";
+import { apiTokensRouter } from "./apiTokens";
 import { getDb } from "./db";
 import { evaluateAlertRules } from "./alertRules";
 import {
@@ -146,7 +147,7 @@ const investigationsRouter = router({
       return result[0] ?? null;
     }),
 
-  create: protectedProcedure
+  create: writeProcedure
     .input(z.object({
       subjectType: z.enum(["individual", "corporate"]),
       subjectName: z.string().min(2),
@@ -203,7 +204,7 @@ const investigationsRouter = router({
       return { ref };
     }),
 
-  assign: protectedProcedure
+  assign: writeProcedure
     .input(z.object({ ref: z.string(), assigneeId: z.number(), assigneeName: z.string() }))
     .mutation(async ({ input, ctx }) => {
       const db = await getDb();
@@ -223,7 +224,7 @@ const investigationsRouter = router({
       return { success: true };
     }),
 
-  updateStatus: protectedProcedure
+  updateStatus: writeProcedure
     .input(z.object({ ref: z.string(), status: z.enum(["draft", "pending", "processing", "completed", "flagged", "archived"]) }))
     .mutation(async ({ input, ctx }) => {
       const db = await getDb();
@@ -236,7 +237,7 @@ const investigationsRouter = router({
       return { success: true };
     }),
 
-  addNote: protectedProcedure
+  addNote: writeProcedure
     .input(z.object({
       ref: z.string(),
       note: z.string().min(1),
@@ -255,7 +256,7 @@ const investigationsRouter = router({
       return { success: true, id: row.id, timestamp: row.createdAt.toISOString(), author: ctx.user!.name ?? ctx.user!.email ?? 'analyst' };
     }),
 
-  updateNote: protectedProcedure
+  updateNote: writeProcedure
     .input(z.object({
       id: z.number(),
       note: z.string().min(1),
@@ -274,7 +275,7 @@ const investigationsRouter = router({
       return { success: true, id: updated.id, timestamp: updated.createdAt.toISOString() };
     }),
 
-  deleteNote: protectedProcedure
+  deleteNote: writeProcedure
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input, ctx }) => {
       const db = await getDb();
@@ -286,7 +287,7 @@ const investigationsRouter = router({
       return { success: true };
     }),
 
-  score: protectedProcedure
+  score: writeProcedure
     .input(z.object({
       ref: z.string(),
       ninVerified: z.boolean().default(false),
@@ -334,7 +335,7 @@ const investigationsRouter = router({
       return scoreResult;
     }),
 
-  exportTimeline: protectedProcedure
+  exportTimeline: writeProcedure
     .input(z.object({ ref: z.string(), tenantId: z.number().optional() }))
     .mutation(async ({ input, ctx }) => {
       const db = await getDb();
@@ -570,7 +571,7 @@ const lookupRouter = router({
     } catch { return { status: "unreachable" }; }
   }),
 
-  nigerianDataBundle: protectedProcedure
+  nigerianDataBundle: writeProcedure
     .input(z.object({
       fullName: z.string().optional(),
       nin: z.string().optional(),
@@ -623,7 +624,7 @@ const alertsRouter = router({
       return db.select().from(alerts).where(conditions.length ? and(...conditions) : undefined).orderBy(desc(alerts.createdAt)).limit(input.limit);
     }),
 
-  acknowledge: protectedProcedure
+  acknowledge: writeProcedure
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input, ctx }) => {
       const db = await getDb();
@@ -633,7 +634,7 @@ const alertsRouter = router({
       return { success: true };
     }),
 
-  resolve: protectedProcedure
+  resolve: writeProcedure
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input, ctx }) => {
       const db = await getDb();
@@ -651,7 +652,7 @@ const alertsRouter = router({
       return { success: true };
     }),
 
-  dismiss: protectedProcedure
+  dismiss: writeProcedure
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input, ctx }) => {
       const db = await getDb();
@@ -660,14 +661,14 @@ const alertsRouter = router({
       return { success: true };
     }),
 
-  markAllRead: protectedProcedure.mutation(async () => {
+  markAllRead: writeProcedure.mutation(async () => {
     const db = await getDb();
     if (!db) throw new Error("Database unavailable");
     await db.update(alerts).set({ read: true });
     return { success: true };
   }),
 
-  escalate: protectedProcedure
+  escalate: writeProcedure
     .input(z.object({
       id: z.number(),
       agentId: z.string(),
@@ -710,7 +711,7 @@ const alertsRouter = router({
 
 const kycRouter = router({
   // create: used by KYCVerificationPage to record a biometric KYC decision
-  create: protectedProcedure
+  create: writeProcedure
     .input(z.object({
       subjectName: z.string().min(1),
       subjectType: z.enum(["individual", "corporate"]).default("individual"),
@@ -777,7 +778,7 @@ const kycRouter = router({
 
   // ── AI Proxy Procedures (server-side, API key never exposed to browser) ──────
 
-  extractDocument: protectedProcedure
+  extractDocument: writeProcedure
     .input(z.object({
       fileDataUri: z.string().min(10), // base64 data URI
       mimeType: z.string().default("image/jpeg"),
@@ -802,7 +803,7 @@ const kycRouter = router({
       }
     }),
 
-  detectTampering: protectedProcedure
+  detectTampering: writeProcedure
     .input(z.object({
       fileDataUri: z.string().min(10),
       mimeType: z.string().default("image/jpeg"),
@@ -826,7 +827,7 @@ const kycRouter = router({
       }
     }),
 
-  verifyLiveness: protectedProcedure
+  verifyLiveness: writeProcedure
     .input(z.object({
       frameDataUri: z.string().min(10), // base64 data URI of last liveness frame
     }))
@@ -849,7 +850,7 @@ const kycRouter = router({
       }
     }),
 
-  matchFace: protectedProcedure
+  matchFace: writeProcedure
     .input(z.object({
       selfieDataUri: z.string().min(10),
       documentDataUri: z.string().min(10),
@@ -875,7 +876,7 @@ const kycRouter = router({
       }
     }),
 
-  verify: protectedProcedure
+  verify: writeProcedure
     .input(z.object({
       subjectName: z.string().min(2),
       nin: z.string().optional(),
@@ -984,7 +985,7 @@ const fieldTasksRouter = router({
       return db.select().from(fieldTasks).where(conditions.length ? and(...conditions) : undefined).orderBy(desc(fieldTasks.createdAt)).limit(input.limit);
     }),
 
-  dispatch: protectedProcedure
+  dispatch: writeProcedure
     .input(z.object({
       agentId: z.string(),
       agentName: z.string(),
@@ -1039,7 +1040,7 @@ const reportsRouter = router({
       return db.select().from(reports).orderBy(desc(reports.createdAt)).limit(input.limit);
     }),
 
-  generate: protectedProcedure
+  generate: writeProcedure
     .input(z.object({
       template: z.string(),
       title: z.string(),
@@ -1099,7 +1100,7 @@ const usersRouter = router({
         .orderBy(users.name)
         .limit(input?.limit ?? 100);
     }),
-  updateRole: protectedProcedure
+  updateRole: writeProcedure
     .input(z.object({ id: z.number(), role: z.enum(["admin", "analyst", "supervisor", "auditor", "readonly"]) }))
     .mutation(async ({ input, ctx }) => {
       if (ctx.user.role !== "admin") throw new TRPCError({ code: "FORBIDDEN", message: "Admin only" });
@@ -1109,7 +1110,7 @@ const usersRouter = router({
       await writeAuditLog(db, { userId: ctx.user.id, category: "user", action: `Role changed to ${input.role}`, targetRef: String(input.id) });
       return { success: true };
     }),
-  deactivate: protectedProcedure
+  deactivate: writeProcedure
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input, ctx }) => {
       if (ctx.user.role !== "admin") throw new TRPCError({ code: "FORBIDDEN", message: "Admin only" });
@@ -1147,7 +1148,7 @@ const fieldAgentsRouter = router({
     .query(async ({ input }) => {
       return getFieldAgentById(input.id);
     }),
-  create: protectedProcedure
+  create: writeProcedure
     .input(z.object({
       agentCode: z.string().min(3).max(32),
       name: z.string().min(2).max(255),
@@ -1162,7 +1163,7 @@ const fieldAgentsRouter = router({
     .mutation(async ({ input, ctx }) => {
       return createFieldAgent({ ...input, createdBy: ctx.user!.id });
     }),
-  update: protectedProcedure
+  update: writeProcedure
     .input(z.object({
       id: z.number(),
       name: z.string().optional(),
@@ -1178,7 +1179,7 @@ const fieldAgentsRouter = router({
       return updateFieldAgent(id, data);
     }),
 
-  updateLocation: protectedProcedure
+  updateLocation: writeProcedure
     .input(z.object({
       id: z.number(),
       lat: z.number().min(-90).max(90),
@@ -1203,7 +1204,7 @@ const fieldAgentsRouter = router({
 // ─── Data Sources Router ──────────────────────────────────────────────────────
 
 const dataSourcesRouter = router({
-  seed: protectedProcedure
+  seed: writeProcedure
     .mutation(async () => {
       const { seedDataSources } = await import('./db');
       return seedDataSources();
@@ -1217,7 +1218,7 @@ const dataSourcesRouter = router({
     .query(async ({ input }) => {
       return getDataSources(input);
     }),
-  create: protectedProcedure
+  create: writeProcedure
     .input(z.object({
       code: z.string().min(2).max(64),
       name: z.string().min(2).max(255),
@@ -1230,7 +1231,7 @@ const dataSourcesRouter = router({
     .mutation(async ({ input }) => {
       return createDataSource(input);
     }),
-  update: protectedProcedure
+  update: writeProcedure
     .input(z.object({
       id: z.number(),
       name: z.string().optional(),
@@ -1259,7 +1260,7 @@ const monitorsRouter = router({
     .query(async ({ input }) => {
       return getMonitors(input);
     }),
-  create: protectedProcedure
+  create: writeProcedure
     .input(z.object({
       subjectName: z.string().min(2).max(255),
       subjectRef: z.string().optional(),
@@ -1273,7 +1274,7 @@ const monitorsRouter = router({
       const monitorRef = `MON-${Date.now().toString(36).toUpperCase()}`;
       return createMonitor({ ...input, monitorRef, createdBy: ctx.user!.id });
     }),
-  update: protectedProcedure
+  update: writeProcedure
     .input(z.object({
       id: z.number(),
       status: z.enum(["active", "paused", "triggered", "expired"]).optional(),
@@ -1299,7 +1300,7 @@ const screeningRouter = router({
     .query(async ({ input }) => {
       return getScreeningRequests(input);
     }),
-  create: protectedProcedure
+  create: writeProcedure
     .input(z.object({
       type: z.enum(["mvr", "drug", "work_authorization", "biometric", "zero_footprint"]),
       subjectName: z.string().min(2).max(255),
@@ -1328,7 +1329,7 @@ const screeningRouter = router({
       }
       return record;
     }),
-  updateStatus: protectedProcedure
+  updateStatus: writeProcedure
     .input(z.object({
       id: z.number(),
       status: z.enum(["pending", "processing", "completed", "failed", "review"]),
@@ -1356,7 +1357,7 @@ const settingsRouter = router({
       return Object.fromEntries(rows.map(r => [r.key, r.value]));
     }),
 
-  set: protectedProcedure
+  set: writeProcedure
     .input(z.object({
       namespace: z.string().default("default"),
       settings: z.record(z.string(), z.unknown()),
@@ -1475,7 +1476,7 @@ const onboardingRouter = router({
       return record;
     }),
 
-  uploadDocument: protectedProcedure
+  uploadDocument: writeProcedure
     .input(z.object({
       applicationId: z.number(),
       fileName: z.string().min(1),
@@ -1543,7 +1544,7 @@ const alertRulesRouter = router({
         .orderBy(desc(alertRules.createdAt));
     }),
 
-  create: protectedProcedure
+  create: writeProcedure
     .input(z.object({
       name: z.string().min(2).max(255),
       description: z.string().optional(),
@@ -1566,7 +1567,7 @@ const alertRulesRouter = router({
       return rule;
     }),
 
-  update: protectedProcedure
+  update: writeProcedure
     .input(z.object({
       id: z.number(),
       name: z.string().optional(),
@@ -1586,7 +1587,7 @@ const alertRulesRouter = router({
       return { success: true };
     }),
 
-  delete: protectedProcedure
+  delete: writeProcedure
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input, ctx }) => {
       const db = await getDb();
@@ -1623,7 +1624,7 @@ const alertRulesRouter = router({
 
   // Dry-run evaluation: checks whether a given metric value would trigger the rule.
   // Does NOT create alerts, write audit entries, or notify the owner.
-  testFire: protectedProcedure
+  testFire: writeProcedure
     .input(z.object({
       ruleId: z.number(),
       sampleValue: z.number(),
@@ -1783,6 +1784,7 @@ export const appRouter = router({
   settings: settingsRouter,
   onboarding: onboardingRouter,
   alertRules: alertRulesRouter,
+  apiTokens: apiTokensRouter,
 });
 
 export type AppRouter = typeof appRouter;

@@ -1,6 +1,6 @@
 // server/tenants.ts — tRPC router for Tenants, API Keys, and Webhooks
 import { z } from "zod";
-import { router, protectedProcedure } from "./_core/trpc";
+import { router, protectedProcedure, writeProcedure } from "./_core/trpc";
 import { getDb } from "./db";
 import {
   tenants, apiKeys, webhooks,
@@ -50,7 +50,7 @@ export const tenantsRouter = router({
       return row ?? null;
     }),
 
-  create: protectedProcedure
+  create: writeProcedure
     .input(z.object({
       name: z.string().min(2).max(255),
       slug: z.string().min(2).max(64).regex(/^[a-z0-9-]+$/),
@@ -73,7 +73,7 @@ export const tenantsRouter = router({
       return row;
     }),
 
-  update: protectedProcedure
+  update: writeProcedure
     .input(z.object({
       id: z.number(),
       name: z.string().min(2).max(255).optional(),
@@ -96,7 +96,7 @@ export const tenantsRouter = router({
       return row;
     }),
 
-  suspend: protectedProcedure
+  suspend: writeProcedure
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input }) => {
       const db = await getDb();
@@ -107,7 +107,7 @@ export const tenantsRouter = router({
       return { success: true };
     }),
 
-  reactivate: protectedProcedure
+  reactivate: writeProcedure
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input }) => {
       const db = await getDb();
@@ -118,7 +118,7 @@ export const tenantsRouter = router({
       return { success: true };
     }),
 
-  updateLogo: protectedProcedure
+  updateLogo: writeProcedure
     .input(z.object({
       id: z.number(),
       // Base64-encoded image data URI, e.g. "data:image/png;base64,..."
@@ -153,7 +153,7 @@ export const tenantsRouter = router({
         .orderBy(desc(apiKeys.createdAt));
     }),
 
-  createKey: protectedProcedure
+  createKey: writeProcedure
     .input(z.object({
       tenantId: z.number(),
       name: z.string().min(2).max(128),
@@ -177,7 +177,7 @@ export const tenantsRouter = router({
       return { ...row, rawKey: raw };
     }),
 
-  revokeKey: protectedProcedure
+  revokeKey: writeProcedure
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input }) => {
       const db = await getDb();
@@ -188,7 +188,7 @@ export const tenantsRouter = router({
       return { success: true };
     }),
 
-  rotateKey: protectedProcedure
+  rotateKey: writeProcedure
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input }) => {
       const db = await getDb();
@@ -213,7 +213,7 @@ export const tenantsRouter = router({
         .orderBy(desc(webhooks.createdAt));
     }),
 
-  createWebhook: protectedProcedure
+  createWebhook: writeProcedure
     .input(z.object({
       tenantId: z.number(),
       url: z.string().url(),
@@ -234,7 +234,7 @@ export const tenantsRouter = router({
       return row;
     }),
 
-  updateWebhook: protectedProcedure
+  updateWebhook: writeProcedure
     .input(z.object({
       id: z.number(),
       url: z.string().url().optional(),
@@ -252,7 +252,7 @@ export const tenantsRouter = router({
       return row;
     }),
 
-  deleteWebhook: protectedProcedure
+  deleteWebhook: writeProcedure
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input }) => {
       const db = await getDb();
@@ -261,7 +261,7 @@ export const tenantsRouter = router({
       return { success: true };
     }),
 
-  testWebhook: protectedProcedure
+  testWebhook: writeProcedure
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input }) => {
       const db = await getDb();
@@ -292,7 +292,7 @@ export const tenantsRouter = router({
 
   // ── Branding Settings ───────────────────────────────────────────────────────
 
-  updateBranding: protectedProcedure
+  updateBranding: writeProcedure
     .input(z.object({
       id: z.number(),
       primaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),

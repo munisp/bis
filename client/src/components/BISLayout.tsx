@@ -98,6 +98,7 @@ const BASE_NAV_GROUPS: NavGroup[] = [
       { label: 'Billing & Ledger', href: '/billing', icon: <Wallet size={15} /> },
       { label: 'Settings', href: '/settings', icon: <Settings size={15} /> },
       { label: 'Audit Log', href: '/audit-log', icon: <ClipboardList size={15} /> },
+      { label: 'Developer Portal', href: '/developer', icon: <Key size={15} /> },
     ],
   },
 ];

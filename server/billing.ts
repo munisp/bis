@@ -6,7 +6,7 @@
  */
 
 import { z } from "zod";
-import { router, protectedProcedure } from "./_core/trpc";
+import { router, protectedProcedure, writeProcedure } from "./_core/trpc";
 import { TRPCError } from "@trpc/server";
 import { storagePut } from "./storage";
 
@@ -122,7 +122,7 @@ export const billingRouter = router({
    * Record a credit deduction for an investigation.
    * Creates a double-entry transfer: tenant debit → revenue credit.
    */
-  recordDebit: protectedProcedure
+  recordDebit: writeProcedure
     .input(
       z.object({
         tenantId: z.string().min(1),
@@ -230,7 +230,7 @@ export const billingRouter = router({
   /**
    * Credit a tenant account (top-up).
    */
-  creditAccount: protectedProcedure
+  creditAccount: writeProcedure
     .input(
       z.object({
         tenantId: z.string().min(1),
@@ -302,7 +302,7 @@ export const billingRouter = router({
    * Fetches transfers from TigerBeetle for the given tenant, converts to CSV,
    * uploads to S3, and returns a presigned download URL valid for 1 hour.
    */
-  exportLedger: protectedProcedure
+  exportLedger: writeProcedure
     .input(
       z.object({
         tenantId: z.string().min(1),
@@ -444,7 +444,7 @@ export const billingRouter = router({
    * Creates a Paystack transaction and returns the authorization URL for redirect.
    * Falls back to a simulated response when PAYSTACK_SECRET_KEY is not configured.
    */
-  initiateTopUp: protectedProcedure
+  initiateTopUp: writeProcedure
     .input(
       z.object({
         tenantId: z.string().min(1),
@@ -533,7 +533,7 @@ export const billingRouter = router({
    * Verify a Paystack payment by reference and credit the tenant's TigerBeetle account.
    * Called after the user returns from the Paystack checkout page.
    */
-  verifyTopUp: protectedProcedure
+  verifyTopUp: writeProcedure
     .input(
       z.object({
         tenantId: z.string().min(1),

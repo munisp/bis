@@ -43,3 +43,29 @@ export const adminProcedure = t.procedure.use(
     });
   }),
 );
+
+/**
+ * Demo-safe mutation procedure.
+ * Behaves like protectedProcedure for authenticated users.
+ * In demo mode (isDemo=true) it rejects with a friendly read-only error
+ * so the live demo cannot corrupt seeded data.
+ */
+const demoReadonlyMiddleware = t.middleware(async opts => {
+  const { ctx, next } = opts;
+
+  if (!ctx.user) {
+    throw new TRPCError({ code: "UNAUTHORIZED", message: UNAUTHED_ERR_MSG });
+  }
+
+  if (ctx.isDemo) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "This action is disabled in demo mode. Sign in with a real account to make changes.",
+    });
+  }
+
+  return next({ ctx: { ...ctx, user: ctx.user } });
+});
+
+/** Use this instead of protectedProcedure for any mutation that writes data. */
+export const writeProcedure = t.procedure.use(demoReadonlyMiddleware);
