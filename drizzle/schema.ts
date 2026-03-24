@@ -94,6 +94,10 @@ export const alerts = pgTable("alerts", {
   acknowledged: boolean("acknowledged").notNull().default(false),
   acknowledgedBy: integer("acknowledgedBy"),
   acknowledgedAt: timestamp("acknowledgedAt"),
+  resolved: boolean("resolved").notNull().default(false),
+  resolvedBy: integer("resolvedBy"),
+  resolvedAt: timestamp("resolvedAt"),
+  dismissed: boolean("dismissed").notNull().default(false),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 

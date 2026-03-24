@@ -234,6 +234,36 @@ export default function InvestigationDetail() {
 
   const riskColor = inv.riskScore >= 80 ? "#f87171" : inv.riskScore >= 60 ? "#fb923c" : inv.riskScore >= 30 ? "#fbbf24" : "#34d399";
 
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [editNoteText, setEditNoteText] = useState("");
+  const [deletingNoteId, setDeletingNoteId] = useState<string | null>(null);
+
+  const updateNoteMutation = trpc.investigations.updateNote.useMutation({
+    onSuccess: (result) => {
+      setEvidenceItems(prev => prev.map(item =>
+        item.id === editingNoteId
+          ? { ...item, body: editNoteText, title: 'Analyst Note (edited)' }
+          : item
+      ));
+      setEditingNoteId(null);
+      setEditNoteText("");
+      toast.success("Note updated");
+    },
+    onError: (e) => toast.error(`Failed to update note: ${e.message}`),
+  });
+
+  const deleteNoteMutation = trpc.investigations.deleteNote.useMutation({
+    onSuccess: () => {
+      setEvidenceItems(prev => prev.filter(item => item.id !== deletingNoteId));
+      setDeletingNoteId(null);
+      toast.success("Note deleted");
+    },
+    onError: (e) => {
+      toast.error(`Failed to delete note: ${e.message}`);
+      setDeletingNoteId(null);
+    },
+  });
+
   const addNoteMutation = trpc.investigations.addNote.useMutation({
     onSuccess: (result) => {
       const newItem: EvidenceItem = {
@@ -656,18 +686,71 @@ export default function InvestigationDetail() {
                               {item.status}
                             </span>
                           )}
+                          {item.type === 'analyst_note' && !item.id.startsWith('mock_') && (
+                            <div className="flex items-center gap-1">
+                              <button
+                                onClick={() => { setEditingNoteId(item.id); setEditNoteText(item.body); }}
+                                className="p-1 rounded hover:bg-muted/40 text-muted-foreground hover:text-foreground transition-colors"
+                                title="Edit note"
+                              >
+                                <FileText size={11} />
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setDeletingNoteId(item.id);
+                                  const noteId = parseInt(item.id.replace('note_', '').replace('audit_', ''));
+                                  if (!isNaN(noteId)) deleteNoteMutation.mutate({ id: noteId });
+                                  else { toast.error('Cannot delete this note'); setDeletingNoteId(null); }
+                                }}
+                                disabled={deletingNoteId === item.id}
+                                className="p-1 rounded hover:bg-red-500/10 text-muted-foreground hover:text-red-400 transition-colors"
+                                title="Delete note"
+                              >
+                                {deletingNoteId === item.id ? <Loader2 size={11} className="animate-spin" /> : <Trash2 size={11} />}
+                              </button>
+                            </div>
+                          )}
                         </div>
                       </div>
 
-                       <p className="text-sm text-foreground/85 leading-relaxed">
-                         {item.body?.split(/(@[\w.@]+)/g).map((part, pi) =>
-                           part.match(/^@[\w.@]+$/) ? (
-                             <span key={pi} className="inline-flex items-center gap-0.5 bg-primary/10 text-primary border border-primary/20 rounded px-1 py-0.5 text-[11px] font-mono">
-                               {part}
-                             </span>
-                           ) : part
-                         )}
-                       </p>
+                       {editingNoteId === item.id ? (
+                         <div className="space-y-2">
+                           <Textarea
+                             value={editNoteText}
+                             onChange={e => setEditNoteText(e.target.value)}
+                             className="text-sm font-mono min-h-[80px] bg-muted/20"
+                             autoFocus
+                           />
+                           <div className="flex items-center gap-2">
+                             <Button
+                               size="sm"
+                               className="h-7 text-xs"
+                               disabled={updateNoteMutation.isPending || !editNoteText.trim()}
+                               onClick={() => {
+                                 const noteId = parseInt(item.id.replace('note_', '').replace('audit_', ''));
+                                 if (!isNaN(noteId)) updateNoteMutation.mutate({ id: noteId, note: editNoteText.trim() });
+                                 else toast.error('Cannot edit this note');
+                               }}
+                             >
+                               {updateNoteMutation.isPending ? <Loader2 size={11} className="animate-spin mr-1" /> : null}
+                               Save
+                             </Button>
+                             <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => { setEditingNoteId(null); setEditNoteText(""); }}>
+                               Cancel
+                             </Button>
+                           </div>
+                         </div>
+                       ) : (
+                         <p className="text-sm text-foreground/85 leading-relaxed">
+                           {item.body?.split(/(@[\w.@]+)/g).map((part, pi) =>
+                             part.match(/^@[\w.@]+$/) ? (
+                               <span key={pi} className="inline-flex items-center gap-0.5 bg-primary/10 text-primary border border-primary/20 rounded px-1 py-0.5 text-[11px] font-mono">
+                                 {part}
+                               </span>
+                             ) : part
+                           )}
+                         </p>
+                       )}
 
                       <div className="flex items-center gap-3 mt-2">
                         {item.attachments && item.attachments > 0 && (

@@ -292,3 +292,32 @@
 
 ### Archive
 - [ ] Comprehensive project archive v14 generated
+
+## Phase 15 — Next Steps (Round 6)
+
+### Dashboard Live Stats
+- [x] trpc.dashboard.stats already existed and queries real DB counts
+- [x] Seeded bis_db with 291 rows — Dashboard now shows real counts
+- [x] Verified: investigations, KYC, alerts, monitors, screening, biometric, duplicates all from DB
+
+### Investigation Notes Full CRUD
+- [x] Add trpc.investigations.updateNote procedure (FORBIDDEN for non-owners)
+- [x] Add trpc.investigations.deleteNote procedure (FORBIDDEN for non-owners)
+- [x] Add Edit button (pencil icon) to each analyst_note evidence item
+- [x] Add Delete button with spinner to each analyst_note evidence item
+- [x] Inline edit mode: textarea with Save/Cancel buttons
+- [x] addNote now returns DB row id for use in edit/delete
+
+### Alerts Acknowledge / Resolve
+- [x] trpc.alerts.acknowledge already existed
+- [x] Add trpc.alerts.resolve mutation (sets resolved=true + acknowledged, writes audit log)
+- [x] Add trpc.alerts.dismiss mutation (sets dismissed=true)
+- [x] Add resolved, resolvedBy, resolvedAt, dismissed columns to alerts table (migration 0006)
+- [x] Fix getAlertStatus() helper: resolved > dismissed > reviewed > new
+- [x] Resolve button shown only for reviewed alerts (emerald color)
+- [x] Dismiss button shown only for new alerts
+- [x] Stat cards updated: New/Critical/Reviewed/Resolved
+- [x] Status badge uses getAlertStatus() for accurate display
+
+### Archive
+- [ ] Comprehensive project archive v15 generated

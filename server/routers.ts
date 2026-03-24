@@ -232,8 +232,46 @@ const investigationsRouter = router({
     .mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new Error("Database unavailable");
-      await writeAuditLog(db, { userId: ctx.user!.id, category: "investigation", action: `Note: ${input.note.slice(0, 80)}`, targetRef: input.ref });
-      return { success: true, timestamp: new Date().toISOString(), author: ctx.user!.name ?? ctx.user!.email ?? 'analyst' };
+      const [row] = await db.insert(auditLog).values({
+        userId: ctx.user!.id,
+        userEmail: ctx.user!.email ?? undefined,
+        category: "investigation",
+        action: `Note: ${input.note}`,
+        targetRef: input.ref,
+        result: "success",
+      }).returning();
+      return { success: true, id: row.id, timestamp: row.createdAt.toISOString(), author: ctx.user!.name ?? ctx.user!.email ?? 'analyst' };
+    }),
+
+  updateNote: protectedProcedure
+    .input(z.object({
+      id: z.number(),
+      note: z.string().min(1),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      // Only allow updating notes that belong to the current user
+      const [existing] = await db.select().from(auditLog).where(and(eq(auditLog.id, input.id), eq(auditLog.category, "investigation")));
+      if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "Note not found" });
+      if (existing.userId !== ctx.user!.id) throw new TRPCError({ code: "FORBIDDEN", message: "Cannot edit another user's note" });
+      const [updated] = await db.update(auditLog)
+        .set({ action: `Note: ${input.note}` })
+        .where(eq(auditLog.id, input.id))
+        .returning();
+      return { success: true, id: updated.id, timestamp: updated.createdAt.toISOString() };
+    }),
+
+  deleteNote: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      const [existing] = await db.select().from(auditLog).where(and(eq(auditLog.id, input.id), eq(auditLog.category, "investigation")));
+      if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "Note not found" });
+      if (existing.userId !== ctx.user!.id) throw new TRPCError({ code: "FORBIDDEN", message: "Cannot delete another user's note" });
+      await db.delete(auditLog).where(eq(auditLog.id, input.id));
+      return { success: true };
     }),
 
   score: protectedProcedure
@@ -387,6 +425,33 @@ const alertsRouter = router({
       if (!db) throw new Error("Database unavailable");
       await db.update(alerts).set({ acknowledged: true, acknowledgedBy: ctx.user!.id, acknowledgedAt: new Date(), read: true }).where(eq(alerts.id, input.id));
       await publishEvent("ALERT_ACKNOWLEDGED", `alert-${input.id}`, "info", {}, "bis-bff");
+      return { success: true };
+    }),
+
+  resolve: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      await db.update(alerts).set({
+        resolved: true,
+        resolvedBy: ctx.user!.id,
+        resolvedAt: new Date(),
+        acknowledged: true,
+        acknowledgedBy: ctx.user!.id,
+        acknowledgedAt: new Date(),
+        read: true,
+      }).where(eq(alerts.id, input.id));
+      await writeAuditLog(db, { userId: ctx.user!.id, category: "system", action: `Alert resolved: ${input.id}`, targetRef: `alert-${input.id}` });
+      return { success: true };
+    }),
+
+  dismiss: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      await db.update(alerts).set({ dismissed: true, read: true }).where(eq(alerts.id, input.id));
       return { success: true };
     }),
 

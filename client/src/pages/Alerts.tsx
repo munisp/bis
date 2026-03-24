@@ -78,7 +78,12 @@ export default function Alerts() {
   });
 
   // dismiss = acknowledge with a note (no separate dismiss procedure — use acknowledge)
-  const dismissMutation = trpc.alerts.acknowledge.useMutation({
+  const resolveMutation = trpc.alerts.resolve.useMutation({
+    onSuccess: () => { toast.success("Alert resolved"); utils.alerts.list.invalidate(); },
+    onError: (e: any) => toast.error("Failed to resolve", { description: e.message }),
+  });
+
+  const dismissMutation = trpc.alerts.dismiss.useMutation({
     onSuccess: () => { toast.info("Alert dismissed"); utils.alerts.list.invalidate(); },
     onError: (e: any) => toast.error("Failed to dismiss", { description: e.message }),
   });
@@ -91,14 +96,19 @@ export default function Alerts() {
     });
   };
 
+  const getAlertStatus = (a: any) => {
+    if (a.resolved) return "resolved";
+    if (a.dismissed) return "dismissed";
+    if (a.acknowledged) return "reviewed";
+    return "new";
+  };
+
   const filtered = rawAlerts
     .filter((a: any) => {
       const text = `${a.title ?? ""} ${a.body ?? ""} ${a.investigationId ?? ""}`.toLowerCase();
       const matchSearch = !search || text.includes(search.toLowerCase());
-      const matchStatus = statusFilter === "all" ||
-        (statusFilter === "new" && !a.acknowledged && !a.read) ||
-        (statusFilter === "reviewed" && a.acknowledged) ||
-        (statusFilter === "dismissed" && a.read && !a.acknowledged);
+      const status = getAlertStatus(a);
+      const matchStatus = statusFilter === "all" || status === statusFilter;
       const matchSeverity = severityFilter === "all" || a.severity === severityFilter;
       return matchSearch && matchStatus && matchSeverity;
     })
@@ -146,10 +156,10 @@ export default function Alerts() {
       {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
         {[
-          { label: "New", value: rawAlerts.filter((a: any) => !a.acknowledged && !a.read).length, color: "text-red-400" },
+          { label: "New", value: rawAlerts.filter((a: any) => getAlertStatus(a) === "new").length, color: "text-red-400" },
           { label: "Critical", value: rawAlerts.filter((a: any) => a.severity === "critical").length, color: "text-red-500" },
-          { label: "Reviewed", value: rawAlerts.filter((a: any) => a.acknowledged).length, color: "text-amber-400" },
-          { label: "Dismissed", value: rawAlerts.filter((a: any) => a.read && !a.acknowledged).length, color: "text-muted-foreground" },
+          { label: "Reviewed", value: rawAlerts.filter((a: any) => getAlertStatus(a) === "reviewed").length, color: "text-amber-400" },
+          { label: "Resolved", value: rawAlerts.filter((a: any) => getAlertStatus(a) === "resolved").length, color: "text-emerald-400" },
         ].map(stat => (
           <div key={stat.label} className="bis-card p-3">
             <div className={`text-2xl font-bold font-mono ${stat.color}`}>{stat.value}</div>
@@ -236,7 +246,7 @@ export default function Alerts() {
                         >
                           {alert.severity}
                         </Badge>
-                        <span className={`bis-badge ${getStatusBadgeClass(alert.acknowledged ? "reviewed" : alert.read ? "dismissed" : "new")}`}>{alert.acknowledged ? "reviewed" : alert.read ? "read" : "new"}</span>
+                        <span className={`bis-badge ${getStatusBadgeClass(getAlertStatus(alert))}`}>{getAlertStatus(alert)}</span>
                       </div>
                       <p className="text-xs text-muted-foreground mt-1">{alert.title ?? "—"}</p>
                       <div className="flex items-center gap-3 mt-2 text-[10px] text-muted-foreground flex-wrap">
@@ -258,7 +268,7 @@ export default function Alerts() {
                           </Button>
                         </Link>
                       )}
-                      {!alert.acknowledged && (
+                      {getAlertStatus(alert) === "new" && (
                         <>
                           <Button
                             variant="outline" size="sm" className="h-6 text-[10px] px-2"
@@ -275,6 +285,15 @@ export default function Alerts() {
                             <BellOff size={10} className="mr-1" />Dismiss
                           </Button>
                         </>
+                      )}
+                      {getAlertStatus(alert) === "reviewed" && (
+                        <Button
+                          variant="outline" size="sm" className="h-6 text-[10px] px-2 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10"
+                          disabled={resolveMutation.isPending}
+                          onClick={() => resolveMutation.mutate({ id: alert.id })}
+                        >
+                          <CheckCircle2 size={10} className="mr-1" />Resolve
+                        </Button>
                       )}
                       <Button
                         variant="ghost" size="sm" className="h-6 text-[10px] px-1.5"
