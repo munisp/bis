@@ -119,6 +119,20 @@ routes:
             X-BIS-Gateway: "APISix/3.x"
             X-Content-Type-Options: "nosniff"
             X-Frame-Options: "DENY"
+      kafka-logger:
+        broker_list:
+          "kafka:9092": 1
+        kafka_topic: bis.audit
+        key: "${remote_addr}"
+        timeout: 3
+        include_req_body: false
+        include_resp_body: false
+        meta_format: default
+        batch_max_size: 100
+        inactive_timeout: 5
+        buffer_duration: 60
+        max_retry_count: 3
+        retry_delay: 1
 
   # ── OAuth callback (unauthenticated) ─────────────────────────────────────────
   - id: oauth-callback
@@ -160,6 +174,20 @@ routes:
         headers:
           set:
             X-BIS-Gateway: "APISix/3.x"
+      kafka-logger:
+        broker_list:
+          "kafka:9092": 1
+        kafka_topic: bis.audit
+        key: "${remote_addr}"
+        timeout: 3
+        include_req_body: false
+        include_resp_body: false
+        meta_format: default
+        batch_max_size: 100
+        inactive_timeout: 5
+        buffer_duration: 60
+        max_retry_count: 3
+        retry_delay: 1
 
   # ── Python Risk Engine ────────────────────────────────────────────────────────
   - id: py-risk

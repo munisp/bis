@@ -1,0 +1,93 @@
+{
+  "__inputs": [
+    { "name": "DS_PROMETHEUS", "label": "Prometheus", "type": "datasource", "pluginId": "prometheus" }
+  ],
+  "description": "BIS Platform — All services health: Go gateway, Python risk engine, Rust event processor, Node.js BFF",
+  "editable": true,
+  "graphTooltip": 1,
+  "id": null,
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Go Gateway — Uptime",
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+      "datasource": "${DS_PROMETHEUS}",
+      "targets": [{ "expr": "up{job=\"go-gateway\"}", "legendFormat": "Gateway" }],
+      "options": { "colorMode": "background", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "mappings": [{ "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }] } }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Python Risk Engine — Uptime",
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
+      "datasource": "${DS_PROMETHEUS}",
+      "targets": [{ "expr": "up{job=\"python-risk-engine\"}", "legendFormat": "Risk Engine" }],
+      "options": { "colorMode": "background", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "mappings": [{ "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }] } }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Rust Event Processor — Uptime",
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
+      "datasource": "${DS_PROMETHEUS}",
+      "targets": [{ "expr": "up{job=\"rust-event-processor\"}", "legendFormat": "Event Processor" }],
+      "options": { "colorMode": "background", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "mappings": [{ "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }] } }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Node.js BFF — Uptime",
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
+      "datasource": "${DS_PROMETHEUS}",
+      "targets": [{ "expr": "up{job=\"bff-node\"}", "legendFormat": "BFF" }],
+      "options": { "colorMode": "background", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "mappings": [{ "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }] } }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Request Rate — All Services",
+      "gridPos": { "x": 0, "y": 4, "w": 24, "h": 8 },
+      "datasource": "${DS_PROMETHEUS}",
+      "targets": [
+        { "expr": "sum by (job) (rate(http_requests_total[1m]))", "legendFormat": "{{job}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" } }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Permify Authorization Checks",
+      "gridPos": { "x": 0, "y": 12, "w": 12, "h": 8 },
+      "datasource": "${DS_PROMETHEUS}",
+      "targets": [
+        { "expr": "sum(rate(permify_check_requests_total[1m]))", "legendFormat": "Check Requests/s" },
+        { "expr": "sum(rate(permify_check_requests_total{result=\"denied\"}[1m]))", "legendFormat": "Denied/s" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" } }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Kafka Consumer Lag",
+      "gridPos": { "x": 12, "y": 12, "w": 12, "h": 8 },
+      "datasource": "${DS_PROMETHEUS}",
+      "targets": [
+        { "expr": "sum by (topic) (kafka_consumer_group_lag)", "legendFormat": "{{topic}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" } }
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "tags": ["bis", "services", "overview"],
+  "time": { "from": "now-1h", "to": "now" },
+  "timezone": "browser",
+  "title": "BIS — Services Overview",
+  "uid": "bis-services-overview",
+  "version": 1
+}

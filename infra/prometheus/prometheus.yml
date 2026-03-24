@@ -1,0 +1,94 @@
+# ─── Prometheus Configuration for BIS Platform ───────────────────────────────
+# Scrapes metrics from APISix, all 4 application services, and infrastructure.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    platform: bis
+    environment: production
+
+# ── Alerting ──────────────────────────────────────────────────────────────────
+alerting:
+  alertmanagers: []
+
+# ── Rule files ────────────────────────────────────────────────────────────────
+rule_files: []
+
+# ── Scrape configs ────────────────────────────────────────────────────────────
+scrape_configs:
+
+  # APISix — primary gateway metrics (Prometheus plugin on :9091)
+  - job_name: apisix
+    static_configs:
+      - targets: ["apisix:9091"]
+        labels:
+          service: apisix
+          layer: gateway
+    metrics_path: /apisix/prometheus/metrics
+
+  # Node.js tRPC BFF
+  - job_name: bff-node
+    static_configs:
+      - targets: ["bff:3000"]
+        labels:
+          service: bff
+          language: nodejs
+          layer: application
+    metrics_path: /api/metrics
+
+  # Go API Gateway
+  - job_name: go-gateway
+    static_configs:
+      - targets: ["gateway:8081"]
+        labels:
+          service: gateway
+          language: go
+          layer: application
+    metrics_path: /metrics
+
+  # Python Risk Engine
+  - job_name: python-risk-engine
+    static_configs:
+      - targets: ["risk-engine:8082"]
+        labels:
+          service: risk-engine
+          language: python
+          layer: application
+    metrics_path: /metrics
+
+  # Rust Event Processor
+  - job_name: rust-event-processor
+    static_configs:
+      - targets: ["event-processor:8083"]
+        labels:
+          service: event-processor
+          language: rust
+          layer: application
+    metrics_path: /metrics
+
+  # Permify
+  - job_name: permify
+    static_configs:
+      - targets: ["permify:3476"]
+        labels:
+          service: permify
+          layer: middleware
+    metrics_path: /metrics
+
+  # Kafka (via JMX exporter if available, otherwise skip)
+  - job_name: kafka
+    static_configs:
+      - targets: ["kafka:9092"]
+        labels:
+          service: kafka
+          layer: middleware
+    metrics_path: /metrics
+
+  # Prometheus self-monitoring
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+        labels:
+          service: prometheus
+          layer: observability

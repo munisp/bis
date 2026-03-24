@@ -29,6 +29,7 @@ const NigerianDataBundlePage    = lazy(() => import("@/pages/bis/NigerianDataBun
 const WorkAuthorizationPage     = lazy(() => import("@/pages/bis/WorkAuthorizationPage"));
 const ZeroFootprintPage         = lazy(() => import("@/pages/bis/ZeroFootprintPage"));
 
+const BillingPage               = lazy(() => import("@/pages/bis/BillingPage"));
 const KYCVerificationPage       = lazy(() => import("@/pages/kyc/KYCVerificationPage"));
 const MessagingChannelsPage     = lazy(() => import("@/pages/messaging/MessagingChannelsPage"));
 const SocialMonitoringDashboard = lazy(() => import("@/pages/monitoring/SocialMonitoringDashboard"));
@@ -75,6 +76,7 @@ function Router() {
         <Route path="/zero-footprint" component={ZeroFootprintPage} />
         <Route path="/field-agents" component={FieldAgentsPage} />
         <Route path="/data-sources" component={DataSourcesPage} />
+        <Route path="/billing" component={BillingPage} />
 
         {/* KYC / Onboarding / Intelligence */}
         <Route path="/kyc-verification" component={KYCVerificationPage} />

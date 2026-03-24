@@ -46,3 +46,12 @@
 - [x] billing.ts tRPC router wired into appRouter
 - [x] docker-compose.yml updated: Permify + APISix + TigerBeetle + TigerBeetle HTTP proxy (15 total containers)
 - [x] docs/environment-variables.md — complete port map and variable reference
+
+## Phase 4 — Observability & Billing UI
+- [x] Permify relationship seeding on investigation create/assign in tRPC procedures
+- [x] Replace role-only checks with permifyMiddleware in tRPC procedures (assign procedure)
+- [x] Billing UI page (/billing) with NGN balance, top-up form, transaction history
+- [x] Wire /billing route into App.tsx and sidebar navigation
+- [x] APISix kafka-logger plugin config for bis.audit topic (tRPC BFF + Go gateway routes)
+- [x] Prometheus + Grafana Docker services with APISix dashboard provisioning
+- [x] Update docker-compose.yml with prometheus + grafana containers (17 total)

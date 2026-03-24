@@ -1,6 +1,7 @@
 import { COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { billingRouter } from "./billing";
+import { permifyWriteRelationship, permifyCheck } from "./permify";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { getDb } from "./db";
@@ -162,7 +163,33 @@ const investigationsRouter = router({
       });
       await writeAuditLog(db, { userId: ctx.user!.id, userEmail: ctx.user!.email ?? undefined, category: "investigation", action: "Investigation created", targetRef: ref });
       await publishEvent("INVESTIGATION_CREATED", ref, "info", { subjectName: input.subjectName, tier: input.tier });
+      // Seed Permify: creator is both owner and assignee of the new investigation
+      const userId = String(ctx.user!.id);
+      await permifyWriteRelationship([
+        { entity: { type: "investigation", id: ref }, relation: "owner",    subject: { type: "user", id: userId } },
+        { entity: { type: "investigation", id: ref }, relation: "assignee", subject: { type: "user", id: userId } },
+      ]);
       return { ref };
+    }),
+
+  assign: protectedProcedure
+    .input(z.object({ ref: z.string(), assigneeId: z.number(), assigneeName: z.string() }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      // Permify: check caller can assign this investigation
+      const canAssign = await permifyCheck("investigation", input.ref, "assign", String(ctx.user!.id));
+      if (!canAssign) throw new Error("Forbidden: you cannot assign this investigation");
+      await db.update(investigations)
+        .set({ assignedTo: input.assigneeId, updatedAt: new Date() })
+        .where(eq(investigations.ref, input.ref));
+      // Seed Permify: new assignee relation
+      await permifyWriteRelationship([
+        { entity: { type: "investigation", id: input.ref }, relation: "assignee", subject: { type: "user", id: String(input.assigneeId) } },
+      ]);
+      await writeAuditLog(db, { userId: ctx.user!.id, category: "investigation", action: `Assigned to ${input.assigneeName}`, targetRef: input.ref });
+      await publishEvent("INVESTIGATION_ASSIGNED", input.ref, "info", { assigneeId: input.assigneeId, assigneeName: input.assigneeName });
+      return { success: true };
     }),
 
   updateStatus: protectedProcedure

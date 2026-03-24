@@ -38,10 +38,27 @@ plugin_attr:
     export_addr:
       ip: 0.0.0.0
       port: 9091
+    # Expose all upstream metrics for Grafana scraping
+    enable_export_server: true
+    metric_prefix: apisix_
   request-id:
     header_name: X-BIS-Request-ID
     include_in_response: true
     algorithm: uuid
+  kafka-logger:
+    # Global Kafka logger defaults — overridden per-route as needed
+    timeout: 3
+    broker_list:
+      "kafka:9092": 1
+    kafka_topic: bis.audit
+    meta_format: default
+    batch_max_size: 200
+    inactive_timeout: 5
+    buffer_duration: 60
+    max_retry_count: 3
+    retry_delay: 1
+    include_req_body: false
+    include_resp_body: false
 
 plugins:
   - real-ip

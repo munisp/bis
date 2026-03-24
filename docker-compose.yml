@@ -2,14 +2,24 @@ version: "3.9"
 
 # ─── BIS Platform — Full Stack Docker Compose ────────────────────────────────
 # Infrastructure:  postgres, redis, zookeeper, kafka, keycloak, temporal, temporal-ui
-#                  permify, apisix, apisix-dashboard, tigerbeetle
+#                  permify, apisix, tigerbeetle (init + server + http-proxy)
+# Observability:   prometheus, grafana
 # Application:     gateway (Go), risk-engine (Python), event-processor (Rust), bff (Node.js)
 #
 # Quick start:
 #   cp .env.example .env && docker compose up -d
 #   docker compose logs -f gateway risk-engine event-processor bff
 #
-# Service count: 15 containers total
+# Service count: 17 containers total
+# Ports:
+#   3001  BFF (Node.js tRPC)
+#   8081  Go Gateway
+#   8082  Python Risk Engine
+#   8083  Rust Event Processor
+#   9080  APISix HTTP ingress
+#   9091  APISix Prometheus metrics
+#   9090  Prometheus
+#   3000  Grafana
 
 networks:
   bis-net:
@@ -22,6 +32,8 @@ volumes:
   permify_data:
   tigerbeetle_data:
   apisix_data:
+  prometheus_data:
+  grafana_data:
 
 # ─── Infrastructure ───────────────────────────────────────────────────────────
 
@@ -421,4 +433,63 @@ services:
       test: ["CMD", "curl", "-f", "http://localhost:3000/api/trpc/auth.me"]
       interval: 30s
       timeout: 10s
+      retries: 3
+
+  # ─── Observability: Prometheus ────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.51.2
+    container_name: bis-prometheus
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=30d"
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
+      - "--web.enable-lifecycle"
+      - "--web.enable-remote-write-receiver"
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    networks: [bis-net]
+    depends_on:
+      - apisix
+      - gateway
+      - risk-engine
+      - event-processor
+      - bff
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9090/-/healthy"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ─── Observability: Grafana ───────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:10.4.2
+    container_name: bis-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-bis_grafana_dev}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_ROOT_URL: http://localhost:3000
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/apisix-gateway.json
+      GF_FEATURE_TOGGLES_ENABLE: "publicDashboards"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    networks: [bis-net]
+    depends_on:
+      - prometheus
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 15s
+      timeout: 5s
       retries: 3
