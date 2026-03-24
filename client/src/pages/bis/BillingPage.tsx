@@ -5,6 +5,7 @@
  */
 
 import { useState, useMemo } from "react";
+import { useAuth } from "@/_core/hooks/useAuth";
 import BISLayout from "@/components/BISLayout";
 import { trpc } from "@/lib/trpc";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -86,12 +87,13 @@ function tierColor(tier?: string) {
 
 export default function BillingPage() {
   const tenantId = "tenant-001"; // In production: from auth context
+  const { user } = useAuth();
 
   const [topUpOpen, setTopUpOpen] = useState(false);
   const [topUpAmount, setTopUpAmount] = useState("");
-  const [topUpRef, setTopUpRef] = useState("");
   const [filterType, setFilterType] = useState<"all" | "debit" | "credit">("all");
   const [isExporting, setIsExporting] = useState(false);
+  const [paystackRef, setPaystackRef] = useState<string | null>(null);
 
   // ── tRPC queries ──────────────────────────────────────────────────────────
   const { data: balance, isLoading: balanceLoading, refetch: refetchBalance } =
@@ -122,20 +124,46 @@ export default function BillingPage() {
     exportMutation.mutate({ tenantId, type: filterType });
   };
 
-  const creditMutation = trpc.billing.creditAccount.useMutation({
+  // ── Paystack initiate mutation ─────────────────────────────────────────────────────
+  const initiateMutation = trpc.billing.initiateTopUp.useMutation({
     onSuccess: (data) => {
-      toast.success("Top-up successful", { description: `${formatNGN(data.amountKobo)} credited to your account. Transfer ID: ${data.transferId}` });
       setTopUpOpen(false);
-      setTopUpAmount("");
-      setTopUpRef("");
-      refetchBalance();
+      if (data.simulated) {
+        // Demo mode: skip real redirect, just show a success toast
+        toast.success("Demo top-up initiated", {
+          description: `Reference: ${data.reference} (no real payment in demo mode)`,
+        });
+        // Immediately verify the simulated reference
+        verifyMutation.mutate({ tenantId, reference: data.reference });
+      } else {
+        // Real Paystack: open checkout in new tab, store ref for verification on return
+        setPaystackRef(data.reference);
+        window.open(data.authorizationUrl, "_blank", "noopener,noreferrer");
+        toast.info("Paystack checkout opened", {
+          description: "Complete the payment in the new tab, then click Verify Payment below.",
+          duration: 8000,
+        });
+      }
     },
     onError: (err) => {
-      toast.error("Top-up failed", { description: err.message });
+      toast.error("Payment initiation failed", { description: err.message });
     },
   });
 
-  // ── Derived state ─────────────────────────────────────────────────────────
+  const verifyMutation = trpc.billing.verifyTopUp.useMutation({
+    onSuccess: (data) => {
+      toast.success("Top-up confirmed", {
+        description: `${formatNGN(data.amountKobo)} credited via ${data.channel}. Ref: ${data.reference}`,
+      });
+      setPaystackRef(null);
+      refetchBalance();
+    },
+    onError: (err) => {
+      toast.error("Payment verification failed", { description: err.message });
+    },
+  });
+
+  // ── Derived state ───────────────────────────────────────────────────────────────
   const balanceKobo = balance?.balanceKobo ?? 0;
   const balanceAvailable = balance?.available ?? false;
 
@@ -155,14 +183,16 @@ export default function BillingPage() {
 
   const handleTopUp = () => {
     const amountNGN = parseFloat(topUpAmount);
-    if (isNaN(amountNGN) || amountNGN <= 0) {
-      toast.error("Invalid amount", { description: "Enter a positive NGN amount." });
+    if (isNaN(amountNGN) || amountNGN < 100) {
+      toast.error("Invalid amount", { description: "Minimum top-up is ₦100." });
       return;
     }
-    creditMutation.mutate({
+    const email = user?.email ?? "ops@bis.platform";
+    initiateMutation.mutate({
       tenantId,
       amountKobo: Math.round(amountNGN * 100),
-      reference: topUpRef || undefined,
+      email,
+      callbackUrl: `${window.location.origin}/billing`,
     });
   };
 
@@ -207,9 +237,33 @@ export default function BillingPage() {
         </div>
       }
     >
-      {/* ── KPI Row ─────────────────────────────────────────────────────────── */}
+      {/* ── Pending Paystack verification banner ─────────────────────────────── */}
+      {paystackRef && (
+        <div className="flex items-center justify-between bg-amber-500/10 border border-amber-500/30 rounded-lg px-4 py-3 mb-4">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="h-4 w-4 text-amber-400 shrink-0" />
+            <div>
+              <p className="text-sm font-medium text-amber-300">Payment pending verification</p>
+              <p className="text-xs text-amber-400/70 font-mono">{paystackRef}</p>
+            </div>
+          </div>
+          <Button
+            size="sm"
+            onClick={() => verifyMutation.mutate({ tenantId, reference: paystackRef })}
+            disabled={verifyMutation.isPending}
+            className="bg-amber-600 hover:bg-amber-700 text-white shrink-0"
+          >
+            {verifyMutation.isPending ? (
+              <><Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> Verifying…</>
+            ) : (
+              <><CheckCircle2 className="h-3.5 w-3.5 mr-1" /> Verify Payment</>
+            )}
+          </Button>
+        </div>
+      )}
+
+      {/* ── KPI Row ─────────────────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-        {/* Balance */}
         <Card className="bg-slate-900 border-slate-700">
           <CardContent className="pt-5">
             <div className="flex items-start justify-between">
@@ -430,18 +484,18 @@ export default function BillingPage() {
         <DialogContent className="bg-slate-900 border-slate-700 text-slate-100 max-w-sm">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Plus className="h-4 w-4 text-emerald-400" />
-              Top Up Account
+              <CreditCard className="h-4 w-4 text-emerald-400" />
+              Top Up via Paystack
             </DialogTitle>
             <DialogDescription className="text-slate-400">
-              Credit your tenant wallet. The transfer is recorded as a double-entry
-              ledger transaction in TigerBeetle.
+              Pay securely with card, bank transfer, or USSD. Funds are credited to
+              your TigerBeetle ledger instantly on confirmation.
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-2">
             <div className="space-y-1.5">
-              <Label className="text-xs text-slate-400">Amount (NGN)</Label>
+              <Label className="text-xs text-slate-400">Amount (NGN) — minimum ₦100</Label>
               <Input
                 type="number"
                 min="100"
@@ -456,16 +510,6 @@ export default function BillingPage() {
                   = {formatNGN(Math.round(parseFloat(topUpAmount) * 100))}
                 </p>
               )}
-            </div>
-
-            <div className="space-y-1.5">
-              <Label className="text-xs text-slate-400">Payment Reference (optional)</Label>
-              <Input
-                placeholder="e.g. REF/2026/0033"
-                value={topUpRef}
-                onChange={(e) => setTopUpRef(e.target.value)}
-                className="bg-slate-800 border-slate-700 text-slate-100 placeholder:text-slate-600"
-              />
             </div>
 
             {/* Quick amounts */}
@@ -484,6 +528,13 @@ export default function BillingPage() {
                 ))}
               </div>
             </div>
+
+            <div className="rounded-md bg-slate-800/60 border border-slate-700/50 p-3 text-xs text-slate-400 space-y-1">
+              <p className="font-medium text-slate-300">How it works</p>
+              <p>1. Click <strong>Pay with Paystack</strong> — a secure checkout tab opens.</p>
+              <p>2. Complete payment with card, bank transfer, or USSD.</p>
+              <p>3. Return here and click <strong>Verify Payment</strong> to credit your balance.</p>
+            </div>
           </div>
 
           <DialogFooter className="gap-2">
@@ -496,13 +547,13 @@ export default function BillingPage() {
             </Button>
             <Button
               onClick={handleTopUp}
-              disabled={creditMutation.isPending}
+              disabled={initiateMutation.isPending}
               className="bg-emerald-600 hover:bg-emerald-700 text-white"
             >
-              {creditMutation.isPending ? (
-                <><Loader2 className="h-4 w-4 mr-1 animate-spin" /> Processing…</>
+              {initiateMutation.isPending ? (
+                <><Loader2 className="h-4 w-4 mr-1 animate-spin" /> Redirecting…</>
               ) : (
-                <><CheckCircle2 className="h-4 w-4 mr-1" /> Confirm Top-Up</>
+                <><CreditCard className="h-4 w-4 mr-1" /> Pay with Paystack</>
               )}
             </Button>
           </DialogFooter>

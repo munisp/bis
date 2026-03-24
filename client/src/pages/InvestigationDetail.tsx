@@ -149,7 +149,21 @@ const EVIDENCE_TYPE_CONFIG: Record<EvidenceType, { label: string; color: string;
 export default function InvestigationDetail() {
   const [, navigate] = useLocation();
   const params = useParams<{ id: string }>();
-  const inv = mockInvestigations.find(i => i.id === params.id) ?? mockInvestigations[0];
+
+  // ── Live data: try to load investigation by ref (params.id may be ref or mock id)
+  const { data: liveInv, isLoading: invLoading } = trpc.investigations.get.useQuery(
+    { ref: params.id ?? "" },
+    { enabled: !!params.id }
+  );
+
+  // ── Live audit log for this investigation (used in Processing Log tab)
+  const { data: auditData, isLoading: auditLoading } = trpc.audit.list.useQuery(
+    { targetRef: params.id ?? "", limit: 50 },
+    { enabled: !!params.id }
+  );
+
+  // ── Fall back to mock data when DB is unavailable or ref not found
+  const inv = (liveInv as typeof mockInvestigations[0] | null) ?? mockInvestigations.find(i => i.id === params.id) ?? mockInvestigations[0];
   const relatedAlerts = mockAlerts.filter(a => a.subjectRef === inv.ref);
   const [note, setNote] = useState("");
   const [addingNote, setAddingNote] = useState(false);
@@ -191,12 +205,28 @@ export default function InvestigationDetail() {
     setTimeout(() => noteRef.current?.focus(), 0);
   };
   const [activeTab, setActiveTab] = useState<'overview' | 'evidence' | 'timeline'>('overview');
+  // Seed evidence items from live audit log when available, else fall back to mock
+  const liveEvidenceItems: EvidenceItem[] = (auditData?.items ?? []).map(a => ({
+    id: String(a.id),
+    type: 'analyst_note' as EvidenceType,
+    timestamp: a.createdAt instanceof Date ? a.createdAt.toISOString() : String(a.createdAt),
+    title: a.action,
+    body: a.detail != null ? String(a.detail) : a.action,
+    source: a.category,
+    linkedBy: a.userEmail ?? undefined,
+  }));
   const [evidenceItems, setEvidenceItems] = useState<EvidenceItem[]>(MOCK_EVIDENCE);
+  // Merge live audit items at top when available
+  const mergedEvidence: EvidenceItem[] = liveEvidenceItems.length > 0
+    ? [...liveEvidenceItems, ...evidenceItems.filter(e => !e.id.startsWith('ev'))]
+    : evidenceItems;
   const [evidenceFilter, setEvidenceFilter] = useState<EvidenceType | 'all'>('all');
   const [currentStatus, setCurrentStatus] = useState<string>(inv.status);
-  // Live assignee state — seed from mock data, updated by assign mutation
+  // Live assignee state — seed from live data or mock, updated by assign mutation
   const [assignedToId, setAssignedToId] = useState<string>("");
-  const [assignedToName, setAssignedToName] = useState<string>(inv.assignedTo ?? "");
+  const [assignedToName, setAssignedToName] = useState<string>(
+    (liveInv as any)?.assignedTo ? String((liveInv as any).assignedTo) : (inv as any).assignedTo ?? ""
+  );
 
   // ── Live users list for assignee dropdown ─────────────────────────────────
   const { data: usersList, isLoading: usersLoading } = trpc.users.list.useQuery({});
@@ -284,7 +314,7 @@ export default function InvestigationDetail() {
     toast.info("Investigation re-queued for processing");
   };
 
-  const filteredEvidence = evidenceItems.filter(e =>
+  const filteredEvidence = mergedEvidence.filter(e =>
     evidenceFilter === 'all' || e.type === evidenceFilter
   );
 
@@ -298,10 +328,21 @@ export default function InvestigationDetail() {
     return `${Math.floor(h / 24)}d ago`;
   };
 
+  // Show loading skeleton while fetching live investigation
+  if (invLoading) {
+    return (
+      <BISLayout title="Loading…" subtitle="Fetching investigation data">
+        <div className="flex items-center justify-center py-24">
+          <Loader2 size={28} className="animate-spin text-muted-foreground" />
+        </div>
+      </BISLayout>
+    );
+  }
+
   return (
     <BISLayout
       title={inv.ref}
-      subtitle={inv.subjectName}
+      subtitle={(liveInv as any)?.subjectName ?? inv.subjectName}
       actions={
         <div className="flex items-center gap-2">
           <Select
@@ -375,39 +416,45 @@ export default function InvestigationDetail() {
         <ArrowLeft size={12} /> Back to Investigations
       </Button>
 
-      {/* Subject card — always visible */}
+      {/* Subject card — always visible, live data when available */}
       <div className="bis-card p-4 mb-4">
         <div className="flex items-start gap-4">
           <div className="w-12 h-12 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0">
-            {inv.subjectType === "individual" ? <User size={20} className="text-primary" /> : <Building2 size={20} className="text-primary" />}
+            {((liveInv as any)?.subjectType ?? inv.subjectType) === "individual" ? <User size={20} className="text-primary" /> : <Building2 size={20} className="text-primary" />}
           </div>
           <div className="flex-1">
             <div className="flex items-center gap-2 flex-wrap">
-              <h2 className="text-lg font-bold text-foreground">{inv.subjectName}</h2>
-              <span className={`bis-badge ${getStatusBadgeClass(inv.status)}`}>{inv.status}</span>
-              {inv.tags.map(tag => (
+              <h2 className="text-lg font-bold text-foreground">{(liveInv as any)?.subjectName ?? inv.subjectName}</h2>
+              <span className={`bis-badge ${getStatusBadgeClass(currentStatus)}`}>{currentStatus}</span>
+              {/* Tags: live investigation may not have tags, fall back to mock */}
+              {((inv as any).tags ?? []).map((tag: string) => (
                 <Badge key={tag} variant="outline" className="text-[10px] h-4 px-1.5 border-red-500/30 text-red-400">{tag}</Badge>
               ))}
             </div>
             <div className="flex flex-wrap gap-4 mt-2 text-xs text-muted-foreground">
-              <span className="capitalize">{inv.subjectType}</span>
+              <span className="capitalize">{(liveInv as any)?.subjectType ?? inv.subjectType}</span>
               <span>·</span>
-              <span className="font-mono">{inv.ref}</span>
+              <span className="font-mono">{(liveInv as any)?.ref ?? inv.ref}</span>
               <span>·</span>
-              <span className="capitalize">{inv.tier} tier</span>
+              <span className="capitalize">{(liveInv as any)?.tier ?? inv.tier} tier</span>
               <span>·</span>
-              <span>{inv.country}</span>
+              <span>{(liveInv as any)?.country ?? inv.country}</span>
+              {liveInv && <><span>·</span><span className="text-emerald-400/70 font-mono text-[10px]">LIVE</span></>}
             </div>
             <div className="flex flex-wrap gap-4 mt-1 text-xs text-muted-foreground">
-              <span>Created: {formatDate(inv.createdAt)}</span>
-              <span>Updated: {formatDateTime(inv.updatedAt)}</span>
-              <span>Assigned: {inv.assignedTo}</span>
+              <span>Created: {formatDate((liveInv as any)?.createdAt ?? inv.createdAt)}</span>
+              <span>Updated: {formatDateTime((liveInv as any)?.updatedAt ?? inv.updatedAt)}</span>
+              {assignedToName && <span>Assigned: {assignedToName}</span>}
             </div>
           </div>
           <div className="text-center shrink-0">
-            <div className="text-3xl font-bold font-mono" style={{ color: riskColor }}>{inv.riskScore}</div>
+            <div className="text-3xl font-bold font-mono" style={{ color: riskColor }}>
+              {(liveInv as any)?.riskScore ?? inv.riskScore}
+            </div>
             <div className="text-[10px] text-muted-foreground uppercase tracking-wider">Risk Score</div>
-            <div className="text-xs capitalize font-medium mt-0.5" style={{ color: riskColor }}>{inv.riskLevel}</div>
+            <div className="text-xs capitalize font-medium mt-0.5" style={{ color: riskColor }}>
+              {(inv as any).riskLevel ?? ""}
+            </div>
           </div>
         </div>
       </div>
@@ -734,23 +781,57 @@ export default function InvestigationDetail() {
       {/* ── Processing Log Tab ── */}
       {activeTab === 'timeline' && (
         <div className="max-w-2xl space-y-2">
-          {processingTimeline.map((event, i) => {
-            const color = event.type === "error" ? "text-red-400 bg-red-500/10 border-red-500/20"
-              : event.type === "warning" ? "text-amber-400 bg-amber-500/10 border-amber-500/20"
-              : event.type === "success" ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/20"
-              : event.type === "note" ? "text-blue-400 bg-blue-500/10 border-blue-500/20"
+          {auditLoading && (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground py-4">
+              <Loader2 size={12} className="animate-spin" /> Loading live audit log…
+            </div>
+          )}
+          {/* Live audit entries */}
+          {(auditData?.items ?? []).map((entry, i) => {
+            const color = entry.result === "failure" ? "text-red-400 bg-red-500/10 border-red-500/20"
+              : entry.result === "warning" ? "text-amber-400 bg-amber-500/10 border-amber-500/20"
+              : entry.result === "success" ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/20"
               : "text-muted-foreground bg-muted/20 border-border/50";
+            const detailStr = entry.detail != null ? String(entry.detail) : null;
             return (
-              <div key={i} className={`p-3 rounded-lg border text-xs ${color}`}>
-                <div className="font-mono font-semibold">{event.event}</div>
+              <div key={entry.id} className={`p-3 rounded-lg border text-xs ${color}`}>
+                <div className="font-mono font-semibold">{entry.action}</div>
                 <div className="flex items-center gap-2 mt-1 opacity-70">
-                  <span>{event.actor}</span>
+                  <span>{entry.userEmail ?? entry.category}</span>
                   <span>·</span>
-                  <span className="font-mono">{formatDateTime(event.time)}</span>
+                  <span className="font-mono">
+                    {entry.createdAt instanceof Date
+                      ? formatDateTime(entry.createdAt.toISOString())
+                      : formatDateTime(String(entry.createdAt))}
+                  </span>
+                  {detailStr && <><span>·</span><span className="truncate max-w-[200px]">{detailStr}</span></>}
                 </div>
               </div>
             );
           })}
+          {/* Fall back to static mock processing timeline when no live entries */}
+          {!auditLoading && (auditData?.items ?? []).length === 0 && (
+            <>
+              <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider mb-2">Simulated processing log (no live DB entries)</p>
+              {processingTimeline.map((event, i) => {
+                const color = event.type === "error" ? "text-red-400 bg-red-500/10 border-red-500/20"
+                  : event.type === "warning" ? "text-amber-400 bg-amber-500/10 border-amber-500/20"
+                  : event.type === "success" ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/20"
+                  : event.type === "note" ? "text-blue-400 bg-blue-500/10 border-blue-500/20"
+                  : "text-muted-foreground bg-muted/20 border-border/50";
+                return (
+                  <div key={i} className={`p-3 rounded-lg border text-xs ${color}`}>
+                    <div className="font-mono font-semibold">{event.event}</div>
+                    <div className="flex items-center gap-2 mt-1 opacity-70">
+                      <span>{event.actor}</span>
+                      <span>·</span>
+                      <span className="font-mono">{formatDateTime(event.time)}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </>
+          )}
         </div>
       )}
     </BISLayout>

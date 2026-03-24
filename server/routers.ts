@@ -414,6 +414,7 @@ const auditRouter = router({
     .input(z.object({
       category: z.string().optional(),
       result: z.string().optional(),
+      targetRef: z.string().optional(),
       limit: z.number().default(100),
       offset: z.number().default(0),
     }))
@@ -423,6 +424,7 @@ const auditRouter = router({
       const conditions = [];
       if (input.category) conditions.push(eq(auditLog.category, input.category as any));
       if (input.result) conditions.push(eq(auditLog.result, input.result as any));
+      if (input.targetRef) conditions.push(eq(auditLog.targetRef, input.targetRef));
       const where = conditions.length ? and(...conditions) : undefined;
       const [items, countResult] = await Promise.all([
         db.select().from(auditLog).where(where).orderBy(desc(auditLog.createdAt)).limit(input.limit).offset(input.offset),

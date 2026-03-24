@@ -63,3 +63,12 @@
 - [x] notifyOwner webhook contact point + email fallback + notification policies in Grafana
 - [x] Investigation assign dropdown in InvestigationDetail — live trpc.users.list, Permify-gated assign mutation
 - [x] trpc.users.list procedure (protectedProcedure, optional role filter, ordered by name)
+
+## Phase 6 — Grafana Webhook, Paystack, Live Investigation Detail
+
+- [x] POST /api/webhooks/grafana-alert Express route with bearer token auth and notifyOwner forwarding
+- [x] Paystack initiate/verify tRPC procedures (billing.initiateTopUp, billing.verifyTopUp)
+- [x] Top-up dialog updated with Paystack checkout flow (card/bank/USSD) + Verify Payment banner
+- [x] InvestigationDetail subject card replaced with live trpc.investigations.get query (with mock fallback)
+- [x] InvestigationDetail evidence items merged with live trpc.audit.list (targetRef filter)
+- [x] Processing Log tab wired to live audit entries; risk score from live investigation record

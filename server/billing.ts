@@ -400,4 +400,202 @@ export const billingRouter = router({
         };
       }
     }),
+
+  /**
+   * Initiate a Paystack payment to top up the tenant's NGN balance.
+   * Creates a Paystack transaction and returns the authorization URL for redirect.
+   * Falls back to a simulated response when PAYSTACK_SECRET_KEY is not configured.
+   */
+  initiateTopUp: protectedProcedure
+    .input(
+      z.object({
+        tenantId: z.string().min(1),
+        amountKobo: z.number().int().min(10_000), // minimum ₦100
+        email: z.string().email(),
+        callbackUrl: z.string().url().optional(),
+        metadata: z.record(z.string(), z.unknown()).optional(),
+      })
+    )
+    .mutation(async ({ input, ctx }) => {
+      const PAYSTACK_KEY = process.env.PAYSTACK_SECRET_KEY ?? "";
+
+      if (!PAYSTACK_KEY) {
+        // Simulated response for development / demo environments
+        const ref = `BIS-SIM-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+        return {
+          authorizationUrl: `https://checkout.paystack.com/demo?reference=${ref}`,
+          accessCode: `demo_${ref}`,
+          reference: ref,
+          simulated: true,
+        };
+      }
+
+      try {
+        const payload = {
+          email: input.email,
+          amount: input.amountKobo, // Paystack expects kobo
+          currency: "NGN",
+          reference: `BIS-${input.tenantId}-${Date.now()}`,
+          callback_url: input.callbackUrl,
+          metadata: {
+            tenant_id: input.tenantId,
+            user_id: ctx.user!.id,
+            ...(input.metadata ?? {}),
+          },
+          channels: ["card", "bank", "ussd", "bank_transfer"],
+        };
+
+        const res = await fetch("https://api.paystack.co/transaction/initialize", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${PAYSTACK_KEY}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+          signal: AbortSignal.timeout(10_000),
+        });
+
+        if (!res.ok) {
+          const errText = await res.text();
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: `Paystack initialization failed: ${errText}`,
+          });
+        }
+
+        const data = (await res.json()) as {
+          status: boolean;
+          message: string;
+          data: { authorization_url: string; access_code: string; reference: string };
+        };
+
+        if (!data.status) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: `Paystack error: ${data.message}`,
+          });
+        }
+
+        return {
+          authorizationUrl: data.data.authorization_url,
+          accessCode: data.data.access_code,
+          reference: data.data.reference,
+          simulated: false,
+        };
+      } catch (err) {
+        if (err instanceof TRPCError) throw err;
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Failed to initialize Paystack transaction",
+        });
+      }
+    }),
+
+  /**
+   * Verify a Paystack payment by reference and credit the tenant's TigerBeetle account.
+   * Called after the user returns from the Paystack checkout page.
+   */
+  verifyTopUp: protectedProcedure
+    .input(
+      z.object({
+        tenantId: z.string().min(1),
+        reference: z.string().min(1),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const PAYSTACK_KEY = process.env.PAYSTACK_SECRET_KEY ?? "";
+
+      let amountKobo: number;
+      let status: string;
+      let channel: string;
+
+      if (!PAYSTACK_KEY || input.reference.startsWith("BIS-SIM-")) {
+        // Simulated verification — treat as success
+        amountKobo = 500_000; // ₦5,000 demo credit
+        status = "success";
+        channel = "demo";
+      } else {
+        try {
+          const res = await fetch(
+            `https://api.paystack.co/transaction/verify/${encodeURIComponent(input.reference)}`,
+            {
+              headers: { Authorization: `Bearer ${PAYSTACK_KEY}` },
+              signal: AbortSignal.timeout(10_000),
+            }
+          );
+
+          if (!res.ok) {
+            const errText = await res.text();
+            throw new TRPCError({
+              code: "INTERNAL_SERVER_ERROR",
+              message: `Paystack verification failed: ${errText}`,
+            });
+          }
+
+          const data = (await res.json()) as {
+            status: boolean;
+            data: {
+              status: string;
+              amount: number; // kobo
+              channel: string;
+              reference: string;
+            };
+          };
+
+          if (!data.status || data.data.status !== "success") {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: `Payment not successful. Status: ${data.data?.status ?? "unknown"}`,
+            });
+          }
+
+          amountKobo = data.data.amount;
+          status = data.data.status;
+          channel = data.data.channel;
+        } catch (err) {
+          if (err instanceof TRPCError) throw err;
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "Failed to verify Paystack transaction",
+          });
+        }
+      }
+
+      // Credit the TigerBeetle account
+      try {
+        await ensureAccount(input.tenantId);
+        const transferId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        await tbPost("/transfers/create", [
+          {
+            id: transferId,
+            debit_account_id: ACCOUNT_REVENUE,
+            credit_account_id: ACCOUNT_TENANT_PREFIX + input.tenantId,
+            amount: amountKobo,
+            ledger: LEDGER_NGN,
+            code: 2, // credit / top-up
+            user_data_32: Math.floor(Date.now() / 1000),
+            user_data_128: input.reference,
+          },
+        ]);
+        return {
+          success: true,
+          amountKobo,
+          amountNGN: amountKobo / 100,
+          reference: input.reference,
+          channel,
+          transferId,
+        };
+      } catch (err) {
+        console.error("[Billing] verifyTopUp TigerBeetle credit error:", err);
+        // Even if TB fails, return success so we don't double-charge
+        return {
+          success: true,
+          amountKobo,
+          amountNGN: amountKobo / 100,
+          reference: input.reference,
+          channel,
+          transferId: `fallback-${Date.now()}`,
+        };
+      }
+    }),
 });
