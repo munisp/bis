@@ -13,6 +13,7 @@ import { quickcheckRouter } from "./quickcheck";
 import { goamlRouter } from "./goaml";
 import { messagingRouter } from "./messaging";
 import { socialMonitoringRouter } from "./socialMonitoring";
+import { biometricRouter } from "./biometric";
 import { getDb } from "./db";
 import { evaluateAlertRules } from "./alertRules";
 import {
@@ -1791,8 +1792,8 @@ export const appRouter = router({
   apiTokens: apiTokensRouter,
   quickcheck: quickcheckRouter,
   goaml: goamlRouter,
-  messaging: messagingRouter,
+   messaging: messagingRouter,
   socialMonitoring: socialMonitoringRouter,
+  biometric: biometricRouter,
 });
-
 export type AppRouter = typeof appRouter;

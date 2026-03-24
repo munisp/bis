@@ -16,9 +16,27 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // ── Load OpenAPI spec ────────────────────────────────────────────────────────
 let openApiSpec: Record<string, unknown> = {};
 try {
-  const specPath = path.join(__dirname, "openapi.yaml");
-  const raw = fs.readFileSync(specPath, "utf8");
-  openApiSpec = yaml.load(raw) as Record<string, unknown>;
+  // Try multiple candidate paths to handle tsx (dev) and esbuild (prod) contexts
+  // In tsx dev mode, import.meta.url resolves to the project root, not server/
+  const candidates = [
+    path.join(__dirname, "openapi.yaml"),
+    path.join(__dirname, "server", "openapi.yaml"),
+    path.join(process.cwd(), "server", "openapi.yaml"),
+    path.join(process.cwd(), "openapi.yaml"),
+  ];
+  let loaded = false;
+  for (const specPath of candidates) {
+    if (fs.existsSync(specPath)) {
+      const raw = fs.readFileSync(specPath, "utf8");
+      openApiSpec = yaml.load(raw) as Record<string, unknown>;
+      console.info(`[OpenClaw] Loaded openapi.yaml from ${specPath}`);
+      loaded = true;
+      break;
+    }
+  }
+  if (!loaded) {
+    console.warn("[OpenClaw] Could not load openapi.yaml — Swagger UI will be empty");
+  }
 } catch {
   console.warn("[OpenClaw] Could not load openapi.yaml — Swagger UI will be empty");
 }

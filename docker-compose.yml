@@ -383,6 +383,33 @@ services:
       timeout: 5s
       retries: 3
 
+  biometric-engine:
+    build:
+      context: ./services/biometric-engine
+      dockerfile: Dockerfile
+    container_name: bis-biometric-engine
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      PORT: "8084"
+      REDIS_URL: redis://:${REDIS_PASSWORD:-bis_redis_dev}@redis:6379/2
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      LIVENESS_THRESHOLD: "0.72"
+      MATCH_THRESHOLD: "0.40"
+      ANTISPOOFING_THRESHOLD: "0.60"
+      EMBEDDING_CACHE_TTL: "86400"
+    ports:
+      - "8084:8084"
+    networks: [bis-net]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8084/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
   bff:
     build:
       context: .
@@ -399,6 +426,8 @@ services:
       risk-engine:
         condition: service_healthy
       event-processor:
+        condition: service_healthy
+      biometric-engine:
         condition: service_healthy
     environment:
       NODE_ENV: production

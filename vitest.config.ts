@@ -15,5 +15,9 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["server/**/*.test.ts", "server/**/*.spec.ts"],
+    env: {
+      // Use local PostgreSQL for tests when no DATABASE_URL is set in environment
+      DATABASE_URL: process.env.DATABASE_URL ?? "postgresql://bis_user:bis_secure_2026@localhost:5432/bis_db",
+    },
   },
 });

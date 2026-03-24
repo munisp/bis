@@ -345,7 +345,7 @@ paths:
     get:
       tags: [Investigations]
       summary: List investigations
-      description: Returns a paginated list of investigations. Supports filtering by status, priority, and case type. **Tokens: 1**
+      description: "Returns a paginated list of investigations. Supports filtering by status, priority, and case type. **Tokens: 1**"
       parameters:
         - name: status
           in: query
@@ -405,7 +405,7 @@ paths:
     post:
       tags: [Investigations]
       summary: Create investigation
-      description: Opens a new investigation case. Returns a BIS reference number. **Tokens: 3**
+      description: "Opens a new investigation case. Returns a BIS reference number. **Tokens: 3**"
       requestBody:
         required: true
         content:
@@ -454,7 +454,7 @@ paths:
     get:
       tags: [Investigations]
       summary: Get investigation by reference
-      description: Returns the full investigation record including risk score and audit trail. **Tokens: 1**
+      description: "Returns the full investigation record including risk score and audit trail. **Tokens: 1**"
       parameters:
         - name: ref
           in: path
@@ -481,7 +481,7 @@ paths:
     get:
       tags: [KYC]
       summary: List KYC records
-      description: Returns KYC records for the tenant. **Tokens: 1**
+      description: "Returns KYC records for the tenant. **Tokens: 1**"
       parameters:
         - name: status
           in: query
@@ -675,7 +675,7 @@ paths:
     get:
       tags: [Field Agents]
       summary: List field agents
-      description: Returns available field agents with their current status and location. **Tokens: 1**
+      description: "Returns available field agents with their current status and location. **Tokens: 1**"
       parameters:
         - name: status
           in: query
@@ -772,7 +772,7 @@ paths:
     get:
       tags: [Alerts]
       summary: List alerts
-      description: Returns compliance alerts for the tenant. **Tokens: 1**
+      description: "Returns compliance alerts for the tenant. **Tokens: 1**"
       parameters:
         - name: severity
           in: query
@@ -810,7 +810,7 @@ paths:
     get:
       tags: [Tokens]
       summary: List API tokens
-      description: Returns all API tokens for the authenticated tenant. **Tokens: 1**
+      description: "Returns all API tokens for the authenticated tenant. **Tokens: 1**"
       responses:
         "200":
           description: API tokens
@@ -827,7 +827,7 @@ paths:
     post:
       tags: [Tokens]
       summary: Create API token
-      description: Creates a new API token. The full token value is returned only once — store it securely. **Tokens: 1**
+      description: "Creates a new API token. The full token value is returned only once — store it securely. **Tokens: 1**"
       requestBody:
         required: true
         content:
@@ -870,7 +870,7 @@ paths:
     delete:
       tags: [Tokens]
       summary: Revoke API token
-      description: Permanently revokes an API token. This action cannot be undone. **Tokens: 1**
+      description: "Permanently revokes an API token. This action cannot be undone. **Tokens: 1**"
       parameters:
         - name: id
           in: path
@@ -893,7 +893,7 @@ paths:
     get:
       tags: [Tokens]
       summary: Token usage stats
-      description: Returns usage statistics for a specific API token. **Tokens: 1**
+      description: "Returns usage statistics for a specific API token. **Tokens: 1**"
       parameters:
         - name: id
           in: path
