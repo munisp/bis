@@ -1657,6 +1657,100 @@ const alertRulesRouter = router({
           : `Would NOT trigger — sample value ${input.sampleValue} does not satisfy ${operator} ${threshold}.`,
       };
     }),
+
+  // Run all enabled rules against the latest aggregated metric values from the DB.
+  // Supports metrics: risk_score (avg last 24h), adverse_media_count (total last 24h),
+  // sanctions_confidence (avg last 24h), pep_confidence (avg last 24h).
+  runScheduled: adminProcedure
+    .mutation(async ({ ctx }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+
+      const enabledRules = await db.select().from(alertRules).where(eq(alertRules.enabled, true));
+      if (enabledRules.length === 0) return { rulesEvaluated: 0, rulesTriggered: 0, alertsCreated: 0 };
+
+      // Compute latest metric values from the DB (last 24 hours)
+      const since = Date.now() - 24 * 60 * 60 * 1000;
+
+      // avg risk_score from investigations updated in last 24h
+      const [{ avgRisk }] = await db
+        .select({ avgRisk: sql<number>`AVG(${investigations.riskScore})` })
+        .from(investigations)
+        .where(gte(investigations.updatedAt, new Date(since)));
+
+      // count of screening requests in last 24h (proxy for adverse_media_count)
+      const [{ screeningCount }] = await db
+        .select({ screeningCount: count() })
+        .from(screeningRequests)
+        .where(gte(screeningRequests.createdAt, new Date(since)));
+
+      // avg risk score from kyc records in last 24h (proxy for sanctions/pep confidence)
+      const [{ avgKycRisk }] = await db
+        .select({ avgKycRisk: sql<number>`AVG(${kycRecords.riskScore})` })
+        .from(kycRecords)
+        .where(gte(kycRecords.createdAt, new Date(since)));
+
+      const metricValues: Record<string, number> = {
+        risk_score:              Number(avgRisk ?? 0),
+        adverse_media_count:     Number(screeningCount ?? 0),
+        sanctions_confidence:    Number(avgKycRisk ?? 0),
+        pep_confidence:          Number(avgKycRisk ?? 0),
+        duplicate_identity_score: Number(avgRisk ?? 0),
+        velocity_hourly:         Number(screeningCount ?? 0),
+        velocity_daily:          Number(screeningCount ?? 0),
+        credit_score:            Number(avgRisk ?? 0),
+      };
+
+      let rulesTriggered = 0;
+      let alertsCreated = 0;
+
+      for (const rule of enabledRules) {
+        const value = metricValues[rule.metric as keyof typeof metricValues] ?? 0;
+        // evaluateAlertRules returns the number of alerts created for this metric
+        const alertsForRule = await evaluateAlertRules(rule.metric as any, value, {
+          subjectRef: 'scheduled-run',
+          triggeredBy: 'scheduled',
+          userId: ctx.user!.id,
+        });
+        if (alertsForRule > 0) rulesTriggered++;
+        alertsCreated += alertsForRule;
+      }
+
+      await writeAuditLog(db, {
+        userId: ctx.user!.id,
+        category: 'system',
+        action: `Scheduled rule evaluation: ${enabledRules.length} rules, ${rulesTriggered} triggered, ${alertsCreated} alerts`,
+        targetRef: 'scheduled-run',
+      });
+
+      return { rulesEvaluated: enabledRules.length, rulesTriggered, alertsCreated };
+    }),
+
+  // Return the last 5 triggered evaluations for the dashboard widget.
+  recentTriggers: protectedProcedure
+    .query(async () => {
+      const db = await getDb();
+      if (!db) return [];
+      const rows = await db
+        .select({
+          id: ruleEvaluations.id,
+          ruleId: ruleEvaluations.ruleId,
+          subjectRef: ruleEvaluations.subjectRef,
+          metric: ruleEvaluations.metric,
+          value: ruleEvaluations.value,
+          threshold: ruleEvaluations.threshold,
+          alertCreated: ruleEvaluations.alertCreated,
+          createdAt: ruleEvaluations.createdAt,
+          ruleName: alertRules.name,
+          ruleSeverity: alertRules.severity,
+        })
+        .from(ruleEvaluations)
+        .leftJoin(alertRules, eq(ruleEvaluations.ruleId, alertRules.id))
+        .where(eq(ruleEvaluations.triggered, true))
+        .orderBy(desc(ruleEvaluations.createdAt))
+        .limit(5);
+      return rows;
+    }),
 });
 
 // ─── App Router ───────────────────────────────────────────────────────────────

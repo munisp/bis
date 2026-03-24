@@ -39,6 +39,7 @@ const OnboardingAdminPage         = lazy(() => import("@/pages/admin/OnboardingA
 const UsersAdminPage              = lazy(() => import("@/pages/admin/UsersAdminPage"));
 const ScreeningRecordsPage        = lazy(() => import("@/pages/screening/ScreeningRecordsPage"));
 const AlertRulesPage               = lazy(() => import("@/pages/AlertRulesPage"));
+const TenantBrandingPage           = lazy(() => import("@/pages/TenantBrandingPage"));
 
 // ─── Page loading skeleton ────────────────────────────────────────────────────
 
@@ -93,6 +94,7 @@ function Router() {
         <Route path="/admin/users" component={UsersAdminPage} />
         <Route path="/screening-records" component={ScreeningRecordsPage} />
         <Route path="/alert-rules" component={AlertRulesPage} />
+        <Route path="/tenants/:id/settings" component={TenantBrandingPage} />
 
         {/* Fallback */}
         <Route path="/404" component={NotFound} />

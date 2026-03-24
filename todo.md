@@ -468,4 +468,34 @@
 - [x] 0 TypeScript errors
 
 ### Archive
-- [ ] Comprehensive end-to-end archive v20 generated (source + services, >= 17 MB)
+- [x] Comprehensive end-to-end archive v20 generated (bis-pwa-archive-v20-20260324.zip, 67 MB, 1041 files)
+
+## Phase 21 — Next Steps (Completed)
+
+### Scheduled Rule Evaluation
+- [x] Add alertRules.runScheduled adminProcedure (queries avg risk scores last 24h, evaluates all enabled rules)
+- [x] Add alertRules.recentTriggers query (last 5 triggered evaluations for Dashboard widget)
+- [x] Return summary: rulesEvaluated, rulesTriggered, alertsCreated
+- [x] Add Run Now button in AlertRulesPage header (loading spinner + result toast)
+
+### Rules Activity Dashboard Widget
+- [x] Add recentTriggers query to Dashboard.tsx
+- [x] Add Rules Activity card to Dashboard bottom grid (rule name, subject ref, metric value, timestamp, outcome badge)
+- [x] Show No recent triggers empty state when no evaluations exist
+
+### Tenant Branding Settings Page
+- [x] Add updateBranding mutation to tenantsRouter (primaryColor + reportFooter)
+- [x] Add primaryColor and reportFooter columns to tenants table in schema.ts
+- [x] Push migration to local PostgreSQL
+- [x] Create TenantBrandingPage (/tenants/:id/settings) with logo upload, colour picker, footer text
+- [x] Add PDF preview mode showing rendered report header with tenant logo + classification banner
+- [x] Register /tenants/:id/settings route in App.tsx
+- [x] Add Branding Settings link to TenantCard expanded panel tab bar
+- [x] Add Palette icon to Tenants.tsx lucide-react imports
+
+### Tests
+- [x] All 26 tests pass (3 test files, 0 failures)
+- [x] 0 TypeScript errors
+
+### Archive
+- [ ] Comprehensive archive v21 generated

@@ -329,6 +329,8 @@ export const tenants = pgTable("tenants", {
   usedThisMonth: integer("usedThisMonth").notNull().default(0),
   ngnBalance: real("ngnBalance").notNull().default(0),
   logoUrl: text("logoUrl"),
+  primaryColor: varchar("primaryColor", { length: 32 }),
+  reportFooter: text("reportFooter"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
 });

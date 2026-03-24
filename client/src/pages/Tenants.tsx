@@ -13,7 +13,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/lib/trpc";
 import {
-  Building2, Plus, Key, Copy, Eye, EyeOff, Trash2,
+  Building2, Plus, Key, Copy, Eye, EyeOff, Trash2, Palette,
   Search, Shield, Activity, CheckCircle2, RefreshCw,
   RotateCcw, AlertTriangle, Clock, ChevronDown, ChevronUp,
   Loader2, X, Webhook, Send, CheckSquare
@@ -482,6 +482,15 @@ function TenantCard({ tenant, pc, sc, usagePct, isExpanded, onToggle, onSuspend,
                 {tab === 'keys' ? `API Keys (${keys.filter((k: any) => k.status === 'active').length})` : `Webhooks (${whooks.length})`}
               </button>
             ))}
+            <div className="ml-auto">
+              <a
+                href={`/tenants/${tenant.id}/settings`}
+                onClick={e => e.stopPropagation()}
+                className="flex items-center gap-1.5 text-[10px] font-mono px-2.5 py-1 rounded-md transition-colors text-violet-400 hover:text-violet-300 hover:bg-violet-500/10 border border-transparent hover:border-violet-500/20"
+              >
+                <Palette size={10} /> Branding Settings
+              </a>
+            </div>
           </div>
 
           {/* ── Keys tab ── */}

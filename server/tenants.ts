@@ -289,4 +289,23 @@ export const tenantsRouter = router({
         return { success: false, status: 0 };
       }
     }),
+
+  // ── Branding Settings ───────────────────────────────────────────────────────
+
+  updateBranding: protectedProcedure
+    .input(z.object({
+      id: z.number(),
+      primaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+      reportFooter: z.string().max(500).optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      const { id, ...data } = input;
+      const [row] = await db.update(tenants)
+        .set({ ...data, updatedAt: new Date() })
+        .where(eq(tenants.id, id))
+        .returning();
+      return row;
+    }),
 });

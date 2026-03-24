@@ -141,6 +141,17 @@ export default function AlertRulesPage() {
     onError: (e: any) => toast.error("Toggle failed", { description: e.message }),
   });
 
+  // ── Run Scheduled ──
+  const runScheduledMutation = trpc.alertRules.runScheduled.useMutation({
+    onSuccess: (res) => {
+      toast.success("Scheduled evaluation complete", {
+        description: `${res.rulesEvaluated} rules evaluated · ${res.rulesTriggered} triggered · ${res.alertsCreated} alerts created`,
+      });
+      utils.alertRules.evaluationHistory.invalidate();
+    },
+    onError: (e: any) => toast.error("Scheduled run failed", { description: e.message }),
+  });
+
   // ── Test Fire ──
   const [testFireRuleId, setTestFireRuleId] = useState<number | null>(null);
   const [testSampleValue, setTestSampleValue] = useState<string>("");
@@ -196,6 +207,18 @@ export default function AlertRulesPage() {
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => refetch()}>
             <RefreshCw size={11} className={isLoading ? "animate-spin" : ""} /> Refresh
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-xs gap-1 border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10"
+            onClick={() => runScheduledMutation.mutate()}
+            disabled={runScheduledMutation.isPending}
+          >
+            {runScheduledMutation.isPending
+              ? <Loader2 size={11} className="animate-spin" />
+              : <Zap size={11} />}
+            Run Now
           </Button>
           {tab === "rules" && (
             <Button size="sm" className="h-7 text-xs gap-1.5" onClick={openCreate}>

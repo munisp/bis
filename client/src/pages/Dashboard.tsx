@@ -168,10 +168,12 @@ export default function Dashboard() {
   const { data: recentInvData } = trpc.investigations.list.useQuery({ limit: 6, offset: 0 });
   const { data: alertsData } = trpc.alerts.list.useQuery({ limit: 4 });
   const { data: dataSourcesData } = trpc.dataSources.list.useQuery();
+  const { data: recentTriggersData } = trpc.alertRules.recentTriggers.useQuery();
 
   const recentInvestigations = recentInvData?.items ?? [];
   const criticalAlerts = (alertsData ?? []).filter((a: any) => a.severity === "critical" || a.severity === "high").slice(0, 4);
   const liveDataSources = dataSourcesData ?? [];
+  const recentTriggers = recentTriggersData ?? [];
 
   const handleRefresh = () => {
     setRefreshing(true);
@@ -462,6 +464,42 @@ export default function Dashboard() {
             </div>
           </div>
         </div>
+      </div>
+
+      {/* ── Rules Activity Widget ── */}
+      <div className="mt-4 rounded-lg border border-border bg-card">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+          <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+            <Zap size={13} className="text-amber-400" />
+            Rules Activity
+          </h3>
+          <Button variant="ghost" size="sm" className="h-6 text-xs gap-1" onClick={() => navigate("/alert-rules")}>
+            View all <ChevronRight size={11} />
+          </Button>
+        </div>
+        {recentTriggers.length === 0 ? (
+          <div className="px-4 py-6 text-xs text-muted-foreground text-center">No rule evaluations yet</div>
+        ) : (
+          <div className="divide-y divide-border">
+            {recentTriggers.slice(0, 5).map((ev: any) => (
+              <div key={ev.id} className="px-4 py-2.5 flex items-center justify-between gap-3 hover:bg-accent/20 transition-colors">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${ev.alertCreated ? 'bg-red-400' : 'bg-emerald-400'}`} />
+                  <div className="min-w-0">
+                    <div className="text-xs font-medium text-foreground truncate">{ev.ruleName ?? `Rule #${ev.ruleId}`}</div>
+                    <div className="text-[10px] text-muted-foreground font-mono">{ev.subjectRef} · {ev.metric} = {ev.value}</div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  {ev.alertCreated && (
+                    <span className="text-[9px] font-bold uppercase tracking-wider text-red-400 bg-red-500/10 border border-red-500/30 rounded px-1.5 py-0.5">TRIGGERED</span>
+                  )}
+                  <span className="text-[10px] text-muted-foreground font-mono">{new Date(ev.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* ── Data Source Activity Bar Chart ── */}

@@ -71,6 +71,13 @@
       "when": 1774383989915,
       "tag": "0009_unique_sprite",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1774385671666,
+      "tag": "0010_stiff_boom_boom",
+      "breakpoints": true
     }
   ]
 }
