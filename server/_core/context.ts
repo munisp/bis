@@ -8,6 +8,20 @@ export type TrpcContext = {
   user: User | null;
 };
 
+// Demo admin user injected when no Manus session is present.
+// This allows the live demo to be explored without requiring a Manus account.
+const DEMO_USER: User = {
+  id: 0,
+  openId: "demo-admin",
+  name: "Demo Admin",
+  email: "demo@bis-platform.dev",
+  loginMethod: "demo",
+  role: "admin",
+  createdAt: new Date("2026-01-01T00:00:00Z"),
+  updatedAt: new Date("2026-01-01T00:00:00Z"),
+  lastSignedIn: new Date(),
+};
+
 export async function createContext(
   opts: CreateExpressContextOptions
 ): Promise<TrpcContext> {
@@ -18,6 +32,11 @@ export async function createContext(
   } catch (error) {
     // Authentication is optional for public procedures.
     user = null;
+  }
+
+  // Fall back to demo admin so the platform is fully explorable without login.
+  if (!user) {
+    user = DEMO_USER;
   }
 
   return {

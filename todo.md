@@ -498,4 +498,45 @@
 - [x] 0 TypeScript errors
 
 ### Archive
-- [ ] Comprehensive archive v21 generated
+- [x] Comprehensive archive v21 generated (bis-pwa-archive-v21-20260324.zip, 67 MB, 1044 files)
+
+## Phase 22 — Auth Gate Fix, Seed Script, Production Hardening
+
+### Auth Gate Fix
+- [x] Remove Manus OAuth requirement from public demo — add demo bypass / guest login
+- [x] Add auto-login as demo admin user when no session exists (no redirect to Manus OAuth)
+- [x] Ensure all BIS pages load without requiring Manus account
+
+### Seed Script
+- [x] Create server/seed.ts comprehensive seed script
+- [x] Seed: 5 tenants with branding, 20 users (admin/analyst/auditor/readonly), 50 investigations
+- [x] Seed: 100 KYC records, 200 audit log entries, 30 field agents, 50 field tasks
+- [x] Seed: 25 data sources, 20 monitors, 40 alerts, 15 screening records
+- [x] Seed: 10 alert rules, 30 rule evaluations, 5 onboarding applications
+- [x] Add `pnpm db:seed` script to package.json
+- [x] Run seed script and verify data in DB
+
+### Production Hardening — Microservices Audit
+- [x] Audit all 8 microservices for stub/hardcoded data
+- [x] Verify every tRPC procedure has error handling and no raw throws
+- [x] Check all service health-check endpoints exist
+
+### Production Hardening — E2E Smoke Tests (Vitest server-side)
+- [x] Add 41 production hardening tests (server/phase22.test.ts)
+- [x] Flow 1: New Investigation → create returns BIS- ref
+- [x] Flow 2: KYC record create → list view with status filter
+- [x] Flow 3: Alert Rule trigger → runScheduled returns summary
+- [x] Flow 4: Field Agent dispatch → task visible with FT- ref
+- [x] Flow 5: Dashboard stats → all numeric KPIs present
+
+### Production Hardening — Role-based UI Hardening
+- [x] Audit every admin-only page for frontend role guards
+- [x] AlertRulesPage: Run Now button hidden for non-admin roles
+- [x] TenantBrandingPage: full access-denied guard for non-admin
+- [x] OnboardingAdminPage: already had isAdmin guard (verified)
+- [x] UsersAdminPage: already had role !== admin redirect (verified)
+- [x] Verify server-side adminProcedure guards match frontend visibility
+
+### Archive
+- [ ] Comprehensive archive v22 generated with seed script included
+  (pending checkpoint + zip)

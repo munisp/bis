@@ -1,5 +1,6 @@
 import { useState, useRef } from "react";
 import { useParams } from "wouter";
+import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
 import BISLayout from "@/components/BISLayout";
 import { Button } from "@/components/ui/button";
@@ -17,6 +18,8 @@ export default function TenantBrandingPage() {
   const tenantId = Number(params.id);
 
   const utils = trpc.useUtils();
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
   const { data: tenant, isLoading } = trpc.tenants.get.useQuery({ id: tenantId });
 
   const [primaryColor, setPrimaryColor] = useState<string>("");
@@ -96,6 +99,24 @@ export default function TenantBrandingPage() {
       <BISLayout>
         <div className="flex items-center justify-center h-64">
           <div className="text-sm text-muted-foreground">Tenant not found.</div>
+        </div>
+      </BISLayout>
+    );
+  }
+
+  if (!isAdmin) {
+    return (
+      <BISLayout>
+        <div className="flex flex-col items-center justify-center h-64 gap-3">
+          <div className="text-sm font-medium text-foreground">Access Restricted</div>
+          <div className="text-xs text-muted-foreground text-center max-w-xs">
+            Tenant branding settings require the <strong>admin</strong> role. Contact your platform administrator to request access.
+          </div>
+          <Link href="/tenants">
+            <Button variant="outline" size="sm" className="gap-1.5 text-xs mt-2">
+              <ArrowLeft size={12} /> Back to Tenants
+            </Button>
+          </Link>
         </div>
       </BISLayout>
     );

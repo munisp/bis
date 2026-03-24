@@ -2,6 +2,7 @@
 // Design: Forensic Intelligence — dark/light semantic CSS variables
 
 import { useState } from "react";
+import { useAuth } from "@/_core/hooks/useAuth";
 import BISLayout from "@/components/BISLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -198,6 +199,8 @@ export default function AlertRulesPage() {
 
   const enabledCount = (rules as any[]).filter((r: any) => r.enabled).length;
   const criticalCount = (rules as any[]).filter((r: any) => r.severity === "critical" || r.severity === "high").length;
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
 
   return (
     <BISLayout
@@ -208,6 +211,7 @@ export default function AlertRulesPage() {
           <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => refetch()}>
             <RefreshCw size={11} className={isLoading ? "animate-spin" : ""} /> Refresh
           </Button>
+          {isAdmin && (
           <Button
             variant="outline"
             size="sm"
@@ -220,6 +224,7 @@ export default function AlertRulesPage() {
               : <Zap size={11} />}
             Run Now
           </Button>
+          )}
           {tab === "rules" && (
             <Button size="sm" className="h-7 text-xs gap-1.5" onClick={openCreate}>
               <Plus size={12} /> New Rule

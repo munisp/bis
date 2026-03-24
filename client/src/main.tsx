@@ -18,7 +18,9 @@ const redirectToLoginIfUnauthorized = (error: unknown) => {
 
   if (!isUnauthorized) return;
 
-  window.location.href = getLoginUrl();
+  // Demo mode: server always returns a demo user, so UNAUTHORIZED should not
+  // occur. Log it but do NOT redirect to Manus OAuth to keep the demo open.
+  console.warn("[BIS Demo] Unauthorized API call — skipping OAuth redirect");
 };
 
 queryClient.getQueryCache().subscribe(event => {

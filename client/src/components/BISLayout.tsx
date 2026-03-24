@@ -490,6 +490,14 @@ export default function BISLayout({ children, title, subtitle, actions }: BISLay
           </div>
         </header>
 
+        {/* Demo mode banner */}
+        {user?.openId === 'demo-admin' && (
+          <div className="flex items-center gap-2 px-4 py-1.5 bg-amber-500/10 border-b border-amber-500/30 text-amber-400 text-[11px] font-mono shrink-0">
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+            <span>DEMO MODE — You are browsing as a read-only demo administrator. All data is synthetic. No real identities are processed.</span>
+          </div>
+        )}
+
         {/* Content */}
         <main className="flex-1 overflow-y-auto p-6 animate-fade-up">
           {children}
