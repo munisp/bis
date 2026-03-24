@@ -1,7 +1,7 @@
 // InvestigationDetail — full investigation view with Evidence timeline tab
 // Design: Forensic Intelligence Dark theme, JetBrains Mono typography
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useLocation, useParams } from "wouter";
 import BISLayout from "@/components/BISLayout";
 import { Button } from "@/components/ui/button";
@@ -152,6 +152,43 @@ export default function InvestigationDetail() {
   const relatedAlerts = mockAlerts.filter(a => a.subjectRef === inv.ref);
   const [note, setNote] = useState("");
   const [addingNote, setAddingNote] = useState(false);
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [mentionStart, setMentionStart] = useState(0);
+  const noteRef = useRef<HTMLTextAreaElement>(null);
+
+  const MENTION_USERS = [
+    'analyst@bis.io', 'senior_analyst@bis.io', 'compliance@bis.io',
+    'supervisor@bis.io', 'admin@bis.platform',
+  ];
+
+  const filteredMentions = mentionQuery !== null
+    ? MENTION_USERS.filter(u => u.toLowerCase().includes(mentionQuery.toLowerCase()))
+    : [];
+
+  const handleNoteChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value;
+    setNote(val);
+    const cursor = e.target.selectionStart ?? val.length;
+    const textBefore = val.slice(0, cursor);
+    const atIdx = textBefore.lastIndexOf('@');
+    if (atIdx !== -1 && !textBefore.slice(atIdx + 1).includes(' ')) {
+      setMentionQuery(textBefore.slice(atIdx + 1));
+      setMentionStart(atIdx);
+    } else {
+      setMentionQuery(null);
+    }
+  };
+
+  const insertMention = (user: string) => {
+    const cursor = noteRef.current?.selectionStart ?? note.length;
+    const before = note.slice(0, mentionStart);
+    const after = note.slice(cursor);
+    const newNote = `${before}@${user} ${after}`;
+    setNote(newNote);
+    setMentionQuery(null);
+    toast.info(`@${user} will be notified when this note is saved`);
+    setTimeout(() => noteRef.current?.focus(), 0);
+  };
   const [activeTab, setActiveTab] = useState<'overview' | 'evidence' | 'timeline'>('overview');
   const [evidenceItems, setEvidenceItems] = useState<EvidenceItem[]>(MOCK_EVIDENCE);
   const [evidenceFilter, setEvidenceFilter] = useState<EvidenceType | 'all'>('all');
@@ -425,11 +462,30 @@ export default function InvestigationDetail() {
               <h3 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
                 <FileText size={14} className="text-primary" /> Add Note to Evidence Log
               </h3>
-              <Textarea
-                placeholder="Add analyst notes, context, or follow-up actions..."
-                rows={3} value={note} onChange={e => setNote(e.target.value)}
-                className="text-sm resize-none"
-              />
+              <div className="relative">
+                <Textarea
+                  ref={noteRef}
+                  placeholder="Add analyst notes, context, or follow-up actions... (type @ to mention)"
+                  rows={3} value={note} onChange={handleNoteChange}
+                  className="text-sm resize-none"
+                />
+                {filteredMentions.length > 0 && (
+                  <div className="absolute left-0 bottom-full mb-1 z-50 w-64 rounded-lg border border-border bg-popover shadow-lg overflow-hidden">
+                    <div className="px-2 py-1 border-b border-border">
+                      <span className="text-[9px] font-mono text-muted-foreground uppercase tracking-wider">Mention analyst</span>
+                    </div>
+                    {filteredMentions.map(u => (
+                      <button
+                        key={u}
+                        className="w-full text-left px-3 py-1.5 text-xs font-mono text-foreground hover:bg-muted/50 transition-colors flex items-center gap-2"
+                        onMouseDown={e => { e.preventDefault(); insertMention(u); }}
+                      >
+                        <span className="text-primary">@</span>{u}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
               <div className="flex justify-end mt-2">
                 <Button size="sm" className="h-7 text-xs" onClick={handleAddNote} disabled={addingNote || !note.trim()}>
                   {addingNote ? <><Loader2 size={11} className="animate-spin mr-1" />Saving...</> : "Add to Evidence"}
@@ -598,11 +654,30 @@ export default function InvestigationDetail() {
             <h3 className="text-xs font-mono text-muted-foreground uppercase tracking-wider mb-3 flex items-center gap-2">
               <FileText size={11} /> Add Analyst Note to Evidence
             </h3>
-            <Textarea
-              placeholder="Add context, findings, or follow-up actions..."
-              rows={2} value={note} onChange={e => setNote(e.target.value)}
-              className="text-sm resize-none"
-            />
+            <div className="relative">
+              <Textarea
+                ref={noteRef}
+                placeholder="Add context, findings, or follow-up actions... (type @ to mention)"
+                rows={2} value={note} onChange={handleNoteChange}
+                className="text-sm resize-none"
+              />
+              {filteredMentions.length > 0 && (
+                <div className="absolute left-0 bottom-full mb-1 z-50 w-64 rounded-lg border border-border bg-popover shadow-lg overflow-hidden">
+                  <div className="px-2 py-1 border-b border-border">
+                    <span className="text-[9px] font-mono text-muted-foreground uppercase tracking-wider">Mention analyst</span>
+                  </div>
+                  {filteredMentions.map(u => (
+                    <button
+                      key={u}
+                      className="w-full text-left px-3 py-1.5 text-xs font-mono text-foreground hover:bg-muted/50 transition-colors flex items-center gap-2"
+                      onMouseDown={e => { e.preventDefault(); insertMention(u); }}
+                    >
+                      <span className="text-primary">@</span>{u}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
             <div className="flex justify-end mt-2">
               <Button size="sm" className="h-7 text-xs" onClick={handleAddNote} disabled={addingNote || !note.trim()}>
                 {addingNote ? <><Loader2 size={11} className="animate-spin mr-1" />Saving...</> : "Add Note"}

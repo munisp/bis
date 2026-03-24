@@ -15,7 +15,7 @@ import {
   Building2, Plus, Key, Copy, Eye, EyeOff, Trash2,
   Search, Shield, Activity, CheckCircle2, RefreshCw,
   RotateCcw, AlertTriangle, Clock, ChevronDown, ChevronUp,
-  Loader2, X
+  Loader2, X, Webhook, Send, CheckSquare
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -35,6 +35,15 @@ interface APIKey {
   environment: "live" | "test";
 }
 
+interface WebhookEndpoint {
+  id: string;
+  url: string;
+  events: string[];
+  status: 'active' | 'failing' | 'disabled';
+  lastDelivery: string | null;
+  successRate: number;
+}
+
 interface Tenant {
   id: string;
   name: string;
@@ -45,6 +54,7 @@ interface Tenant {
   country: string;
   createdAt: string;
   keys: APIKey[];
+  webhooks: WebhookEndpoint[];
 }
 
 // ─── Mock data ────────────────────────────────────────────────────────────────
@@ -53,10 +63,20 @@ function makeKey(prefix: string, env: "live" | "test"): string {
   return `bis_${env}_${prefix}_${Math.random().toString(36).slice(2, 10)}${Math.random().toString(36).slice(2, 26)}`;
 }
 
+const ALL_EVENTS = [
+  'investigation.created', 'investigation.completed', 'investigation.flagged',
+  'kyc.passed', 'kyc.failed', 'kyc.review',
+  'alert.critical', 'alert.high', 'alert.medium',
+  'field_task.dispatched', 'field_task.completed',
+];
+
 const SEED_TENANTS: Tenant[] = [
   {
     id: "t1", name: "TourismPay Platform", plan: "enterprise", status: "active",
     apiCalls: 8420, quota: 100000, country: "NG", createdAt: "2026-01-01",
+    webhooks: [
+      { id: 'wh1', url: 'https://api.tourismpay.ng/bis-webhook', events: ['investigation.flagged', 'alert.critical', 'kyc.failed'], status: 'active', lastDelivery: '2026-03-24T09:00:00Z', successRate: 99.2 },
+    ],
     keys: [
       { id: "k1a", label: "Production",   key: "bis_live_tp_a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6", status: "active",  createdAt: "2026-01-01", lastUsed: "2026-03-24T09:01:00Z", callCount: 8420, environment: "live" },
       { id: "k1b", label: "Staging",      key: "bis_test_tp_q1r2s3t4u5v6w7x8y9z0a1b2c3d4e5f6", status: "active",  createdAt: "2026-01-15", lastUsed: "2026-03-23T14:30:00Z", callCount: 312,  environment: "test" },
@@ -66,13 +86,18 @@ const SEED_TENANTS: Tenant[] = [
   {
     id: "t2", name: "Konga Merchant Services", plan: "growth", status: "active",
     apiCalls: 1240, quota: 10000, country: "NG", createdAt: "2026-02-15",
+    webhooks: [],
     keys: [
-      { id: "k2a", label: "Production",   key: "bis_live_km_g1h2i3j4k5l6m7n8o9p0q1r2s3t4u5v6", status: "active",  createdAt: "2026-02-15", lastUsed: "2026-03-24T08:45:00Z", callCount: 1240, environment: "live" },
+      { id: "k2a", label: "Production", key: "bis_live_km_g1h2i3j4k5l6m7n8o9p0q1r2s3t4u5v6", status: "active", createdAt: "2026-02-15", lastUsed: "2026-03-24T08:45:00Z", callCount: 1240, environment: "live" },
     ],
   },
   {
     id: "t3", name: "Flutterwave Compliance", plan: "enterprise", status: "active",
     apiCalls: 22100, quota: 100000, country: "NG", createdAt: "2026-01-20",
+    webhooks: [
+      { id: 'wh3', url: 'https://compliance.flutterwave.com/hooks/bis', events: ['investigation.flagged', 'investigation.completed', 'alert.critical', 'alert.high'], status: 'active', lastDelivery: '2026-03-24T08:55:00Z', successRate: 100 },
+      { id: 'wh3b', url: 'https://dev.flutterwave.com/hooks/bis-test', events: ['kyc.passed', 'kyc.failed'], status: 'failing', lastDelivery: '2026-03-22T10:00:00Z', successRate: 62.5 },
+    ],
     keys: [
       { id: "k3a", label: "Production",   key: "bis_live_fw_w1x2y3z4a5b6c7d8e9f0g1h2i3j4k5l6", status: "active",  createdAt: "2026-01-20", lastUsed: "2026-03-24T09:00:00Z", callCount: 22100, environment: "live" },
       { id: "k3b", label: "Dev / Test",   key: "bis_test_fw_m1n2o3p4q5r6s7t8u9v0w1x2y3z4a5b6", status: "active",  createdAt: "2026-02-01", lastUsed: "2026-03-22T11:00:00Z", callCount: 890,   environment: "test" },
@@ -81,6 +106,7 @@ const SEED_TENANTS: Tenant[] = [
   {
     id: "t4", name: "Paystack Risk Team", plan: "growth", status: "trial",
     apiCalls: 340, quota: 10000, country: "NG", createdAt: "2026-03-10",
+    webhooks: [],
     keys: [
       { id: "k4a", label: "Trial Key",    key: "bis_test_ps_a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6", status: "active",  createdAt: "2026-03-10", lastUsed: "2026-03-23T16:00:00Z", callCount: 340,  environment: "test" },
     ],
@@ -88,6 +114,7 @@ const SEED_TENANTS: Tenant[] = [
   {
     id: "t5", name: "GTBank Digital", plan: "starter", status: "suspended",
     apiCalls: 0, quota: 1000, country: "NG", createdAt: "2026-02-01",
+    webhooks: [],
     keys: [
       { id: "k5a", label: "Production",   key: "bis_live_gt_z1y2x3w4v5u6t7s8r9q0p1o2n3m4l5k6", status: "revoked", createdAt: "2026-02-01", lastUsed: "2026-02-28T12:00:00Z", callCount: 0,    environment: "live" },
     ],
@@ -138,6 +165,51 @@ export default function Tenants() {
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [newTenant, setNewTenant] = useState({ name: "", plan: "growth" as TenantPlan, country: "NG" });
+  const [expandedTab, setExpandedTab] = useState<Record<string, 'keys' | 'webhooks'>>({});
+  const [newWebhookUrl, setNewWebhookUrl] = useState<Record<string, string>>({});
+  const [newWebhookEvents, setNewWebhookEvents] = useState<Record<string, Set<string>>>({});
+  const [testingWebhook, setTestingWebhook] = useState<string | null>(null);
+
+  const getTab = (tenantId: string) => expandedTab[tenantId] ?? 'keys';
+
+  const handleAddWebhook = (tenantId: string) => {
+    const url = newWebhookUrl[tenantId]?.trim();
+    if (!url || !url.startsWith('http')) { toast.error('Enter a valid HTTPS URL'); return; }
+    const events = Array.from(newWebhookEvents[tenantId] ?? new Set<string>());
+    if (events.length === 0) { toast.error('Select at least one event type'); return; }
+    const wh: WebhookEndpoint = {
+      id: `wh_${Date.now()}`,
+      url,
+      events,
+      status: 'active',
+      lastDelivery: null,
+      successRate: 100,
+    };
+    setTenants(prev => prev.map(t => t.id !== tenantId ? t : { ...t, webhooks: [...t.webhooks, wh] }));
+    setNewWebhookUrl(p => ({ ...p, [tenantId]: '' }));
+    setNewWebhookEvents(p => ({ ...p, [tenantId]: new Set<string>() }));
+    toast.success('Webhook endpoint registered');
+  };
+
+  const handleDeleteWebhook = (tenantId: string, whId: string) => {
+    setTenants(prev => prev.map(t => t.id !== tenantId ? t : { ...t, webhooks: t.webhooks.filter(w => w.id !== whId) }));
+    toast.warning('Webhook endpoint removed');
+  };
+
+  const handleTestWebhook = async (whId: string) => {
+    setTestingWebhook(whId);
+    await new Promise(r => setTimeout(r, 1400));
+    setTestingWebhook(null);
+    toast.success('Test payload delivered — 200 OK received');
+  };
+
+  const toggleWebhookEvent = (tenantId: string, event: string) => {
+    setNewWebhookEvents(prev => {
+      const cur = new Set(prev[tenantId] ?? []);
+      cur.has(event) ? cur.delete(event) : cur.add(event);
+      return { ...prev, [tenantId]: cur };
+    });
+  };
 
   const filtered = tenants.filter(t =>
     t.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -225,6 +297,7 @@ export default function Tenants() {
       quota: PLAN_CONFIG[newTenant.plan].quota,
       country: newTenant.country,
       createdAt: new Date().toISOString().split("T")[0],
+      webhooks: [],
       keys: [
         {
           id: `k_${Date.now()}`,
@@ -385,9 +458,31 @@ export default function Tenants() {
                 </div>
               </div>
 
-              {/* ── Expanded: API Keys panel ── */}
+              {/* ── Expanded: Tabbed panel ── */}
               {isExpanded && (
                 <div className="border-t border-border px-4 pb-4 pt-3">
+                  {/* Tab bar */}
+                  <div className="flex items-center gap-1 mb-3 border-b border-border pb-2">
+                    {(['keys', 'webhooks'] as const).map(tab => (
+                      <button
+                        key={tab}
+                        onClick={() => setExpandedTab(p => ({ ...p, [tenant.id]: tab }))}
+                        className={cn(
+                          "flex items-center gap-1.5 text-[10px] font-mono px-2.5 py-1 rounded-md transition-colors",
+                          getTab(tenant.id) === tab
+                            ? "bg-primary/10 text-primary border border-primary/20"
+                            : "text-muted-foreground hover:text-foreground"
+                        )}
+                      >
+                        {tab === 'keys' ? <Key size={10} /> : <Webhook size={10} />}
+                        {tab === 'keys' ? `API Keys (${tenant.keys.filter(k => k.status === 'active').length})` : `Webhooks (${tenant.webhooks.length})`}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* ── Keys tab ── */}
+                  {getTab(tenant.id) === 'keys' && (
+                  <div>
                   <div className="flex items-center justify-between mb-3">
                     <h4 className="text-xs font-semibold text-foreground flex items-center gap-1.5">
                       <Key size={12} className="text-primary" /> API Keys
@@ -511,6 +606,98 @@ export default function Tenants() {
                   <p className="text-[9px] font-mono text-muted-foreground/50 mt-3">
                     Rotated and revoked keys are shown for audit purposes only. Key changes are logged to the Audit Log.
                   </p>
+                  </div>
+                  )}
+
+                  {/* ── Webhooks tab ── */}
+                  {getTab(tenant.id) === 'webhooks' && (
+                  <div className="space-y-3">
+                    {/* Existing webhooks */}
+                    {tenant.webhooks.length === 0 && (
+                      <p className="text-xs text-muted-foreground py-2">No webhook endpoints registered yet.</p>
+                    )}
+                    {tenant.webhooks.map(wh => (
+                      <div key={wh.id} className={cn(
+                        "rounded-lg border p-3 space-y-2",
+                        wh.status === 'failing' ? 'border-red-500/30 bg-red-500/5' : 'border-border bg-muted/20'
+                      )}>
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <code className="text-[10px] font-mono text-foreground truncate">{wh.url}</code>
+                              <span className={cn(
+                                "text-[9px] font-mono rounded px-1.5 py-0.5 border shrink-0",
+                                wh.status === 'active'   ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30' :
+                                wh.status === 'failing'  ? 'text-red-400 bg-red-500/10 border-red-500/30' :
+                                'text-muted-foreground bg-muted/30 border-border'
+                              )}>{wh.status.toUpperCase()}</span>
+                            </div>
+                            <div className="flex flex-wrap gap-1 mb-1">
+                              {wh.events.map(ev => (
+                                <span key={ev} className="text-[9px] font-mono bg-primary/10 text-primary border border-primary/20 rounded px-1.5 py-0.5">{ev}</span>
+                              ))}
+                            </div>
+                            <div className="flex items-center gap-3 text-[9px] font-mono text-muted-foreground">
+                              <span>Last delivery: {wh.lastDelivery ? relTime(wh.lastDelivery) : 'Never'}</span>
+                              <span>·</span>
+                              <span>Success rate: {wh.successRate}%</span>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <Button
+                              variant="outline" size="sm" className="h-6 text-[10px] px-2 gap-1"
+                              disabled={testingWebhook === wh.id}
+                              onClick={() => handleTestWebhook(wh.id)}
+                            >
+                              {testingWebhook === wh.id ? <Loader2 size={9} className="animate-spin" /> : <Send size={9} />}
+                              {testingWebhook === wh.id ? 'Sending…' : 'Test'}
+                            </Button>
+                            <Button
+                              variant="outline" size="sm" className="h-6 text-[10px] px-2 gap-1 text-red-400 hover:text-red-400 hover:border-red-500/30"
+                              onClick={() => handleDeleteWebhook(tenant.id, wh.id)}
+                            >
+                              <Trash2 size={9} /> Remove
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+
+                    {/* Add new webhook form */}
+                    <div className="rounded-lg border border-dashed border-border p-3 space-y-2">
+                      <p className="text-[10px] font-semibold text-foreground">Register new endpoint</p>
+                      <Input
+                        className="h-7 text-xs font-mono"
+                        placeholder="https://your-server.com/bis-webhook"
+                        value={newWebhookUrl[tenant.id] ?? ''}
+                        onChange={e => setNewWebhookUrl(p => ({ ...p, [tenant.id]: e.target.value }))}
+                      />
+                      <div className="flex flex-wrap gap-1">
+                        {ALL_EVENTS.map(ev => {
+                          const selected = (newWebhookEvents[tenant.id] ?? new Set()).has(ev);
+                          return (
+                            <button
+                              key={ev}
+                              onClick={() => toggleWebhookEvent(tenant.id, ev)}
+                              className={cn(
+                                "text-[9px] font-mono rounded px-1.5 py-0.5 border transition-colors",
+                                selected
+                                  ? 'bg-primary/10 text-primary border-primary/30'
+                                  : 'text-muted-foreground border-border hover:border-primary/30 hover:text-foreground'
+                              )}
+                            >
+                              {selected && <CheckSquare size={8} className="inline mr-0.5" />}{ev}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <Button size="sm" className="h-6 text-[10px] gap-1" onClick={() => handleAddWebhook(tenant.id)}>
+                        <Plus size={9} /> Register Endpoint
+                      </Button>
+                    </div>
+                  </div>
+                  )}
+
                 </div>
               )}
             </div>

@@ -61,6 +61,46 @@ const statusIcon: Record<InvestigationStatus, React.ReactNode> = {
 
 const COUNTRIES = Array.from(new Set(mockInvestigations.map(i => i.country))).sort();
 
+// ─── Sparkline ────────────────────────────────────────────────────────────────
+
+// Deterministic 7-day history seeded from the investigation id + current score
+function seedHistory(id: string, currentScore: number): number[] {
+  const seed = id.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
+  const pts: number[] = [];
+  let val = Math.max(5, Math.min(95, currentScore - 8 + (seed % 16)));
+  for (let i = 0; i < 7; i++) {
+    pts.push(Math.max(0, Math.min(100, Math.round(val))));
+    val += ((seed * (i + 1)) % 13) - 6;
+  }
+  pts[6] = currentScore; // last point is always the current score
+  return pts;
+}
+
+function Sparkline({ values, color }: { values: number[]; color: string }) {
+  const W = 48, H = 18;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+  const pts = values.map((v, i) => {
+    const x = (i / (values.length - 1)) * W;
+    const y = H - ((v - min) / range) * (H - 2) - 1;
+    return `${x},${y}`;
+  }).join(' ');
+  const trend = values[values.length - 1] - values[0];
+  return (
+    <svg width={W} height={H} className="shrink-0">
+      <polyline points={pts} fill="none" stroke={color} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
+      {/* Trend arrow dot */}
+      <circle
+        cx={W}
+        cy={H - ((values[values.length - 1] - min) / range) * (H - 2) - 1}
+        r={2}
+        fill={trend > 0 ? '#f87171' : trend < 0 ? '#34d399' : color}
+      />
+    </svg>
+  );
+}
+
 const BUILT_IN_PRESETS: Preset[] = [
   {
     id: 'builtin-flagged-ng',
@@ -227,14 +267,26 @@ export default function Investigations() {
     });
   }, [filters, sortKey, sortDir]);
 
-  const riskBar = (score: number) => {
+  const riskBar = (score: number, id: string) => {
     const color = score >= 80 ? "#f87171" : score >= 60 ? "#fb923c" : score >= 30 ? "#fbbf24" : "#34d399";
+    const history = seedHistory(id, score);
+    const trend = history[history.length - 1] - history[0];
     return (
       <div className="flex items-center gap-2">
-        <div className="flex-1 h-1 bg-muted rounded-full overflow-hidden">
-          <div className="h-full rounded-full transition-all" style={{ width: `${score}%`, backgroundColor: color }} />
+        <Sparkline values={history} color={color} />
+        <div className="flex flex-col gap-0.5 min-w-0">
+          <div className="flex items-center gap-1">
+            <span className="text-xs font-mono font-bold" style={{ color }}>{score}</span>
+            {trend !== 0 && (
+              <span className={`text-[9px] font-mono ${trend > 0 ? 'text-red-400' : 'text-emerald-400'}`}>
+                {trend > 0 ? `+${trend}` : trend}
+              </span>
+            )}
+          </div>
+          <div className="w-16 h-1 bg-muted rounded-full overflow-hidden">
+            <div className="h-full rounded-full" style={{ width: `${score}%`, backgroundColor: color }} />
+          </div>
         </div>
-        <span className="text-xs font-mono w-6 text-right" style={{ color }}>{score}</span>
       </div>
     );
   };
@@ -506,7 +558,7 @@ export default function Investigations() {
                       <span className="text-[10px] font-mono text-muted-foreground/60">{tierPrice[inv.tier]}</span>
                     </div>
                   </td>
-                  <td className="px-4 py-3 w-32">{riskBar(inv.riskScore)}</td>
+                  <td className="px-4 py-3 w-40">{riskBar(inv.riskScore, inv.id)}</td>
                   <td className="px-4 py-3">
                     <span className="text-xs text-muted-foreground">{formatDateTime(inv.updatedAt)}</span>
                   </td>
