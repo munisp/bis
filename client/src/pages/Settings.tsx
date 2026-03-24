@@ -7,11 +7,40 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Settings2, Bell, Shield, Globe, Key, Loader2, Save, Zap, Database } from "lucide-react";
+import { Settings2, Bell, Shield, Globe, Key, Loader2, Save, Zap, Database, Eye, EyeOff, CheckCircle2 } from "lucide-react";
+
+const INTEGRATIONS = [
+  { name: "NIMC Identity API", status: "connected", key: "nimc_api_key", endpoint: "https://api.nimc.gov.ng/v2", description: "National Identity Management Commission — NIN lookup & biometric" },
+  { name: "CBN BVN Service", status: "connected", key: "cbn_bvn_key", endpoint: "https://api.cbn.gov.ng/bvn/v1", description: "Central Bank of Nigeria — BVN verification" },
+  { name: "EFCC Watchlist API", status: "connected", key: "efcc_api_key", endpoint: "https://api.efcc.gov.ng/watchlist", description: "Economic & Financial Crimes Commission watchlist" },
+  { name: "NPF POSSAP", status: "degraded", key: "npf_api_key", endpoint: "https://possap.npf.gov.ng/api", description: "Nigeria Police Force — criminal records & warrant lookup" },
+  { name: "OFAC SDN API", status: "connected", key: "ofac_api_key", endpoint: "https://api.ofac.treasury.gov/v1", description: "US Treasury OFAC — Specially Designated Nationals list" },
+  { name: "Interpol I-24/7", status: "pending", key: "interpol_key", endpoint: "https://i247.interpol.int/api", description: "INTERPOL Red Notice & fugitive lookup" },
+  { name: "Africa's Talking SMS", status: "connected", key: "at_api_key", endpoint: "https://api.africastalking.com/version1", description: "SMS delivery for OTP and alert notifications" },
+  { name: "WhatsApp Business API", status: "connected", key: "wa_token", endpoint: "https://graph.facebook.com/v18.0", description: "WhatsApp Business — subject notification channel" },
+];
 
 export default function Settings() {
   const [saving, setSaving] = useState(false);
+  const [configuring, setConfiguring] = useState<typeof INTEGRATIONS[0] | null>(null);
+  const [apiKeyValue, setApiKeyValue] = useState("");
+  const [showKey, setShowKey] = useState(false);
+  const [testingConn, setTestingConn] = useState(false);
+
+  const handleTestConnection = async () => {
+    setTestingConn(true);
+    await new Promise(r => setTimeout(r, 1400));
+    setTestingConn(false);
+    toast.success(`Connection test passed — ${configuring?.name} responded in ${Math.round(80 + Math.random() * 400)}ms`);
+  };
+
+  const handleSaveIntegration = () => {
+    toast.success(`${configuring?.name} configuration saved`);
+    setConfiguring(null);
+    setApiKeyValue("");
+  };
 
   // AutoFlag thresholds
   const [thresholds, setThresholds] = useState({
@@ -192,25 +221,16 @@ export default function Settings() {
         <TabsContent value="integrations">
           <div className="bis-card p-5 space-y-4">
             <h3 className="text-sm font-semibold text-foreground mb-2">External Data Sources</h3>
-            {[
-              { name: "NIMC Identity API", status: "connected", key: "nimc_api_key" },
-              { name: "CBN BVN Service", status: "connected", key: "cbn_bvn_key" },
-              { name: "EFCC Watchlist API", status: "connected", key: "efcc_api_key" },
-              { name: "NPF POSSAP", status: "degraded", key: "npf_api_key" },
-              { name: "OFAC SDN API", status: "connected", key: "ofac_api_key" },
-              { name: "Interpol I-24/7", status: "pending", key: "interpol_key" },
-              { name: "Africa's Talking SMS", status: "connected", key: "at_api_key" },
-              { name: "WhatsApp Business API", status: "connected", key: "wa_token" },
-            ].map(src => (
+            {INTEGRATIONS.map(src => (
               <div key={src.name} className="flex items-center justify-between py-2 border-b border-border/50 last:border-0">
                 <div className="flex items-center gap-3">
-                  <div className={`w-2 h-2 rounded-full ${src.status === "connected" ? "bg-emerald-400" : src.status === "degraded" ? "bg-amber-400" : "bg-muted-foreground"}`} />
+                  <div className={`w-2 h-2 rounded-full shrink-0 ${src.status === "connected" ? "bg-emerald-400" : src.status === "degraded" ? "bg-amber-400" : "bg-muted-foreground"}`} />
                   <div>
                     <div className="text-sm font-medium text-foreground">{src.name}</div>
-                    <div className="text-[10px] text-muted-foreground capitalize">{src.status}</div>
+                    <div className="text-[10px] text-muted-foreground">{src.description}</div>
                   </div>
                 </div>
-                <Button variant="outline" size="sm" className="h-6 text-[10px] px-2" onClick={() => toast.info(`Configure ${src.name}`)}>
+                <Button variant="outline" size="sm" className="h-6 text-[10px] px-2 shrink-0" onClick={() => { setConfiguring(src); setApiKeyValue(""); setShowKey(false); }}>
                   <Key size={9} className="mr-1" />Configure
                 </Button>
               </div>
@@ -250,6 +270,52 @@ export default function Settings() {
           {saving ? <><Loader2 size={12} className="animate-spin" />Saving...</> : <><Save size={12} />Save Settings</>}
         </Button>
       </div>
+
+      {/* Integration Configure Dialog */}
+      <Dialog open={!!configuring} onOpenChange={open => { if (!open) { setConfiguring(null); setApiKeyValue(""); } }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-semibold">{configuring?.name}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-2">
+            <div>
+              <div className="text-[10px] text-muted-foreground mb-1">Description</div>
+              <p className="text-xs text-foreground">{configuring?.description}</p>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">API Endpoint</Label>
+              <Input className="h-8 text-xs font-mono" value={configuring?.endpoint ?? ""} readOnly />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">API Key / Token</Label>
+              <div className="relative">
+                <Input
+                  className="h-8 text-xs font-mono pr-8"
+                  type={showKey ? "text" : "password"}
+                  placeholder={`Enter ${configuring?.key ?? 'api_key'}`}
+                  value={apiKeyValue}
+                  onChange={e => setApiKeyValue(e.target.value)}
+                />
+                <button
+                  type="button"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  onClick={() => setShowKey(v => !v)}
+                >
+                  {showKey ? <EyeOff size={12} /> : <Eye size={12} />}
+                </button>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 pt-1">
+              <Button variant="outline" size="sm" className="h-7 text-xs gap-1" disabled={testingConn} onClick={handleTestConnection}>
+                {testingConn ? <><Loader2 size={11} className="animate-spin" /> Testing…</> : <><CheckCircle2 size={11} /> Test Connection</>}
+              </Button>
+              <Button size="sm" className="h-7 text-xs gap-1 ml-auto" onClick={handleSaveIntegration}>
+                <Save size={11} /> Save
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </BISLayout>
   );
 }

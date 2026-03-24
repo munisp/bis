@@ -87,17 +87,35 @@ function Sparkline({ values, color }: { values: number[]; color: string }) {
     return `${x},${y}`;
   }).join(' ');
   const trend = values[values.length - 1] - values[0];
+  const days = ['D-6','D-5','D-4','D-3','D-2','D-1','Today'];
+  const tooltipContent = values.map((v, i) => `${days[i]}: ${v}`).join(' · ');
   return (
-    <svg width={W} height={H} className="shrink-0">
-      <polyline points={pts} fill="none" stroke={color} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
-      {/* Trend arrow dot */}
-      <circle
-        cx={W}
-        cy={H - ((values[values.length - 1] - min) / range) * (H - 2) - 1}
-        r={2}
-        fill={trend > 0 ? '#f87171' : trend < 0 ? '#34d399' : color}
-      />
-    </svg>
+    <div className="relative group shrink-0" title={tooltipContent}>
+      <svg width={W} height={H} className="shrink-0">
+        <polyline points={pts} fill="none" stroke={color} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
+        <circle
+          cx={W}
+          cy={H - ((values[values.length - 1] - min) / range) * (H - 2) - 1}
+          r={2}
+          fill={trend > 0 ? '#f87171' : trend < 0 ? '#34d399' : color}
+        />
+      </svg>
+      {/* Hover tooltip */}
+      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 z-50 hidden group-hover:block pointer-events-none">
+        <div className="bg-popover border border-border rounded-lg shadow-lg p-2 text-[9px] font-mono text-foreground whitespace-nowrap">
+          <div className="text-[8px] text-muted-foreground uppercase tracking-wider mb-1">7-day risk history</div>
+          <div className="grid grid-cols-7 gap-1">
+            {values.map((v, i) => (
+              <div key={i} className="text-center">
+                <div className="font-bold" style={{ color: v >= 80 ? '#f87171' : v >= 60 ? '#fb923c' : v >= 30 ? '#fbbf24' : '#34d399' }}>{v}</div>
+                <div className="text-muted-foreground">{days[i]}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="w-2 h-2 bg-popover border-b border-r border-border rotate-45 mx-auto -mt-1" />
+      </div>
+    </div>
   );
 }
 

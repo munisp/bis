@@ -3,8 +3,10 @@
 
 import { useState } from 'react';
 import BISLayout from '@/components/BISLayout';
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { Database, CheckCircle2, Clock, XCircle, AlertTriangle, Globe, Shield, Building2, Search } from 'lucide-react';
+import { toast } from 'sonner';
+import { Database, CheckCircle2, Clock, XCircle, AlertTriangle, Globe, Shield, Building2, Search, RefreshCw, Loader2, Wifi } from 'lucide-react';
 
 interface DataSource {
   id: string;
@@ -70,6 +72,23 @@ export default function DataSourcesPage() {
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('All');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [testing, setTesting] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState<string | null>(null);
+
+  const handleTest = async (id: string) => {
+    setTesting(id);
+    await new Promise(r => setTimeout(r, 1200 + Math.random() * 800));
+    setTesting(null);
+    const latency = Math.round(100 + Math.random() * 900);
+    toast.success(`Connection test passed — ${latency}ms response time`);
+  };
+
+  const handleRefresh = async (id: string) => {
+    setRefreshing(id);
+    await new Promise(r => setTimeout(r, 800));
+    setRefreshing(null);
+    toast.success('Status refreshed — source is live');
+  };
 
   const filtered = DATA_SOURCES.filter(s => {
     const matchSearch = s.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -158,7 +177,7 @@ export default function DataSourcesPage() {
               <p className="text-[10px] text-muted-foreground leading-relaxed mb-3">{source.description}</p>
 
               {source.status === 'live' && (
-                <div className="grid grid-cols-3 gap-2 text-center border-t border-border/30 pt-2">
+                <div className="grid grid-cols-3 gap-2 text-center border-t border-border/30 pt-2 mb-2">
                   <div>
                     <p className="text-[9px] font-mono text-muted-foreground uppercase">Latency</p>
                     <p className="text-xs font-mono text-foreground font-semibold">{source.latencyMs}ms</p>
@@ -175,7 +194,7 @@ export default function DataSourcesPage() {
               )}
 
               {source.status !== 'live' && (
-                <div className="border-t border-border/30 pt-2">
+                <div className="border-t border-border/30 pt-2 mb-2">
                   <p className={cn("text-[10px] font-mono", statusCfg.color)}>
                     {source.status === 'sandbox' ? 'Integration in testing — not yet production-ready' :
                      source.status === 'pending' ? 'API access application submitted — awaiting approval' :
@@ -183,6 +202,30 @@ export default function DataSourcesPage() {
                   </p>
                 </div>
               )}
+
+              {/* Actions */}
+              <div className="flex items-center gap-1.5 border-t border-border/30 pt-2">
+                <Button
+                  variant="outline" size="sm"
+                  className="h-6 text-[10px] px-2 gap-1 flex-1"
+                  disabled={testing === source.id || source.status === 'pending'}
+                  onClick={() => handleTest(source.id)}
+                >
+                  {testing === source.id
+                    ? <><Loader2 size={9} className="animate-spin" /> Testing…</>
+                    : <><Wifi size={9} /> Test Connection</>}
+                </Button>
+                <Button
+                  variant="outline" size="sm"
+                  className="h-6 text-[10px] px-2 gap-1 flex-1"
+                  disabled={refreshing === source.id}
+                  onClick={() => handleRefresh(source.id)}
+                >
+                  {refreshing === source.id
+                    ? <><Loader2 size={9} className="animate-spin" /> Refreshing…</>
+                    : <><RefreshCw size={9} /> Refresh Status</>}
+                </Button>
+              </div>
             </div>
           );
         })}

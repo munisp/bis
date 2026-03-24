@@ -35,6 +35,16 @@ interface APIKey {
   environment: "live" | "test";
 }
 
+interface WebhookDelivery {
+  id: string;
+  timestamp: string;
+  statusCode: number;
+  durationMs: number;
+  event: string;
+  success: boolean;
+  payloadPreview: string;
+}
+
 interface WebhookEndpoint {
   id: string;
   url: string;
@@ -42,6 +52,7 @@ interface WebhookEndpoint {
   status: 'active' | 'failing' | 'disabled';
   lastDelivery: string | null;
   successRate: number;
+  deliveries?: WebhookDelivery[];
 }
 
 interface Tenant {
@@ -95,8 +106,22 @@ const SEED_TENANTS: Tenant[] = [
     id: "t3", name: "Flutterwave Compliance", plan: "enterprise", status: "active",
     apiCalls: 22100, quota: 100000, country: "NG", createdAt: "2026-01-20",
     webhooks: [
-      { id: 'wh3', url: 'https://compliance.flutterwave.com/hooks/bis', events: ['investigation.flagged', 'investigation.completed', 'alert.critical', 'alert.high'], status: 'active', lastDelivery: '2026-03-24T08:55:00Z', successRate: 100 },
-      { id: 'wh3b', url: 'https://dev.flutterwave.com/hooks/bis-test', events: ['kyc.passed', 'kyc.failed'], status: 'failing', lastDelivery: '2026-03-22T10:00:00Z', successRate: 62.5 },
+      { id: 'wh3', url: 'https://compliance.flutterwave.com/hooks/bis', events: ['investigation.flagged', 'investigation.completed', 'alert.critical', 'alert.high'], status: 'active', lastDelivery: '2026-03-24T08:55:00Z', successRate: 100,
+        deliveries: [
+          { id: 'd1', timestamp: '2026-03-24T08:55:00Z', statusCode: 200, durationMs: 142, event: 'investigation.flagged', success: true, payloadPreview: '{"ref":"BIS-2026-0004","risk":87,"subject":"Emeka Nwosu"}' },
+          { id: 'd2', timestamp: '2026-03-24T07:12:00Z', statusCode: 200, durationMs: 98,  event: 'alert.critical',         success: true, payloadPreview: '{"alertId":"ALT-0012","type":"sanctions_match"}' },
+          { id: 'd3', timestamp: '2026-03-23T18:30:00Z', statusCode: 200, durationMs: 211, event: 'investigation.completed', success: true, payloadPreview: '{"ref":"BIS-2026-0001","status":"completed"}' },
+          { id: 'd4', timestamp: '2026-03-23T14:00:00Z', statusCode: 200, durationMs: 134, event: 'investigation.flagged',   success: true, payloadPreview: '{"ref":"BIS-2026-0007","risk":91}' },
+          { id: 'd5', timestamp: '2026-03-22T09:45:00Z', statusCode: 200, durationMs: 178, event: 'alert.high',              success: true, payloadPreview: '{"alertId":"ALT-0009","type":"pep_match"}' },
+        ]
+      },
+      { id: 'wh3b', url: 'https://dev.flutterwave.com/hooks/bis-test', events: ['kyc.passed', 'kyc.failed'], status: 'failing', lastDelivery: '2026-03-22T10:00:00Z', successRate: 62.5,
+        deliveries: [
+          { id: 'd6', timestamp: '2026-03-22T10:00:00Z', statusCode: 503, durationMs: 5000, event: 'kyc.failed', success: false, payloadPreview: '{"ref":"KYC-0088","result":"failed"}' },
+          { id: 'd7', timestamp: '2026-03-21T15:30:00Z', statusCode: 200, durationMs: 88,   event: 'kyc.passed', success: true,  payloadPreview: '{"ref":"KYC-0085","result":"passed"}' },
+          { id: 'd8', timestamp: '2026-03-21T09:00:00Z', statusCode: 503, durationMs: 5000, event: 'kyc.failed', success: false, payloadPreview: '{"ref":"KYC-0082","result":"failed"}' },
+        ]
+      },
     ],
     keys: [
       { id: "k3a", label: "Production",   key: "bis_live_fw_w1x2y3z4a5b6c7d8e9f0g1h2i3j4k5l6", status: "active",  createdAt: "2026-01-20", lastUsed: "2026-03-24T09:00:00Z", callCount: 22100, environment: "live" },
@@ -169,6 +194,15 @@ export default function Tenants() {
   const [newWebhookUrl, setNewWebhookUrl] = useState<Record<string, string>>({});
   const [newWebhookEvents, setNewWebhookEvents] = useState<Record<string, Set<string>>>({});
   const [testingWebhook, setTestingWebhook] = useState<string | null>(null);
+  const [expandedDeliveries, setExpandedDeliveries] = useState<Set<string>>(new Set());
+
+  const toggleDeliveries = (whId: string) => {
+    setExpandedDeliveries(prev => {
+      const next = new Set(prev);
+      next.has(whId) ? next.delete(whId) : next.add(whId);
+      return next;
+    });
+  };
 
   const getTab = (tenantId: string) => expandedTab[tenantId] ?? 'keys';
 
@@ -653,6 +687,13 @@ export default function Tenants() {
                               {testingWebhook === wh.id ? 'Sending…' : 'Test'}
                             </Button>
                             <Button
+                              variant="outline" size="sm" className="h-6 text-[10px] px-2 gap-1"
+                              onClick={() => toggleDeliveries(wh.id)}
+                            >
+                              <Activity size={9} />
+                              {expandedDeliveries.has(wh.id) ? 'Hide log' : `Log (${wh.deliveries?.length ?? 0})`}
+                            </Button>
+                            <Button
                               variant="outline" size="sm" className="h-6 text-[10px] px-2 gap-1 text-red-400 hover:text-red-400 hover:border-red-500/30"
                               onClick={() => handleDeleteWebhook(tenant.id, wh.id)}
                             >
@@ -660,6 +701,24 @@ export default function Tenants() {
                             </Button>
                           </div>
                         </div>
+                        {/* Delivery log */}
+                        {expandedDeliveries.has(wh.id) && wh.deliveries && wh.deliveries.length > 0 && (
+                          <div className="mt-2 border-t border-border/30 pt-2 space-y-1">
+                            <div className="text-[9px] font-mono text-muted-foreground uppercase tracking-wider mb-1">Last {wh.deliveries.length} deliveries</div>
+                            {wh.deliveries.map(d => (
+                              <div key={d.id} className={cn(
+                                "flex items-start gap-2 rounded px-2 py-1 text-[9px] font-mono",
+                                d.success ? 'bg-emerald-500/5 border border-emerald-500/10' : 'bg-red-500/5 border border-red-500/10'
+                              )}>
+                                <span className={cn('font-bold shrink-0', d.success ? 'text-emerald-400' : 'text-red-400')}>{d.statusCode}</span>
+                                <span className="text-muted-foreground shrink-0">{d.durationMs}ms</span>
+                                <span className="text-primary shrink-0">{d.event}</span>
+                                <code className="text-foreground/70 truncate flex-1">{d.payloadPreview}</code>
+                                <span className="text-muted-foreground shrink-0">{new Date(d.timestamp).toLocaleTimeString()}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     ))}
 

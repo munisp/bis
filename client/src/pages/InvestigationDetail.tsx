@@ -621,7 +621,15 @@ export default function InvestigationDetail() {
                         </div>
                       </div>
 
-                      <p className="text-sm text-foreground/85 leading-relaxed">{item.body}</p>
+                       <p className="text-sm text-foreground/85 leading-relaxed">
+                         {item.body?.split(/(@[\w.@]+)/g).map((part, pi) =>
+                           part.match(/^@[\w.@]+$/) ? (
+                             <span key={pi} className="inline-flex items-center gap-0.5 bg-primary/10 text-primary border border-primary/20 rounded px-1 py-0.5 text-[11px] font-mono">
+                               {part}
+                             </span>
+                           ) : part
+                         )}
+                       </p>
 
                       <div className="flex items-center gap-3 mt-2">
                         {item.attachments && item.attachments > 0 && (
