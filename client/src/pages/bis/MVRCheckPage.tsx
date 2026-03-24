@@ -128,7 +128,7 @@ interface MVRFormData {
 }
 
 const VIOLATION_SEVERITY_CONFIG = {
-  minor:    { label: "Minor",    color: "text-slate-600",   bg: "bg-slate-100",   points: "1–2 pts" },
+  minor:    { label: "Minor",    color: "text-muted-foreground",   bg: "bg-muted",   points: "1–2 pts" },
   moderate: { label: "Moderate", color: "text-amber-700",   bg: "bg-amber-100",   points: "3–5 pts" },
   major:    { label: "Major",    color: "text-orange-700",  bg: "bg-orange-100",  points: "6–9 pts" },
   fatal:    { label: "Fatal",    color: "text-red-700",     bg: "bg-red-100",     points: "10+ pts" },
@@ -139,7 +139,7 @@ const LICENSE_STATUS_CONFIG = {
   expired:    { label: "Expired",    color: "text-amber-700",   bg: "bg-amber-100",   icon: "⏰" },
   suspended:  { label: "Suspended",  color: "text-red-700",     bg: "bg-red-100",     icon: "⛔" },
   revoked:    { label: "Revoked",    color: "text-red-800",     bg: "bg-red-200",     icon: "✕" },
-  not_found:  { label: "Not Found",  color: "text-slate-600",   bg: "bg-slate-100",   icon: "?" },
+  not_found:  { label: "Not Found",  color: "text-muted-foreground",   bg: "bg-muted",   icon: "?" },
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -200,23 +200,23 @@ function MVRCheckPageInner() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-muted">
       {/* Header */}
-      <div className="bg-white border-b border-slate-200 px-6 py-4">
+      <div className="bg-card border-b border-border px-6 py-4">
         <div className="max-w-4xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white text-xl">🚗</div>
             <div>
-              <h1 className="text-xl font-bold text-slate-900">Motor Vehicle Record Check</h1>
-              <p className="text-sm text-slate-500">Verify driving history, license status, and violations</p>
+              <h1 className="text-xl font-bold text-muted-foreground">Motor Vehicle Record Check</h1>
+              <p className="text-sm text-muted-foreground">Verify driving history, license status, and violations</p>
             </div>
           </div>
           <div className="flex gap-2">
-            <button onClick={() => setTab("form")} className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${tab === "form" ? "bg-blue-600 text-white" : "text-slate-600 hover:bg-slate-100"}`}>
+            <button onClick={() => setTab("form")} className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${tab === "form" ? "bg-blue-600 text-white" : "text-muted-foreground hover:bg-muted"}`}>
               New Check
             </button>
             {result && (
-              <button onClick={() => setTab("result")} className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${tab === "result" ? "bg-blue-600 text-white" : "text-slate-600 hover:bg-slate-100"}`}>
+              <button onClick={() => setTab("result")} className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${tab === "result" ? "bg-blue-600 text-white" : "text-muted-foreground hover:bg-muted"}`}>
                 Results
               </button>
             )}
@@ -233,8 +233,8 @@ function MVRCheckPageInner() {
                 <CountrySelector value={form.country} onChange={c => setForm(f => ({ ...f, country: c, state: "" }))} required />
                 {form.country && (
                   <div className="flex flex-col gap-1">
-                    <label className="text-sm font-medium text-slate-700">Data Agency</label>
-                    <div className="border border-slate-200 rounded-lg px-3 py-2 text-sm bg-slate-50 text-slate-700">
+                    <label className="text-sm font-medium text-muted-foreground">Data Agency</label>
+                    <div className="border border-border rounded-lg px-3 py-2 text-sm bg-muted text-muted-foreground">
                       {mvrConfig.agency}
                     </div>
                   </div>
@@ -246,7 +246,7 @@ function MVRCheckPageInner() {
                 </div>
               )}
               {mvrConfig.notes && (
-                <div className="mt-3 flex items-start gap-2 text-sm text-slate-600 bg-blue-50 border border-blue-100 rounded-lg p-3">
+                <div className="mt-3 flex items-start gap-2 text-sm text-muted-foreground bg-blue-50 border border-blue-100 rounded-lg p-3">
                   <span>ℹ️</span>
                   <span>{mvrConfig.notes}</span>
                 </div>
@@ -257,40 +257,40 @@ function MVRCheckPageInner() {
             <SectionCard title="Subject Information" icon="👤">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-slate-700">Subject ID / Reference <span className="text-red-500">*</span></label>
+                  <label className="text-sm font-medium text-muted-foreground">Subject ID / Reference <span className="text-red-500">*</span></label>
                   <input
                     type="text" required value={form.subjectId}
                     onChange={e => setForm(f => ({ ...f, subjectId: e.target.value }))}
                     placeholder="e.g. INV-2024-0042"
-                    className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-slate-700">Full Name <span className="text-red-500">*</span></label>
+                  <label className="text-sm font-medium text-muted-foreground">Full Name <span className="text-red-500">*</span></label>
                   <input
                     type="text" required value={form.fullName}
                     onChange={e => setForm(f => ({ ...f, fullName: e.target.value }))}
                     placeholder={form.country === "NG" ? "e.g. Adebayo Oluwaseun Emmanuel" : "Full legal name"}
-                    className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                   {form.country === "NG" && (
-                    <p className="text-xs text-slate-400">Enter name exactly as it appears on the driver's license</p>
+                    <p className="text-xs text-muted-foreground">Enter name exactly as it appears on the driver's license</p>
                   )}
                 </div>
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-slate-700">Date of Birth <span className="text-red-500">*</span></label>
+                  <label className="text-sm font-medium text-muted-foreground">Date of Birth <span className="text-red-500">*</span></label>
                   <input
                     type="date" required value={form.dateOfBirth}
                     onChange={e => setForm(f => ({ ...f, dateOfBirth: e.target.value }))}
-                    className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-slate-700">Purpose of Check <span className="text-red-500">*</span></label>
+                  <label className="text-sm font-medium text-muted-foreground">Purpose of Check <span className="text-red-500">*</span></label>
                   <select
                     value={form.purpose}
                     onChange={e => setForm(f => ({ ...f, purpose: e.target.value }))}
-                    className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                    className="border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-card"
                   >
                     <option value="employment">Pre-employment (Driver role)</option>
                     <option value="ride_hailing">Ride-hailing / Transport operator</option>
@@ -308,22 +308,22 @@ function MVRCheckPageInner() {
             <SectionCard title="License Information" icon="🪪">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-slate-700">{mvrConfig.idLabel} <span className="text-red-500">*</span></label>
+                  <label className="text-sm font-medium text-muted-foreground">{mvrConfig.idLabel} <span className="text-red-500">*</span></label>
                   <input
                     type="text" required value={form.licenseNumber}
                     onChange={e => setForm(f => ({ ...f, licenseNumber: e.target.value.toUpperCase() }))}
                     placeholder={mvrConfig.idPlaceholder}
-                    className="border border-slate-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="border border-border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
-                  <p className="text-xs text-slate-400">{mvrConfig.idHint}</p>
+                  <p className="text-xs text-muted-foreground">{mvrConfig.idHint}</p>
                 </div>
                 {form.country === "NG" && (
                   <div className="flex flex-col gap-1">
-                    <label className="text-sm font-medium text-slate-700">State of Issue</label>
+                    <label className="text-sm font-medium text-muted-foreground">State of Issue</label>
                     <select
                       value={form.state}
                       onChange={e => setForm(f => ({ ...f, state: e.target.value }))}
-                      className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                      className="border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-card"
                     >
                       <option value="">All states</option>
                       {nigerianStates.map(s => <option key={s} value={s}>{s}</option>)}
@@ -331,11 +331,11 @@ function MVRCheckPageInner() {
                   </div>
                 )}
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-slate-700">Lookback Period</label>
+                  <label className="text-sm font-medium text-muted-foreground">Lookback Period</label>
                   <select
                     value={form.lookbackYears}
                     onChange={e => setForm(f => ({ ...f, lookbackYears: Number(e.target.value) }))}
-                    className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                    className="border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-card"
                   >
                     <option value={3}>3 years</option>
                     <option value={5}>5 years</option>
@@ -347,10 +347,10 @@ function MVRCheckPageInner() {
 
               {/* License classes info */}
               <div className="mt-4">
-                <p className="text-xs font-medium text-slate-500 mb-2">LICENSE CLASSES IN {form.country || "THIS COUNTRY"}</p>
+                <p className="text-xs font-medium text-muted-foreground mb-2">LICENSE CLASSES IN {form.country || "THIS COUNTRY"}</p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                   {mvrConfig.licenseClasses.map(cls => (
-                    <div key={cls.value} className="flex items-center gap-2 text-xs text-slate-600 bg-slate-50 rounded-lg px-2.5 py-1.5">
+                    <div key={cls.value} className="flex items-center gap-2 text-xs text-muted-foreground bg-muted rounded-lg px-2.5 py-1.5">
                       <span className="font-bold text-blue-700 w-6">{cls.value}</span>
                       <span>{cls.label}</span>
                     </div>
@@ -406,13 +406,13 @@ function MVRResultView({ result, onNewCheck }: { result: MVRResult; onNewCheck: 
   return (
     <div className="space-y-6">
       {/* Summary Header */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+      <div className="bg-card rounded-2xl border border-border shadow-sm p-6">
         <div className="flex items-start justify-between flex-wrap gap-4">
           <div className="flex items-center gap-4">
             <ScoreGauge score={100 - result.riskScore} label="Safety Score" size={100} />
             <div>
-              <h2 className="text-xl font-bold text-slate-900">MVR Check Complete</h2>
-              <p className="text-slate-500 text-sm mt-0.5">Subject ID: {result.subjectId}</p>
+              <h2 className="text-xl font-bold text-muted-foreground">MVR Check Complete</h2>
+              <p className="text-muted-foreground text-sm mt-0.5">Subject ID: {result.subjectId}</p>
               <div className="flex items-center gap-2 mt-2">
                 <RiskBadge level={result.riskLevel as RiskLevel} />
                 <span className={`inline-flex items-center gap-1 text-sm font-semibold px-2.5 py-1 rounded-full ${licCfg.color} ${licCfg.bg}`}>
@@ -422,9 +422,9 @@ function MVRResultView({ result, onNewCheck }: { result: MVRResult; onNewCheck: 
             </div>
           </div>
           <div className="text-right">
-            <div className="text-xs text-slate-400">Data Source</div>
-            <div className="text-sm font-medium text-slate-700">{result.dataSource}</div>
-            <div className="text-xs text-slate-400 mt-1">
+            <div className="text-xs text-muted-foreground">Data Source</div>
+            <div className="text-sm font-medium text-muted-foreground">{result.dataSource}</div>
+            <div className="text-xs text-muted-foreground mt-1">
               {new Date(result.verifiedAt).toLocaleString()}
             </div>
           </div>
@@ -450,9 +450,9 @@ function MVRResultView({ result, onNewCheck }: { result: MVRResult; onNewCheck: 
             { label: "Expiry Date", value: result.licenseExpiry },
             { label: "Total Points", value: `${result.totalPoints} pts` },
           ].map(item => (
-            <div key={item.label} className="bg-slate-50 rounded-xl p-3">
-              <div className="text-xs text-slate-500 mb-1">{item.label}</div>
-              <div className="font-semibold text-slate-800">{item.value}</div>
+            <div key={item.label} className="bg-muted rounded-xl p-3">
+              <div className="text-xs text-muted-foreground mb-1">{item.label}</div>
+              <div className="font-semibold text-muted-foreground">{item.value}</div>
             </div>
           ))}
         </div>
@@ -462,14 +462,14 @@ function MVRResultView({ result, onNewCheck }: { result: MVRResult; onNewCheck: 
       <SectionCard title="Driving Statistics" icon="📊">
         <div className="grid grid-cols-3 gap-4">
           {[
-            { label: "Violations", value: result.violations.length, icon: "⚠️", color: result.violations.length > 3 ? "text-orange-600" : "text-slate-800" },
-            { label: "Accidents", value: result.accidentsCount, icon: "💥", color: result.accidentsCount > 0 ? "text-red-600" : "text-slate-800" },
-            { label: "DUI Count", value: result.duiCount, icon: "🍺", color: result.duiCount > 0 ? "text-red-700 font-bold" : "text-slate-800" },
+            { label: "Violations", value: result.violations.length, icon: "⚠️", color: result.violations.length > 3 ? "text-orange-600" : "text-muted-foreground" },
+            { label: "Accidents", value: result.accidentsCount, icon: "💥", color: result.accidentsCount > 0 ? "text-red-600" : "text-muted-foreground" },
+            { label: "DUI Count", value: result.duiCount, icon: "🍺", color: result.duiCount > 0 ? "text-red-700 font-bold" : "text-muted-foreground" },
           ].map(stat => (
-            <div key={stat.label} className="bg-slate-50 rounded-xl p-4 text-center">
+            <div key={stat.label} className="bg-muted rounded-xl p-4 text-center">
               <div className="text-2xl mb-1">{stat.icon}</div>
               <div className={`text-3xl font-bold ${stat.color}`}>{stat.value}</div>
-              <div className="text-xs text-slate-500 mt-0.5">{stat.label}</div>
+              <div className="text-xs text-muted-foreground mt-0.5">{stat.label}</div>
             </div>
           ))}
         </div>
@@ -482,17 +482,17 @@ function MVRResultView({ result, onNewCheck }: { result: MVRResult; onNewCheck: 
             {result.violations.map((v, i) => {
               const sev = VIOLATION_SEVERITY_CONFIG[v.severity];
               return (
-                <div key={i} className="flex items-start gap-3 p-3 bg-slate-50 rounded-xl">
+                <div key={i} className="flex items-start gap-3 p-3 bg-muted rounded-xl">
                   <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${sev.color} ${sev.bg} shrink-0 mt-0.5`}>
                     {sev.label}
                   </span>
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium text-slate-800">{v.description}</div>
-                    <div className="text-xs text-slate-500 mt-0.5 flex items-center gap-3">
+                    <div className="text-sm font-medium text-muted-foreground">{v.description}</div>
+                    <div className="text-xs text-muted-foreground mt-0.5 flex items-center gap-3">
                       <span>📅 {v.date}</span>
                       <span>📍 {v.state}</span>
                       <span>⚖️ {v.disposition}</span>
-                      <span className="font-medium text-slate-700">+{v.points} pts</span>
+                      <span className="font-medium text-muted-foreground">+{v.points} pts</span>
                     </div>
                   </div>
                 </div>
@@ -510,7 +510,7 @@ function MVRResultView({ result, onNewCheck }: { result: MVRResult; onNewCheck: 
       <div className="flex gap-3">
         <button
           onClick={onNewCheck}
-          className="flex-1 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 font-medium py-2.5 rounded-xl text-sm transition-all"
+          className="flex-1 bg-card border border-border hover:bg-muted text-muted-foreground font-medium py-2.5 rounded-xl text-sm transition-all"
         >
           New Check
         </button>

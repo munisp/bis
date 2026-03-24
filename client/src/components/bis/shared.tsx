@@ -18,7 +18,7 @@ export function RiskBadge({ level, size = "md" }: { level: RiskLevel; size?: "sm
 // ── Status Badge ──────────────────────────────────────────────────────────────
 
 export function StatusBadge({ status, size = "md" }: { status: string; size?: "sm" | "md" }) {
-  const cfg = STATUS_CONFIG[status] ?? { label: status, color: "text-slate-600", bg: "bg-slate-100" };
+  const cfg = STATUS_CONFIG[status] ?? { label: status, color: "text-muted-foreground", bg: "bg-muted" };
   const sizes = { sm: "text-xs px-2 py-0.5", md: "text-sm px-2.5 py-1" };
   return (
     <span className={`inline-flex items-center rounded-full font-medium ${cfg.color} ${cfg.bg} ${sizes[size]}`}>
@@ -56,7 +56,7 @@ export function ScoreGauge({ score, label, size = 120 }: { score: number; label?
           {Math.round(score)}
         </text>
       </svg>
-      {label && <span className="text-xs text-slate-500 font-medium">{label}</span>}
+      {label && <span className="text-xs text-muted-foreground font-medium">{label}</span>}
     </div>
   );
 }
@@ -74,13 +74,13 @@ export function CountrySelector({
 }) {
   return (
     <div className={`flex flex-col gap-1 ${className}`}>
-      <label className="text-sm font-medium text-slate-700">
+      <label className="text-sm font-medium text-muted-foreground">
         {label} {required && <span className="text-red-500">*</span>}
       </label>
       <select
         value={value}
         onChange={e => onChange(e.target.value)}
-        className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+        className="border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-card"
       >
         <option value="">Select country...</option>
         <optgroup label="🌍 Africa">
@@ -117,7 +117,7 @@ export function DataEnvironmentBanner({ country }: { country: Country }) {
         {country.primarySources.length > 0 && (
           <div className="mt-1 flex flex-wrap gap-1">
             {country.primarySources.map(s => (
-              <span key={s} className="bg-white/60 border border-current/20 rounded px-1.5 py-0.5 text-xs font-medium">{s}</span>
+              <span key={s} className="bg-card/60 border border-current/20 rounded px-1.5 py-0.5 text-xs font-medium">{s}</span>
             ))}
           </div>
         )}
@@ -142,7 +142,7 @@ export function NigerianSourceCard({
     4: "bg-red-100 text-red-700",
     5: "bg-orange-100 text-orange-700",
     6: "bg-cyan-100 text-cyan-700",
-    7: "bg-slate-100 text-slate-700",
+    7: "bg-muted text-muted-foreground",
   };
   const categoryIcons: Record<string, string> = {
     identity: "🪪", business: "🏢", financial: "💳", watchlist: "🚨",
@@ -153,15 +153,15 @@ export function NigerianSourceCard({
     <button
       onClick={onToggle}
       className={`w-full text-left p-3 rounded-xl border-2 transition-all ${
-        selected ? "border-blue-500 bg-blue-50" : "border-slate-200 bg-white hover:border-slate-300"
+        selected ? "border-blue-500 bg-blue-50" : "border-border bg-card hover:border-border"
       }`}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
           <span className="text-lg">{categoryIcons[source.category]}</span>
           <div className="min-w-0">
-            <div className="font-semibold text-sm text-slate-800 truncate">{source.shortName}</div>
-            <div className="text-xs text-slate-500 truncate">{source.name}</div>
+            <div className="font-semibold text-sm text-muted-foreground truncate">{source.shortName}</div>
+            <div className="text-xs text-muted-foreground truncate">{source.name}</div>
           </div>
         </div>
         <div className="flex flex-col items-end gap-1 shrink-0">
@@ -171,7 +171,7 @@ export function NigerianSourceCard({
           {selected && <span className="text-blue-600 text-sm font-bold">✓</span>}
         </div>
       </div>
-      <div className="mt-2 flex items-center gap-3 text-xs text-slate-500">
+      <div className="mt-2 flex items-center gap-3 text-xs text-muted-foreground">
         <span>💰 ${source.avgCostUSD.toFixed(2)}</span>
         <span>⏱ {source.avgTurnaround}</span>
         <span>📶 {Math.round(source.reliability * 100)}% uptime</span>
@@ -189,11 +189,11 @@ export function ConfidenceMeter({ confidence }: { confidence: number }) {
   const label = pct >= 70 ? "High Confidence" : pct >= 40 ? "Medium Confidence" : "Low Confidence";
   return (
     <div className="flex flex-col gap-1">
-      <div className="flex justify-between text-xs text-slate-600">
+      <div className="flex justify-between text-xs text-muted-foreground">
         <span>Data Confidence</span>
         <span className="font-semibold">{pct}% — {label}</span>
       </div>
-      <div className="h-2 bg-slate-200 rounded-full overflow-hidden">
+      <div className="h-2 bg-muted rounded-full overflow-hidden">
         <div className={`h-full rounded-full transition-all ${color}`} style={{ width: `${pct}%` }} />
       </div>
     </div>
@@ -206,10 +206,10 @@ export function SectionCard({ title, icon, children, className = "" }: {
   title: string; icon?: string; children: React.ReactNode; className?: string;
 }) {
   return (
-    <div className={`bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden ${className}`}>
-      <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-2">
+    <div className={`bg-card rounded-2xl border border-border shadow-sm overflow-hidden ${className}`}>
+      <div className="px-5 py-4 border-b border-border flex items-center gap-2">
         {icon && <span className="text-lg">{icon}</span>}
-        <h3 className="font-semibold text-slate-800">{title}</h3>
+        <h3 className="font-semibold text-muted-foreground">{title}</h3>
       </div>
       <div className="p-5">{children}</div>
     </div>
@@ -236,14 +236,14 @@ export function FieldAgentTimeline({ status }: { status: string }) {
           <React.Fragment key={step.key}>
             <div className="flex flex-col items-center gap-1">
               <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm border-2 transition-all ${
-                done ? "bg-blue-600 border-blue-600 text-white" : "bg-white border-slate-300 text-slate-400"
+                done ? "bg-blue-600 border-blue-600 text-white" : "bg-card border-border text-muted-foreground"
               } ${active ? "ring-2 ring-blue-300 ring-offset-1" : ""}`}>
                 {step.icon}
               </div>
-              <span className={`text-xs font-medium ${done ? "text-blue-700" : "text-slate-400"}`}>{step.label}</span>
+              <span className={`text-xs font-medium ${done ? "text-blue-700" : "text-muted-foreground"}`}>{step.label}</span>
             </div>
             {idx < steps.length - 1 && (
-              <div className={`flex-1 h-0.5 mb-5 ${idx < currentIdx ? "bg-blue-500" : "bg-slate-200"}`} />
+              <div className={`flex-1 h-0.5 mb-5 ${idx < currentIdx ? "bg-blue-500" : "bg-muted"}`} />
             )}
           </React.Fragment>
         );
@@ -284,8 +284,8 @@ export function EmptyState({ icon, title, description, action }: {
   return (
     <div className="flex flex-col items-center justify-center py-16 text-center">
       <span className="text-5xl mb-4">{icon}</span>
-      <h3 className="text-lg font-semibold text-slate-800 mb-1">{title}</h3>
-      <p className="text-slate-500 text-sm max-w-xs">{description}</p>
+      <h3 className="text-lg font-semibold text-muted-foreground mb-1">{title}</h3>
+      <p className="text-muted-foreground text-sm max-w-xs">{description}</p>
       {action && <div className="mt-4">{action}</div>}
     </div>
   );

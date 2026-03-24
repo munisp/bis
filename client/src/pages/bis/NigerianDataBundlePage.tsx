@@ -253,7 +253,7 @@ const STATUS_CONFIG: Record<SourceResult["status"], { label: string; color: stri
   verified:  { label: "Verified",   color: "text-emerald-700", bg: "bg-emerald-100", icon: "✓" },
   not_found: { label: "Not Found",  color: "text-amber-700",   bg: "bg-amber-100",   icon: "?" },
   mismatch:  { label: "Mismatch",   color: "text-red-700",     bg: "bg-red-100",     icon: "✕" },
-  error:     { label: "Error",      color: "text-slate-600",   bg: "bg-slate-100",   icon: "!" },
+  error:     { label: "Error",      color: "text-muted-foreground",   bg: "bg-muted",   icon: "!" },
   pending:   { label: "Pending",    color: "text-blue-700",    bg: "bg-blue-100",    icon: "⟳" },
 };
 
@@ -317,21 +317,21 @@ function NigerianDataBundlePageInner() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-muted">
       {/* Header */}
-      <div className="bg-white border-b border-slate-200 px-6 py-4">
+      <div className="bg-card border-b border-border px-6 py-4">
         <div className="max-w-4xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-green-700 rounded-xl flex items-center justify-center text-white text-xl">🇳🇬</div>
             <div>
-              <h1 className="text-xl font-bold text-slate-900">Nigerian Data Bundle</h1>
-              <p className="text-sm text-slate-500">NIMC, BVN, FRSC, INEC, CAC, EFCC, ICPC, NFIU, CRC, FIRS, NCC — all in one check</p>
+              <h1 className="text-xl font-bold text-muted-foreground">Nigerian Data Bundle</h1>
+              <p className="text-sm text-muted-foreground">NIMC, BVN, FRSC, INEC, CAC, EFCC, ICPC, NFIU, CRC, FIRS, NCC — all in one check</p>
             </div>
           </div>
           <div className="flex gap-2">
             {[{ v: "bundle", label: "Presets" }, { v: "custom", label: "Custom" }].map(tab => (
               <button key={tab.v} onClick={() => setView(tab.v as any)}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${view === tab.v ? "bg-green-700 text-white" : "text-slate-600 hover:bg-slate-100"}`}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${view === tab.v ? "bg-green-700 text-white" : "text-muted-foreground hover:bg-muted"}`}
               >
                 {tab.label}
               </button>
@@ -347,26 +347,26 @@ function NigerianDataBundlePageInner() {
           <div className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {BUNDLE_PRESETS.map(preset => (
-                <div key={preset.id} className="bg-white rounded-2xl border border-slate-200 p-5 hover:border-green-400 transition-all cursor-pointer" onClick={() => applyPreset(preset)}>
+                <div key={preset.id} className="bg-card rounded-2xl border border-border p-5 hover:border-green-400 transition-all cursor-pointer" onClick={() => applyPreset(preset)}>
                   <div className="flex items-start justify-between gap-2 mb-3">
                     <div className="flex items-center gap-2">
                       <span className="text-2xl">{preset.icon}</span>
                       <div>
-                        <div className="font-bold text-slate-900">{preset.label}</div>
-                        <div className="text-xs text-slate-500">{preset.useCase}</div>
+                        <div className="font-bold text-muted-foreground">{preset.label}</div>
+                        <div className="text-xs text-muted-foreground">{preset.useCase}</div>
                       </div>
                     </div>
                     <div className="text-right">
                       <div className="text-xl font-bold text-green-700">${preset.priceUSD.toFixed(2)}</div>
-                      <div className="text-xs text-slate-400">per check</div>
+                      <div className="text-xs text-muted-foreground">per check</div>
                     </div>
                   </div>
-                  <p className="text-sm text-slate-600 mb-3">{preset.description}</p>
+                  <p className="text-sm text-muted-foreground mb-3">{preset.description}</p>
                   <div className="flex flex-wrap gap-1">
                     {preset.sources.map(sourceId => {
                       const src = NG_DATA_SOURCES.find(s => s.id === sourceId);
                       return src ? (
-                        <span key={sourceId} className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">{src.icon} {src.label.split("—")[0].trim()}</span>
+                        <span key={sourceId} className="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded-full">{src.icon} {src.label.split("—")[0].trim()}</span>
                       ) : null;
                     })}
                   </div>
@@ -385,17 +385,17 @@ function NigerianDataBundlePageInner() {
                     <div className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold mb-2 ${CATEGORY_COLORS[cat]}`}>{cat}</div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-4">
                       {NG_DATA_SOURCES.filter(s => s.category === cat).map(src => (
-                        <div key={src.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl text-sm">
+                        <div key={src.id} className="flex items-center justify-between p-3 bg-muted rounded-xl text-sm">
                           <div className="flex items-center gap-2">
                             <span>{src.icon}</span>
                             <div>
-                              <div className="font-medium text-slate-800 text-xs">{src.label}</div>
-                              <div className="text-xs text-slate-400">{src.coverage}</div>
+                              <div className="font-medium text-muted-foreground text-xs">{src.label}</div>
+                              <div className="text-xs text-muted-foreground">{src.coverage}</div>
                             </div>
                           </div>
                           <div className="text-right shrink-0">
                             <div className="font-bold text-green-700 text-xs">${src.priceUSD.toFixed(2)}</div>
-                            <div className="text-xs text-slate-400">{src.reliability}% reliable</div>
+                            <div className="text-xs text-muted-foreground">{src.reliability}% reliable</div>
                           </div>
                         </div>
                       ))}
@@ -413,34 +413,34 @@ function NigerianDataBundlePageInner() {
             <SectionCard title="Subject Information" icon="👤">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-slate-700">Subject ID <span className="text-red-500">*</span></label>
+                  <label className="text-sm font-medium text-muted-foreground">Subject ID <span className="text-red-500">*</span></label>
                   <input type="text" required value={form.subjectId}
                     onChange={e => setForm(f => ({ ...f, subjectId: e.target.value }))}
                     placeholder="e.g. INV-2024-0042"
-                    className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-600"
+                    className="border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-600"
                   />
                 </div>
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-slate-700">Full Name <span className="text-red-500">*</span></label>
+                  <label className="text-sm font-medium text-muted-foreground">Full Name <span className="text-red-500">*</span></label>
                   <input type="text" required value={form.fullName}
                     onChange={e => setForm(f => ({ ...f, fullName: e.target.value }))}
                     placeholder="Full legal name"
-                    className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-600"
+                    className="border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-600"
                   />
                 </div>
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-slate-700">Date of Birth</label>
+                  <label className="text-sm font-medium text-muted-foreground">Date of Birth</label>
                   <input type="date" value={form.dateOfBirth}
                     onChange={e => setForm(f => ({ ...f, dateOfBirth: e.target.value }))}
-                    className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-600"
+                    className="border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-600"
                   />
                 </div>
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-slate-700">Phone Number</label>
+                  <label className="text-sm font-medium text-muted-foreground">Phone Number</label>
                   <input type="tel" value={form.phoneNumber}
                     onChange={e => setForm(f => ({ ...f, phoneNumber: e.target.value }))}
                     placeholder="+234 8XX XXX XXXX"
-                    className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-600"
+                    className="border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-600"
                   />
                 </div>
               </div>
@@ -459,11 +459,11 @@ function NigerianDataBundlePageInner() {
                   { id: "tax_tin", label: "TIN", placeholder: "10-digit TIN", field: "tin" as const },
                 ].map(item => (
                   <div key={item.id} className="flex flex-col gap-1">
-                    <label className="text-sm font-medium text-slate-700">{item.label}</label>
+                    <label className="text-sm font-medium text-muted-foreground">{item.label}</label>
                     <input type="text" value={form[item.field]}
                       onChange={e => setForm(f => ({ ...f, [item.field]: e.target.value }))}
                       placeholder={item.placeholder}
-                      className="border border-slate-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-green-600"
+                      className="border border-border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-green-600"
                     />
                   </div>
                 ))}
@@ -482,15 +482,15 @@ function NigerianDataBundlePageInner() {
                           key={src.id} type="button"
                           onClick={() => toggleSource(src.id)}
                           className={`text-left p-3 rounded-xl border-2 transition-all ${
-                            form.selectedSources.includes(src.id) ? "border-green-500 bg-green-50" : "border-slate-200 bg-white hover:border-slate-300"
+                            form.selectedSources.includes(src.id) ? "border-green-500 bg-green-50" : "border-border bg-card hover:border-border"
                           }`}
                         >
                           <div className="flex items-center justify-between gap-2">
                             <div className="flex items-center gap-2">
                               <span>{src.icon}</span>
                               <div>
-                                <div className="font-medium text-xs text-slate-800">{src.label.split("—")[1]?.trim() ?? src.label}</div>
-                                <div className="text-xs text-slate-400">{src.turnaround} · {src.reliability}% reliable</div>
+                                <div className="font-medium text-xs text-muted-foreground">{src.label.split("—")[1]?.trim() ?? src.label}</div>
+                                <div className="text-xs text-muted-foreground">{src.turnaround} · {src.reliability}% reliable</div>
                               </div>
                             </div>
                             <div className="text-right shrink-0">
@@ -520,7 +520,7 @@ function NigerianDataBundlePageInner() {
 
             <button
               type="submit" disabled={loading || form.selectedSources.length === 0}
-              className="w-full bg-green-700 hover:bg-green-800 disabled:bg-slate-300 text-white font-semibold py-3 rounded-xl transition-all flex items-center justify-center gap-2"
+              className="w-full bg-green-700 hover:bg-green-800 disabled:bg-muted text-white font-semibold py-3 rounded-xl transition-all flex items-center justify-center gap-2"
             >
               {loading ? <><span className="animate-spin">⟳</span> Running {form.selectedSources.length} checks...</> : <><span>🇳🇬</span> Run Nigerian Data Bundle</>}
             </button>
@@ -531,19 +531,19 @@ function NigerianDataBundlePageInner() {
         {view === "results" && (
           <div className="space-y-6">
             {/* Score Summary */}
-            <div className="bg-white rounded-2xl border border-slate-200 p-6">
+            <div className="bg-card rounded-2xl border border-border p-6">
               <div className="flex items-center gap-6">
                 <ScoreGauge score={overallScore} size={120} />
                 <div>
-                  <h2 className="text-xl font-bold text-slate-900">
+                  <h2 className="text-xl font-bold text-muted-foreground">
                     {overallScore >= 80 ? "High Confidence" : overallScore >= 50 ? "Moderate Confidence" : "Low Confidence"}
                   </h2>
-                  <p className="text-slate-500 text-sm mt-1">
+                  <p className="text-muted-foreground text-sm mt-1">
                     {results.filter(r => r.status === "verified").length} of {results.length} sources verified
                   </p>
                   <div className="flex gap-2 mt-3">
                     <RiskBadge level={overallScore >= 80 ? "low" : overallScore >= 50 ? "medium" : "high"} />
-                    <span className="text-xs text-slate-400 self-center">Overall risk level</span>
+                    <span className="text-xs text-muted-foreground self-center">Overall risk level</span>
                   </div>
                 </div>
               </div>
@@ -562,8 +562,8 @@ function NigerianDataBundlePageInner() {
                         <div className="flex items-center gap-3">
                           <span className="text-xl">{src.icon}</span>
                           <div>
-                            <div className="font-semibold text-sm text-slate-800">{src.label}</div>
-                            <div className="text-xs text-slate-500">{src.apiProvider}</div>
+                            <div className="font-semibold text-sm text-muted-foreground">{src.label}</div>
+                            <div className="text-xs text-muted-foreground">{src.apiProvider}</div>
                           </div>
                         </div>
                         <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold ${cfg.bg} ${cfg.color}`}>
@@ -574,9 +574,9 @@ function NigerianDataBundlePageInner() {
                       {result.status === "verified" && result.data && (
                         <div className="mt-3 grid grid-cols-2 md:grid-cols-3 gap-2">
                           {Object.entries(result.data).map(([k, v]) => (
-                            <div key={k} className="bg-white/60 rounded-lg p-2">
-                              <div className="text-xs text-slate-400">{k}</div>
-                              <div className="text-xs font-medium text-slate-700">{v}</div>
+                            <div key={k} className="bg-card/60 rounded-lg p-2">
+                              <div className="text-xs text-muted-foreground">{k}</div>
+                              <div className="text-xs font-medium text-muted-foreground">{v}</div>
                             </div>
                           ))}
                         </div>
@@ -591,7 +591,7 @@ function NigerianDataBundlePageInner() {
             </SectionCard>
 
             <div className="flex gap-3">
-              <button onClick={() => setView("bundle")} className="flex-1 bg-white border border-slate-300 text-slate-700 font-medium py-3 rounded-xl text-sm">
+              <button onClick={() => setView("bundle")} className="flex-1 bg-card border border-border text-muted-foreground font-medium py-3 rounded-xl text-sm">
                 New Check
               </button>
               <button className="flex-1 bg-green-700 hover:bg-green-800 text-white font-semibold py-3 rounded-xl text-sm flex items-center justify-center gap-2">

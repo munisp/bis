@@ -82,7 +82,7 @@ const WORK_AUTH_STATUS_CONFIG: Record<WorkAuthStatus, { label: string; color: st
   tentative_non_confirmation:  { label: "Tentative Non-Confirmation", color: "text-amber-700", bg: "bg-amber-100",   icon: "⚠", description: "Possible mismatch. Subject has 8 business days to resolve with the relevant authority." },
   pending:                     { label: "Pending Verification",     color: "text-blue-700",    bg: "bg-blue-100",    icon: "⟳", description: "Verification is in progress. Manual check required." },
   expired:                     { label: "Expired",                  color: "text-orange-700",  bg: "bg-orange-100",  icon: "⏰", description: "Work authorization has expired. Subject must renew before employment." },
-  not_applicable:              { label: "Not Required",             color: "text-slate-600",   bg: "bg-slate-100",   icon: "–", description: "Subject is a citizen of this country. No work permit required." },
+  not_applicable:              { label: "Not Required",             color: "text-muted-foreground",   bg: "bg-muted",   icon: "–", description: "Subject is a citizen of this country. No work permit required." },
 };
 
 const NIGERIAN_STATES = [
@@ -176,14 +176,14 @@ function WorkAuthorizationPageInner() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-muted">
       {/* Header */}
-      <div className="bg-white border-b border-slate-200 px-6 py-4">
+      <div className="bg-card border-b border-border px-6 py-4">
         <div className="max-w-3xl mx-auto flex items-center gap-3">
           <div className="w-10 h-10 bg-emerald-600 rounded-xl flex items-center justify-center text-white text-xl">📋</div>
           <div>
-            <h1 className="text-xl font-bold text-slate-900">Work Authorization Check</h1>
-            <p className="text-sm text-slate-500">Verify right to work — E-Verify, CERPAC, Right to Work, ECOWAS</p>
+            <h1 className="text-xl font-bold text-muted-foreground">Work Authorization Check</h1>
+            <p className="text-sm text-muted-foreground">Verify right to work — E-Verify, CERPAC, Right to Work, ECOWAS</p>
           </div>
         </div>
       </div>
@@ -231,7 +231,7 @@ function WorkAuthorizationPageInner() {
                 </div>
               )}
 
-              <div className="mt-4 bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs text-slate-600">
+              <div className="mt-4 bg-muted border border-border rounded-xl p-3 text-xs text-muted-foreground">
                 <span className="font-semibold">⚖️ Legal Basis: </span>{authConfig.legalBasis}
               </div>
             </SectionCard>
@@ -240,34 +240,34 @@ function WorkAuthorizationPageInner() {
             <SectionCard title="Subject Information" icon="👤">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-slate-700">Subject ID <span className="text-red-500">*</span></label>
+                  <label className="text-sm font-medium text-muted-foreground">Subject ID <span className="text-red-500">*</span></label>
                   <input type="text" required value={form.subjectId}
                     onChange={e => setForm(f => ({ ...f, subjectId: e.target.value }))}
                     placeholder="e.g. INV-2024-0042"
-                    className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    className="border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   />
                 </div>
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-slate-700">Full Name <span className="text-red-500">*</span></label>
+                  <label className="text-sm font-medium text-muted-foreground">Full Name <span className="text-red-500">*</span></label>
                   <input type="text" required value={form.fullName}
                     onChange={e => setForm(f => ({ ...f, fullName: e.target.value }))}
                     placeholder="Full legal name"
-                    className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    className="border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   />
                 </div>
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-slate-700">Date of Birth <span className="text-red-500">*</span></label>
+                  <label className="text-sm font-medium text-muted-foreground">Date of Birth <span className="text-red-500">*</span></label>
                   <input type="date" required value={form.dateOfBirth}
                     onChange={e => setForm(f => ({ ...f, dateOfBirth: e.target.value }))}
-                    className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    className="border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   />
                 </div>
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-slate-700">Employer Name</label>
+                  <label className="text-sm font-medium text-muted-foreground">Employer Name</label>
                   <input type="text" value={form.employerName}
                     onChange={e => setForm(f => ({ ...f, employerName: e.target.value }))}
                     placeholder="Employing organization"
-                    className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    className="border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   />
                 </div>
               </div>
@@ -282,11 +282,11 @@ function WorkAuthorizationPageInner() {
                       key={at.value} type="button"
                       onClick={() => setForm(f => ({ ...f, authType: at.value }))}
                       className={`w-full text-left p-4 rounded-xl border-2 transition-all ${
-                        form.authType === at.value ? "border-emerald-500 bg-emerald-50" : "border-slate-200 bg-white hover:border-slate-300"
+                        form.authType === at.value ? "border-emerald-500 bg-emerald-50" : "border-border bg-card hover:border-border"
                       }`}
                     >
-                      <div className="font-semibold text-sm text-slate-800">{at.label}</div>
-                      <div className="text-xs text-slate-500 mt-0.5">{at.description}</div>
+                      <div className="font-semibold text-sm text-muted-foreground">{at.label}</div>
+                      <div className="text-xs text-muted-foreground mt-0.5">{at.description}</div>
                       <div className="text-xs text-emerald-700 mt-1 font-medium">Applies to: {at.applicableTo}</div>
                     </button>
                   ))}
@@ -299,19 +299,19 @@ function WorkAuthorizationPageInner() {
               <SectionCard title="CERPAC / Work Permit Details" icon="🪪">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="flex flex-col gap-1">
-                    <label className="text-sm font-medium text-slate-700">CERPAC / Permit Number <span className="text-red-500">*</span></label>
+                    <label className="text-sm font-medium text-muted-foreground">CERPAC / Permit Number <span className="text-red-500">*</span></label>
                     <input type="text" value={form.documentNumber}
                       onChange={e => setForm(f => ({ ...f, documentNumber: e.target.value.toUpperCase() }))}
                       placeholder="e.g. CERPAC/2023/12345"
-                      className="border border-slate-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      className="border border-border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500"
                     />
-                    <p className="text-xs text-slate-400">Found on the CERPAC card or NIS approval letter</p>
+                    <p className="text-xs text-muted-foreground">Found on the CERPAC card or NIS approval letter</p>
                   </div>
                   <div className="flex flex-col gap-1">
-                    <label className="text-sm font-medium text-slate-700">Permit Expiry Date <span className="text-red-500">*</span></label>
+                    <label className="text-sm font-medium text-muted-foreground">Permit Expiry Date <span className="text-red-500">*</span></label>
                     <input type="date" value={form.documentExpiry}
                       onChange={e => setForm(f => ({ ...f, documentExpiry: e.target.value }))}
-                      className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      className="border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                     />
                   </div>
                 </div>
@@ -326,13 +326,13 @@ function WorkAuthorizationPageInner() {
               <SectionCard title="UK Right to Work — Share Code" icon="🇬🇧">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="flex flex-col gap-1">
-                    <label className="text-sm font-medium text-slate-700">Share Code <span className="text-red-500">*</span></label>
+                    <label className="text-sm font-medium text-muted-foreground">Share Code <span className="text-red-500">*</span></label>
                     <input type="text" value={form.shareCode}
                       onChange={e => setForm(f => ({ ...f, shareCode: e.target.value.toUpperCase() }))}
                       placeholder="e.g. W4B-3X7-P9Q"
-                      className="border border-slate-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      className="border border-border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500"
                     />
-                    <p className="text-xs text-slate-400">Subject generates this at gov.uk/prove-right-to-work</p>
+                    <p className="text-xs text-muted-foreground">Subject generates this at gov.uk/prove-right-to-work</p>
                   </div>
                 </div>
               </SectionCard>
@@ -343,10 +343,10 @@ function WorkAuthorizationPageInner() {
               <SectionCard title="US E-Verify / I-9 Details" icon="🇺🇸">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="flex flex-col gap-1">
-                    <label className="text-sm font-medium text-slate-700">I-9 Document Type <span className="text-red-500">*</span></label>
+                    <label className="text-sm font-medium text-muted-foreground">I-9 Document Type <span className="text-red-500">*</span></label>
                     <select value={form.i9DocumentType}
                       onChange={e => setForm(f => ({ ...f, i9DocumentType: e.target.value }))}
-                      className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white"
+                      className="border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-card"
                     >
                       <option value="passport">US Passport (List A)</option>
                       <option value="green_card">Permanent Resident Card (List A)</option>
@@ -355,19 +355,19 @@ function WorkAuthorizationPageInner() {
                     </select>
                   </div>
                   <div className="flex flex-col gap-1">
-                    <label className="text-sm font-medium text-slate-700">Document Number <span className="text-red-500">*</span></label>
+                    <label className="text-sm font-medium text-muted-foreground">Document Number <span className="text-red-500">*</span></label>
                     <input type="text" value={form.documentNumber}
                       onChange={e => setForm(f => ({ ...f, documentNumber: e.target.value }))}
                       placeholder="Passport / Green Card / EAD number"
-                      className="border border-slate-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      className="border border-border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500"
                     />
                   </div>
                   <div className="flex flex-col gap-1">
-                    <label className="text-sm font-medium text-slate-700">SSN (last 4 digits)</label>
+                    <label className="text-sm font-medium text-muted-foreground">SSN (last 4 digits)</label>
                     <input type="text" value={form.ssn} maxLength={4}
                       onChange={e => setForm(f => ({ ...f, ssn: e.target.value }))}
                       placeholder="XXXX"
-                      className="border border-slate-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      className="border border-border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500"
                     />
                   </div>
                 </div>
@@ -401,7 +401,7 @@ function WorkAuthResultView({ result, onNewCheck }: { result: WorkAuthResult; on
       {/* Status Banner */}
       <div className={`rounded-2xl border-2 p-6 ${cfg.bg} border-current/20`}>
         <div className="flex items-center gap-4">
-          <div className={`w-16 h-16 rounded-full flex items-center justify-center text-3xl font-bold ${cfg.color} bg-white/60`}>
+          <div className={`w-16 h-16 rounded-full flex items-center justify-center text-3xl font-bold ${cfg.color} bg-card/60`}>
             {cfg.icon}
           </div>
           <div>
@@ -410,7 +410,7 @@ function WorkAuthResultView({ result, onNewCheck }: { result: WorkAuthResult; on
           </div>
         </div>
         {result.notes && (
-          <div className={`mt-4 text-sm ${cfg.color} bg-white/50 rounded-xl p-3`}>{result.notes}</div>
+          <div className={`mt-4 text-sm ${cfg.color} bg-card/50 rounded-xl p-3`}>{result.notes}</div>
         )}
       </div>
 
@@ -424,15 +424,15 @@ function WorkAuthResultView({ result, onNewCheck }: { result: WorkAuthResult; on
             { label: "Authorized Until", value: result.authorizedUntil ? new Date(result.authorizedUntil).toLocaleDateString() : "—" },
             { label: "Data Source", value: result.dataSource },
           ].map(item => (
-            <div key={item.label} className="bg-slate-50 rounded-xl p-3">
-              <div className="text-xs text-slate-500 mb-0.5">{item.label}</div>
-              <div className="font-medium text-slate-800">{item.value}</div>
+            <div key={item.label} className="bg-muted rounded-xl p-3">
+              <div className="text-xs text-muted-foreground mb-0.5">{item.label}</div>
+              <div className="font-medium text-muted-foreground">{item.value}</div>
             </div>
           ))}
         </div>
         {result.restrictions && result.restrictions.length > 0 && (
           <div className="mt-4">
-            <div className="text-xs font-semibold text-slate-500 mb-2">RESTRICTIONS</div>
+            <div className="text-xs font-semibold text-muted-foreground mb-2">RESTRICTIONS</div>
             <ul className="space-y-1">
               {result.restrictions.map((r, i) => (
                 <li key={i} className="text-sm text-amber-700 flex items-start gap-2">
@@ -445,7 +445,7 @@ function WorkAuthResultView({ result, onNewCheck }: { result: WorkAuthResult; on
       </SectionCard>
 
       <div className="flex gap-3">
-        <button onClick={onNewCheck} className="flex-1 bg-white border border-slate-300 text-slate-700 font-medium py-3 rounded-xl text-sm">
+        <button onClick={onNewCheck} className="flex-1 bg-card border border-border text-muted-foreground font-medium py-3 rounded-xl text-sm">
           New Check
         </button>
         <button className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-3 rounded-xl text-sm flex items-center justify-center gap-2">

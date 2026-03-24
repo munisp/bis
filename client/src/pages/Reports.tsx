@@ -15,6 +15,7 @@ import {
   Layers, X, Sparkles, BookOpen
 } from "lucide-react";
 import { mockInvestigations, formatDate, formatDateTime } from "@/lib/mockData";
+import ReportPreviewSlideOver from "@/components/ReportPreviewSlideOver";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -146,6 +147,7 @@ export default function Reports() {
   const [typeFilter, setTypeFilter] = useState("all");
   const [reports, setReports] = useState<Report[]>(SEED_REPORTS);
   const [builderOpen, setBuilderOpen] = useState(false);
+  const [previewReport, setPreviewReport] = useState<Report | null>(null);
 
   // Builder state
   const [selectedTemplate, setSelectedTemplate] = useState<ReportTemplate | null>(null);
@@ -411,14 +413,24 @@ export default function Reports() {
                   <span className="text-xs text-muted-foreground">{formatDateTime(r.createdAt)}</span>
                 </td>
                 <td className="px-4 py-3">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-6 text-xs gap-1"
-                    onClick={() => handleDownload(r)}
-                  >
-                    <Download size={11} /> Download
-                  </Button>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 text-xs gap-1"
+                      onClick={(e) => { e.stopPropagation(); setPreviewReport(r); }}
+                    >
+                      <Eye size={11} /> Preview
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 text-xs gap-1"
+                      onClick={() => handleDownload(r)}
+                    >
+                      <Download size={11} /> Download
+                    </Button>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -438,6 +450,10 @@ export default function Reports() {
           </span>
         </div>
       </div>
+      <ReportPreviewSlideOver
+        report={previewReport}
+        onClose={() => setPreviewReport(null)}
+      />
     </BISLayout>
   );
 }

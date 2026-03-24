@@ -124,21 +124,21 @@ function ContinuousMonitoringPageInner() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-muted">
       {/* Header */}
-      <div className="bg-white border-b border-slate-200 px-6 py-4">
+      <div className="bg-card border-b border-border px-6 py-4">
         <div className="max-w-5xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white text-xl">👁</div>
             <div>
-              <h1 className="text-xl font-bold text-slate-900">Continuous Monitoring</h1>
-              <p className="text-sm text-slate-500">Real-time alerts on criminal, sanctions, media, and license changes</p>
+              <h1 className="text-xl font-bold text-muted-foreground">Continuous Monitoring</h1>
+              <p className="text-sm text-muted-foreground">Real-time alerts on criminal, sanctions, media, and license changes</p>
             </div>
           </div>
           <div className="flex gap-2">
             {["dashboard", "enroll", "alerts"].map(v => (
               <button key={v} onClick={() => setView(v as any)}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all capitalize ${view === v ? "bg-indigo-600 text-white" : "text-slate-600 hover:bg-slate-100"}`}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all capitalize ${view === v ? "bg-indigo-600 text-white" : "text-muted-foreground hover:bg-muted"}`}
               >
                 {v === "alerts" && unacknowledgedAlerts > 0 ? (
                   <span className="flex items-center gap-1.5">
@@ -163,14 +163,14 @@ function ContinuousMonitoringPageInner() {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               {[
                 { label: "Active Enrollments", value: activeCount, icon: "👥", color: "text-indigo-600" },
-                { label: "Unread Alerts", value: unacknowledgedAlerts, icon: "🔔", color: unacknowledgedAlerts > 0 ? "text-amber-600" : "text-slate-600" },
-                { label: "Critical Alerts", value: criticalAlerts, icon: "🚨", color: criticalAlerts > 0 ? "text-red-600" : "text-slate-600" },
+                { label: "Unread Alerts", value: unacknowledgedAlerts, icon: "🔔", color: unacknowledgedAlerts > 0 ? "text-amber-600" : "text-muted-foreground" },
+                { label: "Critical Alerts", value: criticalAlerts, icon: "🚨", color: criticalAlerts > 0 ? "text-red-600" : "text-muted-foreground" },
                 { label: "Last Scan", value: "6h ago", icon: "⟳", color: "text-emerald-600" },
               ].map(stat => (
-                <div key={stat.label} className="bg-white rounded-2xl border border-slate-200 p-4 text-center">
+                <div key={stat.label} className="bg-card rounded-2xl border border-border p-4 text-center">
                   <div className="text-2xl mb-1">{stat.icon}</div>
                   <div className={`text-3xl font-bold ${stat.color}`}>{stat.value}</div>
-                  <div className="text-xs text-slate-500 mt-0.5">{stat.label}</div>
+                  <div className="text-xs text-muted-foreground mt-0.5">{stat.label}</div>
                 </div>
               ))}
             </div>
@@ -180,14 +180,14 @@ function ContinuousMonitoringPageInner() {
               <div className="space-y-3">
                 {enrollments.map(enr => (
                   <div key={enr.enrollmentId}
-                    className="flex items-center justify-between p-4 bg-slate-50 rounded-xl hover:bg-slate-100 cursor-pointer transition-all"
+                    className="flex items-center justify-between p-4 bg-muted rounded-xl hover:bg-muted cursor-pointer transition-all"
                     onClick={() => { setSelectedEnrollment(enr); setView("alerts"); }}
                   >
                     <div className="flex items-center gap-3">
-                      <div className={`w-2.5 h-2.5 rounded-full ${enr.active ? "bg-emerald-500" : "bg-slate-300"}`} />
+                      <div className={`w-2.5 h-2.5 rounded-full ${enr.active ? "bg-emerald-500" : "bg-muted"}`} />
                       <div>
-                        <div className="font-semibold text-sm text-slate-800">{enr.subjectName}</div>
-                        <div className="text-xs text-slate-500">{enr.subjectId} · Enrolled {new Date(enr.enrolledAt).toLocaleDateString()}</div>
+                        <div className="font-semibold text-sm text-muted-foreground">{enr.subjectName}</div>
+                        <div className="text-xs text-muted-foreground">{enr.subjectId} · Enrolled {new Date(enr.enrolledAt).toLocaleDateString()}</div>
                       </div>
                     </div>
                     <div className="flex items-center gap-3">
@@ -225,10 +225,10 @@ function ContinuousMonitoringPageInner() {
                         <span className="text-lg">{sev.icon}</span>
                         <div className="flex-1 min-w-0">
                           <div className={`font-semibold text-sm ${sev.color}`}>{alert.title}</div>
-                          <div className="text-xs text-slate-600 mt-0.5">{alert.subjectName} · {alert.source}</div>
-                          <div className="text-xs text-slate-500 mt-0.5">{alert.description.slice(0, 80)}...</div>
+                          <div className="text-xs text-muted-foreground mt-0.5">{alert.subjectName} · {alert.source}</div>
+                          <div className="text-xs text-muted-foreground mt-0.5">{alert.description.slice(0, 80)}...</div>
                         </div>
-                        <div className="text-xs text-slate-400 shrink-0">{new Date(alert.detectedAt).toLocaleDateString()}</div>
+                        <div className="text-xs text-muted-foreground shrink-0">{new Date(alert.detectedAt).toLocaleDateString()}</div>
                       </div>
                     );
                   })}
@@ -256,7 +256,7 @@ function ContinuousMonitoringPageInner() {
                   <button onClick={() => { setEnrolled(false); setView("dashboard"); }} className="bg-emerald-600 text-white font-medium px-6 py-2.5 rounded-xl text-sm">
                     Back to Dashboard
                   </button>
-                  <button onClick={() => { setEnrolled(false); setForm(f => ({ ...f, subjectId: "", subjectName: "" })); }} className="bg-white border border-slate-300 text-slate-700 font-medium px-6 py-2.5 rounded-xl text-sm">
+                  <button onClick={() => { setEnrolled(false); setForm(f => ({ ...f, subjectId: "", subjectName: "" })); }} className="bg-card border border-border text-foreground font-medium px-6 py-2.5 rounded-xl text-sm">
                     Enroll Another
                   </button>
                 </div>
@@ -266,26 +266,26 @@ function ContinuousMonitoringPageInner() {
                 <SectionCard title="Subject to Monitor" icon="👤">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="flex flex-col gap-1">
-                      <label className="text-sm font-medium text-slate-700">Subject ID <span className="text-red-500">*</span></label>
+                      <label className="text-sm font-medium text-foreground">Subject ID <span className="text-red-500">*</span></label>
                       <input type="text" required value={form.subjectId}
                         onChange={e => setForm(f => ({ ...f, subjectId: e.target.value }))}
                         placeholder="e.g. INV-2024-0042"
-                        className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        className="border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                       />
                     </div>
                     <div className="flex flex-col gap-1">
-                      <label className="text-sm font-medium text-slate-700">Subject Name <span className="text-red-500">*</span></label>
+                      <label className="text-sm font-medium text-foreground">Subject Name <span className="text-red-500">*</span></label>
                       <input type="text" required value={form.subjectName}
                         onChange={e => setForm(f => ({ ...f, subjectName: e.target.value }))}
                         placeholder="Full legal name"
-                        className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        className="border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                       />
                     </div>
                     <div className="flex flex-col gap-1">
-                      <label className="text-sm font-medium text-slate-700">Monitoring Duration</label>
+                      <label className="text-sm font-medium text-foreground">Monitoring Duration</label>
                       <select value={form.expiresInMonths}
                         onChange={e => setForm(f => ({ ...f, expiresInMonths: Number(e.target.value) }))}
-                        className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                        className="border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-card"
                       >
                         <option value={3}>3 months</option>
                         <option value={6}>6 months</option>
@@ -304,15 +304,15 @@ function ContinuousMonitoringPageInner() {
                         key={type} type="button"
                         onClick={() => toggleMonitorType(type)}
                         className={`text-left p-4 rounded-xl border-2 transition-all ${
-                          form.monitorTypes.includes(type) ? "border-indigo-500 bg-indigo-50" : "border-slate-200 bg-white hover:border-slate-300"
+                          form.monitorTypes.includes(type) ? "border-indigo-500 bg-indigo-50" : "border-border bg-card hover:border-primary/40"
                         }`}
                       >
                         <div className="flex items-start justify-between gap-2">
                           <div className="flex items-center gap-2">
                             <span className="text-xl">{cfg.icon}</span>
                             <div>
-                              <div className="font-semibold text-sm text-slate-800">{cfg.label}</div>
-                              <div className="text-xs text-slate-500">{cfg.description}</div>
+                              <div className="font-semibold text-sm text-muted-foreground">{cfg.label}</div>
+                              <div className="text-xs text-muted-foreground">{cfg.description}</div>
                             </div>
                           </div>
                           <div className="text-right shrink-0">
@@ -320,7 +320,7 @@ function ContinuousMonitoringPageInner() {
                             {form.monitorTypes.includes(type) && <span className="text-indigo-600 font-bold">✓</span>}
                           </div>
                         </div>
-                        <div className="mt-2 text-xs text-slate-500">
+                        <div className="mt-2 text-xs text-muted-foreground">
                           🇳🇬 {cfg.nigeriaSource}
                         </div>
                       </button>
@@ -343,11 +343,11 @@ function ContinuousMonitoringPageInner() {
                 </SectionCard>
 
                 <div className="flex gap-3">
-                  <button type="button" onClick={() => setView("dashboard")} className="flex-1 bg-white border border-slate-300 text-slate-700 font-medium py-3 rounded-xl text-sm">
+                  <button type="button" onClick={() => setView("dashboard")} className="flex-1 bg-card border border-border text-foreground font-medium py-3 rounded-xl text-sm">
                     Cancel
                   </button>
                   <button type="submit" disabled={loading || form.monitorTypes.length === 0}
-                    className="flex-1 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white font-semibold py-3 rounded-xl transition-all flex items-center justify-center gap-2"
+                    className="flex-1 bg-indigo-600 hover:bg-indigo-700 disabled:bg-muted text-white font-semibold py-3 rounded-xl transition-all flex items-center justify-center gap-2"
                   >
                     {loading ? <><span className="animate-spin">⟳</span> Enrolling...</> : "Enroll in Monitoring ✓"}
                   </button>
@@ -361,7 +361,7 @@ function ContinuousMonitoringPageInner() {
         {view === "alerts" && (
           <div className="space-y-6">
             <div className="flex items-center justify-between">
-              <h2 className="text-lg font-bold text-slate-800">
+              <h2 className="text-lg font-bold text-muted-foreground">
                 {selectedEnrollment ? `Alerts — ${selectedEnrollment.subjectName}` : "All Alerts"}
               </h2>
               {selectedEnrollment && (
@@ -385,27 +385,27 @@ function ContinuousMonitoringPageInner() {
                     const sev = ALERT_SEVERITY_CONFIG[alert.severity];
                     const monCfg = MONITOR_TYPE_CONFIG[alert.monitorType];
                     return (
-                      <div key={alert.alertId} className={`bg-white rounded-2xl border-2 ${sev.border} shadow-sm overflow-hidden`}>
+                      <div key={alert.alertId} className={`bg-card rounded-2xl border-2 ${sev.border} shadow-sm overflow-hidden`}>
                         <div className={`px-5 py-3 flex items-center justify-between ${sev.bg}`}>
                           <div className="flex items-center gap-2">
                             <span className="text-lg">{sev.icon}</span>
                             <span className={`font-bold text-sm ${sev.color}`}>{sev.label} Alert</span>
-                            <span className="text-slate-500 text-xs">·</span>
-                            <span className="text-xs text-slate-600">{monCfg.icon} {monCfg.label}</span>
+                            <span className="text-muted-foreground text-xs">·</span>
+                            <span className="text-xs text-muted-foreground">{monCfg.icon} {monCfg.label}</span>
                           </div>
                           <div className="flex items-center gap-2">
                             {!alert.acknowledgedAt && (
-                              <span className="text-xs bg-white/60 text-slate-600 px-2 py-0.5 rounded-full font-medium">Unread</span>
+                              <span className="text-xs bg-card/60 text-muted-foreground px-2 py-0.5 rounded-full font-medium">Unread</span>
                             )}
-                            <span className="text-xs text-slate-400">{new Date(alert.detectedAt).toLocaleString()}</span>
+                            <span className="text-xs text-muted-foreground">{new Date(alert.detectedAt).toLocaleString()}</span>
                           </div>
                         </div>
                         <div className="p-5">
                           <div className="flex items-start justify-between gap-4">
                             <div>
-                              <h3 className="font-bold text-slate-900">{alert.title}</h3>
-                              <p className="text-sm text-slate-600 mt-1">{alert.description}</p>
-                              <div className="flex items-center gap-3 mt-2 text-xs text-slate-500">
+                              <h3 className="font-bold text-muted-foreground">{alert.title}</h3>
+                              <p className="text-sm text-muted-foreground mt-1">{alert.description}</p>
+                              <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground">
                                 <span>👤 {alert.subjectName}</span>
                                 <span>📅 Event: {alert.eventDate}</span>
                                 <span>🔍 Source: {alert.source}</span>
@@ -413,7 +413,7 @@ function ContinuousMonitoringPageInner() {
                             </div>
                           </div>
                           <div className="flex gap-2 mt-4">
-                            <button className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-medium px-3 py-1.5 rounded-lg transition-all">
+                            <button className="bg-muted hover:bg-muted text-foreground text-xs font-medium px-3 py-1.5 rounded-lg transition-all">
                               ✓ Acknowledge
                             </button>
                             <button className="bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-medium px-3 py-1.5 rounded-lg transition-all">

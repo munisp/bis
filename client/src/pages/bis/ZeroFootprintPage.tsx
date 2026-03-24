@@ -209,21 +209,21 @@ function ZeroFootprintPageInner() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-muted">
       {/* Header */}
-      <div className="bg-white border-b border-slate-200 px-6 py-4">
+      <div className="bg-card border-b border-border px-6 py-4">
         <div className="max-w-4xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-orange-600 rounded-xl flex items-center justify-center text-white text-xl">🔍</div>
             <div>
-              <h1 className="text-xl font-bold text-slate-900">Zero-Footprint Investigation</h1>
-              <p className="text-sm text-slate-500">Investigate subjects with no digital identity — physical & community verification</p>
+              <h1 className="text-xl font-bold text-muted-foreground">Zero-Footprint Investigation</h1>
+              <p className="text-sm text-muted-foreground">Investigate subjects with no digital identity — physical & community verification</p>
             </div>
           </div>
           <div className="flex gap-2">
             {["intro", "form"].map(v => (
               <button key={v} onClick={() => setView(v as any)}
-                className={`px-4 py-2 rounded-lg text-sm font-medium capitalize transition-all ${view === v ? "bg-orange-600 text-white" : "text-slate-600 hover:bg-slate-100"}`}
+                className={`px-4 py-2 rounded-lg text-sm font-medium capitalize transition-all ${view === v ? "bg-orange-600 text-white" : "text-muted-foreground hover:bg-muted"}`}
               >
                 {v === "intro" ? "Overview" : "New Investigation"}
               </button>
@@ -245,7 +245,7 @@ function ZeroFootprintPageInner() {
                 BIS Zero-Footprint Investigation uses a proven 6-pillar methodology combining field agents, institutional records, 
                 behavioral interviews, and AI analysis to build a reliable risk profile from the ground up.
               </p>
-              <button onClick={() => setView("form")} className="mt-6 bg-white text-orange-700 font-bold px-6 py-2.5 rounded-xl text-sm hover:bg-orange-50 transition-all">
+              <button onClick={() => setView("form")} className="mt-6 bg-card text-orange-700 font-bold px-6 py-2.5 rounded-xl text-sm hover:bg-orange-50 transition-all">
                 Start Investigation →
               </button>
             </div>
@@ -254,19 +254,19 @@ function ZeroFootprintPageInner() {
             <SectionCard title="The 6-Pillar Methodology" icon="🏛️">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {INVESTIGATION_PILLARS.map((pillar, idx) => (
-                  <div key={pillar.id} className="flex items-start gap-3 p-4 bg-slate-50 rounded-xl">
+                  <div key={pillar.id} className="flex items-start gap-3 p-4 bg-muted rounded-xl">
                     <div className="w-8 h-8 bg-orange-100 text-orange-700 rounded-full flex items-center justify-center font-bold text-sm shrink-0">
                       {idx + 1}
                     </div>
                     <div>
                       <div className="flex items-center gap-2">
                         <span>{pillar.icon}</span>
-                        <span className="font-semibold text-sm text-slate-800">{pillar.label}</span>
+                        <span className="font-semibold text-sm text-muted-foreground">{pillar.label}</span>
                         {pillar.weight > 0 && (
                           <span className="text-xs bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded font-medium">{pillar.weight}% weight</span>
                         )}
                       </div>
-                      <p className="text-xs text-slate-500 mt-0.5">{pillar.description}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">{pillar.description}</p>
                       <p className="text-xs text-orange-700 mt-1">🇳🇬 {pillar.nigeriaNote.slice(0, 80)}...</p>
                     </div>
                   </div>
@@ -278,12 +278,12 @@ function ZeroFootprintPageInner() {
             <SectionCard title="Nigeria Field Agent Network" icon="📍">
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 {FIELD_AGENT_ZONES.map(zone => (
-                  <div key={zone.zone} className="bg-slate-50 rounded-xl p-3 text-center">
-                    <div className="font-semibold text-sm text-slate-800">{zone.zone}</div>
+                  <div key={zone.zone} className="bg-muted rounded-xl p-3 text-center">
+                    <div className="font-semibold text-sm text-muted-foreground">{zone.zone}</div>
                     <div className="text-2xl font-bold text-orange-600 my-1">{zone.agents}</div>
-                    <div className="text-xs text-slate-500">agents</div>
-                    <div className="text-xs text-slate-400 mt-1">⏱ ~{zone.avgResponseHours}h response</div>
-                    <div className="text-xs text-slate-400">{zone.coverage}</div>
+                    <div className="text-xs text-muted-foreground">agents</div>
+                    <div className="text-xs text-muted-foreground mt-1">⏱ ~{zone.avgResponseHours}h response</div>
+                    <div className="text-xs text-muted-foreground">{zone.coverage}</div>
                   </div>
                 ))}
               </div>
@@ -301,62 +301,62 @@ function ZeroFootprintPageInner() {
             <SectionCard title="Subject Information" icon="👤">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-slate-700">Subject ID <span className="text-red-500">*</span></label>
+                  <label className="text-sm font-medium text-muted-foreground">Subject ID <span className="text-red-500">*</span></label>
                   <input type="text" required value={form.subjectId}
                     onChange={e => setForm(f => ({ ...f, subjectId: e.target.value }))}
                     placeholder="e.g. INV-2024-0042"
-                    className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                    className="border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
                   />
                 </div>
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-slate-700">Full Name <span className="text-red-500">*</span></label>
+                  <label className="text-sm font-medium text-muted-foreground">Full Name <span className="text-red-500">*</span></label>
                   <input type="text" required value={form.subjectName}
                     onChange={e => setForm(f => ({ ...f, subjectName: e.target.value }))}
                     placeholder="e.g. Adebayo Oluwaseun Emmanuel"
-                    className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                    className="border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
                   />
                 </div>
                 <div className="flex flex-col gap-1 md:col-span-2">
-                  <label className="text-sm font-medium text-slate-700">Stated Address <span className="text-red-500">*</span></label>
+                  <label className="text-sm font-medium text-muted-foreground">Stated Address <span className="text-red-500">*</span></label>
                   <input type="text" required value={form.subjectAddress}
                     onChange={e => setForm(f => ({ ...f, subjectAddress: e.target.value }))}
                     placeholder="e.g. 12 Adewale Street, Surulere, Lagos (or informal: Behind First Bank, Agege)"
-                    className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                    className="border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
                   />
-                  <p className="text-xs text-slate-400">Informal addresses are accepted. Field agents are trained to locate subjects using landmarks.</p>
+                  <p className="text-xs text-muted-foreground">Informal addresses are accepted. Field agents are trained to locate subjects using landmarks.</p>
                 </div>
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-slate-700">State <span className="text-red-500">*</span></label>
+                  <label className="text-sm font-medium text-muted-foreground">State <span className="text-red-500">*</span></label>
                   <select required value={form.state}
                     onChange={e => setForm(f => ({ ...f, state: e.target.value }))}
-                    className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 bg-white"
+                    className="border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 bg-card"
                   >
                     {NIGERIAN_STATES.map(s => <option key={s} value={s}>{s}</option>)}
                   </select>
                 </div>
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-slate-700">LGA</label>
+                  <label className="text-sm font-medium text-muted-foreground">LGA</label>
                   <input type="text" value={form.lga}
                     onChange={e => setForm(f => ({ ...f, lga: e.target.value }))}
                     placeholder="Local Government Area"
-                    className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                    className="border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
                   />
                 </div>
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-slate-700">Phone Number</label>
+                  <label className="text-sm font-medium text-muted-foreground">Phone Number</label>
                   <input type="tel" value={form.phone}
                     onChange={e => setForm(f => ({ ...f, phone: e.target.value }))}
                     placeholder="+234 8XX XXX XXXX"
-                    className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                    className="border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
                   />
-                  <p className="text-xs text-slate-400">Even without formal ID, a phone number enables mobile money analysis</p>
+                  <p className="text-xs text-muted-foreground">Even without formal ID, a phone number enables mobile money analysis</p>
                 </div>
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-slate-700">Stated Employer</label>
+                  <label className="text-sm font-medium text-muted-foreground">Stated Employer</label>
                   <input type="text" value={form.statedEmployer}
                     onChange={e => setForm(f => ({ ...f, statedEmployer: e.target.value }))}
                     placeholder="Company name or 'Self-employed'"
-                    className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                    className="border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
                   />
                 </div>
               </div>
@@ -370,7 +370,7 @@ function ZeroFootprintPageInner() {
                     key={pillar.id} type="button"
                     onClick={() => togglePillar(pillar.id)}
                     className={`w-full text-left p-4 rounded-xl border-2 transition-all ${
-                      form.selectedPillars.includes(pillar.id) ? "border-orange-500 bg-orange-50" : "border-slate-200 bg-white hover:border-slate-300"
+                      form.selectedPillars.includes(pillar.id) ? "border-orange-500 bg-orange-50" : "border-border bg-card hover:border-border"
                     }`}
                   >
                     <div className="flex items-start justify-between gap-2">
@@ -378,11 +378,11 @@ function ZeroFootprintPageInner() {
                         <span className="text-xl mt-0.5">{pillar.icon}</span>
                         <div>
                           <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-semibold text-sm text-slate-800">{pillar.label}</span>
+                            <span className="font-semibold text-sm text-muted-foreground">{pillar.label}</span>
                             {pillar.weight >= 15 && <span className="text-xs bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded font-medium">Required</span>}
-                            <span className="text-xs text-slate-500">{pillar.weight}% weight · ~{pillar.estimatedHours}h</span>
+                            <span className="text-xs text-muted-foreground">{pillar.weight}% weight · ~{pillar.estimatedHours}h</span>
                           </div>
-                          <p className="text-xs text-slate-500 mt-0.5">{pillar.description}</p>
+                          <p className="text-xs text-muted-foreground mt-0.5">{pillar.description}</p>
                           <p className="text-xs text-orange-700 mt-1">🇳🇬 {pillar.nigeriaNote.slice(0, 100)}...</p>
                         </div>
                       </div>
@@ -398,15 +398,15 @@ function ZeroFootprintPageInner() {
                 <div className="mt-4 bg-orange-50 border border-orange-200 rounded-xl p-4 grid grid-cols-3 gap-4 text-center">
                   <div>
                     <div className="text-2xl font-bold text-orange-700">{form.selectedPillars.length}</div>
-                    <div className="text-xs text-slate-500">Pillars selected</div>
+                    <div className="text-xs text-muted-foreground">Pillars selected</div>
                   </div>
                   <div>
                     <div className="text-2xl font-bold text-orange-700">{totalDays}</div>
-                    <div className="text-xs text-slate-500">Est. business days</div>
+                    <div className="text-xs text-muted-foreground">Est. business days</div>
                   </div>
                   <div>
                     <div className="text-2xl font-bold text-orange-700">{totalWeight}%</div>
-                    <div className="text-xs text-slate-500">Coverage weight</div>
+                    <div className="text-xs text-muted-foreground">Coverage weight</div>
                   </div>
                 </div>
               )}
@@ -420,11 +420,11 @@ function ZeroFootprintPageInner() {
                     key={zone.zone} type="button"
                     onClick={() => setForm(f => ({ ...f, fieldAgentZone: zone.zone }))}
                     className={`p-3 rounded-xl border-2 text-center transition-all ${
-                      form.fieldAgentZone === zone.zone ? "border-orange-500 bg-orange-50" : "border-slate-200 bg-white hover:border-slate-300"
+                      form.fieldAgentZone === zone.zone ? "border-orange-500 bg-orange-50" : "border-border bg-card hover:border-border"
                     }`}
                   >
-                    <div className="font-semibold text-sm text-slate-800">{zone.zone}</div>
-                    <div className="text-xs text-slate-500 mt-0.5">{zone.agents} agents</div>
+                    <div className="font-semibold text-sm text-muted-foreground">{zone.zone}</div>
+                    <div className="text-xs text-muted-foreground mt-0.5">{zone.agents} agents</div>
                     <div className="text-xs text-orange-600 mt-0.5">~{zone.avgResponseHours}h</div>
                   </button>
                 ))}
@@ -433,7 +433,7 @@ function ZeroFootprintPageInner() {
 
             <button
               type="submit" disabled={loading || form.selectedPillars.length === 0}
-              className="w-full bg-orange-600 hover:bg-orange-700 disabled:bg-slate-300 text-white font-semibold py-3 rounded-xl transition-all flex items-center justify-center gap-2"
+              className="w-full bg-orange-600 hover:bg-orange-700 disabled:bg-muted text-white font-semibold py-3 rounded-xl transition-all flex items-center justify-center gap-2"
             >
               {loading ? <><span className="animate-spin">⟳</span> Dispatching Field Agent...</> : <><span>🚀</span> Launch Zero-Footprint Investigation</>}
             </button>
@@ -471,21 +471,21 @@ function ZeroFootprintPageInner() {
             <SectionCard title="Investigation Checklist" icon="✅">
               <div className="space-y-2">
                 {investigation.checklist.slice(0, 10).map((item, idx) => (
-                  <div key={idx} className={`flex items-start gap-3 p-3 rounded-xl ${item.completed ? "bg-emerald-50" : "bg-slate-50"}`}>
+                  <div key={idx} className={`flex items-start gap-3 p-3 rounded-xl ${item.completed ? "bg-emerald-50" : "bg-muted"}`}>
                     <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center text-xs shrink-0 mt-0.5 ${
-                      item.completed ? "bg-emerald-500 border-emerald-500 text-white" : "border-slate-300"
+                      item.completed ? "bg-emerald-500 border-emerald-500 text-white" : "border-border"
                     }`}>
                       {item.completed ? "✓" : ""}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="text-xs font-semibold text-slate-500 uppercase">{item.pillar}</div>
-                      <div className="text-sm text-slate-700">{item.action}</div>
+                      <div className="text-xs font-semibold text-muted-foreground uppercase">{item.pillar}</div>
+                      <div className="text-sm text-muted-foreground">{item.action}</div>
                     </div>
-                    <div className="text-xs text-slate-400 shrink-0">~{item.estimatedHours.toFixed(1)}h</div>
+                    <div className="text-xs text-muted-foreground shrink-0">~{item.estimatedHours.toFixed(1)}h</div>
                   </div>
                 ))}
                 {investigation.checklist.length > 10 && (
-                  <div className="text-center text-sm text-slate-500 py-2">
+                  <div className="text-center text-sm text-muted-foreground py-2">
                     +{investigation.checklist.length - 10} more steps...
                   </div>
                 )}
@@ -493,7 +493,7 @@ function ZeroFootprintPageInner() {
             </SectionCard>
 
             <div className="flex gap-3">
-              <button onClick={() => setView("form")} className="flex-1 bg-white border border-slate-300 text-slate-700 font-medium py-3 rounded-xl text-sm">
+              <button onClick={() => setView("form")} className="flex-1 bg-card border border-border text-muted-foreground font-medium py-3 rounded-xl text-sm">
                 New Investigation
               </button>
               <button className="flex-1 bg-orange-600 hover:bg-orange-700 text-white font-semibold py-3 rounded-xl text-sm flex items-center justify-center gap-2">

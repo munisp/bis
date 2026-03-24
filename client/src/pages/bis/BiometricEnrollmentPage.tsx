@@ -564,7 +564,7 @@ function BiometricEnrollmentPageInner() {
               key={lang}
               onClick={() => setLanguage(lang)}
               className={`px-2 py-1 text-xs rounded font-medium uppercase ${
-                language === lang ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                language === lang ? 'bg-blue-600 text-white' : 'bg-muted text-muted-foreground hover:bg-muted'
               }`}
             >
               {lang}
@@ -580,7 +580,7 @@ function BiometricEnrollmentPageInner() {
         <div className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="sm:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-1">{t.full_name} *</label>
+              <label className="block text-sm font-medium text-foreground mb-1">{t.full_name} *</label>
               <input
                 type="text"
                 value={state.subjectInfo.fullName}
@@ -592,7 +592,7 @@ function BiometricEnrollmentPageInner() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">{t.dob} *</label>
+              <label className="block text-sm font-medium text-foreground mb-1">{t.dob} *</label>
               <input
                 type="date"
                 value={state.subjectInfo.dob}
@@ -603,7 +603,7 @@ function BiometricEnrollmentPageInner() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Gender</label>
+              <label className="block text-sm font-medium text-foreground mb-1">Gender</label>
               <select
                 value={state.subjectInfo.gender}
                 onChange={e => updateSubjectInfo('gender', e.target.value)}
@@ -616,7 +616,7 @@ function BiometricEnrollmentPageInner() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">{t.nin}</label>
+              <label className="block text-sm font-medium text-foreground mb-1">{t.nin}</label>
               <input
                 type="text"
                 value={state.subjectInfo.nin}
@@ -629,7 +629,7 @@ function BiometricEnrollmentPageInner() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">{t.bvn}</label>
+              <label className="block text-sm font-medium text-foreground mb-1">{t.bvn}</label>
               <input
                 type="text"
                 value={state.subjectInfo.bvn}
@@ -641,7 +641,7 @@ function BiometricEnrollmentPageInner() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">{t.phone}</label>
+              <label className="block text-sm font-medium text-foreground mb-1">{t.phone}</label>
               <input
                 type="tel"
                 value={state.subjectInfo.phone}
@@ -652,7 +652,7 @@ function BiometricEnrollmentPageInner() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">{t.state}</label>
+              <label className="block text-sm font-medium text-foreground mb-1">{t.state}</label>
               <select
                 value={state.subjectInfo.stateOfOrigin}
                 onChange={e => updateSubjectInfo('stateOfOrigin', e.target.value)}
@@ -664,7 +664,7 @@ function BiometricEnrollmentPageInner() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">{t.lga}</label>
+              <label className="block text-sm font-medium text-foreground mb-1">{t.lga}</label>
               <input
                 type="text"
                 value={state.subjectInfo.lga}
@@ -675,7 +675,7 @@ function BiometricEnrollmentPageInner() {
             </div>
 
             <div className="sm:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-1">{t.address}</label>
+              <label className="block text-sm font-medium text-foreground mb-1">{t.address}</label>
               <textarea
                 value={state.subjectInfo.address}
                 onChange={e => updateSubjectInfo('address', e.target.value)}
@@ -713,7 +713,7 @@ function BiometricEnrollmentPageInner() {
               Ensure good lighting — natural light works best.
             </p>
           </div>
-          <div className="bg-gray-100 rounded-lg aspect-video flex items-center justify-center">
+          <div className="bg-muted rounded-lg aspect-video flex items-center justify-center">
             <div className="text-center text-gray-500">
               <div className="text-4xl mb-2">☝️</div>
               <p className="text-sm">Place index finger on camera</p>
@@ -742,7 +742,7 @@ function BiometricEnrollmentPageInner() {
             </button>
             <button
               onClick={() => setStep('gps_verify')}
-              className="px-4 py-3 border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50"
+              className="px-4 py-3 border border-gray-300 rounded-lg text-muted-foreground hover:bg-gray-50"
             >
               Skip
             </button>
@@ -827,7 +827,7 @@ function BiometricEnrollmentPageInner() {
               </div>
               <div>
                 <h2 className="text-xl font-bold text-yellow-800">{t.duplicate_found}</h2>
-                <p className="text-gray-600 mt-2">{t.duplicate_message}</p>
+                <p className="text-muted-foreground mt-2">{t.duplicate_message}</p>
               </div>
               <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
                 <div className="text-sm text-yellow-700 mb-1">Existing BIS Unique Identifier</div>
@@ -841,7 +841,7 @@ function BiometricEnrollmentPageInner() {
               </div>
               <div>
                 <h2 className="text-xl font-bold text-green-800">{t.enrolled_success}</h2>
-                <p className="text-gray-600 mt-2">
+                <p className="text-muted-foreground mt-2">
                   A new identity has been created and secured with biometric data.
                 </p>
               </div>

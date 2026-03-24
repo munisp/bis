@@ -120,8 +120,8 @@ const RESULT_CONFIG: Record<string, { label: string; color: string; bg: string; 
   negative_dilute:   { label: "Negative Dilute",   color: "text-amber-700",   bg: "bg-amber-100",   icon: "~" },
   positive_dilute:   { label: "Positive Dilute",   color: "text-orange-700",  bg: "bg-orange-100",  icon: "!" },
   refusal:           { label: "Refusal",           color: "text-red-800",     bg: "bg-red-200",     icon: "✕" },
-  cancelled:         { label: "Cancelled",         color: "text-slate-600",   bg: "bg-slate-100",   icon: "–" },
-  inconclusive:      { label: "Inconclusive",      color: "text-slate-600",   bg: "bg-slate-100",   icon: "?" },
+  cancelled:         { label: "Cancelled",         color: "text-muted-foreground",   bg: "bg-muted",   icon: "–" },
+  inconclusive:      { label: "Inconclusive",      color: "text-muted-foreground",   bg: "bg-muted",   icon: "?" },
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -191,15 +191,15 @@ function DrugScreeningPageInner() {
   ];
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-muted">
       {/* Header */}
-      <div className="bg-white border-b border-slate-200 px-6 py-4">
+      <div className="bg-card border-b border-border px-6 py-4">
         <div className="max-w-3xl mx-auto">
           <div className="flex items-center gap-3 mb-4">
             <div className="w-10 h-10 bg-violet-600 rounded-xl flex items-center justify-center text-white text-xl">🧪</div>
             <div>
-              <h1 className="text-xl font-bold text-slate-900">Drug Screening</h1>
-              <p className="text-sm text-slate-500">Order substance abuse testing — compliant with local regulations</p>
+              <h1 className="text-xl font-bold text-muted-foreground">Drug Screening</h1>
+              <p className="text-sm text-muted-foreground">Order substance abuse testing — compliant with local regulations</p>
             </div>
           </div>
           {/* Step indicator */}
@@ -209,15 +209,15 @@ function DrugScreeningPageInner() {
                 <div className="flex flex-col items-center gap-1">
                   <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold border-2 transition-all ${
                     step > s.n ? "bg-violet-600 border-violet-600 text-white" :
-                    step === s.n ? "bg-white border-violet-600 text-violet-600" :
-                    "bg-white border-slate-300 text-slate-400"
+                    step === s.n ? "bg-card border-violet-600 text-violet-600" :
+                    "bg-card border-border text-muted-foreground"
                   }`}>
                     {step > s.n ? "✓" : s.n}
                   </div>
-                  <span className={`text-xs font-medium hidden sm:block ${step >= s.n ? "text-violet-700" : "text-slate-400"}`}>{s.label}</span>
+                  <span className={`text-xs font-medium hidden sm:block ${step >= s.n ? "text-violet-700" : "text-muted-foreground"}`}>{s.label}</span>
                 </div>
                 {idx < steps.length - 1 && (
-                  <div className={`flex-1 h-0.5 mb-5 ${step > s.n ? "bg-violet-500" : "bg-slate-200"}`} />
+                  <div className={`flex-1 h-0.5 mb-5 ${step > s.n ? "bg-violet-500" : "bg-muted"}`} />
                 )}
               </React.Fragment>
             ))}
@@ -251,26 +251,26 @@ function DrugScreeningPageInner() {
                     key={panel.value}
                     onClick={() => setForm(f => ({ ...f, panel: panel.value, specimenType: specimenTypeForPanel[panel.value] }))}
                     className={`w-full text-left p-4 rounded-xl border-2 transition-all ${
-                      form.panel === panel.value ? "border-violet-500 bg-violet-50" : "border-slate-200 bg-white hover:border-slate-300"
+                      form.panel === panel.value ? "border-violet-500 bg-violet-50" : "border-border bg-card hover:border-border"
                     }`}
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex-1">
                         <div className="flex items-center gap-2">
-                          <span className="font-semibold text-sm text-slate-800">{panel.label}</span>
+                          <span className="font-semibold text-sm text-muted-foreground">{panel.label}</span>
                           {panel.recommended && (
                             <span className="text-xs bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full font-medium">Recommended</span>
                           )}
                         </div>
                         <div className="flex flex-wrap gap-1 mt-2">
                           {panel.substances.map(s => (
-                            <span key={s} className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">{s}</span>
+                            <span key={s} className="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded-full">{s}</span>
                           ))}
                         </div>
                       </div>
                       <div className="text-right shrink-0">
                         <div className="font-bold text-violet-700">${panel.priceUSD}</div>
-                        <div className="text-xs text-slate-500">{panel.turnaround}</div>
+                        <div className="text-xs text-muted-foreground">{panel.turnaround}</div>
                       </div>
                     </div>
                   </button>
@@ -298,7 +298,7 @@ function DrugScreeningPageInner() {
             <button
               onClick={() => setStep(2)}
               disabled={drugConfig.consentRequired && !form.consentObtained}
-              className="w-full bg-violet-600 hover:bg-violet-700 disabled:bg-slate-300 text-white font-semibold py-3 rounded-xl transition-all"
+              className="w-full bg-violet-600 hover:bg-violet-700 disabled:bg-muted text-white font-semibold py-3 rounded-xl transition-all"
             >
               Continue to Subject Information →
             </button>
@@ -311,51 +311,51 @@ function DrugScreeningPageInner() {
             <SectionCard title="Subject Information" icon="👤">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-slate-700">Subject ID <span className="text-red-500">*</span></label>
+                  <label className="text-sm font-medium text-muted-foreground">Subject ID <span className="text-red-500">*</span></label>
                   <input type="text" required value={form.subjectId}
                     onChange={e => setForm(f => ({ ...f, subjectId: e.target.value }))}
                     placeholder="e.g. INV-2024-0042"
-                    className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
+                    className="border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
                   />
                 </div>
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-slate-700">Full Name <span className="text-red-500">*</span></label>
+                  <label className="text-sm font-medium text-muted-foreground">Full Name <span className="text-red-500">*</span></label>
                   <input type="text" required value={form.subjectName}
                     onChange={e => setForm(f => ({ ...f, subjectName: e.target.value }))}
                     placeholder={form.country === "NG" ? "e.g. Adebayo Oluwaseun Emmanuel" : "Full legal name"}
-                    className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
+                    className="border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
                   />
                 </div>
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-slate-700">Email Address</label>
+                  <label className="text-sm font-medium text-muted-foreground">Email Address</label>
                   <input type="email" value={form.subjectEmail}
                     onChange={e => setForm(f => ({ ...f, subjectEmail: e.target.value }))}
                     placeholder="For result notification"
-                    className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
+                    className="border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
                   />
                 </div>
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-slate-700">Phone Number <span className="text-red-500">*</span></label>
+                  <label className="text-sm font-medium text-muted-foreground">Phone Number <span className="text-red-500">*</span></label>
                   <input type="tel" required value={form.subjectPhone}
                     onChange={e => setForm(f => ({ ...f, subjectPhone: e.target.value }))}
                     placeholder={form.country === "NG" ? "+234 8XX XXX XXXX" : "Phone number"}
-                    className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
+                    className="border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
                   />
-                  <p className="text-xs text-slate-400">SMS notification will be sent with collection instructions</p>
+                  <p className="text-xs text-muted-foreground">SMS notification will be sent with collection instructions</p>
                 </div>
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-slate-700">City</label>
+                  <label className="text-sm font-medium text-muted-foreground">City</label>
                   <input type="text" value={form.city}
                     onChange={e => setForm(f => ({ ...f, city: e.target.value }))}
                     placeholder="City for collection site lookup"
-                    className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
+                    className="border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
                   />
                 </div>
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-slate-700">Purpose</label>
+                  <label className="text-sm font-medium text-muted-foreground">Purpose</label>
                   <select value={form.purpose}
                     onChange={e => setForm(f => ({ ...f, purpose: e.target.value }))}
-                    className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 bg-white"
+                    className="border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 bg-card"
                   >
                     <option value="pre_employment">Pre-employment screening</option>
                     <option value="random">Random / periodic testing</option>
@@ -383,13 +383,13 @@ function DrugScreeningPageInner() {
             </SectionCard>
 
             <div className="flex gap-3">
-              <button onClick={() => setStep(1)} className="flex-1 bg-white border border-slate-300 text-slate-700 font-medium py-3 rounded-xl text-sm">
+              <button onClick={() => setStep(1)} className="flex-1 bg-card border border-border text-muted-foreground font-medium py-3 rounded-xl text-sm">
                 ← Back
               </button>
               <button
                 onClick={() => setStep(3)}
                 disabled={!form.subjectId || !form.subjectName || !form.subjectPhone}
-                className="flex-1 bg-violet-600 hover:bg-violet-700 disabled:bg-slate-300 text-white font-semibold py-3 rounded-xl transition-all"
+                className="flex-1 bg-violet-600 hover:bg-violet-700 disabled:bg-muted text-white font-semibold py-3 rounded-xl transition-all"
               >
                 Select Collection Site →
               </button>
@@ -407,27 +407,27 @@ function DrugScreeningPageInner() {
                     key={site.siteId}
                     onClick={() => setForm(f => ({ ...f, collectionSiteId: site.siteId }))}
                     className={`w-full text-left p-4 rounded-xl border-2 transition-all ${
-                      form.collectionSiteId === site.siteId ? "border-violet-500 bg-violet-50" : "border-slate-200 bg-white hover:border-slate-300"
+                      form.collectionSiteId === site.siteId ? "border-violet-500 bg-violet-50" : "border-border bg-card hover:border-border"
                     }`}
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex-1">
                         <div className="flex items-center gap-2">
-                          <span className="font-semibold text-sm text-slate-800">{site.name}</span>
+                          <span className="font-semibold text-sm text-muted-foreground">{site.name}</span>
                           {site.accredited && (
                             <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-medium">✓ Accredited</span>
                           )}
                         </div>
-                        <div className="text-xs text-slate-500 mt-0.5">{site.address}, {site.city}</div>
-                        <div className="text-xs text-slate-500 mt-0.5 flex items-center gap-3">
+                        <div className="text-xs text-muted-foreground mt-0.5">{site.address}, {site.city}</div>
+                        <div className="text-xs text-muted-foreground mt-0.5 flex items-center gap-3">
                           <span>📞 {site.phone}</span>
                           <span>🕐 {site.hours}</span>
                         </div>
                       </div>
                       {site.distanceKm && (
                         <div className="text-right shrink-0">
-                          <div className="text-sm font-semibold text-slate-700">{site.distanceKm} km</div>
-                          <div className="text-xs text-slate-400">away</div>
+                          <div className="text-sm font-semibold text-muted-foreground">{site.distanceKm} km</div>
+                          <div className="text-xs text-muted-foreground">away</div>
                         </div>
                       )}
                     </div>
@@ -438,18 +438,18 @@ function DrugScreeningPageInner() {
 
             <SectionCard title="Schedule Collection" icon="📅">
               <div className="flex flex-col gap-1">
-                <label className="text-sm font-medium text-slate-700">Preferred Collection Date</label>
+                <label className="text-sm font-medium text-muted-foreground">Preferred Collection Date</label>
                 <input type="date" value={form.scheduledDate}
                   onChange={e => setForm(f => ({ ...f, scheduledDate: e.target.value }))}
                   min={new Date().toISOString().split("T")[0]}
-                  className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
+                  className="border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
                 />
-                <p className="text-xs text-slate-400">Subject has 72 hours from order to complete collection</p>
+                <p className="text-xs text-muted-foreground">Subject has 72 hours from order to complete collection</p>
               </div>
             </SectionCard>
 
             <div className="flex gap-3">
-              <button onClick={() => setStep(2)} className="flex-1 bg-white border border-slate-300 text-slate-700 font-medium py-3 rounded-xl text-sm">
+              <button onClick={() => setStep(2)} className="flex-1 bg-card border border-border text-muted-foreground font-medium py-3 rounded-xl text-sm">
                 ← Back
               </button>
               <button
@@ -485,9 +485,9 @@ function DrugScreeningPageInner() {
                   { label: "Collection Deadline", value: new Date(order.collectionDeadline).toLocaleDateString() },
                   { label: "Collection Site", value: order.collectionSite?.name },
                 ].map(item => (
-                  <div key={item.label} className="bg-slate-50 rounded-xl p-3">
-                    <div className="text-xs text-slate-500 mb-0.5">{item.label}</div>
-                    <div className="font-medium text-slate-800">{item.value}</div>
+                  <div key={item.label} className="bg-muted rounded-xl p-3">
+                    <div className="text-xs text-muted-foreground mb-0.5">{item.label}</div>
+                    <div className="font-medium text-muted-foreground">{item.value}</div>
                   </div>
                 ))}
               </div>
@@ -496,7 +496,7 @@ function DrugScreeningPageInner() {
             <div className="flex gap-3">
               <button
                 onClick={() => { setOrder(null); setStep(1); setForm(f => ({ ...f, subjectId: "", subjectName: "", subjectPhone: "", subjectEmail: "" })); }}
-                className="flex-1 bg-white border border-slate-300 text-slate-700 font-medium py-3 rounded-xl text-sm"
+                className="flex-1 bg-card border border-border text-muted-foreground font-medium py-3 rounded-xl text-sm"
               >
                 New Order
               </button>
