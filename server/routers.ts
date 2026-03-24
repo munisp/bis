@@ -410,11 +410,17 @@ const lookupRouter = router({
 
 const alertsRouter = router({
   list: protectedProcedure
-    .input(z.object({ unreadOnly: z.boolean().default(false), limit: z.number().default(50) }))
+    .input(z.object({
+      unreadOnly: z.boolean().default(false),
+      limit: z.number().default(50),
+      subjectRef: z.string().optional(),
+    }))
     .query(async ({ input }) => {
       const db = await getDb();
       if (!db) return [];
-      const conditions = input.unreadOnly ? [eq(alerts.read, false)] : [];
+      const conditions: any[] = [];
+      if (input.unreadOnly) conditions.push(eq(alerts.read, false));
+      if (input.subjectRef) conditions.push(eq(alerts.subjectRef, input.subjectRef));
       return db.select().from(alerts).where(conditions.length ? and(...conditions) : undefined).orderBy(desc(alerts.createdAt)).limit(input.limit);
     }),
 

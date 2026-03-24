@@ -320,4 +320,31 @@
 - [x] Status badge uses getAlertStatus() for accurate display
 
 ### Archive
-- [ ] Comprehensive project archive v15 generated
+- [x] Comprehensive project archive v15 generated (bis-pwa-archive-v15-20260324.zip, 72 MB)
+
+## Phase 16 — Next Steps (Round 7)
+
+### Screening Requests List Page
+- [x] trpc.screening.list procedure already existed with type/status filters and pagination
+- [x] Build /screening-records page with type filter chips and status filter
+- [x] Detail drawer showing full result JSON for each request
+- [x] CSV export of filtered screening records
+- [x] Register /screening-records route in App.tsx and sidebar nav (SCREENING group)
+- [x] Wrap ScreeningRecordsPage in BISLayout for consistent shell
+
+### Field Task Assignment from Investigation Detail
+- [x] trpc.fieldTasks.dispatch procedure already existed
+- [x] trpc.fieldAgents.list procedure already existed
+- [x] Add "Dispatch Agent" button in Investigation Detail header actions
+- [x] Build slide-over with agent selector, task type, priority, address, instructions fields
+- [x] Dispatch wired to trpc.fieldTasks.dispatch with investigationId pre-filled
+- [x] Dispatched task appears as field_task evidence item in timeline
+
+### Continuous Monitor Alert Drill-Down
+- [x] Add subjectRef query param support to Alerts page (useEffect on mount)
+- [x] Pre-filter Alerts list when ?subjectRef=X is in URL with dismissible banner
+- [x] Alert count badge in Continuous Monitoring navigates to /alerts?subjectRef=X
+- [x] Add trpc.alerts.list subjectRef filter to server procedure
+
+### Archive
+- [ ] Comprehensive project archive v16 generated

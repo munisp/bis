@@ -1,5 +1,6 @@
 // ContinuousMonitoringPage — live tRPC-backed monitoring dashboard
 import { useState, useMemo } from 'react';
+import { useLocation } from 'wouter';
 import {
   RiskBadge, StatusBadge, SectionCard, EmptyState
 } from "../../components/bis/shared";
@@ -64,6 +65,7 @@ const SEVERITY_CONFIG: Record<string, { label: string; color: string; bg: string
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 function ContinuousMonitoringPageInner() {
+  const [, navigate] = useLocation();
   const [view, setView] = useState<"dashboard" | "enroll" | "alerts">("dashboard");
   const [selectedMonitorId, setSelectedMonitorId] = useState<number | null>(null);
   const [form, setForm] = useState({
@@ -209,9 +211,13 @@ function ContinuousMonitoringPageInner() {
                     <div className="flex items-center gap-3">
                       <span className="text-lg">{MONITOR_TYPE_CONFIG[m.type]?.icon ?? '🔍'}</span>
                       {(m.alertCount ?? 0) > 0 && (
-                        <span className="bg-red-100 text-red-700 text-xs font-bold px-2 py-0.5 rounded-full">
-                          {m.alertCount} alert{m.alertCount > 1 ? "s" : ""}
-                        </span>
+                        <button
+                          onClick={e => { e.stopPropagation(); navigate(`/alerts?subjectRef=${encodeURIComponent(m.subjectRef ?? m.subjectName)}`); }}
+                          className="bg-red-100 hover:bg-red-200 text-red-700 text-xs font-bold px-2 py-0.5 rounded-full transition-colors"
+                          title={`View ${m.alertCount} alert${m.alertCount > 1 ? 's' : ''} for ${m.subjectName}`}
+                        >
+                          {m.alertCount} alert{m.alertCount > 1 ? "s" : ""} →
+                        </button>
                       )}
                       <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
                         m.status === 'active' ? 'bg-emerald-100 text-emerald-700' :

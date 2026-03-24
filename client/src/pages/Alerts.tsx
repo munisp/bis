@@ -1,6 +1,6 @@
 // Alerts — live tRPC-backed alert management
 // Design: Forensic Intelligence — dark/light semantic CSS variables
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link } from "wouter";
 import BISLayout from "@/components/BISLayout";
 import { Button } from "@/components/ui/button";
@@ -65,11 +65,20 @@ export default function Alerts() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [severityFilter, setSeverityFilter] = useState("all");
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const [subjectRefFilter, setSubjectRefFilter] = useState<string | undefined>(undefined);
+
+  // Pre-filter by ?subjectRef=X when navigated from Continuous Monitoring drill-down
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const sr = params.get("subjectRef");
+    if (sr) setSubjectRefFilter(sr);
+  }, []);
 
   const utils = trpc.useUtils();
   const { data: rawAlerts = [], isLoading, refetch } = trpc.alerts.list.useQuery({
     unreadOnly: statusFilter === "new" ? true : false,
     limit: 200,
+    subjectRef: subjectRefFilter,
   });
 
   const acknowledgeMutation = trpc.alerts.acknowledge.useMutation({
@@ -153,6 +162,24 @@ export default function Alerts() {
         </div>
       }
     >
+      {/* SubjectRef drill-down banner */}
+      {subjectRefFilter && (
+        <div className="flex items-center justify-between bg-indigo-500/10 border border-indigo-500/30 rounded-lg px-4 py-2.5 mb-4">
+          <div className="flex items-center gap-2 text-sm">
+            <span className="text-indigo-400 font-mono text-xs">🔍 Filtered by subject:</span>
+            <span className="font-mono text-indigo-300 font-semibold">{subjectRefFilter}</span>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 text-xs text-indigo-400 hover:text-indigo-300"
+            onClick={() => { setSubjectRefFilter(undefined); window.history.replaceState({}, '', '/alerts'); }}
+          >
+            ✕ Clear filter
+          </Button>
+        </div>
+      )}
+
       {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
         {[

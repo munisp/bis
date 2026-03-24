@@ -66,6 +66,7 @@ const BASE_NAV_GROUPS: NavGroup[] = [
       { label: 'Drug Screening', href: '/drug-screening', icon: <Pill size={15} /> },
       { label: 'Work Authorization', href: '/work-authorization', icon: <Briefcase size={15} /> },
       { label: 'Zero-Footprint', href: '/zero-footprint', icon: <Eye size={15} /> },
+      { label: 'Screening Records', href: '/screening-records', icon: <ClipboardList size={15} /> },
     ],
   },
   {

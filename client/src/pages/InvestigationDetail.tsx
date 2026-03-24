@@ -1,7 +1,7 @@
 // InvestigationDetail — full investigation view with Evidence timeline tab
 // Design: Forensic Intelligence Dark theme, JetBrains Mono typography
 
-import { useState, useRef } from "react";
+import { useState, useRef, useMemo } from "react";
 import { useLocation, useParams } from "wouter";
 import BISLayout from "@/components/BISLayout";
 import { Button } from "@/components/ui/button";
@@ -13,8 +13,10 @@ import {
   Clock, Loader2, FileText, Download, RefreshCw, Trash2,
   Shield, Activity, Globe, CreditCard, Fingerprint, Search,
   Link2, MessageSquare, Send, Camera, Paperclip, MapPin, X,
-  ChevronDown, UserCheck
+  ChevronDown, UserCheck, Truck
 } from "lucide-react";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetFooter } from "@/components/ui/sheet";
+import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { getStatusBadgeClass, formatDateTime, formatDate } from "@/lib/bisUtils";
 import { cn } from "@/lib/utils";
@@ -264,6 +266,65 @@ export default function InvestigationDetail() {
     },
   });
 
+  // ── Field Agent Dispatch slide-over ─────────────────────────────────────────
+  const [dispatchOpen, setDispatchOpen] = useState(false);
+  const [dispatchAgentId, setDispatchAgentId] = useState("");
+  const [dispatchTaskType, setDispatchTaskType] = useState<string>("address_verification");
+  const [dispatchPriority, setDispatchPriority] = useState<string>("medium");
+  const [dispatchAddress, setDispatchAddress] = useState("");
+  const [dispatchInstructions, setDispatchInstructions] = useState("");
+
+  const { data: agentsList, isLoading: agentsLoading } = trpc.fieldAgents.list.useQuery(
+    { status: "active", limit: 100 },
+    { enabled: dispatchOpen }
+  );
+
+  const dispatchMutation = trpc.fieldTasks.dispatch.useMutation({
+    onSuccess: (result) => {
+      const agent = agentsList?.find(a => String(a.id) === dispatchAgentId);
+      const agentName = agent?.name ?? dispatchAgentId;
+      const newEvidence: EvidenceItem = {
+        id: `ft_${Date.now()}`,
+        type: 'field_task',
+        timestamp: new Date().toISOString(),
+        title: `Field task dispatched — ${TASK_TYPE_LABELS[dispatchTaskType] ?? dispatchTaskType}`,
+        body: `Agent: ${agentName} · Ref: ${result.taskRef}${dispatchAddress ? ` · Address: ${dispatchAddress}` : ''}`,
+        linkedBy: 'you',
+        status: 'dispatched',
+      };
+      setEvidenceItems(p => [newEvidence, ...p]);
+      setDispatchOpen(false);
+      setDispatchAgentId("");
+      setDispatchAddress("");
+      setDispatchInstructions("");
+      toast.success(`Field task ${result.taskRef} dispatched to ${agentName}`);
+    },
+    onError: (e) => toast.error(`Dispatch failed: ${e.message}`),
+  });
+
+  const handleDispatch = () => {
+    if (!dispatchAgentId) { toast.error("Select a field agent"); return; }
+    const agent = agentsList?.find(a => String(a.id) === dispatchAgentId);
+    dispatchMutation.mutate({
+      agentId: dispatchAgentId,
+      agentName: agent?.name ?? dispatchAgentId,
+      taskType: dispatchTaskType as any,
+      priority: dispatchPriority as any,
+      subjectName: (liveInv as any)?.subjectName ?? inv.subjectName,
+      address: dispatchAddress || undefined,
+      instructions: dispatchInstructions || undefined,
+      investigationId: (liveInv as any)?.id ?? undefined,
+    });
+  };
+
+  const TASK_TYPE_LABELS: Record<string, string> = {
+    address_verification: "Address Verification",
+    biometric_capture: "Biometric Capture",
+    document_collection: "Document Collection",
+    surveillance: "Surveillance",
+    interview: "Interview",
+  };
+
   const addNoteMutation = trpc.investigations.addNote.useMutation({
     onSuccess: (result) => {
       const newItem: EvidenceItem = {
@@ -388,6 +449,9 @@ export default function InvestigationDetail() {
               ))}
             </SelectContent>
           </Select>
+          <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => setDispatchOpen(true)}>
+            <Truck size={11} /> Dispatch Agent
+          </Button>
           <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={handleRerun}>
             <RefreshCw size={11} /> Re-run
           </Button>
@@ -872,6 +936,125 @@ export default function InvestigationDetail() {
           )}
         </div>
       )}
+      {/* ── Dispatch Field Agent Slide-over ── */}
+      <Sheet open={dispatchOpen} onOpenChange={setDispatchOpen}>
+        <SheetContent side="right" className="w-[480px] sm:max-w-[480px] overflow-y-auto">
+          <SheetHeader className="mb-5">
+            <SheetTitle className="flex items-center gap-2">
+              <Truck size={16} className="text-violet-400" />
+              Dispatch Field Agent
+            </SheetTitle>
+            <p className="text-xs text-muted-foreground">
+              Assign a field task linked to investigation{" "}
+              <span className="font-mono text-primary">{(liveInv as any)?.ref ?? inv.ref}</span>
+            </p>
+          </SheetHeader>
+
+          <div className="space-y-5">
+            {/* Agent selector */}
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Field Agent *</Label>
+              <Select value={dispatchAgentId} onValueChange={setDispatchAgentId} disabled={agentsLoading}>
+                <SelectTrigger className="h-9 text-sm">
+                  <SelectValue placeholder={agentsLoading ? "Loading agents…" : "Select active agent"} />
+                </SelectTrigger>
+                <SelectContent>
+                  {(agentsList ?? []).map(a => (
+                    <SelectItem key={a.id} value={String(a.id)}>
+                      <div className="flex flex-col">
+                        <span className="font-mono text-sm">{a.name}</span>
+                        <span className="text-[10px] text-muted-foreground">{a.agentCode} · {a.state ?? "—"} · {a.tier}</span>
+                      </div>
+                    </SelectItem>
+                  ))}
+                  {!agentsLoading && (agentsList ?? []).length === 0 && (
+                    <div className="px-2 py-3 text-xs text-muted-foreground text-center">No active agents found</div>
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Task type */}
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Task Type *</Label>
+              <Select value={dispatchTaskType} onValueChange={setDispatchTaskType}>
+                <SelectTrigger className="h-9 text-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {Object.entries(TASK_TYPE_LABELS).map(([val, label]) => (
+                    <SelectItem key={val} value={val}>{label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Priority */}
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Priority</Label>
+              <Select value={dispatchPriority} onValueChange={setDispatchPriority}>
+                <SelectTrigger className="h-9 text-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {["low", "medium", "high", "critical"].map(p => (
+                    <SelectItem key={p} value={p} className="capitalize">{p.charAt(0).toUpperCase() + p.slice(1)}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Address */}
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Field Address</Label>
+              <input
+                type="text"
+                value={dispatchAddress}
+                onChange={e => setDispatchAddress(e.target.value)}
+                placeholder="e.g. 14 Broad Street, Lagos Island"
+                className="w-full h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              />
+            </div>
+
+            {/* Instructions */}
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Instructions</Label>
+              <Textarea
+                value={dispatchInstructions}
+                onChange={e => setDispatchInstructions(e.target.value)}
+                placeholder="Specific instructions for the field agent…"
+                rows={3}
+                className="text-sm resize-none"
+              />
+            </div>
+
+            {/* Subject preview */}
+            <div className="bg-muted/20 rounded-lg p-3 border border-border/50">
+              <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Subject</div>
+              <div className="text-sm font-medium">{(liveInv as any)?.subjectName ?? inv.subjectName}</div>
+              <div className="text-xs text-muted-foreground font-mono mt-0.5">{(liveInv as any)?.ref ?? inv.ref}</div>
+            </div>
+          </div>
+
+          <SheetFooter className="mt-6 flex gap-2">
+            <Button variant="outline" size="sm" className="flex-1" onClick={() => setDispatchOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              className="flex-1 bg-violet-600 hover:bg-violet-700 text-white"
+              onClick={handleDispatch}
+              disabled={!dispatchAgentId || dispatchMutation.isPending}
+            >
+              {dispatchMutation.isPending ? (
+                <><Loader2 size={12} className="animate-spin mr-1" /> Dispatching…</>
+              ) : (
+                <><Truck size={12} className="mr-1" /> Dispatch Task</>
+              )}
+            </Button>
+          </SheetFooter>
+        </SheetContent>
+      </Sheet>
     </BISLayout>
   );
 }
