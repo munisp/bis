@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  LineChart, Line, AreaChart, Area, Legend
+  LineChart, Line, AreaChart, Area, Legend, ReferenceLine
 } from "recharts";
 import BISLayout from "@/components/BISLayout";
 import {
@@ -134,6 +134,9 @@ function useCSSVar(name: string, fallback: string): string {
 export default function Dashboard() {
   const [, navigate] = useLocation();
   const [refreshing, setRefreshing] = useState(false);
+  const [kpiTarget, setKpiTarget] = useState(60);
+  const [editingTarget, setEditingTarget] = useState(false);
+  const [kpiInput, setKpiInput] = useState('60');
 
   // Theme-aware chart colours — re-computed whenever theme changes
   const chartGrid    = useCSSVar('--border',            'oklch(0.22 0.01 264)');
@@ -232,14 +235,68 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 mb-4">
         {/* Risk trend chart */}
         <div className="xl:col-span-2 rounded-lg border border-border bg-card p-4">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex items-start justify-between mb-3">
             <div>
               <h3 className="text-sm font-semibold text-foreground">Risk Score Trend</h3>
               <p className="text-xs text-muted-foreground">12-week rolling average</p>
             </div>
-            <div className="flex items-center gap-3 text-xs text-muted-foreground">
-              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-400 inline-block" />Avg Score</span>
-              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-400 inline-block" />Flagged</span>
+            <div className="flex flex-col items-end gap-1.5">
+              <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-400 inline-block" />Avg Score</span>
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-400 inline-block" />Flagged</span>
+                <span className="flex items-center gap-1"><span className="w-6 border-t-2 border-dashed border-amber-400 inline-block" />Target</span>
+              </div>
+              {/* KPI target editor */}
+              <div className="flex items-center gap-1.5">
+                {editingTarget ? (
+                  <>
+                    <input
+                      type="number" min={0} max={100}
+                      value={kpiInput}
+                      onChange={e => setKpiInput(e.target.value)}
+                      className="w-14 h-6 text-xs font-mono text-center rounded border border-border bg-background text-foreground px-1"
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') {
+                          const v = Math.min(100, Math.max(0, Number(kpiInput)));
+                          setKpiTarget(v); setKpiInput(String(v)); setEditingTarget(false);
+                        }
+                        if (e.key === 'Escape') setEditingTarget(false);
+                      }}
+                      autoFocus
+                    />
+                    <button
+                      className="text-[9px] font-mono text-primary hover:underline"
+                      onClick={() => {
+                        const v = Math.min(100, Math.max(0, Number(kpiInput)));
+                        setKpiTarget(v); setKpiInput(String(v)); setEditingTarget(false);
+                      }}
+                    >Set</button>
+                  </>
+                ) : (
+                  <button
+                    className="text-[9px] font-mono text-muted-foreground hover:text-foreground transition-colors"
+                    onClick={() => setEditingTarget(true)}
+                  >
+                    Flag threshold: <span className="text-amber-400 font-bold">{kpiTarget}</span> · Edit
+                  </button>
+                )}
+              </div>
+              {/* Above/below indicator */}
+              {(() => {
+                const latest = riskTrend[riskTrend.length - 1].avg;
+                const diff = latest - kpiTarget;
+                const isAbove = diff > 0;
+                return (
+                  <span className={cn(
+                    "text-[9px] font-mono px-1.5 py-0.5 rounded border",
+                    isAbove
+                      ? "text-red-400 bg-red-500/10 border-red-500/30"
+                      : "text-emerald-400 bg-emerald-500/10 border-emerald-500/30"
+                  )}>
+                    Latest avg {latest} — {isAbove ? `+${diff} above` : `${Math.abs(diff)} below`} target
+                  </span>
+                );
+              })()}
             </div>
           </div>
           <ResponsiveContainer width="100%" height={200}>
@@ -254,6 +311,13 @@ export default function Dashboard() {
               <XAxis dataKey="week" tick={{ fontSize: 10, fill: chartTick }} />
               <YAxis tick={{ fontSize: 10, fill: chartTick }} />
               <Tooltip contentStyle={{ background: chartBg, border: `1px solid ${chartBorder}`, borderRadius: 6, fontSize: 11 }} />
+              <ReferenceLine
+                y={kpiTarget}
+                stroke="oklch(0.75 0.18 80)"
+                strokeDasharray="5 3"
+                strokeWidth={1.5}
+                label={{ value: `Target ${kpiTarget}`, position: 'insideTopRight', fontSize: 9, fill: 'oklch(0.75 0.18 80)' }}
+              />
               <Area type="monotone" dataKey="avg" stroke={chartPrimary} strokeWidth={2} fill="url(#riskGrad)" />
               <Line type="monotone" dataKey="flagged" stroke={chartDanger} strokeWidth={2} dot={false} />
             </AreaChart>

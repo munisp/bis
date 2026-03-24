@@ -1,4 +1,6 @@
 // BIS Tenants & API Keys Management Page
+// Design: Forensic Intelligence theme, semantic CSS variables
+
 import { useState } from "react";
 import BISLayout from "@/components/BISLayout";
 import { Button } from "@/components/ui/button";
@@ -8,101 +10,247 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 import {
   Building2, Plus, Key, Copy, Eye, EyeOff, Trash2,
-  Search, Shield, Activity, Globe, Loader2, CheckCircle2
+  Search, Shield, Activity, CheckCircle2, RefreshCw,
+  RotateCcw, AlertTriangle, Clock, ChevronDown, ChevronUp,
+  Loader2, X
 } from "lucide-react";
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+type TenantPlan   = "starter" | "growth" | "enterprise";
+type TenantStatus = "active" | "suspended" | "trial";
+type KeyStatus    = "active" | "revoked" | "rotated";
+
+interface APIKey {
+  id: string;
+  label: string;
+  key: string;
+  status: KeyStatus;
+  createdAt: string;
+  lastUsed: string | null;
+  callCount: number;
+  environment: "live" | "test";
+}
 
 interface Tenant {
   id: string;
   name: string;
-  plan: "starter" | "growth" | "enterprise";
-  status: "active" | "suspended" | "trial";
+  plan: TenantPlan;
+  status: TenantStatus;
   apiCalls: number;
   quota: number;
   country: string;
   createdAt: string;
-  apiKey: string;
+  keys: APIKey[];
 }
 
-const mockTenants: Tenant[] = [
-  { id: "t1", name: "TourismPay Platform", plan: "enterprise", status: "active", apiCalls: 8420, quota: 100000, country: "NG", createdAt: "2026-01-01T00:00:00Z", apiKey: "bis_live_tp_a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6" },
-  { id: "t2", name: "Konga Merchant Services", plan: "growth", status: "active", apiCalls: 1240, quota: 10000, country: "NG", createdAt: "2026-02-15T00:00:00Z", apiKey: "bis_live_km_q1r2s3t4u5v6w7x8y9z0a1b2c3d4e5f6" },
-  { id: "t3", name: "Flutterwave Compliance", plan: "enterprise", status: "active", apiCalls: 22100, quota: 100000, country: "NG", createdAt: "2026-01-20T00:00:00Z", apiKey: "bis_live_fw_g1h2i3j4k5l6m7n8o9p0q1r2s3t4u5v6" },
-  { id: "t4", name: "Paystack Risk Team", plan: "growth", status: "trial", apiCalls: 340, quota: 10000, country: "NG", createdAt: "2026-03-10T00:00:00Z", apiKey: "bis_test_ps_w1x2y3z4a5b6c7d8e9f0g1h2i3j4k5l6" },
-  { id: "t5", name: "GTBank Digital", plan: "starter", status: "suspended", apiCalls: 0, quota: 1000, country: "NG", createdAt: "2026-02-01T00:00:00Z", apiKey: "bis_live_gt_m1n2o3p4q5r6s7t8u9v0w1x2y3z4a5b6" },
+// ─── Mock data ────────────────────────────────────────────────────────────────
+
+function makeKey(prefix: string, env: "live" | "test"): string {
+  return `bis_${env}_${prefix}_${Math.random().toString(36).slice(2, 10)}${Math.random().toString(36).slice(2, 26)}`;
+}
+
+const SEED_TENANTS: Tenant[] = [
+  {
+    id: "t1", name: "TourismPay Platform", plan: "enterprise", status: "active",
+    apiCalls: 8420, quota: 100000, country: "NG", createdAt: "2026-01-01",
+    keys: [
+      { id: "k1a", label: "Production",   key: "bis_live_tp_a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6", status: "active",  createdAt: "2026-01-01", lastUsed: "2026-03-24T09:01:00Z", callCount: 8420, environment: "live" },
+      { id: "k1b", label: "Staging",      key: "bis_test_tp_q1r2s3t4u5v6w7x8y9z0a1b2c3d4e5f6", status: "active",  createdAt: "2026-01-15", lastUsed: "2026-03-23T14:30:00Z", callCount: 312,  environment: "test" },
+      { id: "k1c", label: "Old Key",      key: "bis_live_tp_old1old2old3old4old5old6old7old8", status: "rotated", createdAt: "2025-12-01", lastUsed: "2026-01-01T00:00:00Z", callCount: 1240, environment: "live" },
+    ],
+  },
+  {
+    id: "t2", name: "Konga Merchant Services", plan: "growth", status: "active",
+    apiCalls: 1240, quota: 10000, country: "NG", createdAt: "2026-02-15",
+    keys: [
+      { id: "k2a", label: "Production",   key: "bis_live_km_g1h2i3j4k5l6m7n8o9p0q1r2s3t4u5v6", status: "active",  createdAt: "2026-02-15", lastUsed: "2026-03-24T08:45:00Z", callCount: 1240, environment: "live" },
+    ],
+  },
+  {
+    id: "t3", name: "Flutterwave Compliance", plan: "enterprise", status: "active",
+    apiCalls: 22100, quota: 100000, country: "NG", createdAt: "2026-01-20",
+    keys: [
+      { id: "k3a", label: "Production",   key: "bis_live_fw_w1x2y3z4a5b6c7d8e9f0g1h2i3j4k5l6", status: "active",  createdAt: "2026-01-20", lastUsed: "2026-03-24T09:00:00Z", callCount: 22100, environment: "live" },
+      { id: "k3b", label: "Dev / Test",   key: "bis_test_fw_m1n2o3p4q5r6s7t8u9v0w1x2y3z4a5b6", status: "active",  createdAt: "2026-02-01", lastUsed: "2026-03-22T11:00:00Z", callCount: 890,   environment: "test" },
+    ],
+  },
+  {
+    id: "t4", name: "Paystack Risk Team", plan: "growth", status: "trial",
+    apiCalls: 340, quota: 10000, country: "NG", createdAt: "2026-03-10",
+    keys: [
+      { id: "k4a", label: "Trial Key",    key: "bis_test_ps_a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6", status: "active",  createdAt: "2026-03-10", lastUsed: "2026-03-23T16:00:00Z", callCount: 340,  environment: "test" },
+    ],
+  },
+  {
+    id: "t5", name: "GTBank Digital", plan: "starter", status: "suspended",
+    apiCalls: 0, quota: 1000, country: "NG", createdAt: "2026-02-01",
+    keys: [
+      { id: "k5a", label: "Production",   key: "bis_live_gt_z1y2x3w4v5u6t7s8r9q0p1o2n3m4l5k6", status: "revoked", createdAt: "2026-02-01", lastUsed: "2026-02-28T12:00:00Z", callCount: 0,    environment: "live" },
+    ],
+  },
 ];
 
-const planColor: Record<string, string> = {
-  starter: "text-muted-foreground border-border",
-  growth: "text-blue-400 border-blue-500/30",
-  enterprise: "text-amber-400 border-amber-500/30",
+// ─── Config ───────────────────────────────────────────────────────────────────
+
+const PLAN_CONFIG: Record<TenantPlan, { label: string; quota: number; color: string }> = {
+  starter:    { label: "Starter",    quota: 1000,   color: "text-muted-foreground border-border" },
+  growth:     { label: "Growth",     quota: 10000,  color: "text-primary border-primary/30" },
+  enterprise: { label: "Enterprise", quota: 100000, color: "text-amber-400 border-amber-500/30" },
 };
 
-const statusColor: Record<string, string> = {
-  active: "bis-badge-success",
-  suspended: "bis-badge-danger",
-  trial: "bis-badge-warning",
+const STATUS_CONFIG: Record<TenantStatus, { label: string; cls: string }> = {
+  active:    { label: "Active",    cls: "bis-badge-success" },
+  suspended: { label: "Suspended", cls: "bis-badge-danger" },
+  trial:     { label: "Trial",     cls: "bis-badge-warning" },
 };
+
+const KEY_STATUS_CONFIG: Record<KeyStatus, { label: string; color: string }> = {
+  active:  { label: "Active",  color: "text-emerald-500" },
+  revoked: { label: "Revoked", color: "text-red-500" },
+  rotated: { label: "Rotated", color: "text-muted-foreground" },
+};
+
+function relTime(iso: string | null): string {
+  if (!iso) return "Never";
+  const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (diff < 60)    return `${diff}s ago`;
+  if (diff < 3600)  return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return `${Math.floor(diff / 86400)}d ago`;
+}
+
+function maskKey(key: string): string {
+  return key.slice(0, 14) + "••••••••••••••••••••" + key.slice(-4);
+}
+
+// ─── Component ────────────────────────────────────────────────────────────────
 
 export default function Tenants() {
+  const [tenants, setTenants] = useState<Tenant[]>(SEED_TENANTS);
   const [search, setSearch] = useState("");
-  const [tenants, setTenants] = useState<Tenant[]>(mockTenants);
+  const [expandedId, setExpandedId] = useState<string | null>("t1");
   const [visibleKeys, setVisibleKeys] = useState<Set<string>>(new Set());
+  const [rotatingKey, setRotatingKey] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [newTenant, setNewTenant] = useState({ name: "", plan: "growth", country: "NG" });
+  const [newTenant, setNewTenant] = useState({ name: "", plan: "growth" as TenantPlan, country: "NG" });
 
   const filtered = tenants.filter(t =>
     t.name.toLowerCase().includes(search.toLowerCase()) ||
     t.country.toLowerCase().includes(search.toLowerCase())
   );
 
-  const toggleKey = (id: string) => {
+  const toggleKeyVisible = (keyId: string) => {
     setVisibleKeys(prev => {
       const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
+      next.has(keyId) ? next.delete(keyId) : next.add(keyId);
       return next;
     });
   };
 
   const copyKey = (key: string) => {
-    navigator.clipboard.writeText(key);
-    toast.success("API key copied to clipboard");
+    navigator.clipboard.writeText(key).then(() => toast.success("API key copied to clipboard"));
+  };
+
+  const handleRotate = async (tenantId: string, keyId: string, env: "live" | "test") => {
+    setRotatingKey(keyId);
+    await new Promise(r => setTimeout(r, 1200));
+    const newKey: APIKey = {
+      id: `k_${Date.now()}`,
+      label: "Production (rotated)",
+      key: makeKey(tenantId.slice(0, 2), env),
+      status: "active",
+      createdAt: new Date().toISOString().split("T")[0],
+      lastUsed: null,
+      callCount: 0,
+      environment: env,
+    };
+    setTenants(prev => prev.map(t => {
+      if (t.id !== tenantId) return t;
+      return {
+        ...t,
+        keys: t.keys.map(k => k.id === keyId ? { ...k, status: "rotated" as KeyStatus } : k).concat(newKey),
+      };
+    }));
+    setRotatingKey(null);
+    toast.success("API key rotated — old key marked as rotated");
+  };
+
+  const handleRevoke = (tenantId: string, keyId: string) => {
+    setTenants(prev => prev.map(t => {
+      if (t.id !== tenantId) return t;
+      return { ...t, keys: t.keys.map(k => k.id === keyId ? { ...k, status: "revoked" as KeyStatus } : k) };
+    }));
+    toast.warning("API key revoked — all calls using this key will be rejected");
+  };
+
+  const handleGenerateKey = (tenantId: string, env: "live" | "test") => {
+    const prefix = tenantId.slice(0, 2);
+    const newKey: APIKey = {
+      id: `k_${Date.now()}`,
+      label: env === "live" ? "New Live Key" : "New Test Key",
+      key: makeKey(prefix, env),
+      status: "active",
+      createdAt: new Date().toISOString().split("T")[0],
+      lastUsed: null,
+      callCount: 0,
+      environment: env,
+    };
+    setTenants(prev => prev.map(t => t.id === tenantId ? { ...t, keys: [...t.keys, newKey] } : t));
+    toast.success(`New ${env} API key generated`);
+  };
+
+  const handleSuspend = (id: string) => {
+    setTenants(prev => prev.map(t =>
+      t.id === id ? { ...t, status: t.status === "suspended" ? "active" : "suspended" } : t
+    ));
+    toast.info("Tenant status updated");
   };
 
   const handleCreate = async () => {
     if (!newTenant.name.trim()) { toast.error("Tenant name is required"); return; }
     setCreating(true);
     await new Promise(r => setTimeout(r, 1000));
+    const prefix = newTenant.name.slice(0, 2).toLowerCase();
     const newT: Tenant = {
       id: `t${Date.now()}`,
       name: newTenant.name,
-      plan: newTenant.plan as Tenant["plan"],
+      plan: newTenant.plan,
       status: "trial",
       apiCalls: 0,
-      quota: newTenant.plan === "starter" ? 1000 : newTenant.plan === "growth" ? 10000 : 100000,
+      quota: PLAN_CONFIG[newTenant.plan].quota,
       country: newTenant.country,
-      createdAt: new Date().toISOString(),
-      apiKey: `bis_live_${Math.random().toString(36).slice(2, 6)}_${Math.random().toString(36).slice(2, 34)}`,
+      createdAt: new Date().toISOString().split("T")[0],
+      keys: [
+        {
+          id: `k_${Date.now()}`,
+          label: "Trial Key",
+          key: makeKey(prefix, "test"),
+          status: "active",
+          createdAt: new Date().toISOString().split("T")[0],
+          lastUsed: null,
+          callCount: 0,
+          environment: "test",
+        },
+      ],
     };
     setTenants(prev => [newT, ...prev]);
+    setExpandedId(newT.id);
     setCreating(false);
     setCreateOpen(false);
-    toast.success(`Tenant "${newT.name}" created`);
+    toast.success(`Tenant "${newT.name}" created with a trial test key`);
     setNewTenant({ name: "", plan: "growth", country: "NG" });
   };
 
-  const handleSuspend = (id: string, name: string) => {
-    setTenants(prev => prev.map(t => t.id === id ? { ...t, status: t.status === "suspended" ? "active" : "suspended" } : t));
-    toast.info(`Tenant "${name}" status updated`);
-  };
-
-  const maskKey = (key: string) => key.slice(0, 12) + "••••••••••••••••••••" + key.slice(-4);
+  const totalCalls = tenants.reduce((s, t) => s + t.apiCalls, 0);
 
   return (
     <BISLayout
-      title="Tenants"
+      title="Tenants & API Keys"
       subtitle={`${tenants.filter(t => t.status === "active").length} active tenants`}
       actions={
         <Dialog open={createOpen} onOpenChange={setCreateOpen}>
@@ -120,12 +268,12 @@ export default function Tenants() {
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
                   <Label>Plan</Label>
-                  <Select value={newTenant.plan} onValueChange={v => setNewTenant(p => ({ ...p, plan: v }))}>
+                  <Select value={newTenant.plan} onValueChange={v => setNewTenant(p => ({ ...p, plan: v as TenantPlan }))}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="starter">Starter (1K calls/mo)</SelectItem>
-                      <SelectItem value="growth">Growth (10K calls/mo)</SelectItem>
-                      <SelectItem value="enterprise">Enterprise (100K calls/mo)</SelectItem>
+                      <SelectItem value="starter">Starter (1K/mo)</SelectItem>
+                      <SelectItem value="growth">Growth (10K/mo)</SelectItem>
+                      <SelectItem value="enterprise">Enterprise (100K/mo)</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -134,12 +282,7 @@ export default function Tenants() {
                   <Select value={newTenant.country} onValueChange={v => setNewTenant(p => ({ ...p, country: v }))}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="NG">Nigeria</SelectItem>
-                      <SelectItem value="GH">Ghana</SelectItem>
-                      <SelectItem value="KE">Kenya</SelectItem>
-                      <SelectItem value="ZA">South Africa</SelectItem>
-                      <SelectItem value="GB">United Kingdom</SelectItem>
-                      <SelectItem value="US">United States</SelectItem>
+                      {["NG","GH","KE","ZA","GB","US"].map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
@@ -147,7 +290,7 @@ export default function Tenants() {
               <div className="flex justify-end gap-2 pt-2">
                 <Button variant="outline" size="sm" onClick={() => setCreateOpen(false)}>Cancel</Button>
                 <Button size="sm" onClick={handleCreate} disabled={creating}>
-                  {creating ? <><Loader2 size={12} className="animate-spin mr-1" />Creating...</> : "Create Tenant"}
+                  {creating ? <><Loader2 size={12} className="animate-spin mr-1" />Creating…</> : "Create Tenant"}
                 </Button>
               </div>
             </div>
@@ -155,82 +298,224 @@ export default function Tenants() {
         </Dialog>
       }
     >
-      {/* Stats */}
+      {/* ── Stats ── */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
         {[
-          { label: "Total Tenants", value: tenants.length, icon: <Building2 size={14} /> },
-          { label: "Active", value: tenants.filter(t => t.status === "active").length, icon: <CheckCircle2 size={14} className="text-emerald-400" /> },
-          { label: "Enterprise", value: tenants.filter(t => t.plan === "enterprise").length, icon: <Shield size={14} className="text-amber-400" /> },
-          { label: "API Calls (30d)", value: tenants.reduce((s, t) => s + t.apiCalls, 0).toLocaleString(), icon: <Activity size={14} className="text-blue-400" /> },
-        ].map(stat => (
-          <div key={stat.label} className="bis-card p-3 flex items-center gap-3">
-            <div className="text-muted-foreground">{stat.icon}</div>
+          { label: "Total Tenants",   value: tenants.length,                                         icon: <Building2 size={14} />,                                  color: "text-foreground" },
+          { label: "Active",          value: tenants.filter(t => t.status === "active").length,       icon: <CheckCircle2 size={14} className="text-emerald-400" />,  color: "text-emerald-500" },
+          { label: "Enterprise",      value: tenants.filter(t => t.plan === "enterprise").length,     icon: <Shield size={14} className="text-amber-400" />,          color: "text-amber-500" },
+          { label: "API Calls (30d)", value: totalCalls.toLocaleString(),                             icon: <Activity size={14} className="text-primary" />,          color: "text-primary" },
+        ].map(s => (
+          <div key={s.label} className="bis-card p-3 flex items-center gap-3">
+            <div className="text-muted-foreground">{s.icon}</div>
             <div>
-              <div className="text-lg font-bold font-mono text-foreground">{stat.value}</div>
-              <div className="text-[10px] text-muted-foreground uppercase tracking-wider">{stat.label}</div>
+              <div className={cn("text-lg font-bold font-mono", s.color)}>{s.value}</div>
+              <div className="text-[10px] text-muted-foreground uppercase tracking-wider">{s.label}</div>
             </div>
           </div>
         ))}
       </div>
 
-      {/* Search */}
+      {/* ── Search ── */}
       <div className="relative max-w-sm mb-4">
         <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-        <Input className="pl-8 h-8 text-sm" placeholder="Search tenants..." value={search} onChange={e => setSearch(e.target.value)} />
+        <Input className="pl-8 h-8 text-sm" placeholder="Search tenants…" value={search} onChange={e => setSearch(e.target.value)} />
+        {search && <button onClick={() => setSearch("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"><X size={12} /></button>}
       </div>
 
-      {/* Tenant cards */}
+      {/* ── Tenant cards ── */}
       <div className="space-y-3">
-        {filtered.map(tenant => (
-          <div key={tenant.id} className="bis-card p-4">
-            <div className="flex items-start gap-3">
-              <div className="w-9 h-9 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0">
-                <Building2 size={15} className="text-primary" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-semibold text-foreground">{tenant.name}</span>
-                  <Badge variant="outline" className={`text-[10px] h-4 px-1.5 capitalize ${planColor[tenant.plan]}`}>{tenant.plan}</Badge>
-                  <span className={`bis-badge ${statusColor[tenant.status]}`}>{tenant.status}</span>
-                  <span className="text-[10px] text-muted-foreground font-mono">{tenant.country}</span>
-                </div>
+        {filtered.map(tenant => {
+          const pc = PLAN_CONFIG[tenant.plan];
+          const sc = STATUS_CONFIG[tenant.status];
+          const isExpanded = expandedId === tenant.id;
+          const activeKeys = tenant.keys.filter(k => k.status === "active");
 
-                {/* API Key */}
-                <div className="flex items-center gap-2 mt-2 p-2 rounded-md bg-muted/30 border border-border/50">
-                  <Key size={11} className="text-muted-foreground shrink-0" />
-                  <code className="text-[10px] font-mono text-muted-foreground flex-1 truncate">
-                    {visibleKeys.has(tenant.id) ? tenant.apiKey : maskKey(tenant.apiKey)}
-                  </code>
-                  <button onClick={() => toggleKey(tenant.id)} className="text-muted-foreground hover:text-foreground transition-colors">
-                    {visibleKeys.has(tenant.id) ? <EyeOff size={11} /> : <Eye size={11} />}
-                  </button>
-                  <button onClick={() => copyKey(tenant.apiKey)} className="text-muted-foreground hover:text-foreground transition-colors">
-                    <Copy size={11} />
-                  </button>
+          return (
+            <div key={tenant.id} className="bis-card overflow-hidden">
+              {/* ── Header row ── */}
+              <div
+                className="flex items-center gap-3 p-4 cursor-pointer hover:bg-muted/20 transition-colors"
+                onClick={() => setExpandedId(isExpanded ? null : tenant.id)}
+              >
+                <div className="w-9 h-9 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0">
+                  <Building2 size={15} className="text-primary" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-semibold text-foreground text-sm">{tenant.name}</span>
+                    <Badge variant="outline" className={cn("text-[10px] h-4 px-1.5 capitalize", pc.color)}>{pc.label}</Badge>
+                    <span className={cn("bis-badge", sc.cls)}>{sc.label}</span>
+                    <span className="text-[10px] text-muted-foreground font-mono">{tenant.country}</span>
+                  </div>
+                  <div className="flex items-center gap-3 mt-1 text-[10px] text-muted-foreground font-mono">
+                    <span>{tenant.apiCalls.toLocaleString()} / {pc.quota.toLocaleString()} calls</span>
+                    <span>·</span>
+                    <span>{activeKeys.length} active key{activeKeys.length !== 1 ? "s" : ""}</span>
+                    <span>·</span>
+                    <span>Since {tenant.createdAt}</span>
+                  </div>
                 </div>
 
                 {/* Usage bar */}
-                <div className="mt-2">
-                  <div className="flex items-center justify-between text-[10px] text-muted-foreground mb-1">
-                    <span>API Usage (30d)</span>
-                    <span className="font-mono">{tenant.apiCalls.toLocaleString()} / {tenant.quota.toLocaleString()}</span>
+                <div className="w-28 shrink-0 hidden sm:block">
+                  <div className="flex justify-between text-[9px] text-muted-foreground mb-1">
+                    <span>Usage</span>
+                    <span>{Math.round((tenant.apiCalls / pc.quota) * 100)}%</span>
                   </div>
-                  <div className="h-1 bg-muted rounded-full overflow-hidden">
-                    <div className="h-full bg-primary rounded-full transition-all"
-                      style={{ width: `${Math.min(100, (tenant.apiCalls / tenant.quota) * 100)}%` }} />
+                  <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                    <div
+                      className={cn("h-full rounded-full transition-all",
+                        (tenant.apiCalls / pc.quota) > 0.9 ? "bg-red-500" :
+                        (tenant.apiCalls / pc.quota) > 0.7 ? "bg-amber-500" : "bg-primary"
+                      )}
+                      style={{ width: `${Math.min(100, (tenant.apiCalls / pc.quota) * 100)}%` }}
+                    />
                   </div>
+                </div>
+
+                <div className="flex items-center gap-1 shrink-0">
+                  <Button
+                    variant="outline" size="sm" className="h-6 text-[10px] px-2"
+                    onClick={e => { e.stopPropagation(); handleSuspend(tenant.id); }}
+                  >
+                    {tenant.status === "suspended" ? "Activate" : "Suspend"}
+                  </Button>
+                  {isExpanded ? <ChevronUp size={14} className="text-muted-foreground ml-1" /> : <ChevronDown size={14} className="text-muted-foreground ml-1" />}
                 </div>
               </div>
 
-              <div className="flex items-center gap-1 shrink-0">
-                <Button variant="outline" size="sm" className="h-6 text-[10px] px-2"
-                  onClick={() => handleSuspend(tenant.id, tenant.name)}>
-                  {tenant.status === "suspended" ? "Activate" : "Suspend"}
-                </Button>
-              </div>
+              {/* ── Expanded: API Keys panel ── */}
+              {isExpanded && (
+                <div className="border-t border-border px-4 pb-4 pt-3">
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                      <Key size={12} className="text-primary" /> API Keys
+                    </h4>
+                    <div className="flex items-center gap-1.5">
+                      <Button
+                        variant="outline" size="sm" className="h-6 text-[10px] px-2 gap-1"
+                        onClick={() => handleGenerateKey(tenant.id, "test")}
+                      >
+                        <Plus size={10} /> Test Key
+                      </Button>
+                      <Button
+                        variant="outline" size="sm" className="h-6 text-[10px] px-2 gap-1"
+                        onClick={() => handleGenerateKey(tenant.id, "live")}
+                      >
+                        <Plus size={10} /> Live Key
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    {tenant.keys.map(apiKey => {
+                      const ksc = KEY_STATUS_CONFIG[apiKey.status];
+                      const isVisible = visibleKeys.has(apiKey.id);
+                      const isRotating = rotatingKey === apiKey.id;
+                      return (
+                        <div
+                          key={apiKey.id}
+                          className={cn(
+                            "rounded-lg border p-3 transition-colors",
+                            apiKey.status === "active"   ? "border-border bg-muted/20" :
+                            apiKey.status === "revoked"  ? "border-red-500/20 bg-red-500/5 opacity-60" :
+                            "border-border/50 bg-muted/10 opacity-50"
+                          )}
+                        >
+                          <div className="flex items-start gap-2">
+                            <div className="flex-1 min-w-0">
+                              {/* Label row */}
+                              <div className="flex items-center gap-2 mb-1.5">
+                                <span className="text-xs font-medium text-foreground">{apiKey.label}</span>
+                                <span className={cn(
+                                  "text-[9px] font-mono rounded px-1.5 py-0.5 border",
+                                  apiKey.environment === "live"
+                                    ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/30"
+                                    : "text-amber-400 bg-amber-500/10 border-amber-500/30"
+                                )}>
+                                  {apiKey.environment.toUpperCase()}
+                                </span>
+                                <span className={cn("text-[9px] font-mono", ksc.color)}>{ksc.label}</span>
+                              </div>
+
+                              {/* Key value */}
+                              <div className="flex items-center gap-1.5 p-1.5 rounded bg-muted/40 border border-border/50">
+                                <code className="text-[10px] font-mono text-muted-foreground flex-1 truncate">
+                                  {isVisible ? apiKey.key : maskKey(apiKey.key)}
+                                </code>
+                                <button
+                                  onClick={() => toggleKeyVisible(apiKey.id)}
+                                  className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
+                                  title={isVisible ? "Hide key" : "Show key"}
+                                >
+                                  {isVisible ? <EyeOff size={11} /> : <Eye size={11} />}
+                                </button>
+                                {apiKey.status === "active" && (
+                                  <button
+                                    onClick={() => copyKey(apiKey.key)}
+                                    className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
+                                    title="Copy to clipboard"
+                                  >
+                                    <Copy size={11} />
+                                  </button>
+                                )}
+                              </div>
+
+                              {/* Metadata */}
+                              <div className="flex items-center gap-3 mt-1.5 text-[9px] font-mono text-muted-foreground">
+                                <span className="flex items-center gap-1">
+                                  <Clock size={9} /> Created {apiKey.createdAt}
+                                </span>
+                                <span>·</span>
+                                <span className="flex items-center gap-1">
+                                  <Activity size={9} /> Last used: {relTime(apiKey.lastUsed)}
+                                </span>
+                                <span>·</span>
+                                <span>{apiKey.callCount.toLocaleString()} calls</span>
+                              </div>
+                            </div>
+
+                            {/* Actions */}
+                            {apiKey.status === "active" && (
+                              <div className="flex items-center gap-1 shrink-0 ml-2">
+                                <Button
+                                  variant="outline" size="sm"
+                                  className="h-6 text-[10px] px-2 gap-1"
+                                  disabled={isRotating}
+                                  onClick={() => handleRotate(tenant.id, apiKey.id, apiKey.environment)}
+                                  title="Rotate key — generates a new key and marks this one as rotated"
+                                >
+                                  {isRotating
+                                    ? <Loader2 size={9} className="animate-spin" />
+                                    : <RotateCcw size={9} />}
+                                  {isRotating ? "Rotating…" : "Rotate"}
+                                </Button>
+                                <Button
+                                  variant="outline" size="sm"
+                                  className="h-6 text-[10px] px-2 gap-1 text-red-400 hover:text-red-400 hover:border-red-500/30"
+                                  onClick={() => handleRevoke(tenant.id, apiKey.id)}
+                                  title="Permanently revoke this key"
+                                >
+                                  <Trash2 size={9} /> Revoke
+                                </Button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Footer note */}
+                  <p className="text-[9px] font-mono text-muted-foreground/50 mt-3">
+                    Rotated and revoked keys are shown for audit purposes only. Key changes are logged to the Audit Log.
+                  </p>
+                </div>
+              )}
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </BISLayout>
   );

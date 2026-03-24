@@ -156,6 +156,31 @@ export default function InvestigationDetail() {
   const [evidenceItems, setEvidenceItems] = useState<EvidenceItem[]>(MOCK_EVIDENCE);
   const [evidenceFilter, setEvidenceFilter] = useState<EvidenceType | 'all'>('all');
   const [currentStatus, setCurrentStatus] = useState<string>(inv.status);
+  const [assignedTo, setAssignedTo] = useState<string>(inv.assignedTo ?? 'analyst@bis.io');
+
+  const ANALYSTS = [
+    'analyst@bis.io',
+    'senior_analyst@bis.io',
+    'compliance@bis.io',
+    'supervisor@bis.io',
+    'admin@bis.platform',
+  ];
+
+  const handleAssign = (newAnalyst: string) => {
+    const prev = assignedTo;
+    if (prev === newAnalyst) return;
+    setAssignedTo(newAnalyst);
+    const assignNote: EvidenceItem = {
+      id: `assign_${Date.now()}`,
+      type: 'analyst_note',
+      timestamp: new Date().toISOString(),
+      title: `Reassigned: ${prev} → ${newAnalyst}`,
+      body: `Investigation reassigned from ${prev} to ${newAnalyst} by supervisor@bis.io`,
+      linkedBy: 'supervisor@bis.io',
+    };
+    setEvidenceItems(p => [assignNote, ...p]);
+    toast.success(`Assigned to ${newAnalyst}`);
+  };
 
   const STATUS_FLOW: Record<string, { label: string; color: string; transitions: string[] }> = {
     draft:      { label: 'Draft',      color: 'text-muted-foreground', transitions: ['pending', 'cancelled'] },
@@ -230,6 +255,18 @@ export default function InvestigationDetail() {
       subtitle={inv.subjectName}
       actions={
         <div className="flex items-center gap-2">
+          <Select value={assignedTo} onValueChange={handleAssign}>
+            <SelectTrigger className="h-7 w-40 text-xs">
+              <span className="font-mono text-xs text-muted-foreground truncate">{assignedTo.split('@')[0]}</span>
+            </SelectTrigger>
+            <SelectContent>
+              {ANALYSTS.map(a => (
+                <SelectItem key={a} value={a}>
+                  <span className="font-mono text-xs">{a}</span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <Select value={currentStatus} onValueChange={handleStatusChange}>
             <SelectTrigger className="h-7 w-36 text-xs">
               <span className={cn("font-mono text-xs", STATUS_FLOW[currentStatus]?.color ?? 'text-foreground')}>
