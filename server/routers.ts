@@ -4,8 +4,9 @@ import { billingRouter } from "./billing";
 import { tenantsRouter } from "./tenants";
 import { permifyWriteRelationship, permifyCheck } from "./permify";
 import { systemRouter } from "./_core/systemRouter";
+import { notifyOwner } from "./_core/notification";
 import { TRPCError } from "@trpc/server";
-import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
+import { adminProcedure, protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { getDb } from "./db";
 import {
   investigations,
@@ -1076,10 +1077,15 @@ const onboardingRouter = router({
       }).returning();
       await writeAuditLog(db, { userId: ctx.user!.id, category: "system", action: `Onboarding application submitted`, targetRef: referenceId });
       await publishEvent("ONBOARDING_SUBMITTED", referenceId, "info", { legalName: input.legalName });
+      // Notify platform owner of new application
+      notifyOwner({
+        title: `New Onboarding Application — ${input.legalName}`,
+        content: `A new onboarding application (${referenceId}) was submitted by ${input.contactName ?? "unknown"} (${input.contactEmail ?? "no email"}) for entity type: ${input.entityType}. Use case: ${input.useCase ?? "not specified"}. Log in to review at /admin/onboarding.`,
+      }).catch(e => console.warn("[Notify] onboarding.create:", e));
       return record!;
     }),
 
-  list: protectedProcedure
+  list: adminProcedure
     .input(z.object({ limit: z.number().default(50), offset: z.number().default(0) }))
     .query(async ({ input }) => {
       const db = await getDb();
@@ -1091,7 +1097,7 @@ const onboardingRouter = router({
       return { items, total: Number(countResult[0]?.count ?? 0) };
     }),
 
-  get: protectedProcedure
+  get: adminProcedure
     .input(z.object({ id: z.number() }))
     .query(async ({ input }) => {
       const db = await getDb();
@@ -1101,13 +1107,22 @@ const onboardingRouter = router({
       return record;
     }),
 
-  updateStatus: protectedProcedure
+  updateStatus: adminProcedure
     .input(z.object({ id: z.number(), status: z.enum(["draft", "submitted", "awaiting_documents", "under_review", "approved", "rejected"]) }))
     .mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new Error("Database unavailable");
+      // Fetch application for notification context
+      const [app] = await db.select().from(onboardingApplications).where(eq(onboardingApplications.id, input.id)).limit(1);
       await db.update(onboardingApplications).set({ status: input.status, updatedAt: new Date() }).where(eq(onboardingApplications.id, input.id));
       await writeAuditLog(db, { userId: ctx.user!.id, category: "system", action: `Onboarding status → ${input.status}`, targetRef: String(input.id) });
+      // Notify owner on terminal status changes
+      if (input.status === "approved" || input.status === "rejected") {
+        notifyOwner({
+          title: `Onboarding ${input.status === "approved" ? "Approved" : "Rejected"} — ${app?.legalName ?? `ID ${input.id}`}`,
+          content: `Application ${app?.referenceId ?? input.id} for ${app?.legalName ?? "unknown entity"} has been ${input.status} by user ${ctx.user!.email ?? ctx.user!.id}. Contact: ${app?.contactEmail ?? "n/a"}.`,
+        }).catch(e => console.warn("[Notify] onboarding.updateStatus:", e));
+      }
       return { success: true };
     }),
 });

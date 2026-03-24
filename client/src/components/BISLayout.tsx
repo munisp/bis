@@ -51,6 +51,7 @@ const BASE_NAV_GROUPS: NavGroup[] = [
     defaultOpen: true,
     items: [
       { label: 'KYC / KYB', href: '/kyc-verification', icon: <ShieldCheck size={15} /> },
+      { label: 'KYC Records', href: '/kyc-records', icon: <BarChart3 size={15} /> },
       { label: 'Biometric Enrollment', href: '/biometric-enrollment', icon: <Fingerprint size={15} /> },
       { label: 'Onboarding', href: '/onboarding', icon: <UserCheck size={15} /> },
       { label: 'Onboarding Admin', href: '/admin/onboarding', icon: <ClipboardList size={15} /> },
@@ -346,7 +347,10 @@ export default function BISLayout({ children, title, subtitle, actions }: BISLay
       .forEach(n => markReadMutation.mutate({ id: parseInt(n.id, 10) }));
   };
 
-  // ── Build nav groups with live badges ────────────────────────────────────
+  // ── Build nav groups with live badges (filter admin-only items) ────────────
+  const isAdmin = user?.role === "admin";
+  const ADMIN_ONLY_HREFS = new Set(["/admin/onboarding"]);
+
   const navGroups: NavGroup[] = BASE_NAV_GROUPS.map(group => ({
     ...group,
     items: group.items.map(item => {
@@ -361,7 +365,11 @@ export default function BISLayout({ children, title, subtitle, actions }: BISLay
       }
       return item;
     }),
-  }));
+    // Filter out admin-only items for non-admin users
+  })).map(group => ({
+    ...group,
+    items: group.items.filter(item => !ADMIN_ONLY_HREFS.has(item.href) || isAdmin),
+  })).filter(group => group.items.length > 0);
 
   const unreadCount = notifications.filter(n => !n.read).length;
 

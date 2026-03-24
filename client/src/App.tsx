@@ -31,6 +31,7 @@ const ZeroFootprintPage         = lazy(() => import("@/pages/bis/ZeroFootprintPa
 
 const BillingPage               = lazy(() => import("@/pages/bis/BillingPage"));
 const KYCVerificationPage       = lazy(() => import("@/pages/kyc/KYCVerificationPage"));
+const KYCRecordsPage            = lazy(() => import("@/pages/kyc/KYCRecordsPage"));
 const MessagingChannelsPage     = lazy(() => import("@/pages/messaging/MessagingChannelsPage"));
 const SocialMonitoringDashboard = lazy(() => import("@/pages/monitoring/SocialMonitoringDashboard"));
 const StakeholderOnboardingWizard = lazy(() => import("@/pages/onboarding/StakeholderOnboardingWizard"));
@@ -81,6 +82,7 @@ function Router() {
 
         {/* KYC / Onboarding / Intelligence */}
         <Route path="/kyc-verification" component={KYCVerificationPage} />
+        <Route path="/kyc-records" component={KYCRecordsPage} />
         <Route path="/messaging-channels" component={MessagingChannelsPage} />
         <Route path="/social-monitoring" component={SocialMonitoringDashboard} />
         <Route path="/onboarding" component={StakeholderOnboardingWizard} />

@@ -7,7 +7,9 @@
 
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
+import { useAuth } from "@/_core/hooks/useAuth";
 import BISLayout from "@/components/BISLayout";
+import { ShieldX } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -68,12 +70,18 @@ type Application = {
 };
 
 export default function OnboardingAdminPage() {
+  const { user, loading: authLoading } = useAuth();
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<Application | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
 
-  const { data, isLoading, refetch } = trpc.onboarding.list.useQuery({ limit: 200, offset: 0 });
+  const isAdmin = user?.role === "admin";
+
+  const { data, isLoading, refetch } = trpc.onboarding.list.useQuery(
+    { limit: 200, offset: 0 },
+    { enabled: isAdmin },
+  );
 
   const updateStatus = trpc.onboarding.updateStatus.useMutation({
     onSuccess: (_, vars) => {
@@ -109,6 +117,32 @@ export default function OnboardingAdminPage() {
     acc[app.status] = (acc[app.status] ?? 0) + 1;
     return acc;
   }, {} as Record<string, number>);
+
+  // Show loading state while auth resolves
+  if (authLoading) {
+    return (
+      <BISLayout title="Onboarding Applications" subtitle="">
+        <div className="flex items-center justify-center h-40 text-muted-foreground">
+          <Loader2 className="w-6 h-6 animate-spin mr-2" /> Checking permissions…
+        </div>
+      </BISLayout>
+    );
+  }
+
+  // Block non-admins with a clear 403 message
+  if (!isAdmin) {
+    return (
+      <BISLayout title="Access Denied" subtitle="">
+        <div className="flex flex-col items-center justify-center h-64 gap-4 text-center">
+          <ShieldX className="w-14 h-14 text-destructive opacity-70" />
+          <h2 className="text-xl font-semibold text-foreground">Restricted Area</h2>
+          <p className="text-muted-foreground max-w-sm">
+            The Onboarding Admin panel requires the <strong>admin</strong> role. Contact your platform administrator to request access.
+          </p>
+        </div>
+      </BISLayout>
+    );
+  }
 
   return (
     <BISLayout title="Onboarding Applications" subtitle="Review and manage stakeholder onboarding submissions">

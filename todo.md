@@ -182,3 +182,29 @@
 
 ### Archive
 - [x] Comprehensive project archive generated (bis-pwa-archive-v10-20260324.zip, 4.6 MB, 272 files)
+
+## Phase 11 — Next Steps (Round 2)
+
+### Role-Gate Onboarding Admin
+- [x] Wrap onboarding.updateStatus in adminProcedure (role check server-side)
+- [x] Wrap onboarding.list in adminProcedure
+- [x] Conditionally hide "Onboarding Admin" sidebar link for non-admin users
+- [x] Show 403 Forbidden message in OnboardingAdminPage for non-admins
+
+### KYC Batch Status Dashboard
+- [x] /kyc-records page with list of all KYC records from trpc.kyc.list
+- [x] Pass/fail/review/pending filter chips
+- [x] CSV export of filtered records
+- [x] Re-verify action that triggers trpc.kyc.verify for flagged records
+- [x] trpc.kyc.list procedure already in kycRouter
+- [x] trpc.kyc.verify procedure already in kycRouter
+- [x] Register /kyc-records route in App.tsx
+- [x] Add KYC Records nav item to BISLayout sidebar
+
+### Onboarding Email Notifications
+- [x] Call notifyOwner in onboarding.create when new application submitted
+- [x] Call notifyOwner in onboarding.updateStatus when status changes to approved/rejected
+- [x] Owner notified with contactEmail context on terminal status changes
+
+### Archive
+- [ ] Comprehensive project archive v11 generated
