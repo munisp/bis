@@ -354,6 +354,7 @@ export default function Tenants() {
 // ─── TenantCard sub-component ─────────────────────────────────────────────────
 
 function TenantCard({ tenant, pc, sc, usagePct, isExpanded, onToggle, onSuspend, onReactivate, getTab, setExpandedTab, visibleKeys, toggleKeyVisible, newKeyName, onNewKeyNameChange, onGenerateKey, onRevokeKey, onRotateKey, rotatingKeyId, newWebhookUrl, onWebhookUrlChange, newWebhookEvents, onToggleWebhookEvent, onAddWebhook, onDeleteWebhook, onTestWebhook, testingWebhookId }: any) {
+  const utils = trpc.useUtils();
   const { data: keys = [], isLoading: keysLoading } = trpc.tenants.listKeys.useQuery(
     { tenantId: tenant.id }, { enabled: isExpanded && getTab(tenant.id) === 'keys' }
   );
@@ -361,12 +362,45 @@ function TenantCard({ tenant, pc, sc, usagePct, isExpanded, onToggle, onSuspend,
     { tenantId: tenant.id }, { enabled: isExpanded && getTab(tenant.id) === 'webhooks' }
   );
 
+  // ── Logo upload ──
+  const [logoPreview, setLogoPreview] = useState<string | null>(tenant.logoUrl ?? null);
+  const [logoUploading, setLogoUploading] = useState(false);
+  const updateLogoMut = trpc.tenants.updateLogo.useMutation({
+    onSuccess: (r) => {
+      setLogoPreview(r.logoUrl);
+      toast.success('Logo updated');
+      utils.tenants.list.invalidate();
+    },
+    onError: (e: any) => toast.error('Logo upload failed', { description: e.message }),
+    onSettled: () => setLogoUploading(false),
+  });
+
+  const handleLogoFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) { toast.error('Logo must be under 2 MB'); return; }
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const dataUri = ev.target?.result as string;
+      setLogoPreview(dataUri);
+      setLogoUploading(true);
+      updateLogoMut.mutate({
+        id: tenant.id,
+        dataUri,
+        mimeType: file.type as any,
+      });
+    };
+    reader.readAsDataURL(file);
+  };
+
   return (
     <div className="bis-card overflow-hidden">
       {/* ── Header row ── */}
       <div className="flex items-center gap-3 p-4 cursor-pointer hover:bg-muted/20 transition-colors" onClick={onToggle}>
-        <div className="w-9 h-9 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0">
-          <Building2 size={15} className="text-primary" />
+        <div className="w-9 h-9 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0 overflow-hidden">
+          {logoPreview
+            ? <img src={logoPreview} alt={tenant.name} className="w-full h-full object-cover" />
+            : <Building2 size={15} className="text-primary" />}
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
@@ -406,6 +440,32 @@ function TenantCard({ tenant, pc, sc, usagePct, isExpanded, onToggle, onSuspend,
       {/* ── Expanded panel ── */}
       {isExpanded && (
         <div className="border-t border-border px-4 pb-4 pt-3">
+          {/* Logo upload strip */}
+          <div className="flex items-center gap-3 mb-3 p-2.5 rounded-lg bg-muted/20 border border-border/50">
+            <div className="w-10 h-10 rounded-md bg-primary/10 border border-primary/20 flex items-center justify-center overflow-hidden shrink-0">
+              {logoPreview
+                ? <img src={logoPreview} alt="logo" className="w-full h-full object-cover" />
+                : <Building2 size={14} className="text-primary" />}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-[10px] font-semibold text-foreground">Organization Logo</p>
+              <p className="text-[9px] text-muted-foreground">PNG, JPG, WebP or SVG — max 2 MB. Used in PDF report headers.</p>
+            </div>
+            <label className={cn(
+              "flex items-center gap-1.5 text-[10px] font-mono px-2.5 py-1.5 rounded border cursor-pointer transition-colors",
+              logoUploading
+                ? "border-border text-muted-foreground cursor-not-allowed"
+                : "border-primary/30 text-primary bg-primary/5 hover:bg-primary/15"
+            )}>
+              {logoUploading
+                ? <><Loader2 size={10} className="animate-spin" /> Uploading…</>
+                : <><RefreshCw size={10} /> {logoPreview ? 'Replace' : 'Upload'}</>
+              }
+              <input type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                className="sr-only" disabled={logoUploading} onChange={handleLogoFile} />
+            </label>
+          </div>
+
           {/* Tab bar */}
           <div className="flex items-center gap-1 mb-3 border-b border-border pb-2">
             {(['keys', 'webhooks'] as const).map(tab => (

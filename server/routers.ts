@@ -1620,6 +1620,43 @@ const alertRulesRouter = router({
       ]);
       return { rows, total: Number(total) };
     }),
+
+  // Dry-run evaluation: checks whether a given metric value would trigger the rule.
+  // Does NOT create alerts, write audit entries, or notify the owner.
+  testFire: protectedProcedure
+    .input(z.object({
+      ruleId: z.number(),
+      sampleValue: z.number(),
+    }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      const [rule] = await db.select().from(alertRules).where(eq(alertRules.id, input.ruleId));
+      if (!rule) throw new TRPCError({ code: "NOT_FOUND", message: "Rule not found" });
+
+      // Evaluate the operator against the sample value
+      const { operator, threshold } = rule;
+      let triggered = false;
+      switch (operator) {
+        case "gte": triggered = input.sampleValue >= threshold; break;
+        case "gt":  triggered = input.sampleValue >  threshold; break;
+        case "lte": triggered = input.sampleValue <= threshold; break;
+        case "lt":  triggered = input.sampleValue <  threshold; break;
+        case "eq":  triggered = input.sampleValue === threshold; break;
+        case "neq": triggered = input.sampleValue !== threshold; break;
+        default:    triggered = false;
+      }
+
+      return {
+        triggered,
+        rule: { id: rule.id, name: rule.name, metric: rule.metric, operator, threshold, severity: rule.severity },
+        sampleValue: input.sampleValue,
+        expression: `${input.sampleValue} ${operator} ${threshold}`,
+        message: triggered
+          ? `WOULD TRIGGER — sample value ${input.sampleValue} satisfies ${operator} ${threshold}. A ${rule.severity} alert would be created${rule.autoEscalate ? ' and escalated' : ''}.`
+          : `Would NOT trigger — sample value ${input.sampleValue} does not satisfy ${operator} ${threshold}.`,
+      };
+    }),
 });
 
 // ─── App Router ───────────────────────────────────────────────────────────────

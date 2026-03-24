@@ -8,6 +8,7 @@ import {
 } from "../drizzle/schema";
 import { eq, desc, and, count } from "drizzle-orm";
 import crypto from "crypto";
+import { storagePut } from "./storage";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -115,6 +116,29 @@ export const tenantsRouter = router({
         .set({ status: "active", updatedAt: new Date() })
         .where(eq(tenants.id, input.id));
       return { success: true };
+    }),
+
+  updateLogo: protectedProcedure
+    .input(z.object({
+      id: z.number(),
+      // Base64-encoded image data URI, e.g. "data:image/png;base64,..."
+      dataUri: z.string().min(10).max(5_000_000),
+      mimeType: z.enum(["image/png", "image/jpeg", "image/webp", "image/svg+xml"]).default("image/png"),
+    }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      // Strip the data URI prefix to get raw base64
+      const base64 = input.dataUri.replace(/^data:[^;]+;base64,/, "");
+      const buffer = Buffer.from(base64, "base64");
+      const ext = input.mimeType.split("/")[1].replace("svg+xml", "svg");
+      const fileKey = `tenant-logos/${input.id}-${Date.now()}.${ext}`;
+      const { url } = await storagePut(fileKey, buffer, input.mimeType);
+      const [row] = await db.update(tenants)
+        .set({ logoUrl: url, updatedAt: new Date() })
+        .where(eq(tenants.id, input.id))
+        .returning();
+      return { logoUrl: url, tenant: row };
     }),
 
   // ── API Keys ────────────────────────────────────────────────────────────────

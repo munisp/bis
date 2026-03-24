@@ -18,7 +18,8 @@ import { cn } from "@/lib/utils";
 import {
   Plus, Trash2, Pencil, Zap, Shield, RefreshCw, Loader2,
   AlertTriangle, CheckCircle2, Info, TrendingUp, History,
-  CheckCheck, XCircle, ChevronLeft, ChevronRight
+  CheckCheck, XCircle, ChevronLeft, ChevronRight, Download,
+  FlaskConical
 } from "lucide-react";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
@@ -138,6 +139,15 @@ export default function AlertRulesPage() {
   const toggleMutation = trpc.alertRules.update.useMutation({
     onSuccess: () => utils.alertRules.list.invalidate(),
     onError: (e: any) => toast.error("Toggle failed", { description: e.message }),
+  });
+
+  // ── Test Fire ──
+  const [testFireRuleId, setTestFireRuleId] = useState<number | null>(null);
+  const [testSampleValue, setTestSampleValue] = useState<string>("");
+  const [testResult, setTestResult] = useState<{ triggered: boolean; message: string; expression: string } | null>(null);
+  const testFireMutation = trpc.alertRules.testFire.useMutation({
+    onSuccess: (r) => setTestResult({ triggered: r.triggered, message: r.message, expression: r.expression }),
+    onError: (e: any) => toast.error("Test failed", { description: e.message }),
   });
 
   const openCreate = () => {
@@ -286,6 +296,18 @@ export default function AlertRulesPage() {
                           </Button>
                           <Button
                             variant="ghost" size="sm"
+                            className="h-6 w-6 p-0 text-violet-400 hover:text-violet-300 hover:bg-violet-500/10"
+                            title="Test Rule (dry-run)"
+                            onClick={() => {
+                              setTestFireRuleId(rule.id);
+                              setTestSampleValue("");
+                              setTestResult(null);
+                            }}
+                          >
+                            <FlaskConical size={11} />
+                          </Button>
+                          <Button
+                            variant="ghost" size="sm"
                             className="h-6 w-6 p-0 text-red-400 hover:text-red-300 hover:bg-red-500/10"
                             onClick={() => setDeleteId(rule.id)}
                           >
@@ -334,9 +356,36 @@ export default function AlertRulesPage() {
               </SelectContent>
             </Select>
 
-            <span className="text-[10px] text-muted-foreground ml-auto">
+            <span className="text-[10px] text-muted-foreground">
               {historyTotal} evaluation{historyTotal !== 1 ? "s" : ""}
             </span>
+            <Button
+              variant="outline" size="sm"
+              className="h-7 text-xs gap-1.5 ml-auto"
+              disabled={historyRows.length === 0}
+              onClick={() => {
+                const headers = ['Outcome','Subject Ref','Metric','Value','Threshold','Source','Alert Created','Timestamp'];
+                const csvRows = historyRows.map((r: any) => [
+                  r.triggered ? 'Triggered' : 'Passed',
+                  r.subjectRef ?? '',
+                  formatMetric(r.metric),
+                  r.value,
+                  r.threshold,
+                  r.context ?? '',
+                  r.alertCreated ? 'Yes' : 'No',
+                  new Date(r.createdAt).toISOString(),
+                ]);
+                const csv = [headers, ...csvRows].map(row => row.map((c: any) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+                const blob = new Blob([csv], { type: 'text/csv' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url; a.download = `rule-evaluations-${Date.now()}.csv`;
+                a.click(); URL.revokeObjectURL(url);
+                toast.success('CSV downloaded');
+              }}
+            >
+              <Download size={11} /> Export CSV
+            </Button>
           </div>
 
           {historyLoading ? (
@@ -564,6 +613,85 @@ export default function AlertRulesPage() {
             >
               {deleteMutation.isPending ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
               Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Test Fire Dialog ── */}
+      <Dialog open={testFireRuleId !== null} onOpenChange={open => { if (!open) { setTestFireRuleId(null); setTestResult(null); } }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-violet-400">
+              <FlaskConical size={15} /> Test Rule (Dry Run)
+            </DialogTitle>
+          </DialogHeader>
+          {testFireRuleId !== null && (() => {
+            const rule = (rules as any[]).find((r: any) => r.id === testFireRuleId);
+            if (!rule) return null;
+            const metricLabel = METRICS.find(m => m.value === rule.metric)?.label ?? rule.metric;
+            const unit = METRICS.find(m => m.value === rule.metric)?.unit ?? '';
+            return (
+              <div className="space-y-4 py-2">
+                <div className="p-3 rounded-lg bg-muted/30 border border-border/50 text-xs space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-muted-foreground">Rule:</span>
+                    <span className="font-semibold text-foreground">{rule.name}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-muted-foreground">Condition:</span>
+                    <code className="font-mono text-primary">{metricLabel} {OPERATOR_SYMBOL[rule.operator]} {rule.threshold} {unit}</code>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-muted-foreground">Severity:</span>
+                    <span className={cn("capitalize font-medium", SEVERITY_CONFIG[rule.severity]?.color)}>{rule.severity}</span>
+                    {rule.autoEscalate && <span className="text-[9px] bg-red-500/10 text-red-400 border border-red-500/20 px-1.5 py-0.5 rounded">Auto-escalate</span>}
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Sample {metricLabel} value ({unit})</Label>
+                  <Input
+                    type="number"
+                    placeholder={`e.g. ${rule.threshold}`}
+                    value={testSampleValue}
+                    onChange={e => { setTestSampleValue(e.target.value); setTestResult(null); }}
+                    className="h-8 text-sm"
+                  />
+                </div>
+
+                {testResult && (
+                  <div className={cn(
+                    "p-3 rounded-lg border text-xs",
+                    testResult.triggered
+                      ? "bg-red-500/10 border-red-500/30 text-red-300"
+                      : "bg-emerald-500/10 border-emerald-500/30 text-emerald-300"
+                  )}>
+                    <div className="flex items-center gap-2 font-semibold mb-1">
+                      {testResult.triggered ? <Zap size={12} /> : <CheckCircle2 size={12} />}
+                      {testResult.triggered ? 'WOULD TRIGGER' : 'Would NOT trigger'}
+                    </div>
+                    <p className="text-[11px] leading-relaxed opacity-90">{testResult.message}</p>
+                    <code className="text-[10px] font-mono mt-1 block opacity-70">{testResult.expression}</code>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+          <DialogFooter className="gap-2">
+            <Button variant="ghost" size="sm" onClick={() => { setTestFireRuleId(null); setTestResult(null); }}>Close</Button>
+            <Button
+              size="sm"
+              className="bg-violet-600 hover:bg-violet-700 text-white gap-1.5"
+              disabled={!testSampleValue.trim() || testFireMutation.isPending}
+              onClick={() => {
+                if (testFireRuleId !== null && testSampleValue.trim()) {
+                  testFireMutation.mutate({ ruleId: testFireRuleId, sampleValue: Number(testSampleValue) });
+                }
+              }}
+            >
+              {testFireMutation.isPending ? <Loader2 size={12} className="animate-spin" /> : <FlaskConical size={12} />}
+              Run Test
             </Button>
           </DialogFooter>
         </DialogContent>

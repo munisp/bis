@@ -441,4 +441,31 @@
 - [x] 0 TypeScript errors
 
 ### Archive
-- [ ] Comprehensive project archive v19 generated
+- [x] Comprehensive project archive v19 generated (checkpoint 84c67ff4)
+
+## Phase 20 — Next Steps (Round 11)
+
+### Tenant Logo Upload UI
+- [x] Add updateLogo mutation to tenantsRouter (base64 → storagePut → update logoUrl)
+- [x] Add file input + upload button to TenantCard expanded panel
+- [x] Show live logo preview in tenant card header (replaces Building2 icon)
+- [x] Logo embedded in PDF export header when tenantId provided
+
+### Evaluation History CSV Export
+- [x] Add Download icon import to AlertRulesPage
+- [x] Add Export CSV button to Trigger History filter bar (right-aligned, client-side generation)
+- [x] Blob download via anchor click, auto-named rule-evaluations-{timestamp}.csv
+
+### Alert Rule Test-Fire
+- [x] Add alertRules.testFire tRPC mutation (dry-run, no DB writes, no alerts created)
+- [x] Add FlaskConical icon and testFire state/mutation to AlertRulesPage
+- [x] Add violet Test Rule button per rule row (between Edit and Delete)
+- [x] Build test-fire dialog: rule summary card, sample value input, result panel
+- [x] Result panel: WOULD TRIGGER (red) or Would NOT trigger (green) with expression
+
+### Tests
+- [x] All 26 tests pass (3 test files, 0 failures)
+- [x] 0 TypeScript errors
+
+### Archive
+- [ ] Comprehensive end-to-end archive v20 generated (source + services, >= 17 MB)
