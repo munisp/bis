@@ -11,6 +11,8 @@ import { adminProcedure, protectedProcedure, publicProcedure, router, writeProce
 import { apiTokensRouter } from "./apiTokens";
 import { quickcheckRouter } from "./quickcheck";
 import { goamlRouter } from "./goaml";
+import { messagingRouter } from "./messaging";
+import { socialMonitoringRouter } from "./socialMonitoring";
 import { getDb } from "./db";
 import { evaluateAlertRules } from "./alertRules";
 import {
@@ -1789,6 +1791,8 @@ export const appRouter = router({
   apiTokens: apiTokensRouter,
   quickcheck: quickcheckRouter,
   goaml: goamlRouter,
+  messaging: messagingRouter,
+  socialMonitoring: socialMonitoringRouter,
 });
 
 export type AppRouter = typeof appRouter;

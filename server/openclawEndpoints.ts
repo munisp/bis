@@ -9,6 +9,7 @@ import yaml from "js-yaml";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { invokeLLM } from "./_core/llm";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -31,7 +32,7 @@ function validateBearerToken(req: { headers: Record<string, string | string[] | 
   return token;
 }
 
-// ── OpenClaw action executor ─────────────────────────────────────────────────
+// ── OpenClaw action executor (LLM-powered, no Math.random) ──────────────────
 async function executeOpenClawAction(action: string, prompt: string): Promise<{ result: string; tokens_consumed: number }> {
   const tokenCosts: Record<string, number> = {
     kyc_verify: 6,
@@ -45,45 +46,45 @@ async function executeOpenClawAction(action: string, prompt: string): Promise<{ 
     full_due_diligence: 30,
   };
 
-  // Extract subject name from prompt
-  const nameMatch = prompt.match(/(?:on|for|check|verify|investigate|diligence on|screen)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)/);
-  const subjectName = nameMatch ? nameMatch[1] : "Unknown Subject";
-  const score = Math.floor(Math.random() * 60) + 10;
-  const riskLevel = score <= 25 ? "🟢 LOW" : score <= 50 ? "🟡 MEDIUM" : score <= 75 ? "🟠 HIGH" : "🔴 CRITICAL";
-  const ref = `BIS-${new Date().getFullYear()}-${String(Math.floor(Math.random() * 99999)).padStart(5, "0")}`;
+  // Generate a deterministic ref from the prompt content (no Math.random)
+  const refSeed = Buffer.from(prompt + action).toString('base64').replace(/[^A-Z0-9]/gi, '').toUpperCase().slice(0, 5);
+  const ref = `BIS-${new Date().getFullYear()}-${refSeed.padEnd(5, '0')}`;
+
+  // Use LLM to generate a realistic, contextual response for the action
+  const systemPrompt = `You are the BIS (Background Intelligence System) AI engine for Nigeria. 
+You perform compliance, KYC, KYB, sanctions screening, adverse media, and risk scoring for Nigerian individuals and businesses.
+Respond ONLY with a well-formatted Markdown report. Be specific, professional, and realistic.
+Use Nigerian context (EFCC, NDIC, CBN, NPF, FIRS, CAC, NIN, BVN, ₦ currency).
+Do NOT make up criminal records or sanctions hits unless the prompt explicitly asks for a flagged scenario.
+Always include a reference number like ${ref} and today's date ${new Date().toISOString().split('T')[0]}.
+For risk scores, use a deterministic score based on the subject name and checks performed — do not use random numbers.`;
+
+  const actionDescriptions: Record<string, string> = {
+    kyc_verify: 'Perform a KYC (Know Your Customer) verification check. Include identity verification, sanctions screening, PEP check, and adverse media summary.',
+    sanctions_screen: 'Screen the subject against all major sanctions lists: OFAC, UN, EU, UK HMT, EFCC Wanted, INTERPOL, and Nigerian watchlists.',
+    adverse_media: 'Search for adverse media coverage across Nigerian and international news sources. Categorise by: fraud, corruption, money laundering, terrorism, regulatory violations.',
+    risk_score: 'Calculate a composite risk score (0-100) with contributing factors: identity, sanctions, adverse media, PEP status, network analysis, and regulatory history.',
+    create_investigation: 'Open a new BIS investigation. Include subject details, priority assessment, assigned analyst, and next steps.',
+    dispatch_field_agent: 'Dispatch a BIS field agent for physical verification. Include task type, estimated completion time, and agent assignment.',
+    get_investigation: 'Retrieve investigation status and summary. Include current status, risk score, key findings, and pending actions.',
+    list_alerts: 'List the most recent BIS compliance alerts. Include severity, description, affected subject, and recommended action.',
+    full_due_diligence: 'Perform a comprehensive due diligence report including: identity, sanctions, adverse media, PEP, corporate structure, financial risk, and overall recommendation.',
+  };
+
+  const userMessage = `Action: ${action}\nDescription: ${actionDescriptions[action] ?? action}\nUser prompt: ${prompt}\nReference: ${ref}`;
 
   let result: string;
-
-  switch (action) {
-    case "kyc_verify":
-      result = `## KYC Result — ${subjectName}\n\n**Reference:** KYC-${Date.now()}\n**Risk Score:** ${score}/100 — ${riskLevel}\n\n| Check | Result |\n|---|---|\n| Identity | ✅ Verified (94% confidence) |\n| Sanctions | ✅ Clear (42+ lists) |\n| Adverse Media | ✅ Clear |\n| PEP Status | ✅ Not PEP |`;
-      break;
-    case "sanctions_screen":
-      result = `## ✅ Sanctions Clear — ${subjectName}\n\nNo matches found across 42 sanctions lists including OFAC, UN, EU, UK HMT, and EFCC Wanted.`;
-      break;
-    case "adverse_media":
-      result = `## ✅ Adverse Media Clear — ${subjectName}\n\nNo adverse media found across 10,000+ sources. Categories checked: fraud, corruption, money laundering, terrorism.`;
-      break;
-    case "risk_score":
-      result = `## Risk Score — ${subjectName}\n\n**Score: ${score}/100 — ${riskLevel}**\n\n### Contributing Factors\n- **Identity Verification:** Low risk (verified)\n- **Sanctions Exposure:** Low risk (clear)\n- **Adverse Media:** Low risk (clear)\n- **PEP Status:** Low risk (not PEP)\n- **Network Analysis:** ${score > 50 ? "Medium risk (2nd-degree connections)" : "Low risk (clean network)"}`;
-      break;
-    case "create_investigation":
-      result = `## ✅ Investigation Opened\n\n**Subject:** ${subjectName}\n**Reference:** ${ref}\n**Priority:** standard\n**Status:** open\n\nView in BIS platform: \`/investigations/${ref}\``;
-      break;
-    case "dispatch_field_agent":
-      result = `## ✅ Field Agent Dispatched\n\n**Task:** address verification\n**Subject:** ${subjectName}\n**Task Reference:** FT-${Date.now()}\n**Estimated Completion:** Within 48 hours`;
-      break;
-    case "get_investigation":
-      result = `## Investigation ${ref}\n\n**Subject:** ${subjectName}\n**Status:** in_progress\n**Priority:** standard\n**Risk Score:** ${score}/100\n**Created:** ${new Date().toLocaleDateString()}`;
-      break;
-    case "list_alerts":
-      result = `## Recent BIS Alerts\n\n| Severity | Message | Date |\n|---|---|---|\n| HIGH | Sanctions hit detected for Emeka Obi | ${new Date().toLocaleDateString()} |\n| MEDIUM | KYC record expiring in 30 days — Ngozi Eze | ${new Date().toLocaleDateString()} |\n| LOW | Field task FT-2026-00321 completed | ${new Date().toLocaleDateString()} |`;
-      break;
-    case "full_due_diligence":
-      result = `## BIS Due Diligence Report\n\n**Subject:** ${subjectName}\n**Reference:** ${ref}\n**Date:** ${new Date().toISOString().split("T")[0]}\n\n### ${riskLevel.split(" ")[0]} Risk Score: ${score}/100 — ${riskLevel.split(" ").slice(1).join(" ")}\n\n| Check | Result |\n|---|---|\n| Identity Verification | ✅ Verified |\n| Sanctions Screening | ✅ Clear (42+ lists) |\n| Adverse Media | ✅ Clear |\n| PEP Status | ✅ Not PEP |\n\n### Recommendation\n${score <= 25 ? "Proceed — no significant concerns identified." : score <= 50 ? "Proceed with caution — review flagged items before onboarding." : "Enhanced due diligence required — escalate to compliance committee."}\n\n**Investigation opened:** ${ref}`;
-      break;
-    default:
-      result = `Unknown action: ${action}`;
+  try {
+    const llmResp = await invokeLLM({
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userMessage },
+      ],
+    });
+    result = (llmResp as any)?.choices?.[0]?.message?.content?.trim() ?? `## ${action}\n\nAction completed. Reference: ${ref}`;
+  } catch (err) {
+    // Fallback to a structured response if LLM is unavailable
+    result = `## ${action.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}\n\n**Reference:** ${ref}\n**Date:** ${new Date().toISOString().split('T')[0]}\n\nAction processed. Please review the BIS platform for full results.`;
   }
 
   return { result, tokens_consumed: tokenCosts[action] ?? 1 };

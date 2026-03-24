@@ -81,6 +81,12 @@ interface OnboardingForm {
   expectedMonthlyVolume: string;
   pepDeclaration: boolean;
   agreedToTerms: boolean;
+  // Individual-specific fields
+  nin: string;
+  bvn: string;
+  dateOfBirth: string;
+  occupation: string;
+  gender: string;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -90,7 +96,7 @@ const ENTITY_TYPES = [
   { value: 'financial_institution', label: 'Financial Institution', icon: '🏦', description: 'Banks, PSPs, Mobile Money Operators' },
   { value: 'government_agency', label: 'Government Agency', icon: '🏛️', description: 'Ministries, Departments, Agencies (MDAs)' },
   { value: 'ngo', label: 'NGO / Non-Profit', icon: '🤝', description: 'Charities, Foundations, Civil Society' },
-  { value: 'individual', label: 'Individual Stakeholder', icon: '👤', description: 'Director, Shareholder, or UBO completing KYC' },
+  { value: 'individual', label: 'Individual / Consumer', icon: '👤', description: 'Individual KYC, domestic staff vetting, personal background check' },
 ];
 
 const BUSINESS_CATEGORIES: Record<EntityType, Array<{value: string; label: string}>> = {
@@ -189,6 +195,11 @@ function StakeholderOnboardingWizardInner() {
       countryCode: 'NG',
       pepDeclaration: false,
       agreedToTerms: false,
+      nin: '',
+      bvn: '',
+      dateOfBirth: '',
+      occupation: '',
+      gender: ''
     }
   });
 
@@ -389,7 +400,129 @@ function StakeholderOnboardingWizardInner() {
         )}
 
         {/* ── Step 1: Organisation Details ── */}
-        {step === 1 && entityType && (
+        {step === 1 && entityType === 'individual' && (
+          <Card className="bg-card border-border">
+            <CardHeader>
+              <CardTitle className="text-foreground flex items-center gap-2">
+                <User className="w-5 h-5 text-emerald-400" />
+                Personal Details
+              </CardTitle>
+              <CardDescription>
+                Complete your personal KYC. All information is encrypted and processed in accordance with NDPR.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <Label className="text-muted-foreground">Full Legal Name *</Label>
+                  <Input
+                    {...register('legalName', { required: 'Full name is required' })}
+                    placeholder="As it appears on your NIN / Passport"
+                    className="bg-muted border-border text-foreground mt-1"
+                  />
+                  {errors.legalName && <p className="text-red-400 text-xs mt-1">{errors.legalName.message}</p>}
+                </div>
+                <div>
+                  <Label className="text-muted-foreground">Date of Birth *</Label>
+                  <Input
+                    {...register('dateOfBirth', { required: 'Date of birth is required' })}
+                    type="date"
+                    className="bg-muted border-border text-foreground mt-1"
+                  />
+                </div>
+                <div>
+                  <Label className="text-muted-foreground">NIN (National Identification Number)</Label>
+                  <Input
+                    {...register('nin')}
+                    placeholder="11-digit NIN"
+                    maxLength={11}
+                    className="bg-muted border-border text-foreground mt-1"
+                  />
+                </div>
+                <div>
+                  <Label className="text-muted-foreground">BVN (Bank Verification Number)</Label>
+                  <Input
+                    {...register('bvn')}
+                    placeholder="11-digit BVN"
+                    maxLength={11}
+                    className="bg-muted border-border text-foreground mt-1"
+                  />
+                </div>
+                <div>
+                  <Label className="text-muted-foreground">Gender</Label>
+                  <Select onValueChange={v => setValue('gender' as any, v)}>
+                    <SelectTrigger className="bg-muted border-border text-foreground mt-1">
+                      <SelectValue placeholder="Select gender" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-muted border-border">
+                      <SelectItem value="male">Male</SelectItem>
+                      <SelectItem value="female">Female</SelectItem>
+                      <SelectItem value="prefer_not_to_say">Prefer not to say</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label className="text-muted-foreground">Nationality</Label>
+                  <Select onValueChange={v => setValue('countryCode', v)} defaultValue="NG">
+                    <SelectTrigger className="bg-muted border-border text-foreground mt-1">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="bg-muted border-border">
+                      <SelectItem value="NG">🇳🇬 Nigeria</SelectItem>
+                      <SelectItem value="GH">🇬🇭 Ghana</SelectItem>
+                      <SelectItem value="KE">🇰🇪 Kenya</SelectItem>
+                      <SelectItem value="ZA">🇿🇦 South Africa</SelectItem>
+                      <SelectItem value="GB">🇬🇧 United Kingdom</SelectItem>
+                      <SelectItem value="US">🇺🇸 United States</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label className="text-muted-foreground">State of Origin</Label>
+                  <Input
+                    {...register('stateProvince')}
+                    placeholder="e.g. Lagos, Kano, Abuja FCT"
+                    className="bg-muted border-border text-foreground mt-1"
+                  />
+                </div>
+                <div>
+                  <Label className="text-muted-foreground">Occupation</Label>
+                  <Input
+                    {...register('occupation' as any)}
+                    placeholder="e.g. Engineer, Trader, Civil Servant"
+                    className="bg-muted border-border text-foreground mt-1"
+                  />
+                </div>
+                <div className="md:col-span-2">
+                  <Label className="text-muted-foreground">Residential Address *</Label>
+                  <Input
+                    {...register('address')}
+                    placeholder="House number, street, area, city"
+                    className="bg-muted border-border text-foreground mt-1"
+                  />
+                </div>
+                <div className="md:col-span-2">
+                  <Label className="text-muted-foreground">Purpose of Registration</Label>
+                  <Select onValueChange={v => setValue('useCase', v)}>
+                    <SelectTrigger className="bg-muted border-border text-foreground mt-1">
+                      <SelectValue placeholder="Why are you registering?" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-muted border-border">
+                      <SelectItem value="personal_background_check">Personal background check</SelectItem>
+                      <SelectItem value="vet_domestic_staff">Vet domestic staff (house help, driver, nanny)</SelectItem>
+                      <SelectItem value="vet_contractor">Vet contractor / artisan</SelectItem>
+                      <SelectItem value="director_kyc">Complete KYC as company director / UBO</SelectItem>
+                      <SelectItem value="investor_kyc">Investor / shareholder KYC</SelectItem>
+                      <SelectItem value="other">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {step === 1 && entityType && entityType !== 'individual' && (
           <Card className="bg-card border-border">
             <CardHeader>
               <CardTitle className="text-foreground flex items-center gap-2">
@@ -515,7 +648,7 @@ function StakeholderOnboardingWizardInner() {
                   <Label className="text-muted-foreground">Use Case / Purpose</Label>
                   <Textarea
                     {...register('useCase')}
-                    placeholder="Describe how you intend to use the TourismPay platform..."
+                    placeholder="Describe how you intend to use the BIS platform..."
                     className="bg-muted border-border text-foreground mt-1"
                     rows={3}
                   />

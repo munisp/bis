@@ -558,3 +558,99 @@ export const goamlFilings = pgTable("goaml_filings", {
 
 export type GoamlFiling = typeof goamlFilings.$inferSelect;
 export type InsertGoamlFiling = typeof goamlFilings.$inferInsert;
+
+// ─── Messaging Channels ───────────────────────────────────────────────────────
+export const channelTypeEnum = pgEnum("channel_type", ["whatsapp", "telegram", "ussd", "sms", "email"]);
+export const channelStatusEnum = pgEnum("channel_status", ["active", "inactive", "error", "pending"]);
+export const incomingReportStatusEnum = pgEnum("incoming_report_status", ["new", "processing", "verified", "dismissed", "escalated"]);
+
+export const messagingChannels = pgTable("messaging_channels", {
+  id: serial("id").primaryKey(),
+  channelType: channelTypeEnum("channelType").notNull(),
+  name: varchar("name", { length: 100 }).notNull(),
+  identifier: varchar("identifier", { length: 100 }).notNull(),
+  status: channelStatusEnum("status").notNull().default("inactive"),
+  webhookUrl: varchar("webhookUrl", { length: 500 }),
+  apiKey: varchar("apiKey", { length: 255 }),
+  totalReports: integer("totalReports").notNull().default(0),
+  todayReports: integer("todayReports").notNull().default(0),
+  activeUsers: integer("activeUsers").notNull().default(0),
+  lastActivityAt: timestamp("lastActivityAt"),
+  config: text("config"),
+  tenantId: integer("tenantId"),
+  createdBy: integer("createdBy").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+
+export const incomingReports = pgTable("incoming_reports", {
+  id: serial("id").primaryKey(),
+  channelId: integer("channelId").notNull(),
+  channelType: channelTypeEnum("channelType").notNull(),
+  sender: varchar("sender", { length: 100 }).notNull(),
+  content: text("content").notNull(),
+  status: incomingReportStatusEnum("status").notNull().default("new"),
+  riskScore: integer("riskScore").notNull().default(0),
+  language: varchar("language", { length: 10 }).notNull().default("en"),
+  attachmentCount: integer("attachmentCount").notNull().default(0),
+  linkedSubjectRef: varchar("linkedSubjectRef", { length: 32 }),
+  linkedInvestigationRef: varchar("linkedInvestigationRef", { length: 32 }),
+  assignedTo: integer("assignedTo"),
+  metadata: text("metadata"),
+  receivedAt: timestamp("receivedAt").defaultNow().notNull(),
+  processedAt: timestamp("processedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+
+export type MessagingChannel = typeof messagingChannels.$inferSelect;
+export type InsertMessagingChannel = typeof messagingChannels.$inferInsert;
+export type IncomingReport = typeof incomingReports.$inferSelect;
+export type InsertIncomingReport = typeof incomingReports.$inferInsert;
+
+// ─── Social Monitoring ────────────────────────────────────────────────────────
+export const socialPlatformEnum = pgEnum("social_platform", ["twitter", "facebook", "instagram", "tiktok", "linkedin", "news", "whatsapp_group", "youtube"]);
+export const mentionSentimentEnum = pgEnum("mention_sentiment", ["positive", "neutral", "negative", "critical"]);
+
+export const socialMonitorConfigs = pgTable("social_monitor_configs", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 100 }).notNull(),
+  keywords: text("keywords").notNull(),
+  platforms: text("platforms").notNull(),
+  subjectRef: varchar("subjectRef", { length: 32 }),
+  investigationRef: varchar("investigationRef", { length: 32 }),
+  isActive: boolean("isActive").notNull().default(true),
+  alertThreshold: integer("alertThreshold").notNull().default(60),
+  totalMentions: integer("totalMentions").notNull().default(0),
+  criticalMentions: integer("criticalMentions").notNull().default(0),
+  lastMentionAt: timestamp("lastMentionAt"),
+  tenantId: integer("tenantId"),
+  createdBy: integer("createdBy").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+
+export const socialMentions = pgTable("social_mentions", {
+  id: serial("id").primaryKey(),
+  monitorId: integer("monitorId").notNull(),
+  platform: socialPlatformEnum("platform").notNull(),
+  content: text("content").notNull(),
+  author: varchar("author", { length: 100 }).notNull(),
+  authorHandle: varchar("authorHandle", { length: 100 }),
+  externalUrl: varchar("externalUrl", { length: 500 }),
+  sentiment: mentionSentimentEnum("sentiment").notNull().default("neutral"),
+  riskScore: integer("riskScore").notNull().default(0),
+  keywords: text("keywords"),
+  engagementCount: integer("engagementCount").notNull().default(0),
+  isVerified: boolean("isVerified").notNull().default(false),
+  language: varchar("language", { length: 10 }).notNull().default("en"),
+  isAcknowledged: boolean("isAcknowledged").notNull().default(false),
+  acknowledgedBy: integer("acknowledgedBy"),
+  publishedAt: timestamp("publishedAt").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type SocialMonitorConfig = typeof socialMonitorConfigs.$inferSelect;
+export type InsertSocialMonitorConfig = typeof socialMonitorConfigs.$inferInsert;
+export type SocialMention = typeof socialMentions.$inferSelect;
+export type InsertSocialMention = typeof socialMentions.$inferInsert;

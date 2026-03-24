@@ -105,8 +105,12 @@ async function runChecks(input: {
     });
   }
 
-  // Risk score
-  const riskScore = identityConfirmed ? Math.floor(Math.random() * 25) + 5 : 45;
+  // Risk score — deterministic based on check results (no Math.random)
+  // Base: 10 if identity confirmed, 40 if not. Each flag adds 15, each fail adds 35.
+  const flagCount = factors.filter(f => f.result === 'flag').length;
+  const failCount = factors.filter(f => f.result === 'fail').length;
+  const baseScore = identityConfirmed ? 10 : 40;
+  const riskScore = Math.min(100, baseScore + (flagCount * 15) + (failCount * 35));
   if (checks.includes("risk_score")) {
     factors.push({
       check: "Composite Risk Score",

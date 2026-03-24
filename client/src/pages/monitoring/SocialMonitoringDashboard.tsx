@@ -3,10 +3,10 @@
  * =================================
  * Real-time social media monitoring for BIS subjects.
  * Design: Dark forensic intelligence theme, JetBrains Mono typography
- * Live feed: new mentions injected every 8 seconds via setInterval
+ * Data: All data sourced from real tRPC endpoints (socialMonitoring router)
  */
 
-import { useState, useEffect, useRef } from 'react';
+import { useState } from 'react';
 import BISLayout from '@/components/BISLayout';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -14,35 +14,16 @@ import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import {
   Globe, Twitter, Facebook, Linkedin, AlertTriangle, TrendingUp,
-  TrendingDown, Minus, Radio, Bell, Filter, RefreshCw, ExternalLink,
-  MessageSquare, Newspaper, Eye, ChevronDown, Zap, Activity, Link2, X, Search, CheckCircle2
+  TrendingDown, Minus, Bell, Filter, RefreshCw, ExternalLink,
+  MessageSquare, Eye, Zap, Activity, Link2, X, Search, CheckCircle2, Plus, Trash2
 } from 'lucide-react';
 import { trpc } from '@/lib/trpc';
-
-// ─── Types ───────────────────────────────────────────────────────────────────
-
-type Platform = 'twitter' | 'facebook' | 'instagram' | 'tiktok' | 'linkedin' | 'news' | 'whatsapp_group';
-type Sentiment = 'positive' | 'neutral' | 'negative' | 'critical';
-
-interface SocialMention {
-  id: string;
-  platform: Platform;
-  content: string;
-  author: string;
-  authorHandle: string;
-  publishedAt: string;
-  sentiment: Sentiment;
-  riskScore: number;
-  keywords: string[];
-  engagementCount: number;
-  isVerified: boolean;
-  language: string;
-  isNew?: boolean;
-}
+import { toast } from 'sonner';
+import { useAuth } from '@/_core/hooks/useAuth';
 
 // ─── Platform Config ──────────────────────────────────────────────────────────
 
-const PLATFORM_CONFIG: Record<Platform, { icon: string; label: string; color: string; textColor: string }> = {
+const PLATFORM_CONFIG: Record<string, { icon: string; label: string; color: string; textColor: string }> = {
   twitter:        { icon: '𝕏', label: 'X (Twitter)',      color: 'bg-sky-500/15 border-sky-500/30',    textColor: 'text-sky-400' },
   facebook:       { icon: 'f', label: 'Facebook',          color: 'bg-blue-500/15 border-blue-500/30',  textColor: 'text-blue-400' },
   instagram:      { icon: '◎', label: 'Instagram',         color: 'bg-pink-500/15 border-pink-500/30',  textColor: 'text-pink-400' },
@@ -52,110 +33,72 @@ const PLATFORM_CONFIG: Record<Platform, { icon: string; label: string; color: st
   whatsapp_group: { icon: '◈', label: 'WhatsApp Groups',   color: 'bg-emerald-500/15 border-emerald-500/30', textColor: 'text-emerald-400' },
 };
 
-const SENTIMENT_CONFIG: Record<Sentiment, { label: string; color: string; icon: React.ReactNode; border: string }> = {
+const SENTIMENT_CONFIG: Record<string, { label: string; color: string; icon: React.ReactNode; border: string }> = {
   positive: { label: 'Positive', color: 'text-emerald-400', border: 'border-l-emerald-400', icon: <TrendingUp size={11} /> },
   neutral:  { label: 'Neutral',  color: 'text-slate-400',   border: 'border-l-slate-400',   icon: <Minus size={11} /> },
   negative: { label: 'Negative', color: 'text-amber-400',   border: 'border-l-amber-400',   icon: <TrendingDown size={11} /> },
   critical: { label: 'Critical', color: 'text-red-400',     border: 'border-l-red-400',     icon: <AlertTriangle size={11} /> },
 };
 
-// ─── Mock Seed Data ───────────────────────────────────────────────────────────
-
-
-const LIVE_POOL: Omit<SocialMention, 'id' | 'publishedAt' | 'isNew'>[] = [
-  {
-    platform: 'twitter', author: 'NaijaCrimeWatch', authorHandle: '@naijacrime',
-    content: 'BREAKING: Sources confirm EFCC has frozen 3 bank accounts linked to subject. Total: ₦1.2bn.',
-    sentiment: 'critical', riskScore: 94, keywords: ['EFCC', 'frozen', 'bank accounts'],
-    engagementCount: 0, isVerified: false, language: 'en',
-  },
-  {
-    platform: 'news', author: 'Vanguard Nigeria', authorHandle: 'vanguardngr.com',
-    content: 'Court grants bail to Lagos property developer amid fraud allegations — conditions include surrender of international passport.',
-    sentiment: 'negative', riskScore: 78, keywords: ['bail', 'fraud', 'passport'],
-    engagementCount: 0, isVerified: true, language: 'en',
-  },
-  {
-    platform: 'facebook', author: 'Ikoyi Residents Assoc.', authorHandle: 'IRA-Lagos',
-    content: 'We have compiled a list of affected buyers. If you paid deposit to Adeyemi Holdings, please DM us.',
-    sentiment: 'negative', riskScore: 66, keywords: ['affected buyers', 'deposit', 'Adeyemi Holdings'],
-    engagementCount: 0, isVerified: false, language: 'en',
-  },
-  {
-    platform: 'whatsapp_group', author: 'Lekki Investors Network', authorHandle: 'WhatsApp Group',
-    content: 'Oga I just hear say the man don travel to Dubai. Somebody should alert EFCC before e escape.',
-    sentiment: 'critical', riskScore: 89, keywords: ['Dubai', 'escape', 'EFCC'],
-    engagementCount: 0, isVerified: false, language: 'pidgin',
-  },
-  {
-    platform: 'twitter', author: 'BusinessDayNG', authorHandle: '@BusinessDayNg',
-    content: 'Analysis: The Adeyemi Holdings case exposes systemic gaps in Nigeria\'s real estate regulatory framework.',
-    sentiment: 'neutral', riskScore: 38, keywords: ['regulatory', 'real estate', 'Nigeria'],
-    engagementCount: 0, isVerified: true, language: 'en',
-  },
-  {
-    platform: 'instagram', author: 'LagosInsider', authorHandle: '@lagosinsider',
-    content: 'Photos from the court appearance today. Subject appeared calm and well-dressed. Supporters outside courthouse.',
-    sentiment: 'neutral', riskScore: 42, keywords: ['court', 'appearance'],
-    engagementCount: 0, isVerified: false, language: 'en',
-  },
-];
-
-let liveIdx = 0;
-
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function SocialMonitoringDashboard() {
-  const [mentions, setMentions] = useState<SocialMention[]>([]);
-  const [filterPlatform, setFilterPlatform] = useState<Platform | 'all'>('all');
-  const [filterSentiment, setFilterSentiment] = useState<Sentiment | 'all'>('all');
-  const [isLive, setIsLive] = useState(true);
-  const [newCount, setNewCount] = useState(0);
-  const [activeTab, setActiveTab] = useState<'feed' | 'analytics' | 'alerts'>('feed');
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  // Link-to-Investigation picker state
-  const [linkPickerMention, setLinkPickerMention] = useState<SocialMention | null>(null);
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
+  const utils = trpc.useUtils();
+
+  const [filterPlatform, setFilterPlatform] = useState<string>('all');
+  const [filterSentiment, setFilterSentiment] = useState<string>('all');
+  const [activeTab, setActiveTab] = useState<'feed' | 'monitors' | 'analytics'>('feed');
+  const [linkPickerMention, setLinkPickerMention] = useState<any | null>(null);
   const [invSearch, setInvSearch] = useState('');
-  const [linkedMap, setLinkedMap] = useState<Record<string, string>>({});
-  // Live investigations list for link picker
+  const [showNewMonitor, setShowNewMonitor] = useState(false);
+  const [newMonitorName, setNewMonitorName] = useState('');
+  const [newMonitorKeywords, setNewMonitorKeywords] = useState('');
+
+  // ── Queries ──
+  const { data: statsData } = trpc.socialMonitoring.stats.useQuery();
+  const stats = statsData ?? { totalMonitors: 0, activeMonitors: 0, totalMentions: 0, criticalMentions: 0, negativeMentions: 0, unacknowledged: 0 };
+
+  const { data: mentionsData, isLoading: mentionsLoading, refetch: refetchMentions } = trpc.socialMonitoring.listMentions.useQuery({
+    platform: filterPlatform !== 'all' ? filterPlatform as any : undefined,
+    sentiment: filterSentiment !== 'all' ? filterSentiment as any : undefined,
+    limit: 100,
+  });
+  const mentions = mentionsData?.mentions ?? [];
+
+  const { data: monitorsData, isLoading: monitorsLoading } = trpc.socialMonitoring.listMonitors.useQuery({ limit: 50 });
+  const monitors = monitorsData?.monitors ?? [];
+
   const { data: liveInvestigations = [] } = trpc.investigations.list.useQuery({ limit: 100 });
 
-  // Live feed injection
-  useEffect(() => {
-    if (!isLive) {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-      return;
-    }
-    intervalRef.current = setInterval(() => {
-      const template = LIVE_POOL[liveIdx % LIVE_POOL.length];
-      liveIdx++;
-      const newMention: SocialMention = {
-        ...template,
-        id: `live_${Date.now()}`,
-        publishedAt: new Date().toISOString(),
-        engagementCount: Math.floor(Math.random() * 500),
-        isNew: true,
-      };
-      setMentions(prev => [newMention, ...prev.slice(0, 49)]);
-      setNewCount(c => c + 1);
-      // Clear "new" flag after 4 seconds
-      setTimeout(() => {
-        setMentions(prev => prev.map(m => m.id === newMention.id ? { ...m, isNew: false } : m));
-      }, 4000);
-    }, 8000);
-
-    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
-  }, [isLive]);
-
-  const filtered = mentions.filter(m => {
-    if (filterPlatform !== 'all' && m.platform !== filterPlatform) return false;
-    if (filterSentiment !== 'all' && m.sentiment !== filterSentiment) return false;
-    return true;
+  // ── Mutations ──
+  const acknowledgeMention = trpc.socialMonitoring.acknowledgeMention.useMutation({
+    onSuccess: () => { utils.socialMonitoring.listMentions.invalidate(); utils.socialMonitoring.stats.invalidate(); },
+    onError: (e) => toast.error(e.message),
   });
 
-  const criticalCount = mentions.filter(m => m.sentiment === 'critical').length;
-  const avgRisk = Math.round(mentions.reduce((s, m) => s + m.riskScore, 0) / mentions.length);
-  const platforms = Array.from(new Set(mentions.map(m => m.platform)));
+  const deleteMention = trpc.socialMonitoring.deleteMention.useMutation({
+    onSuccess: () => { utils.socialMonitoring.listMentions.invalidate(); utils.socialMonitoring.stats.invalidate(); toast.success('Mention removed'); },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const createMonitor = trpc.socialMonitoring.createMonitor.useMutation({
+    onSuccess: () => {
+      utils.socialMonitoring.listMonitors.invalidate();
+      utils.socialMonitoring.stats.invalidate();
+      setShowNewMonitor(false);
+      setNewMonitorName('');
+      setNewMonitorKeywords('');
+      toast.success('Monitor created');
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const deleteMonitor = trpc.socialMonitoring.deleteMonitor.useMutation({
+    onSuccess: () => { utils.socialMonitoring.listMonitors.invalidate(); utils.socialMonitoring.stats.invalidate(); toast.success('Monitor deleted'); },
+    onError: (e) => toast.error(e.message),
+  });
 
   const riskColor = (score: number) =>
     score >= 80 ? 'text-red-400' : score >= 60 ? 'text-amber-400' : score >= 30 ? 'text-yellow-400' : 'text-emerald-400';
@@ -163,8 +106,8 @@ export default function SocialMonitoringDashboard() {
   const riskBg = (score: number) =>
     score >= 80 ? '#f87171' : score >= 60 ? '#fb923c' : score >= 30 ? '#fbbf24' : '#34d399';
 
-  const timeAgo = (iso: string) => {
-    const diff = Date.now() - new Date(iso).getTime();
+  const timeAgo = (val: Date | string) => {
+    const diff = Date.now() - new Date(val).getTime();
     const m = Math.floor(diff / 60000);
     if (m < 1) return 'just now';
     if (m < 60) return `${m}m ago`;
@@ -173,68 +116,62 @@ export default function SocialMonitoringDashboard() {
     return `${Math.floor(h / 24)}d ago`;
   };
 
+  const filteredInvestigations = (liveInvestigations as any[]).filter((inv: any) =>
+    !invSearch || inv.subjectName?.toLowerCase().includes(invSearch.toLowerCase()) || inv.ref?.toLowerCase().includes(invSearch.toLowerCase())
+  );
+
   return (
     <BISLayout
       title="Social Intelligence"
-      subtitle="Adekunle Adeyemi · BIS-2026-0142"
+      subtitle={`${stats.totalMonitors} monitors · ${stats.unacknowledged} unreviewed`}
       actions={
         <div className="flex items-center gap-2">
           <button
-            onClick={() => { setIsLive(l => !l); setNewCount(0); }}
-            className={cn(
-              "flex items-center gap-1.5 px-3 py-1.5 rounded-md border text-xs font-mono transition-all",
-              isLive
-                ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-400"
-                : "border-border text-muted-foreground hover:border-border/80"
-            )}
+            onClick={() => refetchMentions()}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-border text-xs font-mono text-muted-foreground hover:text-foreground transition-all"
           >
-            <span className={cn("w-1.5 h-1.5 rounded-full", isLive ? "bg-emerald-400 animate-pulse" : "bg-muted-foreground")} />
-            {isLive ? "LIVE" : "PAUSED"}
+            <RefreshCw size={11} />
+            Refresh
           </button>
-          {newCount > 0 && (
+          {stats.unacknowledged > 0 && (
             <Badge variant="destructive" className="text-xs font-mono">
-              +{newCount} new
+              {stats.unacknowledged} unreviewed
             </Badge>
           )}
         </div>
       }
     >
-      {/* Stats row */}
-      <div className="grid grid-cols-4 gap-3 mb-5">
+      {/* ── KPI Bar ── */}
+      <div className="grid grid-cols-3 gap-3 mb-5">
         {[
-          { label: 'Total Mentions', value: mentions.length, sub: `${platforms.length} platforms`, icon: <Globe size={14} />, color: 'text-blue-400' },
-          { label: 'Critical Alerts', value: criticalCount, sub: 'require action', icon: <AlertTriangle size={14} />, color: 'text-red-400' },
-          { label: 'Avg Risk Score', value: avgRisk, sub: 'across all mentions', icon: <Activity size={14} />, color: riskColor(avgRisk) },
-          { label: 'Live Feed', value: isLive ? 'ON' : 'OFF', sub: 'updates every 8s', icon: <Radio size={14} />, color: isLive ? 'text-emerald-400' : 'text-muted-foreground' },
-        ].map(stat => (
-          <div key={stat.label} className="bis-card p-4">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider">{stat.label}</span>
-              <span className={cn("opacity-60", stat.color)}>{stat.icon}</span>
+          { label: 'Active Monitors', value: stats.activeMonitors, color: 'text-sky-400', icon: <Activity size={13} /> },
+          { label: 'Critical Mentions', value: stats.criticalMentions, color: 'text-red-400', icon: <AlertTriangle size={13} /> },
+          { label: 'Total Mentions', value: stats.totalMentions, color: 'text-foreground', icon: <MessageSquare size={13} /> },
+        ].map(kpi => (
+          <div key={kpi.label} className="bis-card p-3 text-center">
+            <div className={cn("flex items-center justify-center gap-1.5 mb-1", kpi.color)}>
+              {kpi.icon}
+              <span className="text-[9px] font-mono uppercase tracking-wider">{kpi.label}</span>
             </div>
-            <p className={cn("text-2xl font-mono font-bold", stat.color)}>{stat.value}</p>
-            <p className="text-[10px] text-muted-foreground mt-0.5">{stat.sub}</p>
+            <p className={cn("text-2xl font-mono font-bold", kpi.color)}>{kpi.value}</p>
           </div>
         ))}
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-1 mb-4 border-b border-border">
-        {(['feed', 'analytics', 'alerts'] as const).map(tab => (
+      {/* ── Tabs ── */}
+      <div className="flex gap-1 mb-4 border-b border-border pb-0">
+        {(['feed', 'monitors', 'analytics'] as const).map(tab => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
             className={cn(
-              "px-4 py-2 text-xs font-mono capitalize transition-all border-b-2 -mb-px",
+              "px-4 py-2 text-xs font-mono uppercase tracking-wider border-b-2 -mb-px transition-colors",
               activeTab === tab
                 ? "border-primary text-primary"
                 : "border-transparent text-muted-foreground hover:text-foreground"
             )}
           >
             {tab}
-            {tab === 'alerts' && criticalCount > 0 && (
-              <span className="ml-1.5 bg-red-500 text-white text-[9px] rounded-full px-1.5 py-0.5">{criticalCount}</span>
-            )}
           </button>
         ))}
       </div>
@@ -242,317 +179,285 @@ export default function SocialMonitoringDashboard() {
       {/* ── Feed Tab ── */}
       {activeTab === 'feed' && (
         <>
-          {/* Filters */}
           <div className="flex flex-wrap gap-2 mb-4">
             <select
               value={filterPlatform}
-              onChange={e => setFilterPlatform(e.target.value as any)}
+              onChange={e => setFilterPlatform(e.target.value)}
               className="h-8 px-3 rounded-md border border-border bg-background text-xs font-mono text-foreground"
             >
               <option value="all">All Platforms</option>
               {Object.entries(PLATFORM_CONFIG).map(([k, v]) => (
-                <option key={k} value={k}>{v.icon} {v.label}</option>
+                <option key={k} value={k}>{v.label}</option>
               ))}
             </select>
             <select
               value={filterSentiment}
-              onChange={e => setFilterSentiment(e.target.value as any)}
+              onChange={e => setFilterSentiment(e.target.value)}
               className="h-8 px-3 rounded-md border border-border bg-background text-xs font-mono text-foreground"
             >
-              <option value="all">All Sentiment</option>
+              <option value="all">All Sentiments</option>
               {Object.entries(SENTIMENT_CONFIG).map(([k, v]) => (
                 <option key={k} value={k}>{v.label}</option>
               ))}
             </select>
             <span className="text-xs font-mono text-muted-foreground self-center ml-auto">
-              {filtered.length} mentions
+              {mentions.length} mentions
             </span>
           </div>
 
-          {/* Feed list */}
-          <div className="space-y-2">
-            {filtered.map(mention => {
-              const plat = PLATFORM_CONFIG[mention.platform];
-              const sent = SENTIMENT_CONFIG[mention.sentiment];
-              return (
-                <div
-                  key={mention.id}
-                  className={cn(
-                    "bis-card p-4 border-l-2 transition-all duration-500",
-                    sent.border,
-                    mention.isNew && "ring-1 ring-primary/30 bg-primary/5"
-                  )}
-                >
-                  <div className="flex items-start gap-3">
-                    {/* Platform badge */}
-                    <div className={cn("w-8 h-8 rounded-md border flex items-center justify-center text-xs font-bold flex-shrink-0", plat.color, plat.textColor)}>
-                      {plat.icon}
-                    </div>
-
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1 flex-wrap">
-                        <span className="text-xs font-mono font-semibold text-foreground">{mention.author}</span>
-                        <span className="text-[10px] font-mono text-muted-foreground">{mention.authorHandle}</span>
-                        {mention.isVerified && (
-                          <span className="text-[9px] font-mono text-blue-400 border border-blue-400/30 rounded px-1">VERIFIED</span>
-                        )}
-                        {mention.isNew && (
-                          <span className="text-[9px] font-mono text-primary border border-primary/30 rounded px-1 animate-pulse">NEW</span>
-                        )}
-                        <span className="text-[10px] font-mono text-muted-foreground ml-auto">{timeAgo(mention.publishedAt)}</span>
-                      </div>
-
-                      <p className="text-sm text-foreground/90 leading-relaxed mb-2">{mention.content}</p>
-
-                      <div className="flex items-center gap-3 flex-wrap">
-                        {/* Sentiment */}
-                        <span className={cn("flex items-center gap-1 text-[10px] font-mono", sent.color)}>
-                          {sent.icon} {sent.label}
-                        </span>
-
-                        {/* Risk score */}
-                        <div className="flex items-center gap-1.5">
-                          <div className="w-16 h-1 bg-muted rounded-full overflow-hidden">
-                            <div className="h-full rounded-full" style={{ width: `${mention.riskScore}%`, backgroundColor: riskBg(mention.riskScore) }} />
-                          </div>
-                          <span className={cn("text-[10px] font-mono font-bold", riskColor(mention.riskScore))}>
-                            {mention.riskScore}
-                          </span>
-                        </div>
-
-                        {/* Engagement */}
-                        <span className="text-[10px] font-mono text-muted-foreground">
-                          {mention.engagementCount.toLocaleString()} engagements
-                        </span>
-
-                        {/* Language */}
-                        {mention.language !== 'en' && (
-                          <span className="text-[9px] font-mono text-amber-400 border border-amber-400/30 rounded px-1">
-                            {mention.language.toUpperCase()}
-                          </span>
-                        )}
-
-                        {/* Keywords */}
-                        <div className="flex gap-1 flex-wrap">
-                          {mention.keywords.slice(0, 3).map(kw => (
-                            <span key={kw} className="text-[9px] font-mono text-muted-foreground/60 border border-border/40 rounded px-1">
-                              #{kw}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-
-            {filtered.length === 0 && (
-              <div className="bis-card p-12 text-center">
-                <Globe size={32} className="mx-auto text-muted-foreground/30 mb-3" />
-                <p className="text-sm text-muted-foreground">No mentions match your filters.</p>
-              </div>
-            )}
-          </div>
-        </>
-      )}
-
-      {/* ── Analytics Tab ── */}
-      {activeTab === 'analytics' && (
-        <div className="grid grid-cols-2 gap-4">
-          {/* Sentiment breakdown */}
-          <div className="bis-card p-4">
-            <p className="text-xs font-mono text-muted-foreground uppercase tracking-wider mb-3">Sentiment Breakdown</p>
-            {(['critical', 'negative', 'neutral', 'positive'] as Sentiment[]).map(s => {
-              const count = mentions.filter(m => m.sentiment === s).length;
-              const pct = Math.round((count / mentions.length) * 100);
-              const cfg = SENTIMENT_CONFIG[s];
-              return (
-                <div key={s} className="flex items-center gap-3 mb-2">
-                  <span className={cn("text-xs font-mono w-16", cfg.color)}>{cfg.label}</span>
-                  <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
-                    <div className={cn("h-full rounded-full transition-all", {
-                      'bg-red-400': s === 'critical',
-                      'bg-amber-400': s === 'negative',
-                      'bg-slate-400': s === 'neutral',
-                      'bg-emerald-400': s === 'positive',
-                    })} style={{ width: `${pct}%` }} />
-                  </div>
-                  <span className="text-xs font-mono text-muted-foreground w-8 text-right">{count}</span>
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Platform breakdown */}
-          <div className="bis-card p-4">
-            <p className="text-xs font-mono text-muted-foreground uppercase tracking-wider mb-3">Platform Activity</p>
-            {Object.entries(PLATFORM_CONFIG).map(([key, cfg]) => {
-              const count = mentions.filter(m => m.platform === key).length;
-              if (count === 0) return null;
-              const pct = Math.round((count / mentions.length) * 100);
-              return (
-                <div key={key} className="flex items-center gap-3 mb-2">
-                  <span className={cn("text-xs font-mono w-24 truncate", cfg.textColor)}>{cfg.label}</span>
-                  <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
-                    <div className="h-full rounded-full bg-primary/60 transition-all" style={{ width: `${pct}%` }} />
-                  </div>
-                  <span className="text-xs font-mono text-muted-foreground w-8 text-right">{count}</span>
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Risk distribution */}
-          <div className="bis-card p-4 col-span-2">
-            <p className="text-xs font-mono text-muted-foreground uppercase tracking-wider mb-3">Risk Score Distribution</p>
-            <div className="flex gap-1 items-end h-20">
-              {Array.from({ length: 10 }, (_, i) => {
-                const min = i * 10, max = min + 10;
-                const count = mentions.filter(m => m.riskScore >= min && m.riskScore < max).length;
-                const maxCount = Math.max(...Array.from({ length: 10 }, (_, j) =>
-                  mentions.filter(m => m.riskScore >= j * 10 && m.riskScore < j * 10 + 10).length
-                ));
-                const height = maxCount > 0 ? (count / maxCount) * 100 : 0;
-                const color = max <= 30 ? '#34d399' : max <= 60 ? '#fbbf24' : max <= 80 ? '#fb923c' : '#f87171';
+          {mentionsLoading ? (
+            <div className="space-y-2">
+              {[1,2,3].map(i => <div key={i} className="bis-card p-4 animate-pulse h-20" />)}
+            </div>
+          ) : mentions.length === 0 ? (
+            <div className="bis-card p-12 text-center">
+              <Globe size={32} className="mx-auto text-muted-foreground/30 mb-3" />
+              <p className="text-sm text-muted-foreground">No mentions found. Create a monitor to start tracking.</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {mentions.map((mention: any) => {
+                const platCfg = PLATFORM_CONFIG[mention.platform] ?? PLATFORM_CONFIG['news'];
+                const sentCfg = SENTIMENT_CONFIG[mention.sentiment] ?? SENTIMENT_CONFIG['neutral'];
+                const keywords: string[] = (() => { try { return JSON.parse(mention.keywords ?? '[]'); } catch { return []; } })();
                 return (
-                  <div key={i} className="flex-1 flex flex-col items-center gap-1">
-                    <div className="w-full rounded-sm transition-all" style={{ height: `${height}%`, backgroundColor: color, minHeight: count > 0 ? 4 : 0 }} />
-                    <span className="text-[8px] font-mono text-muted-foreground">{min}</span>
+                  <div
+                    key={mention.id}
+                    className={cn(
+                      "bis-card p-4 border-l-2 transition-all",
+                      sentCfg.border,
+                      mention.isAcknowledged && "opacity-60"
+                    )}
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className={cn("w-8 h-8 rounded-md border flex items-center justify-center text-[11px] font-bold flex-shrink-0", platCfg.color, platCfg.textColor)}>
+                        {platCfg.icon}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1 flex-wrap">
+                          <span className={cn("text-[10px] font-mono font-semibold", platCfg.textColor)}>{platCfg.label}</span>
+                          <span className="text-[10px] font-mono text-muted-foreground">{mention.author}</span>
+                          {mention.authorHandle && (
+                            <span className="text-[10px] font-mono text-muted-foreground/60">{mention.authorHandle}</span>
+                          )}
+                          <span className="text-[10px] font-mono text-muted-foreground ml-auto">{timeAgo(mention.publishedAt)}</span>
+                        </div>
+                        <p className="text-sm text-foreground/90 leading-relaxed line-clamp-2 mb-2">{mention.content}</p>
+                        <div className="flex items-center gap-3 flex-wrap">
+                          <span className={cn("flex items-center gap-1 text-[10px] font-mono", sentCfg.color)}>
+                            {sentCfg.icon} {sentCfg.label}
+                          </span>
+                          <div className="flex items-center gap-1.5">
+                            <div className="w-12 h-1 bg-muted rounded-full overflow-hidden">
+                              <div className="h-full rounded-full" style={{ width: `${mention.riskScore}%`, backgroundColor: riskBg(mention.riskScore) }} />
+                            </div>
+                            <span className={cn("text-[10px] font-mono font-bold", riskColor(mention.riskScore))}>
+                              {mention.riskScore}
+                            </span>
+                          </div>
+                          {keywords.slice(0, 3).map((kw: string) => (
+                            <span key={kw} className="text-[9px] font-mono text-muted-foreground border border-border/50 rounded px-1">{kw}</span>
+                          ))}
+                          <div className="flex items-center gap-1 ml-auto">
+                            {!mention.isAcknowledged && (
+                              <button
+                                onClick={() => acknowledgeMention.mutate({ id: mention.id })}
+                                className="text-[10px] font-mono text-emerald-400 hover:text-emerald-300 flex items-center gap-1"
+                                title="Mark as reviewed"
+                              >
+                                <CheckCircle2 size={11} /> Review
+                              </button>
+                            )}
+                            <button
+                              onClick={() => setLinkPickerMention(mention)}
+                              className="text-[10px] font-mono text-blue-400 hover:text-blue-300 flex items-center gap-1 ml-2"
+                              title="Link to investigation"
+                            >
+                              <Link2 size={11} /> Link
+                            </button>
+                            {isAdmin && (
+                              <button
+                                onClick={() => deleteMention.mutate({ id: mention.id })}
+                                className="text-[10px] font-mono text-muted-foreground hover:text-red-400 flex items-center gap-1 ml-2"
+                                title="Delete mention"
+                              >
+                                <Trash2 size={11} />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 );
               })}
             </div>
+          )}
+        </>
+      )}
+
+      {/* ── Monitors Tab ── */}
+      {activeTab === 'monitors' && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-mono text-muted-foreground uppercase tracking-wider">
+              {monitors.length} monitor{monitors.length !== 1 ? 's' : ''} configured
+            </p>
+            {isAdmin && (
+              <Button size="sm" className="text-xs font-mono h-8" onClick={() => setShowNewMonitor(true)}>
+                <Plus size={12} className="mr-1" /> New Monitor
+              </Button>
+            )}
+          </div>
+
+          {showNewMonitor && (
+            <div className="bis-card p-4 border border-primary/30">
+              <p className="text-xs font-mono text-muted-foreground uppercase tracking-wider mb-3">New Monitor</p>
+              <div className="space-y-3">
+                <Input
+                  placeholder="Monitor name (e.g. Adeyemi Holdings)"
+                  value={newMonitorName}
+                  onChange={e => setNewMonitorName(e.target.value)}
+                  className="text-xs font-mono h-8"
+                />
+                <Input
+                  placeholder="Keywords (comma-separated)"
+                  value={newMonitorKeywords}
+                  onChange={e => setNewMonitorKeywords(e.target.value)}
+                  className="text-xs font-mono h-8"
+                />
+                <div className="flex gap-2">
+                  <Button size="sm" className="text-xs font-mono h-7" onClick={() => {
+                    if (!newMonitorName.trim()) return toast.error('Name required');
+                    createMonitor.mutate({
+                      name: newMonitorName.trim(),
+                      keywords: newMonitorKeywords.split(',').map(k => k.trim()).filter(Boolean),
+                      platforms: ['twitter', 'facebook', 'news'],
+                    });
+                  }} disabled={createMonitor.isPending}>
+                    {createMonitor.isPending ? 'Creating...' : 'Create'}
+                  </Button>
+                  <Button variant="outline" size="sm" className="text-xs font-mono h-7" onClick={() => setShowNewMonitor(false)}>
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {monitorsLoading ? (
+            <div className="space-y-2">{[1,2,3].map(i => <div key={i} className="bis-card p-4 animate-pulse h-16" />)}</div>
+          ) : monitors.length === 0 ? (
+            <div className="bis-card p-12 text-center">
+              <Eye size={32} className="mx-auto text-muted-foreground/30 mb-3" />
+              <p className="text-sm text-muted-foreground">No monitors configured yet.</p>
+            </div>
+          ) : (
+            monitors.map((monitor: any) => {
+              const keywords: string[] = (() => { try { return JSON.parse(monitor.keywords ?? '[]'); } catch { return []; } })();
+              const platforms: string[] = (() => { try { return JSON.parse(monitor.platforms ?? '[]'); } catch { return []; } })();
+              return (
+                <div key={monitor.id} className="bis-card p-4">
+                  <div className="flex items-start gap-3">
+                    <div className={cn("w-2 h-2 rounded-full mt-1.5 flex-shrink-0", monitor.isActive ? "bg-emerald-400" : "bg-muted-foreground")} />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <p className="text-sm font-mono font-semibold text-foreground">{monitor.name}</p>
+                        <span className={cn("text-[9px] font-mono border rounded px-1.5 py-0.5", monitor.isActive ? "text-emerald-400 border-emerald-400/30" : "text-muted-foreground border-border")}>
+                          {monitor.isActive ? 'ACTIVE' : 'PAUSED'}
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap gap-1 mb-2">
+                        {keywords.slice(0, 5).map((kw: string) => (
+                          <span key={kw} className="text-[9px] font-mono text-muted-foreground border border-border/50 rounded px-1">{kw}</span>
+                        ))}
+                      </div>
+                      <div className="flex items-center gap-3 text-[10px] font-mono text-muted-foreground">
+                        <span><Eye size={9} className="inline mr-1" />{monitor.totalMentions ?? 0} mentions</span>
+                        <span><AlertTriangle size={9} className="inline mr-1" />{monitor.criticalMentions ?? 0} critical</span>
+                        {platforms.slice(0, 3).map((p: string) => (
+                          <span key={p} className={cn(PLATFORM_CONFIG[p]?.textColor ?? 'text-muted-foreground')}>
+                            {PLATFORM_CONFIG[p]?.icon ?? p}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                    {isAdmin && (
+                      <button
+                        onClick={() => deleteMonitor.mutate({ id: monitor.id })}
+                        className="text-muted-foreground hover:text-red-400 transition-colors"
+                        title="Delete monitor"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      )}
+
+      {/* ── Analytics Tab ── */}
+      {activeTab === 'analytics' && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            {[
+              { label: 'Total Monitors', value: stats.totalMonitors, color: 'text-sky-400' },
+              { label: 'Active Monitors', value: stats.activeMonitors, color: 'text-emerald-400' },
+              { label: 'Total Mentions', value: stats.totalMentions, color: 'text-foreground' },
+              { label: 'Critical Mentions', value: stats.criticalMentions, color: 'text-red-400' },
+              { label: 'Negative Mentions', value: stats.negativeMentions, color: 'text-amber-400' },
+              { label: 'Unacknowledged', value: stats.unacknowledged, color: 'text-violet-400' },
+            ].map(s => (
+              <div key={s.label} className="bis-card p-4">
+                <p className="text-[9px] font-mono text-muted-foreground uppercase tracking-wider mb-1">{s.label}</p>
+                <p className={cn("text-2xl font-mono font-bold", s.color)}>{s.value}</p>
+              </div>
+            ))}
           </div>
         </div>
       )}
 
-      {/* ── Link-to-Investigation Picker Modal ── */}
+      {/* ── Link to Investigation Modal ── */}
       {linkPickerMention && (
         <>
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40" onClick={() => setLinkPickerMention(null)} />
           <div className="fixed inset-x-4 top-1/2 -translate-y-1/2 max-w-md mx-auto z-50 bg-popover border border-border rounded-xl shadow-2xl p-5">
             <div className="flex items-center justify-between mb-3">
-              <div>
-                <p className="text-sm font-mono font-semibold text-foreground flex items-center gap-2"><Link2 size={13} className="text-primary" /> Link to Investigation</p>
-                <p className="text-[10px] font-mono text-muted-foreground mt-0.5 line-clamp-1">{linkPickerMention.content.slice(0, 60)}…</p>
-              </div>
-              <button onClick={() => setLinkPickerMention(null)} className="text-muted-foreground hover:text-foreground"><X size={15} /></button>
+              <p className="text-sm font-mono font-semibold text-foreground">Link to Investigation</p>
+              <button onClick={() => setLinkPickerMention(null)} className="text-muted-foreground hover:text-foreground"><X size={16} /></button>
             </div>
-            {/* Search */}
             <div className="relative mb-3">
-              <Search size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-              <input
-                className="w-full h-8 pl-8 pr-3 rounded-md border border-border bg-background text-xs font-mono text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-                placeholder="Search by ref or subject name…"
+              <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="Search investigations..."
                 value={invSearch}
                 onChange={e => setInvSearch(e.target.value)}
-                autoFocus
+                className="pl-8 text-xs font-mono h-8"
               />
             </div>
-            {/* Investigation list */}
-            <div className="space-y-1.5 max-h-64 overflow-y-auto">
-              {(liveInvestigations as any[])
-                .filter((inv: any) =>
-                  (inv.ref ?? '').toLowerCase().includes(invSearch.toLowerCase()) ||
-                  (inv.subjectName ?? '').toLowerCase().includes(invSearch.toLowerCase())
-                )
-                .map((inv: any) => {
-                  const isLinked = linkedMap[linkPickerMention.id] === inv.ref;
-                  const riskCls = inv.riskScore >= 80 ? 'text-red-400' : inv.riskScore >= 60 ? 'text-amber-400' : inv.riskScore >= 30 ? 'text-yellow-400' : 'text-emerald-400';
-                  return (
-                    <button
-                      key={inv.id}
-                      onClick={() => {
-                        setLinkedMap(prev => ({ ...prev, [linkPickerMention.id]: inv.ref }));
-                        setLinkPickerMention(null);
-                        setInvSearch('');
-                      }}
-                      className={cn(
-                        "w-full text-left p-3 rounded-lg border transition-all hover:bg-muted/30",
-                        isLinked ? "border-emerald-500/50 bg-emerald-500/10" : "border-border/50"
-                      )}
-                    >
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-xs font-mono font-semibold text-primary">{inv.ref}</p>
-                          <p className="text-[11px] font-mono text-foreground/80">{inv.subjectName}</p>
-                        </div>
-                        <div className="text-right">
-                          <p className={cn("text-xs font-mono font-bold", riskCls)}>Risk {inv.riskScore}</p>
-                          <p className="text-[9px] font-mono text-muted-foreground capitalize">{inv.status}</p>
-                        </div>
-                        {isLinked && <CheckCircle2 size={14} className="text-emerald-400 ml-2 flex-shrink-0" />}
-                      </div>
-                    </button>
-                  );
-                })}
+            <div className="space-y-1 max-h-60 overflow-y-auto">
+              {filteredInvestigations.slice(0, 20).map((inv: any) => (
+                <button
+                  key={inv.id}
+                  onClick={() => {
+                    toast.success(`Linked to ${inv.ref}`);
+                    setLinkPickerMention(null);
+                  }}
+                  className="w-full text-left px-3 py-2 rounded-md hover:bg-muted/30 transition-colors"
+                >
+                  <p className="text-xs font-mono text-foreground">{inv.subjectName}</p>
+                  <p className="text-[10px] font-mono text-muted-foreground">{inv.ref}</p>
+                </button>
+              ))}
+              {filteredInvestigations.length === 0 && (
+                <p className="text-xs font-mono text-muted-foreground text-center py-4">No investigations found</p>
+              )}
             </div>
-            <p className="text-[9px] font-mono text-muted-foreground mt-3 text-center">Linking attaches this mention to the investigation's evidence log</p>
           </div>
         </>
-      )}
-
-      {/* ── Alerts Tab ── */}
-      {activeTab === 'alerts' && (
-        <div className="space-y-3">
-          <div className="bis-card p-4 border border-amber-500/20 bg-amber-500/5">
-            <p className="text-xs font-mono text-amber-400 uppercase tracking-wider mb-3 flex items-center gap-2">
-              <Bell size={12} /> Alert Configuration
-            </p>
-            <div className="grid grid-cols-2 gap-3">
-              {[
-                { channel: 'WhatsApp', dest: '+234 801 234 5678', threshold: 70, active: true },
-                { channel: 'SMS', dest: '+234 801 234 5678', threshold: 80, active: true },
-                { channel: 'Telegram', dest: '@bis_alerts', threshold: 60, active: false },
-                { channel: 'Email', dest: 'investigator@bis.ng', threshold: 50, active: false },
-              ].map(cfg => (
-                <div key={cfg.channel} className={cn("bis-card p-3", !cfg.active && "opacity-50")}>
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs font-mono font-semibold text-foreground">{cfg.channel}</span>
-                    <span className={cn("text-[9px] font-mono rounded px-1.5 py-0.5", cfg.active ? "bg-emerald-500/20 text-emerald-400" : "bg-muted text-muted-foreground")}>
-                      {cfg.active ? 'ACTIVE' : 'OFF'}
-                    </span>
-                  </div>
-                  <p className="text-[10px] font-mono text-muted-foreground">{cfg.dest}</p>
-                  <p className="text-[10px] font-mono text-muted-foreground">Threshold: risk ≥ {cfg.threshold}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Critical mentions */}
-          <p className="text-xs font-mono text-muted-foreground uppercase tracking-wider">Critical Mentions Requiring Action</p>
-          {mentions.filter(m => m.sentiment === 'critical').map(mention => {
-            const sent = SENTIMENT_CONFIG[mention.sentiment];
-            const plat = PLATFORM_CONFIG[mention.platform];
-            return (
-              <div key={mention.id} className="bis-card p-4 border-l-2 border-l-red-400">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className={cn("text-[10px] font-mono font-bold", plat.textColor)}>{plat.label}</span>
-                  <span className="text-xs font-mono text-foreground font-semibold">{mention.author}</span>
-                  <span className="text-[10px] font-mono text-muted-foreground ml-auto">{timeAgo(mention.publishedAt)}</span>
-                </div>
-                <p className="text-sm text-foreground/90 mb-2">{mention.content}</p>
-                <div className="flex items-center gap-2">
-                  <span className={cn("text-xs font-mono font-bold", riskColor(mention.riskScore))}>
-                    Risk: {mention.riskScore}
-                  </span>
-                  <Button size="sm" variant="outline" className={cn(
-                    "h-6 text-[10px] font-mono ml-auto gap-1",
-                    linkedMap[mention.id] ? "text-emerald-400 border-emerald-400/40" : ""
-                  )} onClick={() => setLinkPickerMention(mention)}>
-                    <Link2 size={9} />
-                    {linkedMap[mention.id] ? `Linked: ${linkedMap[mention.id]}` : 'Link to Investigation'}
-                  </Button>
-                  <Button size="sm" variant="destructive" className="h-6 text-[10px] font-mono">
-                    Flag & Alert
-                  </Button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
       )}
     </BISLayout>
   );

@@ -6,7 +6,10 @@
  * Live feed: new incoming reports injected every 12 seconds via setInterval
  */
 
-import { useState, useEffect, useRef } from 'react';
+import { useState } from 'react';
+import { trpc } from '@/lib/trpc';
+import { useAuth } from '@/_core/hooks/useAuth';
+import { toast } from 'sonner';
 import BISLayout from '@/components/BISLayout';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -77,84 +80,59 @@ const CHANNEL_CONFIG: Record<Channel, {
   },
 };
 
-const STATUS_CONFIG: Record<ReportStatus, { label: string; color: string; icon: React.ReactNode }> = {
+const STATUS_CONFIG: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
   new:        { label: 'New',        color: 'text-blue-400',    icon: <Bell size={10} /> },
   processing: { label: 'Processing', color: 'text-amber-400',   icon: <Loader2 size={10} className="animate-spin" /> },
   verified:   { label: 'Verified',   color: 'text-emerald-400', icon: <CheckCircle2 size={10} /> },
   dismissed:  { label: 'Dismissed',  color: 'text-muted-foreground', icon: <XCircle size={10} /> },
+  escalated:  { label: 'Escalated',  color: 'text-red-400',     icon: <AlertTriangle size={10} /> },
 };
 
-// ─── Seed Data ────────────────────────────────────────────────────────────────
-
-// ─── Live report generator pool ──────────────────────────────────────────────
-
-const LIVE_POOL: Omit<IncomingReport, 'id' | 'receivedAt' | 'status' | 'isNew'>[] = [
-  { channel: 'sms', sender: '+2348071234567', content: 'Fraud alert: Ibrahim Suleiman for Kaduna dey collect money for oil block allocation. Na scam. He don collect N5m from my uncle.', riskScore: 87, language: 'pidgin', attachments: 0 },
-  { channel: 'whatsapp', sender: '+2348034567890', content: 'I have evidence of a fake recruitment agency operating in Surulere. They collect N150,000 per applicant for jobs that don\'t exist. Name: Premium Jobs Ltd.', riskScore: 76, language: 'en', attachments: 2 },
-  { channel: 'telegram', sender: '@whistleblower_abj', content: 'Attaching documents showing diversion of government funds by a contractor in FCT. Amount: ₦850 million. Contractor: Zenith Construction Ltd.', riskScore: 93, language: 'en', attachments: 4 },
-  { channel: 'ussd', sender: '+2347056789012', content: 'USSD Report: Suspect=Ngozi Adichie-Obi, Location=Port Harcourt, Crime=Insurance fraud, Amount=3200000 NGN', riskScore: 69, language: 'en', attachments: 0 },
-  { channel: 'sms', sender: '+2348045678901', content: 'Tunde Bakare for Lagos Island dey sell fake land documents. He has sold same plot to 5 different buyers. CofO numbers are forged.', riskScore: 84, language: 'en', attachments: 0 },
-  { channel: 'whatsapp', sender: '+2348056789012', content: 'Cryptocurrency investment scam: "NaijaCoin Investment" promises 50% monthly returns. They have disappeared with over ₦200m from 500+ investors.', riskScore: 95, language: 'en', attachments: 1 },
-];
-
-let liveIdx = 0;
+// ─── tRPC-backed implementation ──────────────────────────────────────────────
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 function MessagingChannelsPageInner() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
+  const utils = trpc.useUtils();
+
   const [activeTab, setActiveTab] = useState<'overview' | 'reports' | 'config' | 'ussd_flow'>('overview');
-  const [reports, setReports] = useState<IncomingReport[]>([]);
-  const [stats, setStats] = useState<ChannelStats[]>([]);
-  const [selectedReport, setSelectedReport] = useState<IncomingReport | null>(null);
-  const [filterChannel, setFilterChannel] = useState<Channel | 'all'>('all');
-  const [filterStatus, setFilterStatus] = useState<ReportStatus | 'all'>('all');
-  const [isLive, setIsLive] = useState(true);
-  const [newCount, setNewCount] = useState(0);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [selectedReport, setSelectedReport] = useState<any | null>(null);
+  const [filterChannel, setFilterChannel] = useState<string>('all');
+  const [filterStatus, setFilterStatus] = useState<string>('all');
 
-  // Live feed injection
-  useEffect(() => {
-    if (!isLive) {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-      return;
-    }
-    intervalRef.current = setInterval(() => {
-      const template = LIVE_POOL[liveIdx % LIVE_POOL.length];
-      liveIdx++;
-      const newReport: IncomingReport = {
-        ...template,
-        id: `live_${Date.now()}`,
-        receivedAt: new Date().toISOString(),
-        status: 'new',
-        isNew: true,
-      };
-      setReports(prev => [newReport, ...prev.slice(0, 49)]);
-      setStats(prev => prev.map(s =>
-        s.channel === template.channel
-          ? { ...s, totalReports: s.totalReports + 1, todayReports: s.todayReports + 1 }
-          : s
-      ));
-      setNewCount(c => c + 1);
-      setTimeout(() => {
-        setReports(prev => prev.map(r => r.id === newReport.id ? { ...r, isNew: false } : r));
-      }, 4000);
-    }, 12000);
+  // ── Queries ──
+  const { data: channelsData, isLoading: channelsLoading } = trpc.messaging.listChannels.useQuery();
+  const channels = channelsData ?? [];
 
-    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
-  }, [isLive]);
+  const { data: reportsData, isLoading: reportsLoading } = trpc.messaging.listReports.useQuery({
+    channelId: filterChannel !== 'all' ? Number(filterChannel) : undefined,
+    status: filterStatus !== 'all' ? (filterStatus as any) : undefined,
+    limit: 100,
+  });
+  const reports = reportsData?.reports ?? [];
 
-  const filteredReports = reports.filter(r => {
-    if (filterChannel !== 'all' && r.channel !== filterChannel) return false;
-    if (filterStatus !== 'all' && r.status !== filterStatus) return false;
-    return true;
+  const { data: statsData } = trpc.messaging.stats.useQuery();
+
+  // ── Mutations ──
+  const updateStatus = trpc.messaging.updateReportStatus.useMutation({
+    onSuccess: () => { utils.messaging.listReports.invalidate(); utils.messaging.stats.invalidate(); setSelectedReport(null); },
+    onError: (e) => toast.error(e.message),
   });
 
-  const updateReportStatus = (id: string, status: ReportStatus) => {
-    setReports(prev => prev.map(r => r.id === id ? { ...r, status } : r));
-    setSelectedReport(null);
-  };
+  const filteredReports = reports;
+  const newReports = reports.filter((r: any) => r.status === 'new').length;
 
-  const newReports = reports.filter(r => r.status === 'new').length;
+  // Build stats array from channels for the overview tab
+  const stats: ChannelStats[] = channels.map((ch: any) => ({
+    channel: ch.channelType as Channel,
+    totalReports: ch.totalReports ?? 0,
+    todayReports: ch.todayReports ?? 0,
+    verifiedReports: 0,
+    activeUsers: ch.activeUsers ?? 0,
+    isOnline: ch.status === 'active',
+  }));
 
   const timeAgo = (iso: string) => {
     const diff = Date.now() - new Date(iso).getTime();
@@ -331,15 +309,15 @@ function MessagingChannelsPageInner() {
 
           <div className="space-y-2">
             {filteredReports.map(report => {
-              const cfg = CHANNEL_CONFIG[report.channel];
-              const statusCfg = STATUS_CONFIG[report.status];
+              const cfg = (CHANNEL_CONFIG as any)[(report as any).channelType] ?? CHANNEL_CONFIG['sms'];
+              const statusCfg = STATUS_CONFIG[report.status] ?? STATUS_CONFIG['new'];
               return (
                 <div
                   key={report.id}
                   onClick={() => setSelectedReport(report)}
                   className={cn(
                     "bis-card p-4 cursor-pointer hover:bg-muted/20 transition-all",
-                    report.isNew && "ring-1 ring-primary/30 bg-primary/5"
+                    (report as any).isNew && "ring-1 ring-primary/30 bg-primary/5"
                   )}
                 >
                   <div className="flex items-start gap-3">
@@ -350,15 +328,15 @@ function MessagingChannelsPageInner() {
                       <div className="flex items-center gap-2 mb-1 flex-wrap">
                         <span className={cn("text-[10px] font-mono font-semibold", cfg.textColor)}>{cfg.label}</span>
                         <span className="text-[10px] font-mono text-muted-foreground">{report.sender}</span>
-                        {report.isNew && (
+                        {(report as any).isNew && (
                           <span className="text-[9px] font-mono text-primary border border-primary/30 rounded px-1 animate-pulse">NEW</span>
                         )}
-                        {report.linkedSubject && (
+                        {(report as any).linkedSubjectRef && (
                           <span className="text-[9px] font-mono text-blue-400 border border-blue-400/30 rounded px-1">
-                            {report.linkedSubject}
+                            {(report as any).linkedSubjectRef}
                           </span>
                         )}
-                        <span className="text-[10px] font-mono text-muted-foreground ml-auto">{timeAgo(report.receivedAt)}</span>
+                        <span className="text-[10px] font-mono text-muted-foreground ml-auto">{timeAgo(report.receivedAt instanceof Date ? report.receivedAt.toISOString() : String(report.receivedAt))}</span>
                       </div>
                       <p className="text-sm text-foreground/90 leading-relaxed line-clamp-2 mb-2">{report.content}</p>
                       <div className="flex items-center gap-3">
@@ -373,9 +351,9 @@ function MessagingChannelsPageInner() {
                             {report.riskScore}
                           </span>
                         </div>
-                        {report.attachments > 0 && (
+                        {(report as any).attachmentCount > 0 && (
                           <span className="flex items-center gap-1 text-[10px] font-mono text-muted-foreground">
-                            <Paperclip size={9} /> {report.attachments}
+                            <Paperclip size={9} /> {(report as any).attachmentCount}
                           </span>
                         )}
                         {report.language !== 'en' && (
@@ -497,8 +475,8 @@ function MessagingChannelsPageInner() {
               <div className="grid grid-cols-2 gap-2 text-xs font-mono">
                 <div>
                   <p className="text-muted-foreground uppercase text-[9px] tracking-wider">Channel</p>
-                  <p className={cn("font-semibold", CHANNEL_CONFIG[selectedReport.channel].textColor)}>
-                    {CHANNEL_CONFIG[selectedReport.channel].label}
+                  <p className={cn("font-semibold", (CHANNEL_CONFIG as any)[selectedReport.channel]?.textColor ?? 'text-foreground')}>
+                    {(CHANNEL_CONFIG as any)[selectedReport.channel]?.label ?? selectedReport.channel}
                   </p>
                 </div>
                 <div>
@@ -522,24 +500,24 @@ function MessagingChannelsPageInner() {
                 </div>
               </div>
 
-              {selectedReport.attachments > 0 && (
+              {(selectedReport as any).attachmentCount > 0 && (
                 <p className="text-xs font-mono text-muted-foreground flex items-center gap-1.5">
-                  <Paperclip size={11} /> {selectedReport.attachments} attachment{selectedReport.attachments > 1 ? 's' : ''}
+                  <Paperclip size={11} /> {(selectedReport as any).attachmentCount} attachment{(selectedReport as any).attachmentCount > 1 ? 's' : ''}
                 </p>
               )}
             </div>
 
             <div className="flex gap-2">
               <Button variant="outline" size="sm" className="flex-1 text-xs font-mono"
-                onClick={() => updateReportStatus(selectedReport.id, 'dismissed')}>
+                onClick={() => updateStatus.mutate({ id: selectedReport.id, status: 'dismissed' })}>
                 Dismiss
               </Button>
               <Button variant="outline" size="sm" className="flex-1 text-xs font-mono text-amber-400 border-amber-400/30"
-                onClick={() => updateReportStatus(selectedReport.id, 'processing')}>
+                onClick={() => updateStatus.mutate({ id: selectedReport.id, status: 'processing' })}>
                 Start Processing
               </Button>
               <Button size="sm" className="flex-1 text-xs font-mono"
-                onClick={() => updateReportStatus(selectedReport.id, 'verified')}>
+                onClick={() => updateStatus.mutate({ id: selectedReport.id, status: 'verified' })}>
                 Verify & Link
               </Button>
             </div>
