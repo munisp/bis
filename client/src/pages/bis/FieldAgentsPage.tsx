@@ -262,7 +262,45 @@ export default function FieldAgentsPage() {
     state: '', lga: '', tier: 'junior' as string, notes: '',
   });
 
+  const [locatingAgentId, setLocatingAgentId] = useState<number | null>(null);
   const utils = trpc.useUtils();
+
+  const updateLocationMutation = trpc.fieldAgents.updateLocation.useMutation({
+    onSuccess: (result, variables) => {
+      toast.success(`Location updated for agent #${variables.id}`, {
+        description: `${result.lat.toFixed(4)}, ${result.lng.toFixed(4)}`,
+      });
+      setLocatingAgentId(null);
+      utils.fieldAgents.list.invalidate();
+    },
+    onError: (e: any) => {
+      toast.error('Location update failed', { description: e.message });
+      setLocatingAgentId(null);
+    },
+  });
+
+  const handleUpdateLocation = (agentId: number) => {
+    if (!navigator.geolocation) {
+      toast.error('Geolocation not supported by this browser');
+      return;
+    }
+    setLocatingAgentId(agentId);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        updateLocationMutation.mutate({
+          id: agentId,
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+        });
+      },
+      (err) => {
+        toast.error('Could not get location', { description: err.message });
+        setLocatingAgentId(null);
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  };
+
   const recruitMutation = trpc.fieldAgents.create.useMutation({
     onSuccess: () => {
       toast.success('Agent recruited', { description: `${recruitForm.name} has been added to the network.` });
@@ -525,11 +563,22 @@ export default function FieldAgentsPage() {
                         </span>
                       </td>
                       <td className="px-4 py-3">
-                        <Button size="sm" variant="outline" disabled={agent.status !== 'active'}
-                          onClick={() => setDispatchAgent(agent)}
-                          className="h-6 text-[10px] font-mono gap-1 whitespace-nowrap">
-                          <Send size={9} /> Dispatch Task
-                        </Button>
+                        <div className="flex items-center gap-1.5">
+                          <Button size="sm" variant="outline" disabled={agent.status !== 'active'}
+                            onClick={() => setDispatchAgent(agent)}
+                            className="h-6 text-[10px] font-mono gap-1 whitespace-nowrap">
+                            <Send size={9} /> Dispatch
+                          </Button>
+                          <Button size="sm" variant="ghost"
+                            disabled={locatingAgentId === agent.id}
+                            onClick={() => handleUpdateLocation(agent.id)}
+                            className="h-6 text-[10px] font-mono gap-1 whitespace-nowrap text-muted-foreground hover:text-primary"
+                            title="Update GPS location from browser">
+                            {locatingAgentId === agent.id
+                              ? <Loader2 size={9} className="animate-spin" />
+                              : <Navigation size={9} />}
+                          </Button>
+                        </div>
                       </td>
                     </tr>
                   );

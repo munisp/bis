@@ -302,6 +302,27 @@ export default function InvestigationDetail() {
     onError: (e) => toast.error(`Dispatch failed: ${e.message}`),
   });
 
+  const exportTimelineMutation = trpc.investigations.exportTimeline.useMutation({
+    onSuccess: (result) => {
+      const a = document.createElement("a");
+      a.href = result.url;
+      a.download = result.filename;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      toast.success("Timeline PDF exported successfully");
+    },
+    onError: (e) => toast.error(`PDF export failed: ${e.message}`),
+  });
+
+  const handleExportTimeline = () => {
+    const ref = params.id;
+    if (!ref) return;
+    exportTimelineMutation.mutate({ ref });
+  };
+
   const handleDispatch = () => {
     if (!dispatchAgentId) { toast.error("Select a field agent"); return; }
     const agent = agentsList?.find(a => String(a.id) === dispatchAgentId);
@@ -457,6 +478,16 @@ export default function InvestigationDetail() {
           </Button>
           <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={handleDownloadReport}>
             <Download size={11} /> Report
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-xs gap-1"
+            onClick={handleExportTimeline}
+            disabled={exportTimelineMutation.isPending}
+          >
+            {exportTimelineMutation.isPending ? <Loader2 size={11} className="animate-spin" /> : <FileText size={11} />}
+            {exportTimelineMutation.isPending ? "Generating…" : "Export PDF"}
           </Button>
         </div>
       }

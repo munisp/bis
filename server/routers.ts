@@ -9,6 +9,7 @@ import { storagePut } from "./storage";
 import { TRPCError } from "@trpc/server";
 import { adminProcedure, protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { getDb } from "./db";
+import { evaluateAlertRules } from "./alertRules";
 import {
   investigations,
   alerts,
@@ -189,6 +190,14 @@ const investigationsRouter = router({
         { entity: { type: "investigation", id: ref }, relation: "owner",    subject: { type: "user", id: userId } },
         { entity: { type: "investigation", id: ref }, relation: "assignee", subject: { type: "user", id: userId } },
       ]);
+      // Evaluate alert rules for new investigation (initial risk_score = 0, rules may fire on creation)
+      await evaluateAlertRules("risk_score", 0, {
+        subjectRef: ref,
+        subjectName: input.subjectName,
+        triggeredBy: "investigations.create",
+        userId: ctx.user!.id,
+        userEmail: ctx.user!.email ?? undefined,
+      }).catch(() => {});
       return { ref };
     }),
 
@@ -321,6 +330,147 @@ const investigationsRouter = router({
         await publishEvent("INVESTIGATION_FLAGGED", input.ref, scoreResult.risk_tier, { score: scoreResult.composite_score });
       }
       return scoreResult;
+    }),
+
+  exportTimeline: protectedProcedure
+    .input(z.object({ ref: z.string() }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+
+      // Fetch investigation record
+      const [inv] = await db.select().from(investigations).where(eq(investigations.ref, input.ref)).limit(1);
+      if (!inv) throw new TRPCError({ code: "NOT_FOUND", message: "Investigation not found" });
+
+      // Fetch evidence: audit log entries for this investigation
+      const entries = await db.select().from(auditLog)
+        .where(eq(auditLog.targetRef, input.ref))
+        .orderBy(desc(auditLog.createdAt))
+        .limit(200);
+
+      // Fetch field tasks linked to this investigation
+      const tasks = await db.select().from(fieldTasks)
+        .where(eq(fieldTasks.investigationId, inv.id))
+        .orderBy(desc(fieldTasks.createdAt))
+        .limit(50);
+
+      // Build PDF using pdfmake
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const PdfPrinter = require("pdfmake/build/pdfmake") as any;
+      const fonts = {
+        Helvetica: {
+          normal: "Helvetica",
+          bold: "Helvetica-Bold",
+          italics: "Helvetica-Oblique",
+          bolditalics: "Helvetica-BoldOblique",
+        },
+      };
+      const printer = new PdfPrinter(fonts);
+
+      const riskColor = (score: number | null) =>
+        !score ? "#6b7280" : score >= 80 ? "#dc2626" : score >= 60 ? "#f59e0b" : "#16a34a";
+
+      const timelineRows: any[] = entries.map(e => [
+        { text: new Date(e.createdAt).toLocaleString("en-NG"), style: "cell" },
+        { text: e.category.toUpperCase(), style: "cell" },
+        { text: e.action, style: "cell" },
+        { text: e.result ?? "success", style: "cell" },
+      ]);
+
+      const taskRows: any[] = tasks.map(t => [
+        { text: t.taskRef, style: "cell" },
+        { text: t.taskType, style: "cell" },
+        { text: t.priority, style: "cell" },
+        { text: t.status, style: "cell" },
+        { text: (t as any).address ?? (t as any).assignedAddress ?? "-", style: "cell" },
+      ]);
+
+      const docDefinition: any = {
+        defaultStyle: { font: "Helvetica", fontSize: 9 },
+        styles: {
+          header: { fontSize: 18, bold: true, color: "#1e293b" },
+          subheader: { fontSize: 13, bold: true, color: "#334155", margin: [0, 12, 0, 4] },
+          label: { fontSize: 8, color: "#64748b", bold: true },
+          value: { fontSize: 9, color: "#1e293b" },
+          cell: { fontSize: 8, color: "#374151" },
+          tableHeader: { fontSize: 8, bold: true, color: "#ffffff", fillColor: "#1e293b" },
+        },
+        content: [
+          { text: "BIS — Background Intelligence System", style: "label" },
+          { text: `Investigation Report: ${inv.ref}`, style: "header", margin: [0, 2, 0, 8] },
+          {
+            columns: [
+              { stack: [
+                { text: "SUBJECT", style: "label" },
+                { text: inv.subjectName, style: "value", bold: true },
+                { text: `Type: ${inv.subjectType} · Tier: ${inv.tier} · Country: ${inv.country}`, style: "cell" },
+              ], width: "*" },
+              { stack: [
+                { text: "RISK SCORE", style: "label" },
+                { text: String(inv.riskScore ?? "N/A"), fontSize: 22, bold: true, color: riskColor(inv.riskScore) },
+                { text: `Tier: ${inv.riskTier ?? "unknown"} · Status: ${inv.status}`, style: "cell" },
+              ], width: 120 },
+            ],
+            margin: [0, 0, 0, 12],
+          },
+          { canvas: [{ type: "line", x1: 0, y1: 0, x2: 515, y2: 0, lineWidth: 1, lineColor: "#e2e8f0" }] },
+          { text: "Evidence Timeline", style: "subheader" },
+          timelineRows.length > 0 ? {
+            table: {
+              headerRows: 1,
+              widths: ["auto", "auto", "*", "auto"],
+              body: [
+                [
+                  { text: "Timestamp", style: "tableHeader" },
+                  { text: "Category", style: "tableHeader" },
+                  { text: "Action", style: "tableHeader" },
+                  { text: "Result", style: "tableHeader" },
+                ],
+                ...timelineRows,
+              ],
+            },
+            layout: "lightHorizontalLines",
+          } : { text: "No timeline entries found.", style: "cell", italics: true },
+          ...(taskRows.length > 0 ? [
+            { text: "Field Tasks", style: "subheader" },
+            {
+              table: {
+                headerRows: 1,
+                widths: ["auto", "auto", "auto", "auto", "*"],
+                body: [
+                  [
+                    { text: "Ref", style: "tableHeader" },
+                    { text: "Type", style: "tableHeader" },
+                    { text: "Priority", style: "tableHeader" },
+                    { text: "Status", style: "tableHeader" },
+                    { text: "Address", style: "tableHeader" },
+                  ],
+                  ...taskRows,
+                ],
+              },
+              layout: "lightHorizontalLines",
+            },
+          ] : []),
+          { text: `Generated by BIS on ${new Date().toLocaleString("en-NG")} by ${ctx.user!.name ?? ctx.user!.email}`, style: "label", margin: [0, 16, 0, 0] },
+        ],
+      };
+
+      const pdfDoc = printer.createPdfKitDocument(docDefinition);
+      const chunks: Buffer[] = [];
+      await new Promise<void>((resolve, reject) => {
+        pdfDoc.on("data", (chunk: Buffer) => chunks.push(chunk));
+        pdfDoc.on("end", resolve);
+        pdfDoc.on("error", reject);
+        pdfDoc.end();
+      });
+      const pdfBuffer = Buffer.concat(chunks);
+
+      // Upload to S3
+      const fileKey = `investigation-timelines/${inv.ref}-${Date.now()}.pdf`;
+      const { url } = await storagePut(fileKey, pdfBuffer, "application/pdf");
+
+      await writeAuditLog(db, { userId: ctx.user!.id, category: "investigation", action: `Timeline PDF exported`, targetRef: input.ref });
+      return { url, filename: `BIS-Timeline-${inv.ref}.pdf` };
     }),
 });
 
@@ -537,6 +687,14 @@ const kycRouter = router({
       }).returning();
       await writeAuditLog(db, { userId: ctx.user!.id, category: "kyc", action: `KYC biometric ${status}`, targetRef: input.subjectName });
       await publishEvent("KYC_COMPLETED", input.subjectName, status === "failed" ? "high" : "info", { status, score: riskScore });
+      // Evaluate alert rules against the computed risk score
+      await evaluateAlertRules("risk_score", riskScore, {
+        subjectRef: `kyc-${record.id}`,
+        subjectName: input.subjectName,
+        triggeredBy: "kyc.create",
+        userId: ctx.user!.id,
+        userEmail: ctx.user!.email ?? undefined,
+      }).catch(() => {});
       return { ...record, referenceId, verifiedFields: input.livenessPassed ? ["liveness", "document"] : ["document"] };
     }),
 
@@ -971,6 +1129,27 @@ const fieldAgentsRouter = router({
       const { id, ...data } = input;
       return updateFieldAgent(id, data);
     }),
+
+  updateLocation: protectedProcedure
+    .input(z.object({
+      id: z.number(),
+      lat: z.number().min(-90).max(90),
+      lng: z.number().min(-180).max(180),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      await db.update(fieldAgents)
+        .set({ gpsLat: input.lat, gpsLng: input.lng, lastSeen: new Date(), updatedAt: new Date() })
+        .where(eq(fieldAgents.id, input.id));
+      await writeAuditLog(db, {
+        userId: ctx.user!.id,
+        category: "system",
+        action: `Agent #${input.id} location updated: ${input.lat.toFixed(4)}, ${input.lng.toFixed(4)}`,
+        targetRef: String(input.id),
+      });
+      return { success: true, lat: input.lat, lng: input.lng, lastSeen: new Date() };
+    }),
 });
 
 // ─── Data Sources Router ──────────────────────────────────────────────────────
@@ -1088,7 +1267,18 @@ const screeningRouter = router({
       const requestRef = `SCR-${Date.now().toString(36).toUpperCase()}`;
       const status = input.result ? "completed" : "pending";
       const completedAt = input.result ? new Date() : undefined;
-      return createScreeningRequest({ ...input, requestRef, status, completedAt, processedBy: input.result ? ctx.user!.id : undefined, createdBy: ctx.user!.id });
+      const record = await createScreeningRequest({ ...input, requestRef, status, completedAt, processedBy: input.result ? ctx.user!.id : undefined, createdBy: ctx.user!.id });
+      // Evaluate alert rules if a risk score was provided
+      if (input.riskScore !== undefined) {
+        await evaluateAlertRules("risk_score", input.riskScore, {
+          subjectRef: requestRef,
+          subjectName: input.subjectName,
+          triggeredBy: "screening.create",
+          userId: ctx.user!.id,
+          userEmail: ctx.user!.email ?? undefined,
+        }).catch(() => {});
+      }
+      return record;
     }),
   updateStatus: protectedProcedure
     .input(z.object({

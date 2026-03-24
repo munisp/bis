@@ -376,4 +376,35 @@
 - [x] All 26 tests pass (3 test files)
 
 ### Archive
-- [ ] Comprehensive project archive v17 generated (>= 17 MB)
+- [x] Comprehensive project archive v17 generated (bis-pwa-archive-v17-src-20260324.zip, 67 MB, 1036 files)
+
+## Phase 18 — Next Steps (Completed)
+
+### Alert Rule Evaluation Engine
+- [x] Create server/alertRules.ts with evaluateAlertRules(metric, value, ctx) helper
+- [x] Wire evaluateAlertRules into investigations.create (initial risk_score = 0)
+- [x] Wire evaluateAlertRules into kyc.create (computed risk score after biometric check)
+- [x] Wire evaluateAlertRules into screening.create (if riskScore provided in input)
+- [x] Auto-creates alerts, writes audit log, notifies owner when autoEscalate=true
+
+### Investigation Timeline PDF Export
+- [x] Add pdfmake dependency
+- [x] Add investigations.exportTimeline mutation (fetches inv + audit log + field tasks)
+- [x] Render structured PDF with subject card, risk score, evidence timeline, field tasks table
+- [x] Upload PDF to S3, return presigned URL
+- [x] Add Export PDF button to Investigation Detail header (with loading spinner)
+- [x] Auto-download the PDF on success via anchor click
+
+### Field Agent Geolocation Tracking
+- [x] gpsLat, gpsLng, lastSeen columns already existed in field_agents table
+- [x] Add trpc.fieldAgents.updateLocation mutation (protectedProcedure)
+- [x] Navigation button per agent row — uses browser Geolocation API with loading spinner
+- [x] Map pins already rendered from gpsLat/gpsLng in handleMapReady; invalidate refreshes them
+- [x] Agent name tooltip on map pin via el.title attribute
+
+### Tests
+- [x] All 26 tests pass (3 test files, 0 failures)
+- [x] 0 TypeScript errors
+
+### Archive
+- [ ] Comprehensive project archive v18 generated (>= 17 MB)
