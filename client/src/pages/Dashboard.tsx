@@ -1,8 +1,9 @@
 // BIS Dashboard — merges TourismPay BISDashboard + standalone BIS analytics
 // Design: Forensic Intelligence Dark — command center overview
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useLocation } from "wouter";
+import { useTheme } from "@/contexts/ThemeContext";
 import {
   Shield, Search, CheckCircle, AlertTriangle, TrendingUp, RefreshCw,
   FileDown, Eye, Clock, Flag, Activity, Fingerprint, Users, Database,
@@ -63,7 +64,7 @@ function RiskRing({ score, size = 56 }: { score: number; size?: number }) {
   const color = score >= 80 ? "#f87171" : score >= 60 ? "#fb923c" : score >= 30 ? "#fbbf24" : "#34d399";
   return (
     <svg width={size} height={size} className="shrink-0">
-      <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="oklch(0.22 0.01 264)" strokeWidth={4} />
+      <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="var(--border)" strokeWidth={4} />
       <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={color} strokeWidth={4}
         strokeDasharray={`${dash} ${circ}`} strokeLinecap="round"
         transform={`rotate(-90 ${size/2} ${size/2})`} />
@@ -120,9 +121,27 @@ const TICKER_LIVE_POOL = [
 
 let tickerLiveIdx = 0;
 
+// Read a CSS variable from :root at runtime so charts adapt to theme
+function useCSSVar(name: string, fallback: string): string {
+  const { theme } = useTheme();
+  return useMemo(() => {
+    const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return v || fallback;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [theme]);
+}
+
 export default function Dashboard() {
   const [, navigate] = useLocation();
   const [refreshing, setRefreshing] = useState(false);
+
+  // Theme-aware chart colours — re-computed whenever theme changes
+  const chartGrid    = useCSSVar('--border',            'oklch(0.22 0.01 264)');
+  const chartTick    = useCSSVar('--muted-foreground',  'oklch(0.55 0.01 264)');
+  const chartBg      = useCSSVar('--card',              'oklch(0.13 0.01 264)');
+  const chartBorder  = useCSSVar('--border',            'oklch(0.22 0.01 264)');
+  const chartPrimary = useCSSVar('--chart-1',           'oklch(0.65 0.20 220)');
+  const chartDanger  = useCSSVar('--chart-4',           'oklch(0.60 0.22 25)');
   const [tickerItems, setTickerItems] = useState(TICKER_SEED);
   const tickerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -227,16 +246,16 @@ export default function Dashboard() {
             <AreaChart data={riskTrend}>
               <defs>
                 <linearGradient id="riskGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#60a5fa" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#60a5fa" stopOpacity={0} />
+                  <stop offset="5%" stopColor={chartPrimary} stopOpacity={0.3} />
+                  <stop offset="95%" stopColor={chartPrimary} stopOpacity={0} />
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.22 0.01 264)" />
-              <XAxis dataKey="week" tick={{ fontSize: 10, fill: "oklch(0.55 0.01 264)" }} />
-              <YAxis tick={{ fontSize: 10, fill: "oklch(0.55 0.01 264)" }} />
-              <Tooltip contentStyle={{ background: "oklch(0.13 0.01 264)", border: "1px solid oklch(0.22 0.01 264)", borderRadius: 6, fontSize: 11 }} />
-              <Area type="monotone" dataKey="avg" stroke="#60a5fa" strokeWidth={2} fill="url(#riskGrad)" />
-              <Line type="monotone" dataKey="flagged" stroke="#f87171" strokeWidth={2} dot={false} />
+              <CartesianGrid strokeDasharray="3 3" stroke={chartGrid} />
+              <XAxis dataKey="week" tick={{ fontSize: 10, fill: chartTick }} />
+              <YAxis tick={{ fontSize: 10, fill: chartTick }} />
+              <Tooltip contentStyle={{ background: chartBg, border: `1px solid ${chartBorder}`, borderRadius: 6, fontSize: 11 }} />
+              <Area type="monotone" dataKey="avg" stroke={chartPrimary} strokeWidth={2} fill="url(#riskGrad)" />
+              <Line type="monotone" dataKey="flagged" stroke={chartDanger} strokeWidth={2} dot={false} />
             </AreaChart>
           </ResponsiveContainer>
         </div>
@@ -372,11 +391,11 @@ export default function Dashboard() {
         <p className="text-xs text-muted-foreground mb-4">API calls by source</p>
         <ResponsiveContainer width="100%" height={140}>
           <BarChart data={sourceActivity} barSize={24}>
-            <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.22 0.01 264)" vertical={false} />
-            <XAxis dataKey="name" tick={{ fontSize: 10, fill: "oklch(0.55 0.01 264)" }} />
-            <YAxis tick={{ fontSize: 10, fill: "oklch(0.55 0.01 264)" }} />
-            <Tooltip contentStyle={{ background: "oklch(0.13 0.01 264)", border: "1px solid oklch(0.22 0.01 264)", borderRadius: 6, fontSize: 11 }} />
-            <Bar dataKey="checks" fill="#60a5fa" radius={[3, 3, 0, 0]} />
+            <CartesianGrid strokeDasharray="3 3" stroke={chartGrid} vertical={false} />
+            <XAxis dataKey="name" tick={{ fontSize: 10, fill: chartTick }} />
+            <YAxis tick={{ fontSize: 10, fill: chartTick }} />
+            <Tooltip contentStyle={{ background: chartBg, border: `1px solid ${chartBorder}`, borderRadius: 6, fontSize: 11 }} />
+            <Bar dataKey="checks" fill={chartPrimary} radius={[3, 3, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>
       </div>

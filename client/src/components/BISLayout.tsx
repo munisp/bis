@@ -8,7 +8,7 @@ import {
   Activity, Users, Database, Settings, Bell, ChevronDown,
   ChevronRight, LogOut, Menu, X, AlertTriangle, Car, Pill,
   Briefcase, Globe, MapPin, MessageSquare, Building2, Eye,
-  UserCheck, BarChart3, Key, Zap, CheckCheck, ArrowRight, Sun, Moon
+  UserCheck, BarChart3, Key, Zap, CheckCheck, ArrowRight, Sun, Moon, ClipboardList
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -86,6 +86,7 @@ const navGroups: NavGroup[] = [
     items: [
       { label: 'Tenants & API Keys', href: '/tenants', icon: <Key size={15} /> },
       { label: 'Settings', href: '/settings', icon: <Settings size={15} /> },
+      { label: 'Audit Log', href: '/audit-log', icon: <ClipboardList size={15} /> },
     ],
   },
 ];

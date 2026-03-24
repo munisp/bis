@@ -6,6 +6,7 @@ import { ThemeProvider } from "./contexts/ThemeContext";
 
 // Core pages
 import Dashboard from "@/pages/Dashboard";
+import AuditLogPage from "@/pages/AuditLogPage";
 import Investigations from "@/pages/Investigations";
 import InvestigationDetail from "@/pages/InvestigationDetail";
 import Reports from "@/pages/Reports";
@@ -43,6 +44,7 @@ function Router() {
       <Route path="/alerts" component={Alerts} />
       <Route path="/tenants" component={Tenants} />
       <Route path="/settings" component={Settings} />
+      <Route path="/audit-log" component={AuditLogPage} />
 
       {/* BIS Feature Modules */}
       <Route path="/biometric-enrollment" component={BiometricEnrollmentPage} />

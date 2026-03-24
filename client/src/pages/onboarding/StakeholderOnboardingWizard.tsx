@@ -156,7 +156,7 @@ const DOCUMENT_REQUIREMENTS: Record<EntityType, DocumentUpload[]> = {
 const STATUS_CONFIG: Record<OnboardingStatus, { label: string; color: string; icon: React.ReactNode; description: string }> = {
   draft: { label: 'Draft', color: 'bg-muted/500/20 text-muted-foreground', icon: <Clock className="w-4 h-4" />, description: 'Application is being filled out' },
   awaiting_documents: { label: 'Awaiting Documents', color: 'bg-amber-500/20 text-amber-400', icon: <Upload className="w-4 h-4" />, description: 'Please upload required documents' },
-  processing: { label: 'Processing', color: 'bg-blue-500/20 text-blue-400', icon: <RefreshCw className="w-4 h-4 animate-spin" />, description: 'Documents are being verified by our AI engine' },
+  processing: { label: 'Processing', color: 'bg-primary/20 text-blue-400', icon: <RefreshCw className="w-4 h-4 animate-spin" />, description: 'Documents are being verified by our AI engine' },
   awaiting_stakeholders: { label: 'Awaiting Directors', color: 'bg-purple-500/20 text-purple-400', icon: <Users className="w-4 h-4" />, description: 'Waiting for directors/shareholders to complete KYC' },
   manual_review: { label: 'Under Review', color: 'bg-orange-500/20 text-orange-400', icon: <Eye className="w-4 h-4" />, description: 'Compliance team is reviewing your application' },
   approved: { label: 'Approved ✓', color: 'bg-emerald-500/20 text-emerald-400', icon: <CheckCircle2 className="w-4 h-4" />, description: 'Your application has been approved' },
@@ -652,7 +652,7 @@ function StakeholderOnboardingWizardInner() {
               </Card>
             ))}
 
-            <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-4">
+            <div className="bg-primary/10 border border-primary/20 rounded-xl p-4">
               <div className="flex items-start gap-3">
                 <Shield className="w-5 h-5 text-blue-400 mt-0.5" />
                 <div>
@@ -813,7 +813,7 @@ function StakeholderOnboardingWizardInner() {
                   </div>
                 )}
 
-                <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-4">
+                <div className="bg-primary/10 border border-primary/20 rounded-xl p-4">
                   <p className="text-sm text-blue-300 font-medium mb-2">What happens next?</p>
                   <ul className="space-y-1.5">
                     {[
