@@ -19,6 +19,7 @@ import { serveStatic, setupVite } from "./vite";
 import { notifyOwner } from "./notification";
 import { creditTenantAccount } from "../billing";
 import crypto from "crypto";
+import { createOpenClawRouter } from "../openclawEndpoints";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -170,6 +171,9 @@ async function startServer() {
       res.status(200).json({ received: true, error: "Processing error" });
     }
   });
+
+  // OpenClaw managed instance + Swagger UI
+  app.use(createOpenClawRouter());
 
   // tRPC API
   app.use(

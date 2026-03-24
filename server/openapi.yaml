@@ -1,0 +1,1018 @@
+openapi: 3.0.3
+info:
+  title: BIS Platform API
+  description: |
+    **Background Intelligence System (BIS)** — Nigeria's leading compliance intelligence platform.
+
+    Run KYC checks, sanctions screening, adverse media scans, risk scoring, field agent dispatch,
+    and investigation management via a fully metered REST API.
+
+    ## Authentication
+    All endpoints require a Bearer token obtained from the BIS Developer Portal (`/developer`).
+
+    ```http
+    Authorization: Bearer bis_live_xxxxxxxxxxxxxxxx
+    ```
+
+    ## Rate Limits
+    Rate limits are enforced per token based on your plan tier:
+    - **Starter:** 100 req/min, 10,000 req/day
+    - **Professional:** 500 req/min, 100,000 req/day
+    - **Enterprise:** Unlimited (fair use)
+
+    ## Token Consumption
+    Each API call consumes tokens from your balance. Token costs are shown per endpoint.
+
+    ## Versioning
+    This is v1 of the BIS API. Breaking changes will be introduced as v2 with a 6-month deprecation window.
+  version: "1.0.0"
+  contact:
+    name: BIS API Support
+    email: api-support@bis-platform.com
+    url: https://bis-platform.ng/developer
+  license:
+    name: Proprietary
+    url: https://bis-platform.ng/terms
+
+servers:
+  - url: https://bis-platform.ng/api/v1
+    description: Production
+  - url: https://3000-ixhq6tgivnt84v2lhow3e-f2ebad08.us1.manus.computer/api/v1
+    description: Live Demo (read-only)
+
+tags:
+  - name: Investigations
+    description: Create and manage investigation cases
+  - name: KYC
+    description: Know Your Customer identity verification
+  - name: Screening
+    description: Sanctions, adverse media, and risk scoring
+  - name: Field Agents
+    description: Dispatch and manage field verification agents
+  - name: Alerts
+    description: Compliance alerts and notifications
+  - name: Tokens
+    description: API token management
+  - name: OpenClaw
+    description: OpenClaw agent integration endpoints
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: BIS API Token
+  schemas:
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          example: UNAUTHORIZED
+        message:
+          type: string
+          example: Invalid or expired API token
+        details:
+          type: object
+
+    Investigation:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        ref:
+          type: string
+          example: BIS-2026-00123
+        subject_name:
+          type: string
+          example: Amaka Okonkwo
+        subject_type:
+          type: string
+          enum: [individual, company]
+        case_type:
+          type: string
+          enum: [due_diligence, fraud_investigation, employment_screening, vendor_screening, aml_investigation]
+        status:
+          type: string
+          enum: [open, in_progress, pending_field, completed, closed, escalated]
+        priority:
+          type: string
+          enum: [low, standard, high, critical]
+        risk_score:
+          type: integer
+          minimum: 0
+          maximum: 100
+          nullable: true
+        assigned_to:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    KYCRecord:
+      type: object
+      properties:
+        kyc_id:
+          type: string
+          format: uuid
+        subject_name:
+          type: string
+        subject_type:
+          type: string
+          enum: [individual, company]
+        bvn:
+          type: string
+          nullable: true
+        nin:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [pending, in_progress, completed, failed, expired]
+        risk_score:
+          type: integer
+          minimum: 0
+          maximum: 100
+          nullable: true
+        checks:
+          type: object
+          properties:
+            identity:
+              type: object
+              properties:
+                verified:
+                  type: boolean
+                confidence:
+                  type: number
+                  format: float
+            sanctions:
+              type: object
+              properties:
+                hit:
+                  type: boolean
+                lists_checked:
+                  type: integer
+            adverse_media:
+              type: object
+              properties:
+                hit:
+                  type: boolean
+                articles_count:
+                  type: integer
+            pep:
+              type: object
+              properties:
+                hit:
+                  type: boolean
+        created_at:
+          type: string
+          format: date-time
+
+    SanctionsResult:
+      type: object
+      properties:
+        name:
+          type: string
+        hit:
+          type: boolean
+        lists_checked:
+          type: integer
+        matches:
+          type: array
+          items:
+            type: object
+            properties:
+              list:
+                type: string
+                example: OFAC
+              name:
+                type: string
+              score:
+                type: number
+                format: float
+              entity_type:
+                type: string
+                enum: [individual, company, vessel, aircraft]
+
+    AdverseMediaResult:
+      type: object
+      properties:
+        name:
+          type: string
+        hit:
+          type: boolean
+        articles:
+          type: array
+          items:
+            type: object
+            properties:
+              title:
+                type: string
+              source:
+                type: string
+              url:
+                type: string
+              date:
+                type: string
+                format: date
+              category:
+                type: string
+                enum: [fraud, corruption, money_laundering, terrorism, drug_trafficking, human_rights, other]
+              sentiment:
+                type: string
+                enum: [negative, neutral]
+
+    RiskScoreResult:
+      type: object
+      properties:
+        name:
+          type: string
+        score:
+          type: integer
+          minimum: 0
+          maximum: 100
+        level:
+          type: string
+          enum: [low, medium, high, critical]
+        factors:
+          type: object
+          additionalProperties:
+            type: string
+        recommendation:
+          type: string
+
+    FieldTask:
+      type: object
+      properties:
+        task_id:
+          type: string
+          example: FT-2026-00321
+        task_type:
+          type: string
+          enum: [address_verification, employment_verification, court_record_retrieval, surveillance, biometric_enrollment, document_authentication]
+        subject_name:
+          type: string
+        address:
+          type: string
+        status:
+          type: string
+          enum: [pending, assigned, in_progress, completed, failed]
+        agent_id:
+          type: string
+          nullable: true
+        priority:
+          type: string
+          enum: [low, standard, high, urgent]
+        sla_hours:
+          type: integer
+        estimated_completion:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    Alert:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        message:
+          type: string
+        severity:
+          type: string
+          enum: [low, medium, high, critical]
+        category:
+          type: string
+          enum: [sanctions_hit, adverse_media, risk_threshold, field_task_complete, kyc_expired, system]
+        is_read:
+          type: boolean
+        investigation_ref:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    ApiToken:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        prefix:
+          type: string
+          example: bis_live_abc1
+        scopes:
+          type: array
+          items:
+            type: string
+            enum: [investigations:read, investigations:write, kyc:read, kyc:write, screening:read, screening:write, field_agents:read, field_agents:write, alerts:read, admin]
+        rate_limit_per_minute:
+          type: integer
+        usage_count:
+          type: integer
+        last_used_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        is_active:
+          type: boolean
+
+security:
+  - BearerAuth: []
+
+paths:
+  # ── Investigations ──────────────────────────────────────────────────────────
+  /investigations:
+    get:
+      tags: [Investigations]
+      summary: List investigations
+      description: Returns a paginated list of investigations. Supports filtering by status, priority, and case type. **Tokens: 1**
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [open, in_progress, pending_field, completed, closed, escalated]
+        - name: priority
+          in: query
+          schema:
+            type: string
+            enum: [low, standard, high, critical]
+        - name: case_type
+          in: query
+          schema:
+            type: string
+        - name: search
+          in: query
+          schema:
+            type: string
+          description: Search by subject name or BIS reference
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+      responses:
+        "200":
+          description: Paginated list of investigations
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Investigation"
+                  total:
+                    type: integer
+                  page:
+                    type: integer
+                  limit:
+                    type: integer
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+    post:
+      tags: [Investigations]
+      summary: Create investigation
+      description: Opens a new investigation case. Returns a BIS reference number. **Tokens: 3**
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [subject_name, subject_type, case_type]
+              properties:
+                subject_name:
+                  type: string
+                  example: Amaka Okonkwo
+                subject_type:
+                  type: string
+                  enum: [individual, company]
+                case_type:
+                  type: string
+                  enum: [due_diligence, fraud_investigation, employment_screening, vendor_screening, aml_investigation]
+                priority:
+                  type: string
+                  enum: [low, standard, high, critical]
+                  default: standard
+                notes:
+                  type: string
+                  nullable: true
+            example:
+              subject_name: Amaka Okonkwo
+              subject_type: individual
+              case_type: due_diligence
+              priority: high
+              notes: Board appointment due diligence
+      responses:
+        "201":
+          description: Investigation created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Investigation"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /investigations/{ref}:
+    get:
+      tags: [Investigations]
+      summary: Get investigation by reference
+      description: Returns the full investigation record including risk score and audit trail. **Tokens: 1**
+      parameters:
+        - name: ref
+          in: path
+          required: true
+          schema:
+            type: string
+          example: BIS-2026-00123
+      responses:
+        "200":
+          description: Investigation record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Investigation"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  # ── KYC ────────────────────────────────────────────────────────────────────
+  /kyc:
+    get:
+      tags: [KYC]
+      summary: List KYC records
+      description: Returns KYC records for the tenant. **Tokens: 1**
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, in_progress, completed, failed, expired]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: KYC records
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/KYCRecord"
+                  total:
+                    type: integer
+
+    post:
+      tags: [KYC]
+      summary: Run KYC verification
+      description: |
+        Runs a full KYC check on an individual or company. Checks identity (BVN/NIN/CAC),
+        sanctions, adverse media, and PEP status. **Tokens: 6**
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [subject_type, full_name]
+              properties:
+                subject_type:
+                  type: string
+                  enum: [individual, company]
+                full_name:
+                  type: string
+                  example: Amaka Okonkwo
+                bvn:
+                  type: string
+                  nullable: true
+                  example: "22345678901"
+                nin:
+                  type: string
+                  nullable: true
+                  example: "12345678901"
+                rc_number:
+                  type: string
+                  nullable: true
+                  description: CAC registration number (for companies)
+                checks:
+                  type: array
+                  items:
+                    type: string
+                    enum: [identity, sanctions, adverse_media, pep, credit]
+                  default: [identity, sanctions, adverse_media, pep]
+            example:
+              subject_type: individual
+              full_name: Amaka Okonkwo
+              bvn: "22345678901"
+              checks: [identity, sanctions, adverse_media, pep]
+      responses:
+        "200":
+          description: KYC result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KYCRecord"
+
+  # ── Screening ───────────────────────────────────────────────────────────────
+  /screening/sanctions:
+    post:
+      tags: [Screening]
+      summary: Sanctions screening
+      description: |
+        Screen a name against 42+ global sanctions lists including OFAC, UN, EU, UK HMT,
+        EFCC Wanted, and Interpol Red Notices. **Tokens: 4**
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  example: Emeka Adeyemi
+                lists:
+                  type: array
+                  items:
+                    type: string
+                    enum: [UN, OFAC, EU, UK_HMT, EFCC_WANTED, INTERPOL_RED, AU, ECOWAS]
+                  default: [UN, OFAC, EU, UK_HMT, EFCC_WANTED]
+                fuzzy_threshold:
+                  type: number
+                  format: float
+                  minimum: 0.5
+                  maximum: 1.0
+                  default: 0.85
+                  description: Minimum similarity score for fuzzy name matching
+      responses:
+        "200":
+          description: Sanctions screening result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SanctionsResult"
+
+  /screening/adverse-media:
+    post:
+      tags: [Screening]
+      summary: Adverse media scan
+      description: |
+        Scan 10,000+ news sources, court databases, and regulatory filings for adverse media
+        mentions of a subject. **Tokens: 5**
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  example: Tunde Bakare
+                categories:
+                  type: array
+                  items:
+                    type: string
+                    enum: [fraud, corruption, money_laundering, terrorism, drug_trafficking, human_rights, cybercrime, tax_evasion]
+                  default: [fraud, corruption, money_laundering, terrorism]
+                date_from:
+                  type: string
+                  format: date
+                  nullable: true
+                  description: Only return articles from this date onwards
+      responses:
+        "200":
+          description: Adverse media result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdverseMediaResult"
+
+  /screening/risk-score:
+    post:
+      tags: [Screening]
+      summary: Composite risk score
+      description: |
+        Calculate the AI composite risk score (0–100) for a subject. Combines identity
+        verification, sanctions, adverse media, PEP status, and network analysis.
+        Returns a plain-English explanation of each contributing factor. **Tokens: 8**
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  example: Ngozi Eze
+                bvn:
+                  type: string
+                  nullable: true
+                include_factors:
+                  type: boolean
+                  default: true
+                  description: Include factor breakdown in response
+      responses:
+        "200":
+          description: Risk score result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RiskScoreResult"
+
+  # ── Field Agents ────────────────────────────────────────────────────────────
+  /field-agents:
+    get:
+      tags: [Field Agents]
+      summary: List field agents
+      description: Returns available field agents with their current status and location. **Tokens: 1**
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [available, on_task, offline]
+        - name: state
+          in: query
+          schema:
+            type: string
+          description: Nigerian state (e.g. Lagos, Abuja, Rivers)
+      responses:
+        "200":
+          description: Field agents list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                        name:
+                          type: string
+                        specialization:
+                          type: string
+                        state:
+                          type: string
+                        status:
+                          type: string
+                        active_tasks:
+                          type: integer
+
+  /field-agents/dispatch:
+    post:
+      tags: [Field Agents]
+      summary: Dispatch field agent
+      description: |
+        Dispatch a field agent for physical verification. Supports address verification,
+        employment checks, court record retrieval, and surveillance. **Tokens: 160**
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [task_type, subject_name, address]
+              properties:
+                task_type:
+                  type: string
+                  enum: [address_verification, employment_verification, court_record_retrieval, surveillance, biometric_enrollment, document_authentication]
+                subject_name:
+                  type: string
+                  example: Ngozi Eze
+                address:
+                  type: string
+                  example: 15 Admiralty Way, Lekki Phase 1, Lagos
+                investigation_ref:
+                  type: string
+                  nullable: true
+                  description: Link this task to an existing investigation
+                priority:
+                  type: string
+                  enum: [low, standard, high, urgent]
+                  default: standard
+                sla_hours:
+                  type: integer
+                  default: 48
+                  description: Maximum hours to complete the task
+                instructions:
+                  type: string
+                  nullable: true
+            example:
+              task_type: address_verification
+              subject_name: Ngozi Eze
+              address: 15 Admiralty Way, Lekki Phase 1, Lagos
+              priority: standard
+              sla_hours: 48
+      responses:
+        "201":
+          description: Field task created and agent assigned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FieldTask"
+
+  # ── Alerts ──────────────────────────────────────────────────────────────────
+  /alerts:
+    get:
+      tags: [Alerts]
+      summary: List alerts
+      description: Returns compliance alerts for the tenant. **Tokens: 1**
+      parameters:
+        - name: severity
+          in: query
+          schema:
+            type: string
+            enum: [low, medium, high, critical]
+        - name: is_read
+          in: query
+          schema:
+            type: boolean
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: Alerts list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  alerts:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Alert"
+                  total:
+                    type: integer
+                  unread:
+                    type: integer
+
+  # ── API Tokens ──────────────────────────────────────────────────────────────
+  /tokens:
+    get:
+      tags: [Tokens]
+      summary: List API tokens
+      description: Returns all API tokens for the authenticated tenant. **Tokens: 1**
+      responses:
+        "200":
+          description: API tokens
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ApiToken"
+
+    post:
+      tags: [Tokens]
+      summary: Create API token
+      description: Creates a new API token. The full token value is returned only once — store it securely. **Tokens: 1**
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, scopes]
+              properties:
+                name:
+                  type: string
+                  example: Production Integration
+                scopes:
+                  type: array
+                  items:
+                    type: string
+                    enum: [investigations:read, investigations:write, kyc:read, kyc:write, screening:read, screening:write, field_agents:read, field_agents:write, alerts:read, admin]
+                rate_limit_per_minute:
+                  type: integer
+                  default: 100
+            example:
+              name: Production Integration
+              scopes: [investigations:read, kyc:write, screening:read, screening:write]
+              rate_limit_per_minute: 500
+      responses:
+        "201":
+          description: Token created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiToken"
+                  - type: object
+                    properties:
+                      token:
+                        type: string
+                        description: Full token value — shown only once
+                        example: bis_live_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+  /tokens/{id}:
+    delete:
+      tags: [Tokens]
+      summary: Revoke API token
+      description: Permanently revokes an API token. This action cannot be undone. **Tokens: 1**
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Token revoked
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+
+  /tokens/{id}/usage:
+    get:
+      tags: [Tokens]
+      summary: Token usage stats
+      description: Returns usage statistics for a specific API token. **Tokens: 1**
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: days
+          in: query
+          schema:
+            type: integer
+            default: 30
+      responses:
+        "200":
+          description: Usage statistics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total_calls:
+                    type: integer
+                  total_tokens_consumed:
+                    type: integer
+                  calls_by_endpoint:
+                    type: object
+                    additionalProperties:
+                      type: integer
+                  calls_by_day:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        date:
+                          type: string
+                          format: date
+                        calls:
+                          type: integer
+                        tokens:
+                          type: integer
+
+  # ── OpenClaw ────────────────────────────────────────────────────────────────
+  /openclaw/execute:
+    post:
+      tags: [OpenClaw]
+      summary: Execute OpenClaw action
+      description: |
+        Managed instance endpoint for the BIS OpenClaw Skill. Executes a named action
+        with the given prompt and returns a markdown-formatted result.
+
+        This endpoint is used by the OpenClaw ClawHub skill runner when BIS is configured
+        as a managed instance rather than a local skill installation.
+
+        **Tokens: varies by action** (see skill.json for per-action costs)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action, prompt]
+              properties:
+                action:
+                  type: string
+                  enum: [kyc_verify, sanctions_screen, adverse_media, risk_score, create_investigation, dispatch_field_agent, get_investigation, list_alerts, full_due_diligence]
+                  example: full_due_diligence
+                prompt:
+                  type: string
+                  example: Run full due diligence on Biodun Afolabi before we sign the JV agreement
+                context:
+                  type: object
+                  nullable: true
+                  description: Optional context from the OpenClaw conversation
+      responses:
+        "200":
+          description: Action result as markdown
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+                    description: Markdown-formatted result
+                  tokens_consumed:
+                    type: integer
+                  action:
+                    type: string
+
+  /openclaw/webhook:
+    post:
+      tags: [OpenClaw]
+      summary: OpenClaw webhook receiver
+      description: |
+        Receives webhook events from OpenClaw when an agent completes a BIS-related task.
+        Used for async workflows where OpenClaw triggers a BIS investigation and needs
+        to be notified when results are ready.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                event:
+                  type: string
+                  enum: [investigation.completed, kyc.completed, field_task.completed, alert.triggered]
+                data:
+                  type: object
+                timestamp:
+                  type: string
+                  format: date-time
+      responses:
+        "200":
+          description: Webhook received
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  received:
+                    type: boolean

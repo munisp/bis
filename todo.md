@@ -568,3 +568,29 @@
 - [ ] Design OpenClaw integration architecture
 - [ ] Implement OpenClaw webhook receiver endpoint
 - [ ] Wire OpenClaw intelligence into investigation risk scoring
+
+## Phase 24 — Marketing Site, OpenClaw Skill, Developer API, goAML
+
+### Marketing Website
+- [ ] Deploy BIS marketing website as live Manus web project (bis-marketing)
+- [ ] Ensure public URL accessible without auth
+
+### OpenClaw BIS Skill
+- [ ] Create skill.json manifest for ClawHub
+- [ ] Write OpenClaw action handlers (kyc, sanctions, adverseMedia, riskScore, dispatch, investigate)
+- [ ] Add /api/openclaw/execute endpoint to BIS server
+- [ ] Add OpenClaw managed instance UI tab to Developer Portal
+- [ ] Write OpenClaw README and quick-start guide
+
+### Developer API Layer
+- [ ] Generate OpenAPI 3.0 spec (openapi.yaml) for all BIS v1 endpoints
+- [ ] Add Swagger UI at /api/docs (swagger-ui-express)
+- [ ] Add API Playground tab to Developer Portal page
+- [ ] Generate Python SDK (bis-sdk package structure)
+- [ ] Generate Node.js SDK (@bis/sdk package structure)
+- [ ] Generate Go SDK (bis-go package structure)
+- [ ] Add SDK download links to Developer Portal
+
+### goAML & NPF Documents
+- [ ] Draft goAML integration technical spec (07-goaml-integration-spec.md)
+- [ ] Draft NPF pilot proposal letter (08-npf-pilot-proposal.md)
