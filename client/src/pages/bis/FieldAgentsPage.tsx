@@ -521,6 +521,7 @@ export default function FieldAgentsPage() {
 
       {/* Agent table */}
       <div className={cn("bis-card overflow-hidden", viewMode === 'map' && 'hidden')}>
+        <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border">
@@ -601,6 +602,7 @@ export default function FieldAgentsPage() {
             })}
           </tbody>
         </table>
+        </div>
       </div>
 
       {/* Anti-fraud info */}

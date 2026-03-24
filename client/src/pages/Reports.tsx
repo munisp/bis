@@ -374,6 +374,7 @@ export default function Reports() {
 
       {/* ── Reports table ── */}
       <div className="bis-card overflow-hidden">
+        <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border">
@@ -443,6 +444,7 @@ export default function Reports() {
             )}
           </tbody>
         </table>
+        </div>
 
         <div className="px-4 py-2.5 border-t border-border/50">
           <span className="text-[10px] font-mono text-muted-foreground">

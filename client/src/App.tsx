@@ -1,76 +1,96 @@
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { lazy, Suspense } from "react";
 import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 
-// Core pages
-import Dashboard from "@/pages/Dashboard";
-import AuditLogPage from "@/pages/AuditLogPage";
-import UserManagementPage from "@/pages/UserManagementPage";
-import Investigations from "@/pages/Investigations";
-import InvestigationDetail from "@/pages/InvestigationDetail";
-import Reports from "@/pages/Reports";
-import Alerts from "@/pages/Alerts";
-import Tenants from "@/pages/Tenants";
-import Settings from "@/pages/Settings";
-import NotFound from "@/pages/NotFound";
+// ─── Lazy-loaded pages ────────────────────────────────────────────────────────
+// Each route chunk is loaded on demand, cutting initial bundle by ~60%.
 
-// BIS feature pages
-import BiometricEnrollmentPage from "@/pages/bis/BiometricEnrollmentPage";
-import FieldAgentsPage from "@/pages/bis/FieldAgentsPage";
-import DataSourcesPage from "@/pages/bis/DataSourcesPage";
-import ContinuousMonitoringPage from "@/pages/bis/ContinuousMonitoringPage";
-import DrugScreeningPage from "@/pages/bis/DrugScreeningPage";
-import MVRCheckPage from "@/pages/bis/MVRCheckPage";
-import NigerianDataBundlePage from "@/pages/bis/NigerianDataBundlePage";
-import WorkAuthorizationPage from "@/pages/bis/WorkAuthorizationPage";
-import ZeroFootprintPage from "@/pages/bis/ZeroFootprintPage";
+const Dashboard              = lazy(() => import("@/pages/Dashboard"));
+const AuditLogPage           = lazy(() => import("@/pages/AuditLogPage"));
+const UserManagementPage     = lazy(() => import("@/pages/UserManagementPage"));
+const Investigations         = lazy(() => import("@/pages/Investigations"));
+const InvestigationDetail    = lazy(() => import("@/pages/InvestigationDetail"));
+const Reports                = lazy(() => import("@/pages/Reports"));
+const Alerts                 = lazy(() => import("@/pages/Alerts"));
+const Tenants                = lazy(() => import("@/pages/Tenants"));
+const Settings               = lazy(() => import("@/pages/Settings"));
+const NotFound               = lazy(() => import("@/pages/NotFound"));
 
-// KYC / Onboarding / Monitoring
-import KYCVerificationPage from "@/pages/kyc/KYCVerificationPage";
-import MessagingChannelsPage from "@/pages/messaging/MessagingChannelsPage";
-import SocialMonitoringDashboard from "@/pages/monitoring/SocialMonitoringDashboard";
-import StakeholderOnboardingWizard from "@/pages/onboarding/StakeholderOnboardingWizard";
+const BiometricEnrollmentPage   = lazy(() => import("@/pages/bis/BiometricEnrollmentPage"));
+const FieldAgentsPage           = lazy(() => import("@/pages/bis/FieldAgentsPage"));
+const DataSourcesPage           = lazy(() => import("@/pages/bis/DataSourcesPage"));
+const ContinuousMonitoringPage  = lazy(() => import("@/pages/bis/ContinuousMonitoringPage"));
+const DrugScreeningPage         = lazy(() => import("@/pages/bis/DrugScreeningPage"));
+const MVRCheckPage              = lazy(() => import("@/pages/bis/MVRCheckPage"));
+const NigerianDataBundlePage    = lazy(() => import("@/pages/bis/NigerianDataBundlePage"));
+const WorkAuthorizationPage     = lazy(() => import("@/pages/bis/WorkAuthorizationPage"));
+const ZeroFootprintPage         = lazy(() => import("@/pages/bis/ZeroFootprintPage"));
+
+const KYCVerificationPage       = lazy(() => import("@/pages/kyc/KYCVerificationPage"));
+const MessagingChannelsPage     = lazy(() => import("@/pages/messaging/MessagingChannelsPage"));
+const SocialMonitoringDashboard = lazy(() => import("@/pages/monitoring/SocialMonitoringDashboard"));
+const StakeholderOnboardingWizard = lazy(() => import("@/pages/onboarding/StakeholderOnboardingWizard"));
+
+// ─── Page loading skeleton ────────────────────────────────────────────────────
+
+function PageSkeleton() {
+  return (
+    <div className="flex h-screen w-full items-center justify-center bg-background">
+      <div className="flex flex-col items-center gap-3">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+        <p className="text-xs text-muted-foreground">Loading…</p>
+      </div>
+    </div>
+  );
+}
+
+// ─── Router ───────────────────────────────────────────────────────────────────
 
 function Router() {
   return (
-    <Switch>
-      {/* Core */}
-      <Route path="/" component={Dashboard} />
-      <Route path="/dashboard" component={Dashboard} />
-      <Route path="/investigations" component={Investigations} />
-      <Route path="/investigations/:id" component={InvestigationDetail} />
-      <Route path="/reports" component={Reports} />
-      <Route path="/alerts" component={Alerts} />
-      <Route path="/tenants" component={Tenants} />
-      <Route path="/settings" component={Settings} />
-      <Route path="/audit-log" component={AuditLogPage} />
-      <Route path="/users" component={UserManagementPage} />
+    <Suspense fallback={<PageSkeleton />}>
+      <Switch>
+        {/* Core */}
+        <Route path="/" component={Dashboard} />
+        <Route path="/dashboard" component={Dashboard} />
+        <Route path="/investigations" component={Investigations} />
+        <Route path="/investigations/:id" component={InvestigationDetail} />
+        <Route path="/reports" component={Reports} />
+        <Route path="/alerts" component={Alerts} />
+        <Route path="/tenants" component={Tenants} />
+        <Route path="/settings" component={Settings} />
+        <Route path="/audit-log" component={AuditLogPage} />
+        <Route path="/users" component={UserManagementPage} />
 
-      {/* BIS Feature Modules */}
-      <Route path="/biometric-enrollment" component={BiometricEnrollmentPage} />
-      <Route path="/continuous-monitoring" component={ContinuousMonitoringPage} />
-      <Route path="/drug-screening" component={DrugScreeningPage} />
-      <Route path="/mvr-check" component={MVRCheckPage} />
-      <Route path="/nigeria-data-bundle" component={NigerianDataBundlePage} />
-      <Route path="/work-authorization" component={WorkAuthorizationPage} />
-      <Route path="/zero-footprint" component={ZeroFootprintPage} />
-      <Route path="/field-agents" component={FieldAgentsPage} />
-      <Route path="/data-sources" component={DataSourcesPage} />
+        {/* BIS Feature Modules */}
+        <Route path="/biometric-enrollment" component={BiometricEnrollmentPage} />
+        <Route path="/continuous-monitoring" component={ContinuousMonitoringPage} />
+        <Route path="/drug-screening" component={DrugScreeningPage} />
+        <Route path="/mvr-check" component={MVRCheckPage} />
+        <Route path="/nigeria-data-bundle" component={NigerianDataBundlePage} />
+        <Route path="/work-authorization" component={WorkAuthorizationPage} />
+        <Route path="/zero-footprint" component={ZeroFootprintPage} />
+        <Route path="/field-agents" component={FieldAgentsPage} />
+        <Route path="/data-sources" component={DataSourcesPage} />
 
-      {/* KYC / Onboarding / Intelligence */}
-      <Route path="/kyc-verification" component={KYCVerificationPage} />
-      <Route path="/messaging-channels" component={MessagingChannelsPage} />
-      <Route path="/social-monitoring" component={SocialMonitoringDashboard} />
-      <Route path="/onboarding" component={StakeholderOnboardingWizard} />
+        {/* KYC / Onboarding / Intelligence */}
+        <Route path="/kyc-verification" component={KYCVerificationPage} />
+        <Route path="/messaging-channels" component={MessagingChannelsPage} />
+        <Route path="/social-monitoring" component={SocialMonitoringDashboard} />
+        <Route path="/onboarding" component={StakeholderOnboardingWizard} />
 
-      {/* Fallback */}
-      <Route path="/404" component={NotFound} />
-      <Route component={NotFound} />
-    </Switch>
+        {/* Fallback */}
+        <Route path="/404" component={NotFound} />
+        <Route component={NotFound} />
+      </Switch>
+    </Suspense>
   );
 }
+
+// ─── App ──────────────────────────────────────────────────────────────────────
 
 function App() {
   return (

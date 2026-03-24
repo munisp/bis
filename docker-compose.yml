@@ -1,0 +1,100 @@
+version: "3.9"
+
+# BIS — Background Intelligence System
+# Polyglot microservices: Node.js BFF + Go Gateway + Python Risk Engine + Rust Event Processor
+
+services:
+  # ── Node.js BFF (tRPC + React PWA) ──────────────────────────────────────────
+  bff:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: ${DATABASE_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      BIS_GATEWAY_URL: http://gateway:8081
+      BIS_RISK_ENGINE_URL: http://risk-engine:8082
+      BIS_EVENT_PROCESSOR_URL: http://event-processor:8083
+      BIS_GATEWAY_KEY: ${BIS_GATEWAY_KEY:-change-in-production}
+      VITE_APP_ID: ${VITE_APP_ID}
+      OAUTH_SERVER_URL: ${OAUTH_SERVER_URL}
+      VITE_OAUTH_PORTAL_URL: ${VITE_OAUTH_PORTAL_URL}
+      BUILT_IN_FORGE_API_URL: ${BUILT_IN_FORGE_API_URL}
+      BUILT_IN_FORGE_API_KEY: ${BUILT_IN_FORGE_API_KEY}
+    depends_on:
+      - gateway
+      - risk-engine
+      - event-processor
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/trpc/auth.me"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ── Go API Gateway (Data Source Proxy) ──────────────────────────────────────
+  gateway:
+    build:
+      context: ./services/gateway
+      dockerfile: Dockerfile
+    ports:
+      - "8081:8081"
+    environment:
+      GATEWAY_PORT: "8081"
+      BIS_GATEWAY_KEY: ${BIS_GATEWAY_KEY:-change-in-production}
+      NIMC_API_URL: ${NIMC_API_URL:-https://api.nimc.gov.ng}
+      NIMC_API_KEY: ${NIMC_API_KEY}
+      BVN_API_URL: ${BVN_API_URL:-https://api.nibss-plc.org.ng}
+      BVN_API_KEY: ${BVN_API_KEY}
+      OFAC_API_URL: ${OFAC_API_URL:-https://sanctionslistservice.ofac.treas.gov}
+      EFCC_API_URL: ${EFCC_API_URL:-https://api.efcc.gov.ng}
+      CAC_API_URL: ${CAC_API_URL:-https://api.cac.gov.ng}
+      CREDITBUREAU_API_KEY: ${CREDITBUREAU_API_KEY}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8081/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ── Python ML Risk Engine ────────────────────────────────────────────────────
+  risk-engine:
+    build:
+      context: ./services/risk-engine
+      dockerfile: Dockerfile
+    ports:
+      - "8082:8082"
+    environment:
+      RISK_ENGINE_PORT: "8082"
+      BIS_GATEWAY_KEY: ${BIS_GATEWAY_KEY:-change-in-production}
+      MODEL_VERSION: "1.0.0"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ── Rust Event Processor ─────────────────────────────────────────────────────
+  event-processor:
+    build:
+      context: ./services/event-processor
+      dockerfile: Dockerfile
+    ports:
+      - "8083:8083"
+    environment:
+      EVENT_PROCESSOR_PORT: "8083"
+      BIS_GATEWAY_KEY: ${BIS_GATEWAY_KEY:-change-in-production}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8083/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+networks:
+  default:
+    name: bis-network
