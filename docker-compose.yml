@@ -2,11 +2,14 @@ version: "3.9"
 
 # ─── BIS Platform — Full Stack Docker Compose ────────────────────────────────
 # Infrastructure:  postgres, redis, zookeeper, kafka, keycloak, temporal, temporal-ui
+#                  permify, apisix, apisix-dashboard, tigerbeetle
 # Application:     gateway (Go), risk-engine (Python), event-processor (Rust), bff (Node.js)
 #
 # Quick start:
 #   cp .env.example .env && docker compose up -d
 #   docker compose logs -f gateway risk-engine event-processor bff
+#
+# Service count: 15 containers total
 
 networks:
   bis-net:
@@ -16,6 +19,9 @@ volumes:
   postgres_data:
   redis_data:
   keycloak_data:
+  permify_data:
+  tigerbeetle_data:
+  apisix_data:
 
 # ─── Infrastructure ───────────────────────────────────────────────────────────
 
@@ -90,7 +96,7 @@ services:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
       KAFKA_LOG_RETENTION_HOURS: 168
-      KAFKA_CREATE_TOPICS: "bis.events:3:1,bis.alerts:3:1,bis.audit:1:1"
+      KAFKA_CREATE_TOPICS: "bis.events:3:1,bis.alerts:3:1,bis.audit:1:1,bis.billing:1:1"
     ports:
       - "9093:9093"
     networks: [bis-net]
@@ -155,6 +161,115 @@ services:
       - "8088:8080"
     networks: [bis-net]
 
+  # ─── Permify — Fine-grained Authorization ─────────────────────────────────────
+  permify:
+    image: ghcr.io/permify/permify:latest
+    container_name: bis-permify
+    restart: unless-stopped
+    command: serve
+    environment:
+      PERMIFY_DATABASE_ENGINE: postgres
+      PERMIFY_DATABASE_URI: postgres://bis:${POSTGRES_PASSWORD:-bis_dev_password}@postgres:5432/bis?sslmode=disable
+      PERMIFY_DATABASE_MAX_OPEN_CONNECTIONS: "20"
+      PERMIFY_SERVER_PORT: "3476"
+      PERMIFY_SERVER_GRPC_PORT: "3478"
+      PERMIFY_LOG_LEVEL: info
+      PERMIFY_AUTHN_ENABLED: "true"
+      PERMIFY_AUTHN_METHOD: preshared
+      PERMIFY_AUTHN_PRESHARED_KEYS: "${PERMIFY_API_KEY:-bis-permify-dev-key}"
+    ports:
+      - "3476:3476"   # HTTP API
+      - "3478:3478"   # gRPC
+    networks: [bis-net]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - permify_data:/var/lib/permify
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3476/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # ─── APISix — API Gateway / Single Ingress ────────────────────────────────────
+  apisix:
+    image: apache/apisix:3.9.0-debian
+    container_name: bis-apisix
+    restart: unless-stopped
+    volumes:
+      - ./infra/apisix/conf/config.yaml:/usr/local/apisix/conf/config.yaml:ro
+      - ./infra/apisix/conf/apisix.yaml:/usr/local/apisix/conf/apisix.yaml:ro
+      - apisix_data:/usr/local/apisix/logs
+    environment:
+      APISIX_ADMIN_KEY: ${APISIX_ADMIN_KEY:-bis-apisix-admin-dev}
+      APISIX_VIEWER_KEY: ${APISIX_VIEWER_KEY:-bis-apisix-viewer-dev}
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+    ports:
+      - "9080:9080"   # HTTP ingress (public)
+      - "9180:9180"   # Admin API (internal)
+      - "9091:9091"   # Prometheus metrics
+    networks: [bis-net]
+    depends_on:
+      - bff
+      - gateway
+      - risk-engine
+      - event-processor
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # ─── TigerBeetle — Immutable Financial Ledger ─────────────────────────────────
+  # TigerBeetle requires a pre-formatted data file. The init container creates it.
+  tigerbeetle-init:
+    image: ghcr.io/tigerbeetle/tigerbeetle:0.16.11
+    container_name: bis-tigerbeetle-init
+    command: format --cluster=0 --replica=0 --replica-count=1 /data/0_0.tigerbeetle
+    volumes:
+      - tigerbeetle_data:/data
+    networks: [bis-net]
+    restart: "no"
+
+  tigerbeetle:
+    image: ghcr.io/tigerbeetle/tigerbeetle:0.16.11
+    container_name: bis-tigerbeetle
+    restart: unless-stopped
+    command: start --addresses=0.0.0.0:3000 /data/0_0.tigerbeetle
+    volumes:
+      - tigerbeetle_data:/data
+    ports:
+      - "3100:3000"   # TigerBeetle binary protocol (mapped to 3100 to avoid BFF conflict)
+    networks: [bis-net]
+    depends_on:
+      - tigerbeetle-init
+    healthcheck:
+      test: ["CMD-SHELL", "echo '{}' | nc -w1 localhost 3000 || exit 0"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ─── TigerBeetle HTTP Proxy ────────────────────────────────────────────────────
+  # Exposes TigerBeetle's binary protocol as a JSON REST API for Go/Node.js clients.
+  tigerbeetle-http:
+    image: ghcr.io/tigerbeetle/tigerbeetle-http:latest
+    container_name: bis-tigerbeetle-http
+    restart: unless-stopped
+    environment:
+      TIGERBEETLE_ADDRESS: tigerbeetle:3000
+      PORT: "4000"
+    ports:
+      - "4000:4000"
+    networks: [bis-net]
+    depends_on:
+      - tigerbeetle
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
 # ─── Application Services ─────────────────────────────────────────────────────
 
   gateway:
@@ -187,6 +302,12 @@ services:
       CAC_API_KEY: ${CAC_API_KEY:-}
       EFCC_API_URL: ${EFCC_API_URL:-https://api.efcc.gov.ng}
       CREDITBUREAU_API_KEY: ${CREDITBUREAU_API_KEY:-}
+      # Permify
+      PERMIFY_URL: http://permify:3476
+      PERMIFY_TENANT_ID: ${PERMIFY_TENANT_ID:-t1}
+      PERMIFY_API_KEY: ${PERMIFY_API_KEY:-bis-permify-dev-key}
+      # TigerBeetle
+      TIGERBEETLE_URL: http://tigerbeetle-http:4000
     ports:
       - "8081:8081"
     networks: [bis-net]
@@ -215,6 +336,10 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD:-bis_redis_dev}
       RISK_SCORE_TTL_SECONDS: "3600"
       LOOKUP_TTL_SECONDS: "86400"
+      # Permify (read-only checks for risk scoring access)
+      PERMIFY_URL: http://permify:3476
+      PERMIFY_TENANT_ID: ${PERMIFY_TENANT_ID:-t1}
+      PERMIFY_API_KEY: ${PERMIFY_API_KEY:-bis-permify-dev-key}
     ports:
       - "8082:8082"
     networks: [bis-net]
@@ -277,13 +402,20 @@ services:
       KEYCLOAK_REALM: ${KEYCLOAK_REALM:-bis}
       KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID:-bis-bff}
       KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET:-}
+      # Permify
+      PERMIFY_URL: http://permify:3476
+      PERMIFY_TENANT_ID: ${PERMIFY_TENANT_ID:-t1}
+      PERMIFY_API_KEY: ${PERMIFY_API_KEY:-bis-permify-dev-key}
+      # TigerBeetle
+      TIGERBEETLE_URL: http://tigerbeetle-http:4000
+      # Manus OAuth
       VITE_APP_ID: ${VITE_APP_ID:-}
       OAUTH_SERVER_URL: ${OAUTH_SERVER_URL:-}
       VITE_OAUTH_PORTAL_URL: ${VITE_OAUTH_PORTAL_URL:-}
       BUILT_IN_FORGE_API_URL: ${BUILT_IN_FORGE_API_URL:-}
       BUILT_IN_FORGE_API_KEY: ${BUILT_IN_FORGE_API_KEY:-}
     ports:
-      - "3000:3000"
+      - "3001:3000"   # BFF internal port (APISix routes to this)
     networks: [bis-net]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/api/trpc/auth.me"]

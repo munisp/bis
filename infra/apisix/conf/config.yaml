@@ -1,0 +1,116 @@
+# ─── APISix Configuration for BIS Platform ───────────────────────────────────
+# Single ingress point in front of all 4 BIS application services.
+# Plugins: jwt-auth, rate-limit, request-id, prometheus, cors, response-rewrite
+
+apisix:
+  node_listen: 9080          # HTTP ingress port
+  enable_admin: true
+  admin_listen:
+    ip: 0.0.0.0
+    port: 9180
+  enable_dev_mode: false
+  enable_reuseport: true
+  show_upstream_status_in_response_header: false
+  enable_ipv6: false
+  extra_lua_path: ""
+  extra_lua_cpath: ""
+
+deployment:
+  role: traditional
+  role_traditional:
+    config_provider: yaml
+  admin:
+    allow_admin:
+      - 127.0.0.0/24
+      - 0.0.0.0/0   # restrict in production
+    admin_key:
+      - name: "admin"
+        key: "${APISIX_ADMIN_KEY}"
+        role: admin
+      - name: "viewer"
+        key: "${APISIX_VIEWER_KEY}"
+        role: viewer
+    admin_key_required: true
+
+plugin_attr:
+  prometheus:
+    export_uri: /apisix/prometheus/metrics
+    export_addr:
+      ip: 0.0.0.0
+      port: 9091
+  request-id:
+    header_name: X-BIS-Request-ID
+    include_in_response: true
+    algorithm: uuid
+
+plugins:
+  - real-ip
+  - client-control
+  - proxy-control
+  - request-id
+  - zipkin
+  - ext-plugin-pre-req
+  - fault-injection
+  - mocking
+  - serverless-pre-function
+  - cors
+  - ip-restriction
+  - ua-restriction
+  - referer-restriction
+  - csrf
+  - uri-blocker
+  - request-validation
+  - openid-connect
+  - authz-keycloak
+  - wolf-rbac
+  - ldap-auth
+  - hmac-auth
+  - basic-auth
+  - jwt-auth
+  - key-auth
+  - consumer-restriction
+  - forward-auth
+  - opa
+  - authz-casbin
+  - authz-casdoor
+  - multi-auth
+  - body-transformer
+  - ai-proxy
+  - proxy-mirror
+  - proxy-cache
+  - proxy-rewrite
+  - workflow
+  - api-breaker
+  - limit-conn
+  - limit-count
+  - limit-req
+  - gzip
+  - real-response-body
+  - serverless-post-function
+  - ext-plugin-post-req
+  - redirect
+  - response-rewrite
+  - degraphql
+  - kafka-logger
+  - http-logger
+  - splunk-hec-logging
+  - skywalking-logger
+  - google-cloud-logging
+  - sls-logger
+  - tcp-logger
+  - udp-logger
+  - file-logger
+  - clickhouse-logger
+  - tencent-cloud-cls
+  - inspect
+  - example-plugin
+  - aws-lambda
+  - azure-functions
+  - openwhisk
+  - openfunction
+  - datadog
+  - echo
+  - prometheus
+  - skywalking
+  - node-status
+  - ext-plugin-post-resp

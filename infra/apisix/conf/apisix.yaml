@@ -1,0 +1,234 @@
+# ─── APISix Declarative Route Configuration for BIS Platform ─────────────────
+# Routes all BIS API traffic through APISix with JWT validation,
+# rate limiting, CORS, and request-ID injection.
+#
+# Upstream services:
+#   bff-node   :3001  — Node.js tRPC BFF
+#   go-gateway :8081  — Go API Gateway (data sources)
+#   py-risk    :8082  — Python ML Risk Engine
+#   rust-events:8083  — Rust Event Processor
+
+# ── Consumers (JWT) ──────────────────────────────────────────────────────────
+consumers:
+  - username: bis-analyst
+    plugins:
+      jwt-auth:
+        key: bis-analyst
+        secret: "${JWT_SECRET}"
+        algorithm: HS256
+
+  - username: bis-admin
+    plugins:
+      jwt-auth:
+        key: bis-admin
+        secret: "${JWT_SECRET}"
+        algorithm: HS256
+
+  - username: bis-field-agent
+    plugins:
+      jwt-auth:
+        key: bis-field-agent
+        secret: "${JWT_SECRET}"
+        algorithm: HS256
+
+# ── Upstreams ─────────────────────────────────────────────────────────────────
+upstreams:
+  - id: bff-node
+    name: BIS tRPC BFF (Node.js)
+    type: roundrobin
+    nodes:
+      "bff-node:3001": 1
+    checks:
+      active:
+        http_path: /api/health
+        interval: 10
+        timeout: 2
+        unhealthy:
+          http_failures: 3
+
+  - id: go-gateway
+    name: BIS API Gateway (Go)
+    type: roundrobin
+    nodes:
+      "go-gateway:8081": 1
+    checks:
+      active:
+        http_path: /healthz
+        interval: 10
+        timeout: 2
+        unhealthy:
+          http_failures: 3
+
+  - id: py-risk-engine
+    name: BIS Risk Engine (Python)
+    type: roundrobin
+    nodes:
+      "py-risk-engine:8082": 1
+    checks:
+      active:
+        http_path: /health
+        interval: 10
+        timeout: 2
+        unhealthy:
+          http_failures: 3
+
+  - id: rust-event-processor
+    name: BIS Event Processor (Rust)
+    type: roundrobin
+    nodes:
+      "rust-event-processor:8083": 1
+    checks:
+      active:
+        http_path: /health
+        interval: 10
+        timeout: 2
+        unhealthy:
+          http_failures: 3
+
+# ── Routes ────────────────────────────────────────────────────────────────────
+routes:
+  # ── tRPC BFF — all tRPC procedures ──────────────────────────────────────────
+  - id: trpc-bff
+    name: "BFF tRPC API"
+    uri: /api/trpc/*
+    upstream_id: bff-node
+    plugins:
+      cors:
+        allow_origins: "*"
+        allow_methods: "GET,POST,OPTIONS"
+        allow_headers: "Content-Type,Authorization,X-BIS-Request-ID"
+        expose_headers: "X-BIS-Request-ID"
+        max_age: 3600
+      jwt-auth:
+        header: Authorization
+        query: token
+        cookie: bis_token
+      limit-count:
+        count: 200
+        time_window: 60
+        rejected_code: 429
+        rejected_msg: '{"error":"rate_limit_exceeded","retry_after":60}'
+        key_type: var
+        key: remote_addr
+      request-id:
+        header_name: X-BIS-Request-ID
+        include_in_response: true
+      response-rewrite:
+        headers:
+          set:
+            X-BIS-Gateway: "APISix/3.x"
+            X-Content-Type-Options: "nosniff"
+            X-Frame-Options: "DENY"
+
+  # ── OAuth callback (unauthenticated) ─────────────────────────────────────────
+  - id: oauth-callback
+    name: "OAuth Callback (public)"
+    uri: /api/oauth/*
+    upstream_id: bff-node
+    plugins:
+      cors:
+        allow_origins: "*"
+        allow_methods: "GET,POST,OPTIONS"
+        allow_headers: "Content-Type,Authorization"
+      limit-count:
+        count: 30
+        time_window: 60
+        rejected_code: 429
+      request-id:
+        header_name: X-BIS-Request-ID
+        include_in_response: true
+
+  # ── Go Gateway — data source proxies ─────────────────────────────────────────
+  - id: go-nin-bvn
+    name: "Go Gateway — NIN/BVN/CAC/Sanctions"
+    uri: /api/v1/*
+    upstream_id: go-gateway
+    plugins:
+      jwt-auth:
+        header: Authorization
+      limit-count:
+        count: 60
+        time_window: 60
+        rejected_code: 429
+        rejected_msg: '{"error":"rate_limit_exceeded"}'
+        key_type: var
+        key: remote_addr
+      request-id:
+        header_name: X-BIS-Request-ID
+        include_in_response: true
+      response-rewrite:
+        headers:
+          set:
+            X-BIS-Gateway: "APISix/3.x"
+
+  # ── Python Risk Engine ────────────────────────────────────────────────────────
+  - id: py-risk
+    name: "Python Risk Engine"
+    uri: /api/risk/*
+    upstream_id: py-risk-engine
+    plugins:
+      jwt-auth:
+        header: Authorization
+      limit-count:
+        count: 120
+        time_window: 60
+        rejected_code: 429
+        key_type: var
+        key: remote_addr
+      request-id:
+        header_name: X-BIS-Request-ID
+        include_in_response: true
+      proxy-rewrite:
+        regex_uri:
+          - "^/api/risk/(.*)"
+          - "/$1"
+
+  # ── Rust Event Processor ──────────────────────────────────────────────────────
+  - id: rust-events
+    name: "Rust Event Processor"
+    uri: /api/events/*
+    upstream_id: rust-event-processor
+    plugins:
+      jwt-auth:
+        header: Authorization
+      limit-count:
+        count: 500
+        time_window: 60
+        rejected_code: 429
+        key_type: var
+        key: remote_addr
+      request-id:
+        header_name: X-BIS-Request-ID
+        include_in_response: true
+      proxy-rewrite:
+        regex_uri:
+          - "^/api/events/(.*)"
+          - "/$1"
+
+  # ── Prometheus metrics (internal only) ───────────────────────────────────────
+  - id: prometheus-metrics
+    name: "Prometheus Metrics (internal)"
+    uri: /apisix/prometheus/metrics
+    upstream_id: bff-node   # placeholder; APISix serves this directly
+    plugins:
+      ip-restriction:
+        whitelist:
+          - 10.0.0.0/8
+          - 172.16.0.0/12
+          - 192.168.0.0/16
+          - 127.0.0.1
+
+  # ── Health check (unauthenticated) ────────────────────────────────────────────
+  - id: health
+    name: "APISix Health"
+    uri: /health
+    upstream_id: bff-node
+    plugins:
+      response-rewrite:
+        status_code: 200
+        body: '{"status":"ok","gateway":"apisix"}'
+        headers:
+          set:
+            Content-Type: "application/json"
+
+#END

@@ -1,0 +1,96 @@
+// ─── BIS Permify Authorization Schema ────────────────────────────────────────
+// Defines entities, relations, and permissions for the BIS platform.
+// Apply with: permify schema write --schema infra/permify/schema.perm
+
+entity user {}
+
+entity organization {
+  relation admin   @user
+  relation member  @user
+
+  permission manage = admin
+  permission view   = admin or member
+}
+
+entity investigation {
+  relation owner      @user          // analyst who created it
+  relation assignee   @user          // analyst currently assigned
+  relation supervisor @user          // supervisor overseeing it
+  relation org        @organization  // owning organisation
+
+  // Permissions
+  permission create  = org.admin or org.member
+  permission read    = owner or assignee or supervisor or org.admin
+  permission update  = assignee or supervisor or org.admin
+  permission delete  = supervisor or org.admin
+  permission assign  = supervisor or org.admin
+  permission export  = assignee or supervisor or org.admin
+  permission flag    = assignee or supervisor or org.admin
+  permission close   = supervisor or org.admin
+}
+
+entity alert {
+  relation investigation @investigation
+  relation org           @organization
+
+  permission read        = investigation.read
+  permission acknowledge = investigation.update
+  permission link        = investigation.update
+}
+
+entity kyc_record {
+  relation owner @user
+  relation org   @organization
+
+  permission read   = owner or org.admin or org.member
+  permission create = org.admin or org.member
+  permission update = owner or org.admin
+  permission delete = org.admin
+}
+
+entity field_task {
+  relation assigned_agent @user
+  relation supervisor     @user
+  relation org            @organization
+
+  permission read     = assigned_agent or supervisor or org.admin
+  permission create   = supervisor or org.admin
+  permission update   = assigned_agent or supervisor or org.admin
+  permission complete = assigned_agent
+  permission delete   = supervisor or org.admin
+}
+
+entity report {
+  relation creator @user
+  relation org     @organization
+
+  permission read     = creator or org.admin or org.member
+  permission create   = org.admin or org.member
+  permission download = creator or org.admin
+  permission delete   = org.admin
+}
+
+entity audit_log {
+  relation org @organization
+
+  // Audit logs are immutable — only admins can read
+  permission read = org.admin
+}
+
+entity api_key {
+  relation tenant @organization
+
+  permission read   = tenant.admin
+  permission create = tenant.admin
+  permission revoke = tenant.admin
+  permission rotate = tenant.admin
+}
+
+entity webhook {
+  relation tenant @organization
+
+  permission read   = tenant.admin or tenant.member
+  permission create = tenant.admin
+  permission delete = tenant.admin
+  permission test   = tenant.admin
+}

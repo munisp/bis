@@ -1,5 +1,6 @@
 import { COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
+import { billingRouter } from "./billing";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { getDb } from "./db";
@@ -534,6 +535,7 @@ export const appRouter = router({
   audit: auditRouter,
   fieldTasks: fieldTasksRouter,
   reports: reportsRouter,
+  billing: billingRouter,
 });
 
 export type AppRouter = typeof appRouter;
