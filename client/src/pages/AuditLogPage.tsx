@@ -1,7 +1,7 @@
 // AuditLogPage — live tRPC-backed audit trail
 // Design: Forensic Intelligence theme, semantic CSS variables
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import BISLayout from "@/components/BISLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -46,13 +46,24 @@ export default function AuditLogPage() {
   const [resultFilter, setResultFilter] = useState("all");
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [page, setPage] = useState(0);
+  const [userIdFilter, setUserIdFilter] = useState<number | undefined>(undefined);
   const PAGE_SIZE = 50;
+
+  // Read ?userId=X from URL and pre-filter on mount
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const uid = params.get("userId");
+    if (uid && !isNaN(Number(uid))) {
+      setUserIdFilter(Number(uid));
+    }
+  }, []);
 
   const utils = trpc.useUtils();
 
   const { data, isLoading, refetch } = trpc.audit.list.useQuery({
     category: categoryFilter !== "all" ? categoryFilter : undefined,
     result: resultFilter !== "all" ? resultFilter : undefined,
+    userId: userIdFilter,
     limit: PAGE_SIZE,
     offset: page * PAGE_SIZE,
   });

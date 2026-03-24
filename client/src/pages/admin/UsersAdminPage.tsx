@@ -6,6 +6,7 @@
  */
 
 import { useState, useMemo } from "react";
+import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
 import BISLayout from "@/components/BISLayout";
@@ -72,6 +73,7 @@ export default function UsersAdminPage() {
   const [editTarget, setEditTarget] = useState<UserRow | null>(null);
   const [newRole, setNewRole] = useState<UserRole>("analyst");
   const [deactivateTarget, setDeactivateTarget] = useState<UserRow | null>(null);
+  const [, navigate] = useLocation();
 
   // Role guard
   if (currentUser && currentUser.role !== "admin") {
@@ -234,6 +236,14 @@ export default function UsersAdminPage() {
                               onClick={() => handleEditRole(u)}
                             >
                               <Shield className="w-3 h-3 mr-1" /> Change Role
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-xs text-muted-foreground"
+                              onClick={() => navigate(`/audit-log?userId=${u.id}`)}
+                            >
+                              <ClipboardCheck className="w-3 h-3 mr-1" /> Audit Log
                             </Button>
                             {u.role !== "readonly" && (
                               <Button

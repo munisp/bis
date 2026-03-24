@@ -229,4 +229,43 @@
 - [x] Register /admin/users route in App.tsx and sidebar (admin-only)
 
 ### Archive
-- [ ] Comprehensive project archive v12 generated
+- [x] Comprehensive project archive v12 generated (bis-pwa-archive-v12-20260324.zip, 72 MB, 1151 files)
+
+## Phase 13 — Next Steps (Round 4) + DB Seed
+
+### Uploaded Docs in Onboarding Admin Drawer
+- [x] Fetch documentUrls from application record in OnboardingAdminPage detail drawer
+- [x] Render clickable file list with download links in review drawer
+
+### Filter-Aware KYC Pagination
+- [x] Add status filter input to trpc.kyc.list cursor pagination
+- [x] Enable Load More button when status filter is active (removed statusFilter === "all" restriction)
+
+### User Audit Trail Deep-Link
+- [x] Add "View Audit Log" action to each row in /admin/users
+- [x] Deep-link to /audit-log?userId=X showing all actions for that user
+- [x] AuditLogPage reads userId query param and pre-filters the table
+- [x] Add userId filter to trpc.audit.list procedure
+
+### Database Seed (local PostgreSQL 14)
+- [x] Seed users table (10 users across all roles)
+- [x] Seed tenants table (6 tenants)
+- [x] Seed api_keys table (12 API keys)
+- [x] Seed investigations table (25 investigations)
+- [x] Seed investigation_notes table (31 notes in audit_log)
+- [x] Seed screening_requests table (30 records)
+- [x] Seed kyc_records table (20 records)
+- [x] Seed alerts table (20 alerts)
+- [x] Seed audit_log table (91 entries total)
+- [x] Seed field_agents table (10 agents)
+- [x] Seed field_tasks table (15 tasks)
+- [x] Seed webhooks table (4 webhooks)
+- [x] Seed onboarding_applications table (10 applications)
+- [x] Seed platform_settings table (13 settings)
+- [x] Seed monitors table (12 monitors)
+- [x] Seed data_sources table (12 sources)
+- [x] Seed reports table (10 reports)
+- [x] Total: 291 rows across 16 tables
+
+### Archive
+- [ ] Comprehensive project archive v13 generated

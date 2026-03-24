@@ -19,7 +19,7 @@ import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import {
   CheckCircle2, XCircle, Clock, Eye, Search, RefreshCw,
-  Building2, User, Globe, Phone, Mail, FileText, Loader2
+  Building2, User, Globe, Phone, Mail, FileText, Loader2, Download
 } from "lucide-react";
 
 type OnboardingStatus = "draft" | "submitted" | "awaiting_documents" | "under_review" | "approved" | "rejected";
@@ -64,6 +64,7 @@ type Application = {
   agreedToTerms?: boolean | null;
   status: OnboardingStatus;
   stakeholders?: unknown;
+  documentUrls?: Array<{ name: string; url: string; key: string; uploadedAt: string }> | null;
   createdBy?: string | null;
   createdAt: Date;
   updatedAt: Date;
@@ -339,6 +340,39 @@ export default function OnboardingAdminPage() {
                     </span>
                   </div>
                 </div>
+
+                {/* Uploaded Documents */}
+                {Array.isArray(selected.documentUrls) && selected.documentUrls.length > 0 && (
+                  <>
+                    <Separator />
+                    <div>
+                      <h4 className="text-sm font-semibold text-foreground mb-2 flex items-center gap-1.5">
+                        <FileText className="w-4 h-4" /> Uploaded Documents ({selected.documentUrls.length})
+                      </h4>
+                      <div className="space-y-1.5">
+                        {selected.documentUrls.map((doc, i) => (
+                          <div key={i} className="flex items-center justify-between bg-muted/30 rounded px-3 py-2 text-sm">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <FileText className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                              <span className="truncate font-medium">{doc.name}</span>
+                              <span className="text-xs text-muted-foreground shrink-0">
+                                {new Date(doc.uploadedAt).toLocaleDateString()}
+                              </span>
+                            </div>
+                            <a
+                              href={doc.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="ml-2 shrink-0 inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                            >
+                              <Download className="w-3 h-3" /> Download
+                            </a>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                )}
 
                 {/* Stakeholders */}
                 {Array.isArray(selected.stakeholders) && (selected.stakeholders as unknown[]).length > 0 && (

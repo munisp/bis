@@ -83,10 +83,20 @@ export default function KYCRecordsPage() {
   const [hasMore, setHasMore] = useState(true);
   const [total, setTotal] = useState(0);
 
-  // Initial load
+  // Build server-side filter input — reset pagination when filter changes
+  const serverStatus = statusFilter === "all" ? undefined : statusFilter;
+
+  // Initial load — passes status filter to server so pagination works correctly per-filter
   const { data: firstPage, isLoading, refetch: refetchFirst } = trpc.kyc.list.useQuery(
-    { limit: PAGE_SIZE },
+    { limit: PAGE_SIZE, status: serverStatus },
   );
+
+  // Reset pagination state when filter changes
+  useEffect(() => {
+    setPages([]);
+    setNextCursor(undefined);
+    setHasMore(true);
+  }, [statusFilter]);
 
   // Sync first page into local state
   useEffect(() => {
@@ -106,12 +116,12 @@ export default function KYCRecordsPage() {
     refetchFirst();
   }, [refetchFirst]);
 
-  // Load more via imperative query
+  // Load more via imperative query — respects current status filter
   const handleLoadMore = useCallback(async () => {
     if (!nextCursor || loadingMore) return;
     setLoadingMore(true);
     try {
-      const result = await utils.kyc.list.fetch({ limit: PAGE_SIZE, cursor: nextCursor });
+      const result = await utils.kyc.list.fetch({ limit: PAGE_SIZE, cursor: nextCursor, status: serverStatus });
       setPages(prev => [...prev, result.items as KYCRecord[]]);
       setNextCursor(result.nextCursor ?? undefined);
       setHasMore(result.nextCursor !== null);
@@ -121,7 +131,7 @@ export default function KYCRecordsPage() {
     } finally {
       setLoadingMore(false);
     }
-  }, [nextCursor, loadingMore, utils]);
+  }, [nextCursor, loadingMore, utils, serverStatus]);
 
   const verifyMutation = trpc.kyc.verify.useMutation({
     onSuccess: (result, vars) => {
@@ -318,7 +328,7 @@ export default function KYCRecordsPage() {
                 {statusFilter !== "all" && ` · filtered by "${STATUS_CONFIG[statusFilter]?.label}"`}
                 {allLoaded.length < total && ` · ${allLoaded.length} loaded`}
               </span>
-              {hasMore && !search && statusFilter === "all" && (
+              {hasMore && !search && (
                 <Button
                   variant="outline"
                   size="sm"

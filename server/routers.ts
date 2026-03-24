@@ -434,17 +434,24 @@ const kycRouter = router({
     .input(z.object({
       limit: z.number().min(1).max(200).default(50),
       cursor: z.number().optional(), // last seen record id for cursor pagination
+      status: z.enum(["pending", "processing", "passed", "failed", "review"]).optional(),
     }))
     .query(async ({ input }) => {
       const db = await getDb();
       if (!db) return { items: [], total: 0, nextCursor: null };
-      const where = input.cursor ? sql`${kycRecords.id} < ${input.cursor}` : undefined;
+      const conditions: ReturnType<typeof eq>[] = [];
+      if (input.cursor) conditions.push(sql`${kycRecords.id} < ${input.cursor}` as any);
+      if (input.status) conditions.push(eq(kycRecords.status, input.status));
+      const where = conditions.length > 0 ? and(...conditions) : undefined;
+      // Count query respects status filter
+      const countConditions = input.status ? [eq(kycRecords.status, input.status)] : [];
       const [items, countResult] = await Promise.all([
         db.select().from(kycRecords)
           .where(where)
           .orderBy(desc(kycRecords.id))
           .limit(input.limit + 1), // fetch one extra to detect next page
-        db.select({ count: sql<number>`count(*)` }).from(kycRecords),
+        db.select({ count: sql<number>`count(*)` }).from(kycRecords)
+          .where(countConditions.length ? and(...countConditions) : undefined),
       ]);
       const hasMore = items.length > input.limit;
       const page = hasMore ? items.slice(0, input.limit) : items;
@@ -619,6 +626,7 @@ const auditRouter = router({
       category: z.string().optional(),
       result: z.string().optional(),
       targetRef: z.string().optional(),
+      userId: z.number().optional(), // filter by actor user id (for deep-link from admin/users)
       limit: z.number().default(100),
       offset: z.number().default(0),
     }))
@@ -629,6 +637,7 @@ const auditRouter = router({
       if (input.category) conditions.push(eq(auditLog.category, input.category as any));
       if (input.result) conditions.push(eq(auditLog.result, input.result as any));
       if (input.targetRef) conditions.push(eq(auditLog.targetRef, input.targetRef));
+      if (input.userId) conditions.push(eq(auditLog.userId, input.userId));
       const where = conditions.length ? and(...conditions) : undefined;
       const [items, countResult] = await Promise.all([
         db.select().from(auditLog).where(where).orderBy(desc(auditLog.createdAt)).limit(input.limit).offset(input.offset),
