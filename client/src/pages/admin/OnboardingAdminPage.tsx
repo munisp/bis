@@ -1,0 +1,377 @@
+/**
+ * Onboarding Admin Page
+ * =====================
+ * Lists all stakeholder onboarding applications with status filters,
+ * detail drawer, and approve/reject actions wired to trpc.onboarding.updateStatus.
+ */
+
+import { useState } from "react";
+import { trpc } from "@/lib/trpc";
+import BISLayout from "@/components/BISLayout";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Separator } from "@/components/ui/separator";
+import { toast } from "sonner";
+import {
+  CheckCircle2, XCircle, Clock, Eye, Search, RefreshCw,
+  Building2, User, Globe, Phone, Mail, FileText, Loader2
+} from "lucide-react";
+
+type OnboardingStatus = "draft" | "submitted" | "awaiting_documents" | "under_review" | "approved" | "rejected";
+
+const STATUS_CONFIG: Record<OnboardingStatus, { label: string; color: string; icon: React.ReactNode }> = {
+  draft:               { label: "Draft",              color: "bg-muted text-muted-foreground",        icon: <FileText className="w-3 h-3" /> },
+  submitted:           { label: "Submitted",           color: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300",   icon: <Clock className="w-3 h-3" /> },
+  awaiting_documents:  { label: "Awaiting Docs",       color: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300", icon: <Clock className="w-3 h-3" /> },
+  under_review:        { label: "Under Review",        color: "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300", icon: <Eye className="w-3 h-3" /> },
+  approved:            { label: "Approved",            color: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300",  icon: <CheckCircle2 className="w-3 h-3" /> },
+  rejected:            { label: "Rejected",            color: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300",          icon: <XCircle className="w-3 h-3" /> },
+};
+
+function StatusBadge({ status }: { status: OnboardingStatus }) {
+  const cfg = STATUS_CONFIG[status] ?? STATUS_CONFIG.draft;
+  return (
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${cfg.color}`}>
+      {cfg.icon}
+      {cfg.label}
+    </span>
+  );
+}
+
+type Application = {
+  id: number;
+  referenceId: string;
+  entityType: string;
+  legalName: string;
+  tradingName?: string | null;
+  countryCode?: string | null;
+  stateProvince?: string | null;
+  city?: string | null;
+  address?: string | null;
+  website?: string | null;
+  businessCategory?: string | null;
+  contactName?: string | null;
+  contactEmail?: string | null;
+  contactPhone?: string | null;
+  contactTitle?: string | null;
+  useCase?: string | null;
+  pepDeclaration?: boolean | null;
+  agreedToTerms?: boolean | null;
+  status: OnboardingStatus;
+  stakeholders?: unknown;
+  createdBy?: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export default function OnboardingAdminPage() {
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [search, setSearch] = useState("");
+  const [selected, setSelected] = useState<Application | null>(null);
+  const [actionLoading, setActionLoading] = useState(false);
+
+  const { data, isLoading, refetch } = trpc.onboarding.list.useQuery({ limit: 200, offset: 0 });
+
+  const updateStatus = trpc.onboarding.updateStatus.useMutation({
+    onSuccess: (_, vars) => {
+      toast.success(`Application status updated to "${vars.status}"`);
+      setActionLoading(false);
+      setSelected(null);
+      refetch();
+    },
+    onError: (e) => {
+      toast.error(`Update failed: ${e.message}`);
+      setActionLoading(false);
+    },
+  });
+
+  const handleAction = (id: number, status: OnboardingStatus) => {
+    setActionLoading(true);
+    updateStatus.mutate({ id, status });
+  };
+
+  const items = (data?.items ?? []) as Application[];
+  const filtered = items.filter(app => {
+    const matchesStatus = statusFilter === "all" || app.status === statusFilter;
+    const q = search.toLowerCase();
+    const matchesSearch = !q ||
+      app.legalName.toLowerCase().includes(q) ||
+      app.referenceId.toLowerCase().includes(q) ||
+      (app.contactEmail ?? "").toLowerCase().includes(q) ||
+      (app.businessCategory ?? "").toLowerCase().includes(q);
+    return matchesStatus && matchesSearch;
+  });
+
+  const counts = items.reduce((acc, app) => {
+    acc[app.status] = (acc[app.status] ?? 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+
+  return (
+    <BISLayout title="Onboarding Applications" subtitle="Review and manage stakeholder onboarding submissions">
+      {/* ── Toolbar ── */}
+      <div className="flex flex-col sm:flex-row gap-3 mb-6">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <Input
+            className="pl-9"
+            placeholder="Search by name, reference, email…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
+        </div>
+        <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <SelectTrigger className="w-48">
+            <SelectValue placeholder="Filter by status" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Statuses ({items.length})</SelectItem>
+            {(Object.keys(STATUS_CONFIG) as OnboardingStatus[]).map(s => (
+              <SelectItem key={s} value={s}>
+                {STATUS_CONFIG[s].label} {counts[s] ? `(${counts[s]})` : ""}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Button variant="outline" size="icon" onClick={() => refetch()} title="Refresh">
+          <RefreshCw className="w-4 h-4" />
+        </Button>
+      </div>
+
+      {/* ── Stats Row ── */}
+      <div className="grid grid-cols-3 sm:grid-cols-6 gap-3 mb-6">
+        {(Object.keys(STATUS_CONFIG) as OnboardingStatus[]).map(s => (
+          <div key={s} className="bg-card border border-border rounded-lg p-3 text-center">
+            <div className="text-2xl font-bold text-foreground">{counts[s] ?? 0}</div>
+            <div className="text-xs text-muted-foreground mt-0.5">{STATUS_CONFIG[s].label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* ── Table ── */}
+      <div className="bg-card border border-border rounded-xl overflow-hidden">
+        {isLoading ? (
+          <div className="flex items-center justify-center h-40 text-muted-foreground">
+            <Loader2 className="w-6 h-6 animate-spin mr-2" /> Loading applications…
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-40 text-muted-foreground gap-2">
+            <FileText className="w-8 h-8 opacity-40" />
+            <p className="text-sm">No applications found</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border bg-muted/30">
+                  <th className="text-left px-4 py-3 font-medium text-muted-foreground">Reference</th>
+                  <th className="text-left px-4 py-3 font-medium text-muted-foreground">Entity</th>
+                  <th className="text-left px-4 py-3 font-medium text-muted-foreground">Contact</th>
+                  <th className="text-left px-4 py-3 font-medium text-muted-foreground">Category</th>
+                  <th className="text-left px-4 py-3 font-medium text-muted-foreground">Status</th>
+                  <th className="text-left px-4 py-3 font-medium text-muted-foreground">Submitted</th>
+                  <th className="text-right px-4 py-3 font-medium text-muted-foreground">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((app, i) => (
+                  <tr
+                    key={app.id}
+                    className={`border-b border-border/50 hover:bg-muted/20 transition-colors ${i % 2 === 0 ? "" : "bg-muted/10"}`}
+                  >
+                    <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{app.referenceId}</td>
+                    <td className="px-4 py-3">
+                      <div className="font-medium text-foreground">{app.legalName}</div>
+                      {app.tradingName && <div className="text-xs text-muted-foreground">t/a {app.tradingName}</div>}
+                      <div className="text-xs text-muted-foreground capitalize">{app.entityType.replace(/_/g, " ")}</div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="text-foreground">{app.contactName ?? "—"}</div>
+                      <div className="text-xs text-muted-foreground">{app.contactEmail ?? ""}</div>
+                    </td>
+                    <td className="px-4 py-3 text-muted-foreground capitalize">
+                      {app.businessCategory?.replace(/_/g, " ") ?? "—"}
+                    </td>
+                    <td className="px-4 py-3">
+                      <StatusBadge status={app.status} />
+                    </td>
+                    <td className="px-4 py-3 text-muted-foreground text-xs">
+                      {new Date(app.createdAt).toLocaleDateString()}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setSelected(app)}
+                        className="text-xs"
+                      >
+                        <Eye className="w-3 h-3 mr-1" /> Review
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* ── Detail / Action Dialog ── */}
+      <Dialog open={!!selected} onOpenChange={open => { if (!open) setSelected(null); }}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          {selected && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <Building2 className="w-5 h-5 text-primary" />
+                  {selected.legalName}
+                  <StatusBadge status={selected.status} />
+                </DialogTitle>
+                <p className="text-sm text-muted-foreground font-mono">{selected.referenceId}</p>
+              </DialogHeader>
+
+              <div className="space-y-4 mt-2">
+                {/* Entity Info */}
+                <div>
+                  <h4 className="text-sm font-semibold text-foreground mb-2 flex items-center gap-1.5">
+                    <Building2 className="w-4 h-4" /> Entity Information
+                  </h4>
+                  <div className="grid grid-cols-2 gap-2 text-sm">
+                    <div><span className="text-muted-foreground">Type:</span> <span className="capitalize">{selected.entityType.replace(/_/g, " ")}</span></div>
+                    <div><span className="text-muted-foreground">Category:</span> <span className="capitalize">{selected.businessCategory?.replace(/_/g, " ") ?? "—"}</span></div>
+                    <div><span className="text-muted-foreground">Country:</span> {selected.countryCode ?? "—"}</div>
+                    <div><span className="text-muted-foreground">State:</span> {selected.stateProvince ?? "—"}</div>
+                    <div className="col-span-2"><span className="text-muted-foreground">Address:</span> {[selected.address, selected.city].filter(Boolean).join(", ") || "—"}</div>
+                    {selected.website && (
+                      <div className="col-span-2 flex items-center gap-1">
+                        <Globe className="w-3 h-3 text-muted-foreground" />
+                        <a href={selected.website} target="_blank" rel="noreferrer" className="text-primary hover:underline text-xs">{selected.website}</a>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <Separator />
+
+                {/* Contact */}
+                <div>
+                  <h4 className="text-sm font-semibold text-foreground mb-2 flex items-center gap-1.5">
+                    <User className="w-4 h-4" /> Primary Contact
+                  </h4>
+                  <div className="grid grid-cols-2 gap-2 text-sm">
+                    <div><span className="text-muted-foreground">Name:</span> {selected.contactName ?? "—"}</div>
+                    <div><span className="text-muted-foreground">Title:</span> {selected.contactTitle ?? "—"}</div>
+                    {selected.contactEmail && (
+                      <div className="flex items-center gap-1">
+                        <Mail className="w-3 h-3 text-muted-foreground" />
+                        <span>{selected.contactEmail}</span>
+                      </div>
+                    )}
+                    {selected.contactPhone && (
+                      <div className="flex items-center gap-1">
+                        <Phone className="w-3 h-3 text-muted-foreground" />
+                        <span>{selected.contactPhone}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {selected.useCase && (
+                  <>
+                    <Separator />
+                    <div>
+                      <h4 className="text-sm font-semibold text-foreground mb-1">Use Case</h4>
+                      <p className="text-sm text-muted-foreground">{selected.useCase}</p>
+                    </div>
+                  </>
+                )}
+
+                {/* Declarations */}
+                <Separator />
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  <div>
+                    <span className="text-muted-foreground">PEP Declaration:</span>{" "}
+                    <span className={selected.pepDeclaration ? "text-red-500 font-medium" : "text-green-600"}>
+                      {selected.pepDeclaration ? "Yes — PEP" : "No PEP"}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Terms Agreed:</span>{" "}
+                    <span className={selected.agreedToTerms ? "text-green-600" : "text-red-500"}>
+                      {selected.agreedToTerms ? "Yes" : "No"}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Stakeholders */}
+                {Array.isArray(selected.stakeholders) && (selected.stakeholders as unknown[]).length > 0 && (
+                  <>
+                    <Separator />
+                    <div>
+                      <h4 className="text-sm font-semibold text-foreground mb-2">Stakeholders</h4>
+                      <div className="space-y-1">
+                        {(selected.stakeholders as Array<{ role: string; fullName: string; email?: string; ownershipPercentage?: number }>).map((s, i) => (
+                          <div key={i} className="text-sm flex items-center justify-between bg-muted/30 rounded px-3 py-1.5">
+                            <span>{s.fullName} <span className="text-muted-foreground capitalize">({s.role})</span></span>
+                            {s.ownershipPercentage != null && <span className="text-muted-foreground">{s.ownershipPercentage}%</span>}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              <DialogFooter className="mt-4 flex flex-wrap gap-2">
+                {selected.status !== "approved" && (
+                  <Button
+                    variant="default"
+                    className="bg-green-600 hover:bg-green-700 text-white"
+                    disabled={actionLoading}
+                    onClick={() => handleAction(selected.id, "approved")}
+                  >
+                    {actionLoading ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <CheckCircle2 className="w-4 h-4 mr-1" />}
+                    Approve
+                  </Button>
+                )}
+                {selected.status !== "under_review" && selected.status !== "approved" && (
+                  <Button
+                    variant="outline"
+                    disabled={actionLoading}
+                    onClick={() => handleAction(selected.id, "under_review")}
+                  >
+                    <Eye className="w-4 h-4 mr-1" /> Mark Under Review
+                  </Button>
+                )}
+                {selected.status !== "awaiting_documents" && selected.status !== "approved" && (
+                  <Button
+                    variant="outline"
+                    disabled={actionLoading}
+                    onClick={() => handleAction(selected.id, "awaiting_documents")}
+                  >
+                    <FileText className="w-4 h-4 mr-1" /> Request Documents
+                  </Button>
+                )}
+                {selected.status !== "rejected" && (
+                  <Button
+                    variant="outline"
+                    className="text-red-600 border-red-200 hover:bg-red-50 dark:hover:bg-red-900/20"
+                    disabled={actionLoading}
+                    onClick={() => handleAction(selected.id, "rejected")}
+                  >
+                    {actionLoading ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <XCircle className="w-4 h-4 mr-1" />}
+                    Reject
+                  </Button>
+                )}
+                <Button variant="ghost" onClick={() => setSelected(null)}>Close</Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+    </BISLayout>
+  );
+}

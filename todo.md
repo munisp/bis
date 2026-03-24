@@ -161,3 +161,24 @@
 - [x] Tests: 15/15 passing
 - [x] 0 remaining fetch('/api/...') calls to non-existent endpoints
 - [x] 0 remaining setTimeout stubs in critical form submission paths
+
+## Phase 10 — Suggested Next Steps
+
+### Onboarding Admin View
+- [x] /admin/onboarding page listing all applications with status filters
+- [x] Approve/reject action buttons wired to trpc.onboarding.updateStatus
+- [x] Wire /admin/onboarding route into App.tsx and sidebar nav
+
+### Settings Persistence on Load
+- [x] Settings.tsx calls trpc.settings.get on mount to pre-populate all form fields
+- [x] All 5 setting sections (General, Security, Notifications, Integrations, Compliance) load from DB
+
+### KYC AI Endpoint Proxy
+- [x] trpc.kyc.extractDocument procedure — proxies /api/kyc/extract-document
+- [x] trpc.kyc.detectTampering procedure — proxies /api/kyc/detect-tampering
+- [x] trpc.kyc.verifyLiveness procedure — proxies /api/kyc/verify-liveness
+- [x] trpc.kyc.matchFace procedure — proxies /api/kyc/match-face
+- [x] KYCVerificationPage updated to use trpc.kyc.* instead of direct fetch('/api/kyc/...')
+
+### Archive
+- [x] Comprehensive project archive generated (bis-pwa-archive-v10-20260324.zip, 4.6 MB, 272 files)

@@ -34,6 +34,7 @@ const KYCVerificationPage       = lazy(() => import("@/pages/kyc/KYCVerification
 const MessagingChannelsPage     = lazy(() => import("@/pages/messaging/MessagingChannelsPage"));
 const SocialMonitoringDashboard = lazy(() => import("@/pages/monitoring/SocialMonitoringDashboard"));
 const StakeholderOnboardingWizard = lazy(() => import("@/pages/onboarding/StakeholderOnboardingWizard"));
+const OnboardingAdminPage         = lazy(() => import("@/pages/admin/OnboardingAdminPage"));
 
 // ─── Page loading skeleton ────────────────────────────────────────────────────
 
@@ -83,6 +84,7 @@ function Router() {
         <Route path="/messaging-channels" component={MessagingChannelsPage} />
         <Route path="/social-monitoring" component={SocialMonitoringDashboard} />
         <Route path="/onboarding" component={StakeholderOnboardingWizard} />
+        <Route path="/admin/onboarding" component={OnboardingAdminPage} />
 
         {/* Fallback */}
         <Route path="/404" component={NotFound} />

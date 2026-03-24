@@ -53,6 +53,7 @@ const BASE_NAV_GROUPS: NavGroup[] = [
       { label: 'KYC / KYB', href: '/kyc-verification', icon: <ShieldCheck size={15} /> },
       { label: 'Biometric Enrollment', href: '/biometric-enrollment', icon: <Fingerprint size={15} /> },
       { label: 'Onboarding', href: '/onboarding', icon: <UserCheck size={15} /> },
+      { label: 'Onboarding Admin', href: '/admin/onboarding', icon: <ClipboardList size={15} /> },
     ],
   },
   {
