@@ -396,6 +396,7 @@ export const onboardingApplications = pgTable("onboarding_applications", {
   agreedToTerms: boolean("agreedToTerms").default(false),
   status: onboardingApplicationStatusEnum("status").notNull().default("draft"),
   stakeholders: json("stakeholders").$type<any[]>().default([]),
+  documentUrls: json("documentUrls").$type<{ name: string; url: string; key: string; uploadedAt: string }[]>().default([]),
   createdBy: varchar("createdBy", { length: 255 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),

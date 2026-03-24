@@ -220,18 +220,46 @@ function StakeholderOnboardingWizardInner() {
     setStakeholders(prev => prev.filter((_, i) => i !== index));
   };
 
+  const uploadDocumentMutation = trpc.onboarding.uploadDocument.useMutation({
+    onSuccess: (result, vars) => {
+      setDocuments(prev => prev.map(d =>
+        d.type === vars.fileName.split('__')[0] ? { ...d, status: 'uploaded' } : d
+      ));
+      toast.success(`${result.name} uploaded successfully`);
+    },
+    onError: (e) => {
+      toast.error(`Upload failed: ${e.message}`);
+      setDocuments(prev => prev.map(d =>
+        d.status === 'uploading' ? { ...d, status: 'pending' } : d
+      ));
+    },
+  });
+
   const handleDocumentUpload = useCallback((docType: string, file: File) => {
+    if (!applicationId) {
+      // Queue locally before application is created — will upload after submit
+      setDocuments(prev => prev.map(d =>
+        d.type === docType ? { ...d, file, status: 'pending' } : d
+      ));
+      toast.info(`${file.name} queued — will upload on submission`);
+      return;
+    }
     setDocuments(prev => prev.map(d =>
       d.type === docType ? { ...d, file, status: 'uploading' } : d
     ));
-    // Simulate upload
-    setTimeout(() => {
-      setDocuments(prev => prev.map(d =>
-        d.type === docType ? { ...d, status: 'uploaded' } : d
-      ));
-      toast.success(`${file.name} uploaded successfully`);
-    }, 1500);
-  }, []);
+    // Read file as base64 and upload via tRPC
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const dataUri = e.target?.result as string;
+      uploadDocumentMutation.mutate({
+        applicationId: parseInt(applicationId, 10),
+        fileName: `${docType}__${file.name}`,
+        fileDataUri: dataUri,
+        mimeType: file.type || 'application/octet-stream',
+      });
+    };
+    reader.readAsDataURL(file);
+  }, [applicationId, uploadDocumentMutation]);
 
   const createOnboarding = trpc.onboarding.create.useMutation({
     onSuccess: (record) => {
@@ -241,6 +269,21 @@ function StakeholderOnboardingWizardInner() {
       setStep(5);
       toast.success('Application submitted successfully!');
       setSubmitting(false);
+      // Upload any documents that were queued before submission
+      const queued = documents.filter(d => d.file && d.status === 'pending');
+      queued.forEach(d => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const dataUri = e.target?.result as string;
+          uploadDocumentMutation.mutate({
+            applicationId: record.id,
+            fileName: `${d.type}__${d.file!.name}`,
+            fileDataUri: dataUri,
+            mimeType: d.file!.type || 'application/octet-stream',
+          });
+        };
+        reader.readAsDataURL(d.file!);
+      });
     },
     onError: (e) => {
       toast.error(`Failed to submit application: ${e.message}`);

@@ -207,4 +207,26 @@
 - [x] Owner notified with contactEmail context on terminal status changes
 
 ### Archive
-- [ ] Comprehensive project archive v11 generated
+- [x] Comprehensive project archive v11 generated (bis-pwa-archive-v11-20260324.zip, 72 MB, 1148 files)
+
+## Phase 12 — Next Steps (Round 3)
+
+### KYC Records Cursor Pagination
+- [x] Add cursor-based pagination to trpc.kyc.list (cursor = last record id, limit = 50)
+- [x] Update KYCRecordsPage with Load More button and page state
+- [x] Show total count and loaded count in table footer
+
+### Onboarding Document Upload
+- [x] Add document upload step to StakeholderOnboardingWizard (Step 5: Documents)
+- [x] Add trpc.onboarding.uploadDocument mutation (S3 storagePut + DB link)
+- [x] Add document_urls column to onboarding_applications table (migration 0005)
+- [x] Show uploaded file list with remove option in wizard
+- [x] Queued documents auto-upload after application creation
+
+### Admin Promotion
+- [x] trpc.users.updateRole already existed (adminProcedure)
+- [x] Add /admin/users page listing all users with role management
+- [x] Register /admin/users route in App.tsx and sidebar (admin-only)
+
+### Archive
+- [ ] Comprehensive project archive v12 generated

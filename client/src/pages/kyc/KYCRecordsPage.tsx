@@ -2,10 +2,11 @@
  * KYC Records Dashboard
  * =====================
  * Lists all KYC records with pass/fail/review/pending filter chips,
- * CSV export, and a re-verify action for flagged records.
+ * cursor-based pagination (Load More), CSV export, and a re-verify
+ * action for flagged records.
  */
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
 import BISLayout from "@/components/BISLayout";
 import { Button } from "@/components/ui/button";
@@ -15,25 +16,23 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { toast } from "sonner";
 import {
   Search, RefreshCw, Download, CheckCircle2, XCircle, Clock,
-  AlertTriangle, Loader2, ShieldCheck, RotateCcw, Eye
+  AlertTriangle, Loader2, ShieldCheck, RotateCcw, Eye, ChevronDown
 } from "lucide-react";
 
 type KYCStatus = "pending" | "processing" | "passed" | "failed" | "review";
 
 const STATUS_CONFIG: Record<KYCStatus, { label: string; color: string; icon: React.ReactNode }> = {
-  pending:    { label: "Pending",    color: "bg-muted text-muted-foreground",                                                      icon: <Clock className="w-3 h-3" /> },
-  processing: { label: "Processing", color: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300",                    icon: <Loader2 className="w-3 h-3 animate-spin" /> },
-  passed:     { label: "Passed",     color: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300",                icon: <CheckCircle2 className="w-3 h-3" /> },
-  failed:     { label: "Failed",     color: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300",                        icon: <XCircle className="w-3 h-3" /> },
-  review:     { label: "Review",     color: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300",            icon: <AlertTriangle className="w-3 h-3" /> },
+  pending:    { label: "Pending",    color: "bg-muted text-muted-foreground",                                                   icon: <Clock className="w-3 h-3" /> },
+  processing: { label: "Processing", color: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300",                icon: <Loader2 className="w-3 h-3 animate-spin" /> },
+  passed:     { label: "Passed",     color: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300",            icon: <CheckCircle2 className="w-3 h-3" /> },
+  failed:     { label: "Failed",     color: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300",                    icon: <XCircle className="w-3 h-3" /> },
+  review:     { label: "Review",     color: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300",        icon: <AlertTriangle className="w-3 h-3" /> },
 };
 
 function StatusChip({ status, active, count, onClick }: {
   status: KYCStatus | "all"; active: boolean; count: number; onClick: () => void;
 }) {
-  const cfg = status === "all"
-    ? { label: "All", color: "" }
-    : STATUS_CONFIG[status];
+  const cfg = status === "all" ? { label: "All", color: "" } : STATUS_CONFIG[status];
   return (
     <button
       onClick={onClick}
@@ -69,19 +68,66 @@ function riskColor(score?: number | null) {
   return "text-green-500 font-semibold";
 }
 
+const PAGE_SIZE = 50;
+
 export default function KYCRecordsPage() {
   const [statusFilter, setStatusFilter] = useState<KYCStatus | "all">("all");
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<KYCRecord | null>(null);
   const [reVerifying, setReVerifying] = useState<number | null>(null);
 
-  const { data, isLoading, refetch } = trpc.kyc.list.useQuery({ limit: 500, offset: 0 });
+  // Cursor pagination state
+  const [pages, setPages] = useState<KYCRecord[][]>([]);
+  const [nextCursor, setNextCursor] = useState<number | undefined>(undefined);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const [total, setTotal] = useState(0);
+
+  // Initial load
+  const { data: firstPage, isLoading, refetch: refetchFirst } = trpc.kyc.list.useQuery(
+    { limit: PAGE_SIZE },
+  );
+
+  // Sync first page into local state
+  useEffect(() => {
+    if (!firstPage) return;
+    setPages([firstPage.items as KYCRecord[]]);
+    setNextCursor(firstPage.nextCursor ?? undefined);
+    setHasMore(firstPage.nextCursor !== null);
+    setTotal(firstPage.total);
+  }, [firstPage]);
+
+  const utils = trpc.useUtils();
+
+  const handleRefresh = useCallback(() => {
+    setPages([]);
+    setNextCursor(undefined);
+    setHasMore(true);
+    refetchFirst();
+  }, [refetchFirst]);
+
+  // Load more via imperative query
+  const handleLoadMore = useCallback(async () => {
+    if (!nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const result = await utils.kyc.list.fetch({ limit: PAGE_SIZE, cursor: nextCursor });
+      setPages(prev => [...prev, result.items as KYCRecord[]]);
+      setNextCursor(result.nextCursor ?? undefined);
+      setHasMore(result.nextCursor !== null);
+      setTotal(result.total);
+    } catch (e) {
+      toast.error("Failed to load more records");
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [nextCursor, loadingMore, utils]);
 
   const verifyMutation = trpc.kyc.verify.useMutation({
     onSuccess: (result, vars) => {
       toast.success(`Re-verification complete — ${vars.subjectName}: ${result.status} (score ${result.riskScore})`);
       setReVerifying(null);
-      refetch();
+      handleRefresh();
     },
     onError: (e) => {
       toast.error(`Re-verification failed: ${e.message}`);
@@ -100,16 +146,17 @@ export default function KYCRecordsPage() {
     });
   };
 
-  const allRecords = (data?.items ?? []) as KYCRecord[];
+  // Flatten all loaded pages
+  const allLoaded = useMemo(() => pages.flat(), [pages]);
 
   const counts = useMemo(() => {
-    const c: Record<string, number> = { all: allRecords.length };
-    allRecords.forEach(r => { c[r.status] = (c[r.status] ?? 0) + 1; });
+    const c: Record<string, number> = { all: total };
+    allLoaded.forEach(r => { c[r.status] = (c[r.status] ?? 0) + 1; });
     return c;
-  }, [allRecords]);
+  }, [allLoaded, total]);
 
   const filtered = useMemo(() => {
-    return allRecords.filter(r => {
+    return allLoaded.filter(r => {
       const matchStatus = statusFilter === "all" || r.status === statusFilter;
       const q = search.toLowerCase();
       const matchSearch = !q ||
@@ -118,7 +165,7 @@ export default function KYCRecordsPage() {
         (r.bvn ?? "").includes(q);
       return matchStatus && matchSearch;
     });
-  }, [allRecords, statusFilter, search]);
+  }, [allLoaded, statusFilter, search]);
 
   const handleExportCSV = () => {
     const headers = ["ID", "Subject Name", "Status", "Risk Score", "NIN", "BVN", "DOB", "Phone", "Created At"];
@@ -158,7 +205,7 @@ export default function KYCRecordsPage() {
           />
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => refetch()}>
+          <Button variant="outline" size="sm" onClick={handleRefresh}>
             <RefreshCw className="w-4 h-4 mr-1" /> Refresh
           </Button>
           <Button variant="outline" size="sm" onClick={handleExportCSV} disabled={filtered.length === 0}>
@@ -169,7 +216,7 @@ export default function KYCRecordsPage() {
 
       {/* ── Status Filter Chips ── */}
       <div className="flex flex-wrap gap-2 mb-5">
-        <StatusChip status="all" active={statusFilter === "all"} count={counts.all ?? 0} onClick={() => setStatusFilter("all")} />
+        <StatusChip status="all" active={statusFilter === "all"} count={total} onClick={() => setStatusFilter("all")} />
         {(["passed", "review", "failed", "pending", "processing"] as KYCStatus[]).map(s => (
           <StatusChip key={s} status={s} active={statusFilter === s} count={counts[s] ?? 0} onClick={() => setStatusFilter(s)} />
         ))}
@@ -187,7 +234,7 @@ export default function KYCRecordsPage() {
 
       {/* ── Table ── */}
       <div className="bg-card border border-border rounded-xl overflow-hidden">
-        {isLoading ? (
+        {isLoading && pages.length === 0 ? (
           <div className="flex items-center justify-center h-40 text-muted-foreground">
             <Loader2 className="w-6 h-6 animate-spin mr-2" /> Loading KYC records…
           </div>
@@ -197,80 +244,94 @@ export default function KYCRecordsPage() {
             <p className="text-sm">No records match the current filter</p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border bg-muted/30">
-                  <th className="text-left px-4 py-3 font-medium text-muted-foreground">Subject</th>
-                  <th className="text-left px-4 py-3 font-medium text-muted-foreground">Status</th>
-                  <th className="text-left px-4 py-3 font-medium text-muted-foreground">Risk Score</th>
-                  <th className="text-left px-4 py-3 font-medium text-muted-foreground">NIN / BVN</th>
-                  <th className="text-left px-4 py-3 font-medium text-muted-foreground">Date</th>
-                  <th className="text-right px-4 py-3 font-medium text-muted-foreground">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((record, i) => (
-                  <tr
-                    key={record.id}
-                    className={`border-b border-border/50 hover:bg-muted/20 transition-colors ${i % 2 === 0 ? "" : "bg-muted/10"}`}
-                  >
-                    <td className="px-4 py-3">
-                      <div className="font-medium text-foreground">{record.subjectName}</div>
-                      {record.phone && <div className="text-xs text-muted-foreground">{record.phone}</div>}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_CONFIG[record.status]?.color ?? ""}`}>
-                        {STATUS_CONFIG[record.status]?.icon}
-                        {STATUS_CONFIG[record.status]?.label ?? record.status}
-                      </span>
-                    </td>
-                    <td className={`px-4 py-3 font-mono text-sm ${riskColor(record.riskScore)}`}>
-                      {record.riskScore != null ? record.riskScore : "—"}
-                    </td>
-                    <td className="px-4 py-3 text-xs text-muted-foreground font-mono">
-                      {record.nin ? <div>NIN: {record.nin}</div> : null}
-                      {record.bvn ? <div>BVN: {record.bvn}</div> : null}
-                      {!record.nin && !record.bvn && "—"}
-                    </td>
-                    <td className="px-4 py-3 text-xs text-muted-foreground">
-                      {new Date(record.createdAt).toLocaleDateString()}
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="text-xs"
-                          onClick={() => setSelected(record)}
-                        >
-                          <Eye className="w-3 h-3 mr-1" /> View
-                        </Button>
-                        {(record.status === "review" || record.status === "failed") && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="text-xs text-amber-600 hover:text-amber-700"
-                            disabled={reVerifying === record.id}
-                            onClick={() => handleReVerify(record)}
-                          >
-                            {reVerifying === record.id
-                              ? <Loader2 className="w-3 h-3 animate-spin mr-1" />
-                              : <RotateCcw className="w-3 h-3 mr-1" />}
-                            Re-verify
-                          </Button>
-                        )}
-                      </div>
-                    </td>
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border bg-muted/30">
+                    <th className="text-left px-4 py-3 font-medium text-muted-foreground">Subject</th>
+                    <th className="text-left px-4 py-3 font-medium text-muted-foreground">Status</th>
+                    <th className="text-left px-4 py-3 font-medium text-muted-foreground">Risk Score</th>
+                    <th className="text-left px-4 py-3 font-medium text-muted-foreground">NIN / BVN</th>
+                    <th className="text-left px-4 py-3 font-medium text-muted-foreground">Date</th>
+                    <th className="text-right px-4 py-3 font-medium text-muted-foreground">Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-            <div className="px-4 py-2 text-xs text-muted-foreground border-t border-border/50">
-              Showing {filtered.length} of {allRecords.length} records
-              {statusFilter !== "all" && ` · filtered by "${STATUS_CONFIG[statusFilter]?.label}"`}
+                </thead>
+                <tbody>
+                  {filtered.map((record, i) => (
+                    <tr
+                      key={record.id}
+                      className={`border-b border-border/50 hover:bg-muted/20 transition-colors ${i % 2 === 0 ? "" : "bg-muted/10"}`}
+                    >
+                      <td className="px-4 py-3">
+                        <div className="font-medium text-foreground">{record.subjectName}</div>
+                        {record.phone && <div className="text-xs text-muted-foreground">{record.phone}</div>}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_CONFIG[record.status]?.color ?? ""}`}>
+                          {STATUS_CONFIG[record.status]?.icon}
+                          {STATUS_CONFIG[record.status]?.label ?? record.status}
+                        </span>
+                      </td>
+                      <td className={`px-4 py-3 font-mono text-sm ${riskColor(record.riskScore)}`}>
+                        {record.riskScore != null ? record.riskScore : "—"}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-muted-foreground font-mono">
+                        {record.nin ? <div>NIN: {record.nin}</div> : null}
+                        {record.bvn ? <div>BVN: {record.bvn}</div> : null}
+                        {!record.nin && !record.bvn && "—"}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-muted-foreground">
+                        {new Date(record.createdAt).toLocaleDateString()}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <Button variant="ghost" size="sm" className="text-xs" onClick={() => setSelected(record)}>
+                            <Eye className="w-3 h-3 mr-1" /> View
+                          </Button>
+                          {(record.status === "review" || record.status === "failed") && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-xs text-amber-600 hover:text-amber-700"
+                              disabled={reVerifying === record.id}
+                              onClick={() => handleReVerify(record)}
+                            >
+                              {reVerifying === record.id
+                                ? <Loader2 className="w-3 h-3 animate-spin mr-1" />
+                                : <RotateCcw className="w-3 h-3 mr-1" />}
+                              Re-verify
+                            </Button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-          </div>
+
+            {/* ── Footer: count + Load More ── */}
+            <div className="flex items-center justify-between px-4 py-3 border-t border-border/50 bg-muted/10">
+              <span className="text-xs text-muted-foreground">
+                Showing {filtered.length} of {total} total records
+                {statusFilter !== "all" && ` · filtered by "${STATUS_CONFIG[statusFilter]?.label}"`}
+                {allLoaded.length < total && ` · ${allLoaded.length} loaded`}
+              </span>
+              {hasMore && !search && statusFilter === "all" && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleLoadMore}
+                  disabled={loadingMore}
+                >
+                  {loadingMore
+                    ? <><Loader2 className="w-3 h-3 animate-spin mr-1" /> Loading…</>
+                    : <><ChevronDown className="w-3 h-3 mr-1" /> Load more ({total - allLoaded.length} remaining)</>}
+                </Button>
+              )}
+            </div>
+          </>
         )}
       </div>
 

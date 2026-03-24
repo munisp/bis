@@ -26,6 +26,7 @@ interface NavItem {
   icon: React.ReactNode;
   badge?: string | number;
   badgeVariant?: 'default' | 'destructive' | 'secondary';
+  adminOnly?: boolean;
 }
 
 interface NavGroup {
@@ -90,6 +91,7 @@ const BASE_NAV_GROUPS: NavGroup[] = [
     defaultOpen: true,
     items: [
       { label: 'Users', href: '/users', icon: <Users size={15} /> },
+      { label: 'User Management', href: '/admin/users', icon: <UserCheck size={15} />, adminOnly: true },
       { label: 'Tenants & API Keys', href: '/tenants', icon: <Key size={15} /> },
       { label: 'Billing & Ledger', href: '/billing', icon: <Wallet size={15} /> },
       { label: 'Settings', href: '/settings', icon: <Settings size={15} /> },
@@ -349,7 +351,12 @@ export default function BISLayout({ children, title, subtitle, actions }: BISLay
 
   // ── Build nav groups with live badges (filter admin-only items) ────────────
   const isAdmin = user?.role === "admin";
-  const ADMIN_ONLY_HREFS = new Set(["/admin/onboarding"]);
+  // Collect admin-only hrefs from the nav config (adminOnly flag) + explicit list
+  const ADMIN_ONLY_HREFS = new Set([
+    "/admin/onboarding",
+    "/admin/users",
+    ...BASE_NAV_GROUPS.flatMap(g => g.items.filter(i => i.adminOnly).map(i => i.href)),
+  ]);
 
   const navGroups: NavGroup[] = BASE_NAV_GROUPS.map(group => ({
     ...group,
@@ -368,7 +375,7 @@ export default function BISLayout({ children, title, subtitle, actions }: BISLay
     // Filter out admin-only items for non-admin users
   })).map(group => ({
     ...group,
-    items: group.items.filter(item => !ADMIN_ONLY_HREFS.has(item.href) || isAdmin),
+    items: group.items.filter(item => !(item.adminOnly || ADMIN_ONLY_HREFS.has(item.href)) || isAdmin),
   })).filter(group => group.items.length > 0);
 
   const unreadCount = notifications.filter(n => !n.read).length;

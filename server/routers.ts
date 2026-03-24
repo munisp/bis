@@ -5,6 +5,7 @@ import { tenantsRouter } from "./tenants";
 import { permifyWriteRelationship, permifyCheck } from "./permify";
 import { systemRouter } from "./_core/systemRouter";
 import { notifyOwner } from "./_core/notification";
+import { storagePut } from "./storage";
 import { TRPCError } from "@trpc/server";
 import { adminProcedure, protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { getDb } from "./db";
@@ -430,15 +431,25 @@ const kycRouter = router({
     }),
 
   list: protectedProcedure
-    .input(z.object({ limit: z.number().default(50), offset: z.number().default(0) }))
+    .input(z.object({
+      limit: z.number().min(1).max(200).default(50),
+      cursor: z.number().optional(), // last seen record id for cursor pagination
+    }))
     .query(async ({ input }) => {
       const db = await getDb();
-      if (!db) return { items: [], total: 0 };
+      if (!db) return { items: [], total: 0, nextCursor: null };
+      const where = input.cursor ? sql`${kycRecords.id} < ${input.cursor}` : undefined;
       const [items, countResult] = await Promise.all([
-        db.select().from(kycRecords).orderBy(desc(kycRecords.createdAt)).limit(input.limit).offset(input.offset),
+        db.select().from(kycRecords)
+          .where(where)
+          .orderBy(desc(kycRecords.id))
+          .limit(input.limit + 1), // fetch one extra to detect next page
         db.select({ count: sql<number>`count(*)` }).from(kycRecords),
       ]);
-      return { items, total: Number(countResult[0]?.count ?? 0) };
+      const hasMore = items.length > input.limit;
+      const page = hasMore ? items.slice(0, input.limit) : items;
+      const nextCursor = hasMore ? page[page.length - 1]!.id : null;
+      return { items: page, total: Number(countResult[0]?.count ?? 0), nextCursor };
     }),
 
   // ── AI Proxy Procedures (server-side, API key never exposed to browser) ──────
@@ -1105,6 +1116,39 @@ const onboardingRouter = router({
       const [record] = await db.select().from(onboardingApplications).where(eq(onboardingApplications.id, input.id)).limit(1);
       if (!record) throw new TRPCError({ code: "NOT_FOUND" });
       return record;
+    }),
+
+  uploadDocument: protectedProcedure
+    .input(z.object({
+      applicationId: z.number(),
+      fileName: z.string().min(1),
+      fileDataUri: z.string().min(10), // base64 data URI
+      mimeType: z.string().default("application/octet-stream"),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      // Verify application belongs to this user or user is admin
+      const [app] = await db.select().from(onboardingApplications).where(eq(onboardingApplications.id, input.applicationId)).limit(1);
+      if (!app) throw new TRPCError({ code: "NOT_FOUND" });
+      if (app.createdBy !== String(ctx.user!.id) && ctx.user!.role !== "admin") {
+        throw new TRPCError({ code: "FORBIDDEN" });
+      }
+      // Upload to S3
+      const base64 = input.fileDataUri.split(",")[1] ?? input.fileDataUri;
+      const buffer = Buffer.from(base64, "base64");
+      const suffix = Math.random().toString(36).slice(2, 8);
+      const safeFileName = input.fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
+      const key = `onboarding/${app.referenceId}/${suffix}-${safeFileName}`;
+      const { url } = await storagePut(key, buffer, input.mimeType);
+      // Append to documentUrls
+      const existing = (app.documentUrls as any[] ?? []);
+      const updated = [...existing, { name: input.fileName, url, key, uploadedAt: new Date().toISOString() }];
+      await db.update(onboardingApplications)
+        .set({ documentUrls: updated as any, updatedAt: new Date() })
+        .where(eq(onboardingApplications.id, input.applicationId));
+      await writeAuditLog(db, { userId: ctx.user!.id, category: "system", action: `Document uploaded: ${input.fileName}`, targetRef: app.referenceId });
+      return { url, key, name: input.fileName };
     }),
 
   updateStatus: adminProcedure
