@@ -1,0 +1,77 @@
+{
+  "realm": "bis",
+  "displayName": "BIS — Background Intelligence System",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": true,
+  "permanentLockout": false,
+  "maxFailureWaitSeconds": 900,
+  "minimumQuickLoginWaitSeconds": 60,
+  "waitIncrementSeconds": 60,
+  "quickLoginCheckMilliSeconds": 1000,
+  "maxDeltaTimeSeconds": 43200,
+  "failureFactor": 5,
+  "accessTokenLifespan": 300,
+  "accessTokenLifespanForImplicitFlow": 900,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "roles": {
+    "realm": [
+      { "name": "bis-admin", "description": "BIS Platform Administrator" },
+      { "name": "bis-supervisor", "description": "BIS Investigation Supervisor" },
+      { "name": "bis-analyst", "description": "BIS Intelligence Analyst" },
+      { "name": "bis-viewer", "description": "BIS Read-only Viewer" },
+      { "name": "bis-api", "description": "BIS API-only Access" }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "bis-bff",
+      "name": "BIS Backend-for-Frontend",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "authorizationServicesEnabled": false,
+      "redirectUris": ["http://localhost:3000/*", "https://*.manus.space/*"],
+      "webOrigins": ["http://localhost:3000", "https://*.manus.space"],
+      "protocol": "openid-connect",
+      "defaultClientScopes": ["openid", "profile", "email", "roles"]
+    },
+    {
+      "clientId": "bis-gateway",
+      "name": "BIS Go API Gateway",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect"
+    }
+  ],
+  "users": [
+    {
+      "username": "admin@bis.ng",
+      "email": "admin@bis.ng",
+      "firstName": "BIS",
+      "lastName": "Admin",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "admin_dev_password",
+          "temporary": true
+        }
+      ],
+      "realmRoles": ["bis-admin"]
+    }
+  ],
+  "passwordPolicy": "length(12) and upperCase(1) and lowerCase(1) and digits(1) and specialChars(1) and notUsername(undefined)"
+}

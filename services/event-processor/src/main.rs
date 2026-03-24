@@ -2,6 +2,8 @@
 // High-throughput event streaming processor.
 // Port: 8083
 
+pub mod kafka;
+
 use axum::{
     extract::{Path, State},
     http::{HeaderMap, StatusCode},

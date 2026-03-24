@@ -15,6 +15,13 @@
       "when": 1774318867193,
       "tag": "0001_smooth_hammerhead",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1774353485850,
+      "tag": "0002_far_the_initiative",
+      "breakpoints": true
     }
   ]
 }

@@ -11,7 +11,7 @@ import {
   fieldTasks,
   reports,
 } from "../drizzle/schema";
-import { eq, desc, and, like, gte, lte, sql } from "drizzle-orm";
+import { eq, desc, and, ilike, gte, lte, sql } from "drizzle-orm";
 import { z } from "zod";
 
 // ─── Service URLs ─────────────────────────────────────────────────────────────
@@ -98,7 +98,7 @@ const investigationsRouter = router({
       const db = await getDb();
       if (!db) return { items: [], total: 0 };
       const conditions = [];
-      if (input.search) conditions.push(like(investigations.subjectName, `%${input.search}%`));
+      if (input.search) conditions.push(ilike(investigations.subjectName, `%${input.search}%`));
       if (input.status) conditions.push(eq(investigations.status, input.status as any));
       if (input.country) conditions.push(eq(investigations.country, input.country));
       if (input.tier) conditions.push(eq(investigations.tier, input.tier as any));
@@ -341,7 +341,7 @@ const kycRouter = router({
         investigationId: input.investigationId,
         status: "processing",
         createdBy: ctx.user!.id,
-      });
+      }).returning();
       // Run lookups in parallel
       const [ninResult, bvnResult, sanctionsResult, pepResult, creditResult] = await Promise.allSettled([
         input.nin ? gatewayFetch(`/v1/nin/${input.nin}`) : Promise.resolve(null),
@@ -372,7 +372,7 @@ const kycRouter = router({
         sanctionsResult: sanctions as any,
         pepResult: pep as any,
         creditResult: credit as any,
-      }).where(eq(kycRecords.id, (record as any).insertId));
+      }).where(eq(kycRecords.id, record!.id));
       await writeAuditLog(db, { userId: ctx.user!.id, category: "kyc", action: `KYC ${status}`, targetRef: input.subjectName });
       await publishEvent("KYC_COMPLETED", input.subjectName, status === "failed" ? "high" : "info", { status, score: scoreResult.composite_score });
       return { status, riskScore: scoreResult.composite_score, nin, bvn, sanctions, pep, credit };

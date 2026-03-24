@@ -1,100 +1,292 @@
 version: "3.9"
 
-# BIS — Background Intelligence System
-# Polyglot microservices: Node.js BFF + Go Gateway + Python Risk Engine + Rust Event Processor
+# ─── BIS Platform — Full Stack Docker Compose ────────────────────────────────
+# Infrastructure:  postgres, redis, zookeeper, kafka, keycloak, temporal, temporal-ui
+# Application:     gateway (Go), risk-engine (Python), event-processor (Rust), bff (Node.js)
+#
+# Quick start:
+#   cp .env.example .env && docker compose up -d
+#   docker compose logs -f gateway risk-engine event-processor bff
+
+networks:
+  bis-net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  keycloak_data:
+
+# ─── Infrastructure ───────────────────────────────────────────────────────────
 
 services:
-  # ── Node.js BFF (tRPC + React PWA) ──────────────────────────────────────────
-  bff:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    ports:
-      - "3000:3000"
-    environment:
-      NODE_ENV: production
-      DATABASE_URL: ${DATABASE_URL}
-      JWT_SECRET: ${JWT_SECRET}
-      BIS_GATEWAY_URL: http://gateway:8081
-      BIS_RISK_ENGINE_URL: http://risk-engine:8082
-      BIS_EVENT_PROCESSOR_URL: http://event-processor:8083
-      BIS_GATEWAY_KEY: ${BIS_GATEWAY_KEY:-change-in-production}
-      VITE_APP_ID: ${VITE_APP_ID}
-      OAUTH_SERVER_URL: ${OAUTH_SERVER_URL}
-      VITE_OAUTH_PORTAL_URL: ${VITE_OAUTH_PORTAL_URL}
-      BUILT_IN_FORGE_API_URL: ${BUILT_IN_FORGE_API_URL}
-      BUILT_IN_FORGE_API_KEY: ${BUILT_IN_FORGE_API_KEY}
-    depends_on:
-      - gateway
-      - risk-engine
-      - event-processor
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/api/trpc/auth.me"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
 
-  # ── Go API Gateway (Data Source Proxy) ──────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: bis-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: bis
+      POSTGRES_USER: bis
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-bis_dev_password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks: [bis-net]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bis -d bis"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: bis-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD:-bis_redis_dev}
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks: [bis-net]
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-bis_redis_dev}", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    container_name: bis-zookeeper
+    restart: unless-stopped
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks: [bis-net]
+    healthcheck:
+      test: ["CMD-SHELL", "echo ruok | nc localhost 2181 | grep imok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: bis-kafka
+    restart: unless-stopped
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_CREATE_TOPICS: "bis.events:3:1,bis.alerts:3:1,bis.audit:1:1"
+    ports:
+      - "9093:9093"
+    networks: [bis-net]
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0
+    container_name: bis-keycloak
+    restart: unless-stopped
+    command: start-dev --import-realm
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/bis
+      KC_DB_USERNAME: bis
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD:-bis_dev_password}
+      KC_DB_SCHEMA: keycloak
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin_dev_password}
+      KC_HOSTNAME: ${KEYCLOAK_HOSTNAME:-localhost}
+      KC_HOSTNAME_PORT: 8080
+      KC_HTTP_ENABLED: "true"
+    volumes:
+      - keycloak_data:/opt/keycloak/data
+      - ./infra/keycloak/bis-realm.json:/opt/keycloak/data/import/bis-realm.json:ro
+    ports:
+      - "8080:8080"
+    networks: [bis-net]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  temporal:
+    image: temporalio/auto-setup:1.24.2
+    container_name: bis-temporal
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB: postgresql
+      DB_PORT: 5432
+      POSTGRES_USER: bis
+      POSTGRES_PWD: ${POSTGRES_PASSWORD:-bis_dev_password}
+      POSTGRES_SEEDS: postgres
+    ports:
+      - "7233:7233"
+    networks: [bis-net]
+
+  temporal-ui:
+    image: temporalio/ui:2.26.2
+    container_name: bis-temporal-ui
+    restart: unless-stopped
+    depends_on: [temporal]
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_CORS_ORIGINS: http://localhost:3000
+    ports:
+      - "8088:8080"
+    networks: [bis-net]
+
+# ─── Application Services ─────────────────────────────────────────────────────
+
   gateway:
     build:
       context: ./services/gateway
       dockerfile: Dockerfile
-    ports:
-      - "8081:8081"
+    container_name: bis-gateway
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
       GATEWAY_PORT: "8081"
-      BIS_GATEWAY_KEY: ${BIS_GATEWAY_KEY:-change-in-production}
+      BIS_GATEWAY_KEY: ${BIS_GATEWAY_KEY:-dev-gateway-key-change-in-prod}
+      KAFKA_BROKERS: kafka:9092
+      REDIS_URL: redis:6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-bis_redis_dev}
+      KEYCLOAK_URL: http://keycloak:8080
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-bis}
+      KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID:-bis-gateway}
+      KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET:-}
+      TEMPORAL_HOST: temporal:7233
       NIMC_API_URL: ${NIMC_API_URL:-https://api.nimc.gov.ng}
-      NIMC_API_KEY: ${NIMC_API_KEY}
+      NIMC_API_KEY: ${NIMC_API_KEY:-}
       BVN_API_URL: ${BVN_API_URL:-https://api.nibss-plc.org.ng}
-      BVN_API_KEY: ${BVN_API_KEY}
-      OFAC_API_URL: ${OFAC_API_URL:-https://sanctionslistservice.ofac.treas.gov}
-      EFCC_API_URL: ${EFCC_API_URL:-https://api.efcc.gov.ng}
+      BVN_API_KEY: ${BVN_API_KEY:-}
       CAC_API_URL: ${CAC_API_URL:-https://api.cac.gov.ng}
-      CREDITBUREAU_API_KEY: ${CREDITBUREAU_API_KEY}
-    restart: unless-stopped
+      CAC_API_KEY: ${CAC_API_KEY:-}
+      EFCC_API_URL: ${EFCC_API_URL:-https://api.efcc.gov.ng}
+      CREDITBUREAU_API_KEY: ${CREDITBUREAU_API_KEY:-}
+    ports:
+      - "8081:8081"
+    networks: [bis-net]
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8081/health"]
       interval: 15s
       timeout: 5s
       retries: 3
 
-  # ── Python ML Risk Engine ────────────────────────────────────────────────────
   risk-engine:
     build:
       context: ./services/risk-engine
       dockerfile: Dockerfile
-    ports:
-      - "8082:8082"
+    container_name: bis-risk-engine
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
       RISK_ENGINE_PORT: "8082"
-      BIS_GATEWAY_KEY: ${BIS_GATEWAY_KEY:-change-in-production}
-      MODEL_VERSION: "1.0.0"
-    restart: unless-stopped
+      BIS_GATEWAY_KEY: ${BIS_GATEWAY_KEY:-dev-gateway-key-change-in-prod}
+      KAFKA_BROKERS: kafka:9092
+      REDIS_URL: redis://redis:6379/0
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-bis_redis_dev}
+      RISK_SCORE_TTL_SECONDS: "3600"
+      LOOKUP_TTL_SECONDS: "86400"
+    ports:
+      - "8082:8082"
+    networks: [bis-net]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8082/health"]
       interval: 15s
       timeout: 5s
       retries: 3
 
-  # ── Rust Event Processor ─────────────────────────────────────────────────────
   event-processor:
     build:
       context: ./services/event-processor
       dockerfile: Dockerfile
-    ports:
-      - "8083:8083"
+    container_name: bis-event-processor
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
     environment:
       EVENT_PROCESSOR_PORT: "8083"
-      BIS_GATEWAY_KEY: ${BIS_GATEWAY_KEY:-change-in-production}
-    restart: unless-stopped
+      BIS_GATEWAY_KEY: ${BIS_GATEWAY_KEY:-dev-gateway-key-change-in-prod}
+      KAFKA_BROKERS: kafka:9092
+    ports:
+      - "8083:8083"
+    networks: [bis-net]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8083/health"]
       interval: 15s
       timeout: 5s
       retries: 3
 
-networks:
-  default:
-    name: bis-network
+  bff:
+    build:
+      context: .
+      dockerfile: Dockerfile.bff
+    container_name: bis-bff
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      gateway:
+        condition: service_healthy
+      risk-engine:
+        condition: service_healthy
+      event-processor:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://bis:${POSTGRES_PASSWORD:-bis_dev_password}@postgres:5432/bis
+      REDIS_URL: redis://:${REDIS_PASSWORD:-bis_redis_dev}@redis:6379
+      GATEWAY_URL: http://gateway:8081
+      RISK_ENGINE_URL: http://risk-engine:8082
+      EVENT_PROCESSOR_URL: http://event-processor:8083
+      TEMPORAL_HOST: temporal:7233
+      BIS_GATEWAY_KEY: ${BIS_GATEWAY_KEY:-dev-gateway-key-change-in-prod}
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      KEYCLOAK_URL: http://keycloak:8080
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-bis}
+      KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID:-bis-bff}
+      KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET:-}
+      VITE_APP_ID: ${VITE_APP_ID:-}
+      OAUTH_SERVER_URL: ${OAUTH_SERVER_URL:-}
+      VITE_OAUTH_PORTAL_URL: ${VITE_OAUTH_PORTAL_URL:-}
+      BUILT_IN_FORGE_API_URL: ${BUILT_IN_FORGE_API_URL:-}
+      BUILT_IN_FORGE_API_KEY: ${BUILT_IN_FORGE_API_KEY:-}
+    ports:
+      - "3000:3000"
+    networks: [bis-net]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/trpc/auth.me"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
