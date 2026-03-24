@@ -12,8 +12,10 @@ import {
   ArrowLeft, User, Building2, AlertTriangle, CheckCircle2,
   Clock, Loader2, FileText, Download, RefreshCw, Trash2,
   Shield, Activity, Globe, CreditCard, Fingerprint, Search,
-  Link2, MessageSquare, Send, Camera, Paperclip, MapPin, X
+  Link2, MessageSquare, Send, Camera, Paperclip, MapPin, X,
+  ChevronDown
 } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   mockInvestigations, mockAlerts, getStatusBadgeClass, formatDateTime, formatDate
 } from "@/lib/mockData";
@@ -153,6 +155,32 @@ export default function InvestigationDetail() {
   const [activeTab, setActiveTab] = useState<'overview' | 'evidence' | 'timeline'>('overview');
   const [evidenceItems, setEvidenceItems] = useState<EvidenceItem[]>(MOCK_EVIDENCE);
   const [evidenceFilter, setEvidenceFilter] = useState<EvidenceType | 'all'>('all');
+  const [currentStatus, setCurrentStatus] = useState<string>(inv.status);
+
+  const STATUS_FLOW: Record<string, { label: string; color: string; transitions: string[] }> = {
+    draft:      { label: 'Draft',      color: 'text-muted-foreground', transitions: ['pending', 'cancelled'] },
+    pending:    { label: 'Pending',    color: 'text-amber-500',        transitions: ['processing', 'cancelled'] },
+    processing: { label: 'Processing', color: 'text-blue-400',         transitions: ['completed', 'flagged', 'pending'] },
+    completed:  { label: 'Completed',  color: 'text-emerald-500',      transitions: ['processing', 'archived'] },
+    flagged:    { label: 'Flagged',    color: 'text-red-500',          transitions: ['processing', 'completed', 'archived'] },
+    archived:   { label: 'Archived',   color: 'text-muted-foreground', transitions: ['pending'] },
+    cancelled:  { label: 'Cancelled',  color: 'text-muted-foreground', transitions: ['pending'] },
+  };
+
+  const handleStatusChange = (newStatus: string) => {
+    const prev = currentStatus;
+    setCurrentStatus(newStatus);
+    const statusNote: EvidenceItem = {
+      id: `status_${Date.now()}`,
+      type: 'analyst_note',
+      timestamp: new Date().toISOString(),
+      title: `Status changed: ${STATUS_FLOW[prev]?.label ?? prev} → ${STATUS_FLOW[newStatus]?.label ?? newStatus}`,
+      body: `Investigation status updated from "${STATUS_FLOW[prev]?.label ?? prev}" to "${STATUS_FLOW[newStatus]?.label ?? newStatus}" by analyst@bis.io`,
+      linkedBy: 'analyst@bis.io',
+    };
+    setEvidenceItems(p => [statusNote, ...p]);
+    toast.success(`Status updated to ${STATUS_FLOW[newStatus]?.label ?? newStatus}`);
+  };
 
   const riskColor = inv.riskScore >= 80 ? "#f87171" : inv.riskScore >= 60 ? "#fb923c" : inv.riskScore >= 30 ? "#fbbf24" : "#34d399";
 
@@ -202,6 +230,28 @@ export default function InvestigationDetail() {
       subtitle={inv.subjectName}
       actions={
         <div className="flex items-center gap-2">
+          <Select value={currentStatus} onValueChange={handleStatusChange}>
+            <SelectTrigger className="h-7 w-36 text-xs">
+              <span className={cn("font-mono text-xs", STATUS_FLOW[currentStatus]?.color ?? 'text-foreground')}>
+                {STATUS_FLOW[currentStatus]?.label ?? currentStatus}
+              </span>
+            </SelectTrigger>
+            <SelectContent>
+              {/* Current status always shown */}
+              <SelectItem value={currentStatus}>
+                <span className={cn("font-mono text-xs", STATUS_FLOW[currentStatus]?.color)}>
+                  {STATUS_FLOW[currentStatus]?.label ?? currentStatus} (current)
+                </span>
+              </SelectItem>
+              {(STATUS_FLOW[currentStatus]?.transitions ?? []).map(t => (
+                <SelectItem key={t} value={t}>
+                  <span className={cn("font-mono text-xs", STATUS_FLOW[t]?.color)}>
+                    → {STATUS_FLOW[t]?.label ?? t}
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={handleRerun}>
             <RefreshCw size={11} /> Re-run
           </Button>

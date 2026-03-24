@@ -14,7 +14,7 @@ import {
   Search, Plus, Filter, ChevronRight, User, Building2,
   Clock, CheckCircle2, AlertTriangle, Loader2, FileText,
   X, SlidersHorizontal, ArrowUpDown, ArrowUp, ArrowDown,
-  ChevronDown, ChevronUp, Bookmark, BookmarkCheck, Trash2
+  ChevronDown, ChevronUp, Bookmark, BookmarkCheck, Trash2, Download
 } from "lucide-react";
 import {
   mockInvestigations, InvestigationStatus,
@@ -168,6 +168,28 @@ export default function Investigations() {
     setActivePresetId(null);
   };
 
+  const handleExportCSV = () => {
+    const rows = [
+      ['Reference', 'Subject', 'Type', 'Country', 'Tier', 'Risk Score', 'Status', 'Updated'],
+      ...filtered.map(inv => [
+        inv.ref,
+        inv.subjectName,
+        inv.subjectType,
+        inv.country,
+        inv.tier,
+        inv.riskScore,
+        inv.status,
+        formatDateTime(inv.updatedAt),
+      ].map(v => `"${v}"`).join(','))
+    ].join('\n');
+    const blob = new Blob([rows], { type: 'text/csv' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url; a.download = `bis-investigations-${Date.now()}.csv`; a.click();
+    URL.revokeObjectURL(url);
+    toast.success(`Exported ${filtered.length} investigations to CSV`);
+  };
+
   const set = (key: keyof FilterState) => (val: string) => {
     setFilters(prev => ({ ...prev, [key]: val }));
     setActivePresetId(null);
@@ -224,9 +246,14 @@ export default function Investigations() {
       title="Investigations"
       subtitle={`${filtered.length} of ${mockInvestigations.length} records`}
       actions={
-        <Button size="sm" className="h-7 text-xs gap-1.5" onClick={() => setCreateOpen(true)}>
-          <Plus size={12} /> New Investigation
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5" onClick={handleExportCSV}>
+            <Download size={11} /> Export CSV
+          </Button>
+          <Button size="sm" className="h-7 text-xs gap-1.5" onClick={() => setCreateOpen(true)}>
+            <Plus size={12} /> New Investigation
+          </Button>
+        </div>
       }
     >
       {/* ── Preset chips row ── */}

@@ -84,6 +84,7 @@ const navGroups: NavGroup[] = [
     label: 'PLATFORM',
     defaultOpen: true,
     items: [
+      { label: 'Users', href: '/users', icon: <Users size={15} /> },
       { label: 'Tenants & API Keys', href: '/tenants', icon: <Key size={15} /> },
       { label: 'Settings', href: '/settings', icon: <Settings size={15} /> },
       { label: 'Audit Log', href: '/audit-log', icon: <ClipboardList size={15} /> },
