@@ -543,6 +543,29 @@ const reportsRouter = router({
     }),
 });
 
+// ─── Users Router ───────────────────────────────────────────────────────────
+
+const usersRouter = router({
+  list: protectedProcedure
+    .input(z.object({
+      role: z.string().optional(),
+      limit: z.number().default(100),
+    }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return [];
+      const { users } = await import("../drizzle/schema");
+      const conditions = [];
+      if (input.role) conditions.push(eq(users.role, input.role as any));
+      return db
+        .select({ id: users.id, name: users.name, email: users.email, role: users.role })
+        .from(users)
+        .where(conditions.length ? and(...conditions) : undefined)
+        .orderBy(users.name)
+        .limit(input.limit);
+    }),
+});
+
 // ─── App Router ───────────────────────────────────────────────────────────────
 
 export const appRouter = router({
@@ -563,6 +586,7 @@ export const appRouter = router({
   fieldTasks: fieldTasksRouter,
   reports: reportsRouter,
   billing: billingRouter,
+  users: usersRouter,
 });
 
 export type AppRouter = typeof appRouter;

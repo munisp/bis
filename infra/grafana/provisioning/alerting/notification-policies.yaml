@@ -1,0 +1,27 @@
+apiVersion: 1
+
+# ─── BIS Platform — Grafana Notification Policies ────────────────────────────
+# Routes alert groups to the appropriate contact point.
+# Default: all alerts → bis-owner-webhook.
+# Critical severity (P99 latency, high error rate) also routes to email fallback.
+
+policies:
+  - orgId: 1
+    receiver: bis-owner-webhook
+    group_by: ["alertname", "severity"]
+    group_wait: 30s
+    group_interval: 5m
+    repeat_interval: 4h
+    routes:
+      # Critical alerts get both webhook and email
+      - receiver: bis-owner-webhook
+        matchers:
+          - name: severity
+            value: critical
+            isEqual: true
+        continue: true
+      - receiver: bis-email-fallback
+        matchers:
+          - name: severity
+            value: critical
+            isEqual: true

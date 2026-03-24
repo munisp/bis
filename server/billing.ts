@@ -8,6 +8,7 @@
 import { z } from "zod";
 import { router, protectedProcedure } from "./_core/trpc";
 import { TRPCError } from "@trpc/server";
+import { storagePut } from "./storage";
 
 const TB_URL = process.env.TIGERBEETLE_URL ?? "";
 const ACCOUNT_REVENUE = "1";
@@ -257,4 +258,146 @@ export const billingRouter = router({
       currency: "NGN",
     }));
   }),
+
+  /**
+   * Export ledger transactions as a CSV file.
+   * Fetches transfers from TigerBeetle for the given tenant, converts to CSV,
+   * uploads to S3, and returns a presigned download URL valid for 1 hour.
+   */
+  exportLedger: protectedProcedure
+    .input(
+      z.object({
+        tenantId: z.string().min(1),
+        fromTimestamp: z.number().int().optional(), // Unix ms
+        toTimestamp: z.number().int().optional(),   // Unix ms
+        type: z.enum(["all", "debit", "credit"]).default("all"),
+      })
+    )
+    .mutation(async ({ input, ctx }) => {
+      // Build simulated or real ledger rows
+      type LedgerRow = {
+        id: string;
+        timestamp: number;
+        type: string;
+        description: string;
+        amountNGN: number;
+        reference: string;
+        tier: string;
+      };
+
+      let rows: LedgerRow[] = [];
+
+      if (!TB_URL) {
+        // Simulated data when TigerBeetle is not configured
+        const now = Date.now();
+        const tiers = ["basic", "standard", "premium"] as const;
+        const descs = [
+          "Investigation debit",
+          "Account top-up",
+          "Investigation debit",
+          "Investigation debit",
+          "Account top-up",
+        ];
+        rows = Array.from({ length: 20 }, (_, i) => {
+          const isCredit = i % 4 === 1;
+          const tier = tiers[i % 3];
+          const amountKobo = isCredit ? 500_000 : TIER_AMOUNTS[tier];
+          return {
+            id: `sim-${i.toString().padStart(4, "0")}`,
+            timestamp: now - i * 3_600_000,
+            type: isCredit ? "credit" : "debit",
+            description: descs[i % descs.length],
+            amountNGN: amountKobo / 100,
+            reference: isCredit ? `TOPUP-${i}` : `INV-${1000 + i}`,
+            tier: isCredit ? "" : tier,
+          };
+        });
+      } else {
+        try {
+          const transfers = (await tbGet(
+            `/accounts/${ACCOUNT_TENANT_PREFIX}${input.tenantId}/transfers`
+          )) as Array<{
+            id: string;
+            timestamp?: number;
+            user_data_32?: number;
+            amount: number;
+            code: number;
+            debit_account_id: string;
+            credit_account_id: string;
+            user_data_128?: string;
+            user_data_64?: number;
+          }> | null;
+
+          if (transfers) {
+            const tierNames: Record<number, string> = { 1: "basic", 2: "standard", 3: "premium" };
+            rows = transfers
+              .filter((t) => {
+                if (input.type === "debit" && t.code !== 1) return false;
+                if (input.type === "credit" && t.code !== 2) return false;
+                const ts = (t.user_data_32 ?? 0) * 1000;
+                if (input.fromTimestamp && ts < input.fromTimestamp) return false;
+                if (input.toTimestamp && ts > input.toTimestamp) return false;
+                return true;
+              })
+              .map((t) => ({
+                id: t.id,
+                timestamp: (t.user_data_32 ?? 0) * 1000,
+                type: t.code === 2 ? "credit" : "debit",
+                description: t.code === 2 ? "Account top-up" : "Investigation debit",
+                amountNGN: t.amount / 100,
+                reference: t.user_data_128 ?? "",
+                tier: tierNames[t.user_data_64 ?? 0] ?? "",
+              }));
+          }
+        } catch (err) {
+          console.error("[TigerBeetle] exportLedger fetch error:", err);
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "Failed to fetch ledger transactions",
+          });
+        }
+      }
+
+      // Build CSV
+      const header = "ID,Timestamp,Type,Description,Amount (NGN),Reference,Tier\n";
+      const csvRows = rows.map((r) =>
+        [
+          r.id,
+          new Date(r.timestamp).toISOString(),
+          r.type,
+          `"${r.description}"`,
+          r.amountNGN.toFixed(2),
+          r.reference,
+          r.tier,
+        ].join(",")
+      );
+      const csv = header + csvRows.join("\n");
+
+      // Upload to S3
+      const dateStr = new Date().toISOString().slice(0, 10);
+      const suffix = Math.random().toString(36).slice(2, 8);
+      const fileKey = `billing-exports/${input.tenantId}/${dateStr}-ledger-${suffix}.csv`;
+
+      try {
+        const { url } = await storagePut(fileKey, csv, "text/csv");
+        return {
+          url,
+          fileKey,
+          rowCount: rows.length,
+          tenantId: input.tenantId,
+          exportedAt: new Date().toISOString(),
+        };
+      } catch (err) {
+        console.error("[Billing] exportLedger S3 upload error:", err);
+        // Fallback: return CSV as data URI so the UI can still trigger download
+        const dataUri = `data:text/csv;charset=utf-8,${encodeURIComponent(csv)}`;
+        return {
+          url: dataUri,
+          fileKey: "",
+          rowCount: rows.length,
+          tenantId: input.tenantId,
+          exportedAt: new Date().toISOString(),
+        };
+      }
+    }),
 });

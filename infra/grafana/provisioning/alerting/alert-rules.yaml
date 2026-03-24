@@ -1,0 +1,288 @@
+apiVersion: 1
+
+# ─── BIS Platform — Grafana Alert Rules ──────────────────────────────────────
+# Three rule groups covering the three key SLIs:
+#   1. APISix Gateway — P99 latency > 2 s
+#   2. APISix Gateway — HTTP error rate > 5 %
+#   3. Kafka — consumer group lag > 1,000 messages
+#
+# All rules use the auto-provisioned Prometheus datasource (uid: bis-prometheus).
+# Alerts fire to the bis-owner-webhook contact point.
+
+groups:
+  # ── Group 1: APISix Latency ────────────────────────────────────────────────
+  - orgId: 1
+    name: apisix-latency
+    folder: BIS
+    interval: 1m
+    rules:
+      - uid: bis-alert-p99-latency
+        title: "APISix P99 Latency > 2s"
+        condition: C
+        data:
+          # A: raw P99 histogram quantile
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: bis-prometheus
+            model:
+              expr: >-
+                histogram_quantile(0.99,
+                  sum(rate(apisix_http_latency_bucket[5m])) by (le)
+                )
+              instant: false
+              intervalMs: 15000
+              maxDataPoints: 43200
+              refId: A
+
+          # B: reduce to single value (last)
+          - refId: B
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: []
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              reducer: last
+              refId: B
+              type: reduce
+
+          # C: threshold — fire when P99 > 2000 ms
+          - refId: C
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [2000]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [B]
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: B
+              refId: C
+              type: threshold
+
+        noDataState: NoData
+        execErrState: Error
+        for: 2m
+        annotations:
+          summary: "APISix P99 latency is above 2 seconds"
+          description: >-
+            The 99th-percentile request latency through the APISix gateway has
+            exceeded 2,000 ms for more than 2 minutes. Current value: {{ $values.B.Value }} ms.
+            Check upstream service health and database query times.
+          runbook_url: "https://github.com/your-org/bis/wiki/runbooks/high-latency"
+        labels:
+          severity: critical
+          team: platform
+          service: apisix
+
+  # ── Group 2: APISix Error Rate ────────────────────────────────────────────
+  - orgId: 1
+    name: apisix-error-rate
+    folder: BIS
+    interval: 1m
+    rules:
+      - uid: bis-alert-error-rate
+        title: "APISix HTTP Error Rate > 5%"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: bis-prometheus
+            model:
+              expr: >-
+                sum(rate(apisix_http_requests_total{status=~"5.."}[5m]))
+                /
+                sum(rate(apisix_http_requests_total[5m]))
+                * 100
+              instant: false
+              intervalMs: 15000
+              maxDataPoints: 43200
+              refId: A
+
+          - refId: B
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: []
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              reducer: last
+              refId: B
+              type: reduce
+
+          # C: threshold — fire when error rate > 5 %
+          - refId: C
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [5]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [B]
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: B
+              refId: C
+              type: threshold
+
+        noDataState: NoData
+        execErrState: Error
+        for: 2m
+        annotations:
+          summary: "APISix HTTP 5xx error rate exceeded 5%"
+          description: >-
+            More than 5% of requests through the APISix gateway are returning
+            5xx errors over the last 5 minutes. Current rate: {{ $values.B.Value }}%.
+            Inspect upstream service logs and recent deployments.
+          runbook_url: "https://github.com/your-org/bis/wiki/runbooks/high-error-rate"
+        labels:
+          severity: critical
+          team: platform
+          service: apisix
+
+  # ── Group 3: Kafka Consumer Lag ───────────────────────────────────────────
+  - orgId: 1
+    name: kafka-consumer-lag
+    folder: BIS
+    interval: 1m
+    rules:
+      - uid: bis-alert-kafka-lag
+        title: "Kafka Consumer Lag > 1,000"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: bis-prometheus
+            model:
+              expr: >-
+                sum(kafka_consumer_group_lag)
+              instant: false
+              intervalMs: 15000
+              maxDataPoints: 43200
+              refId: A
+
+          - refId: B
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: []
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              reducer: last
+              refId: B
+              type: reduce
+
+          # C: threshold — fire when total lag > 1000
+          - refId: C
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [1000]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [B]
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: B
+              refId: C
+              type: threshold
+
+        noDataState: NoData
+        execErrState: Error
+        for: 3m
+        annotations:
+          summary: "Kafka consumer group lag exceeded 1,000 messages"
+          description: >-
+            Total Kafka consumer group lag across all topics has exceeded 1,000
+            messages for more than 3 minutes. Current lag: {{ $values.B.Value }}.
+            Check the Rust event processor health and Kafka broker throughput.
+          runbook_url: "https://github.com/your-org/bis/wiki/runbooks/kafka-lag"
+        labels:
+          severity: warning
+          team: platform
+          service: kafka

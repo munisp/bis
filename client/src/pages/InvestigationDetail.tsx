@@ -13,13 +13,14 @@ import {
   Clock, Loader2, FileText, Download, RefreshCw, Trash2,
   Shield, Activity, Globe, CreditCard, Fingerprint, Search,
   Link2, MessageSquare, Send, Camera, Paperclip, MapPin, X,
-  ChevronDown
+  ChevronDown, UserCheck
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   mockInvestigations, mockAlerts, getStatusBadgeClass, formatDateTime, formatDate
 } from "@/lib/mockData";
 import { cn } from "@/lib/utils";
+import { trpc } from "@/lib/trpc";
 
 // ─── Static module data ───────────────────────────────────────────────────────
 
@@ -193,30 +194,41 @@ export default function InvestigationDetail() {
   const [evidenceItems, setEvidenceItems] = useState<EvidenceItem[]>(MOCK_EVIDENCE);
   const [evidenceFilter, setEvidenceFilter] = useState<EvidenceType | 'all'>('all');
   const [currentStatus, setCurrentStatus] = useState<string>(inv.status);
-  const [assignedTo, setAssignedTo] = useState<string>(inv.assignedTo ?? 'analyst@bis.io');
+  // Live assignee state — seed from mock data, updated by assign mutation
+  const [assignedToId, setAssignedToId] = useState<string>("");
+  const [assignedToName, setAssignedToName] = useState<string>(inv.assignedTo ?? "");
 
-  const ANALYSTS = [
-    'analyst@bis.io',
-    'senior_analyst@bis.io',
-    'compliance@bis.io',
-    'supervisor@bis.io',
-    'admin@bis.platform',
-  ];
+  // ── Live users list for assignee dropdown ─────────────────────────────────
+  const { data: usersList, isLoading: usersLoading } = trpc.users.list.useQuery({});
 
-  const handleAssign = (newAnalyst: string) => {
-    const prev = assignedTo;
-    if (prev === newAnalyst) return;
-    setAssignedTo(newAnalyst);
-    const assignNote: EvidenceItem = {
-      id: `assign_${Date.now()}`,
-      type: 'analyst_note',
-      timestamp: new Date().toISOString(),
-      title: `Reassigned: ${prev} → ${newAnalyst}`,
-      body: `Investigation reassigned from ${prev} to ${newAnalyst} by supervisor@bis.io`,
-      linkedBy: 'supervisor@bis.io',
-    };
-    setEvidenceItems(p => [assignNote, ...p]);
-    toast.success(`Assigned to ${newAnalyst}`);
+  const assignMutation = trpc.investigations.assign.useMutation({
+    onSuccess: (_data, variables) => {
+      const user = usersList?.find(u => u.id === variables.assigneeId);
+      const name = user?.name ?? user?.email ?? String(variables.assigneeId);
+      setAssignedToId(String(variables.assigneeId));
+      setAssignedToName(name);
+      const assignNote: EvidenceItem = {
+        id: `assign_${Date.now()}`,
+        type: 'analyst_note',
+        timestamp: new Date().toISOString(),
+        title: `Reassigned to ${name}`,
+        body: `Investigation reassigned to ${name} (ID: ${variables.assigneeId})`,
+        linkedBy: 'you',
+      };
+      setEvidenceItems(p => [assignNote, ...p]);
+      toast.success(`Assigned to ${name}`);
+    },
+    onError: (err) => {
+      toast.error("Assignment failed", { description: err.message });
+    },
+  });
+
+  const handleAssign = (userIdStr: string) => {
+    const userId = parseInt(userIdStr, 10);
+    if (isNaN(userId)) return;
+    const user = usersList?.find(u => u.id === userId);
+    const name = user?.name ?? user?.email ?? userIdStr;
+    assignMutation.mutate({ ref: inv.ref, assigneeId: userId, assigneeName: name });
   };
 
   const STATUS_FLOW: Record<string, { label: string; color: string; transitions: string[] }> = {
@@ -292,16 +304,40 @@ export default function InvestigationDetail() {
       subtitle={inv.subjectName}
       actions={
         <div className="flex items-center gap-2">
-          <Select value={assignedTo} onValueChange={handleAssign}>
-            <SelectTrigger className="h-7 w-40 text-xs">
-              <span className="font-mono text-xs text-muted-foreground truncate">{assignedTo.split('@')[0]}</span>
+          <Select
+            value={assignedToId}
+            onValueChange={handleAssign}
+            disabled={usersLoading || assignMutation.isPending}
+          >
+            <SelectTrigger className="h-7 w-44 text-xs">
+              {assignMutation.isPending ? (
+                <span className="flex items-center gap-1 text-muted-foreground">
+                  <Loader2 size={10} className="animate-spin" /> Assigning…
+                </span>
+              ) : (
+                <span className="flex items-center gap-1 font-mono text-xs text-muted-foreground truncate">
+                  <UserCheck size={11} />
+                  {assignedToName || (usersLoading ? "Loading…" : "Assign analyst")}
+                </span>
+              )}
             </SelectTrigger>
             <SelectContent>
-              {ANALYSTS.map(a => (
-                <SelectItem key={a} value={a}>
-                  <span className="font-mono text-xs">{a}</span>
-                </SelectItem>
-              ))}
+              {usersLoading ? (
+                <div className="px-2 py-1 text-xs text-muted-foreground">Loading users…</div>
+              ) : usersList && usersList.length > 0 ? (
+                usersList.map(u => (
+                  <SelectItem key={u.id} value={String(u.id)}>
+                    <div className="flex flex-col">
+                      <span className="font-mono text-xs">{u.name ?? u.email ?? `User #${u.id}`}</span>
+                      {u.email && u.name && (
+                        <span className="text-[10px] text-muted-foreground">{u.email}</span>
+                      )}
+                    </div>
+                  </SelectItem>
+                ))
+              ) : (
+                <div className="px-2 py-1 text-xs text-muted-foreground">No users found</div>
+              )}
             </SelectContent>
           </Select>
           <Select value={currentStatus} onValueChange={handleStatusChange}>

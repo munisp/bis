@@ -55,3 +55,11 @@
 - [x] APISix kafka-logger plugin config for bis.audit topic (tRPC BFF + Go gateway routes)
 - [x] Prometheus + Grafana Docker services with APISix dashboard provisioning
 - [x] Update docker-compose.yml with prometheus + grafana containers (17 total)
+
+## Phase 5 — Invoice Export, Grafana Alerts, Assign UI
+- [x] billing.exportLedger tRPC procedure (CSV generation, S3 presigned URL + data-URI fallback)
+- [x] Download CSV button in BillingPage header (respects active transaction filter)
+- [x] Grafana alerting provisioning YAML (P99 > 2s, error rate > 5%, Kafka lag > 1000)
+- [x] notifyOwner webhook contact point + email fallback + notification policies in Grafana
+- [x] Investigation assign dropdown in InvestigationDetail — live trpc.users.list, Permify-gated assign mutation
+- [x] trpc.users.list procedure (protectedProcedure, optional role filter, ordered by name)

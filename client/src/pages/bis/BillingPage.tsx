@@ -41,6 +41,7 @@ import {
   Receipt,
   ArrowDownLeft,
   ArrowUpRight,
+  Download,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -90,12 +91,36 @@ export default function BillingPage() {
   const [topUpAmount, setTopUpAmount] = useState("");
   const [topUpRef, setTopUpRef] = useState("");
   const [filterType, setFilterType] = useState<"all" | "debit" | "credit">("all");
+  const [isExporting, setIsExporting] = useState(false);
 
   // ── tRPC queries ──────────────────────────────────────────────────────────
   const { data: balance, isLoading: balanceLoading, refetch: refetchBalance } =
     trpc.billing.getBalance.useQuery({ tenantId });
 
   const { data: pricing } = trpc.billing.getTierPricing.useQuery();
+
+  const exportMutation = trpc.billing.exportLedger.useMutation({
+    onSuccess: (data) => {
+      setIsExporting(false);
+      // Trigger browser download
+      const a = document.createElement("a");
+      a.href = data.url;
+      a.download = `bis-ledger-${tenantId}-${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      toast.success("Export ready", { description: `${data.rowCount} transactions exported.` });
+    },
+    onError: (err) => {
+      setIsExporting(false);
+      toast.error("Export failed", { description: err.message });
+    },
+  });
+
+  const handleExport = () => {
+    setIsExporting(true);
+    exportMutation.mutate({ tenantId, type: filterType });
+  };
 
   const creditMutation = trpc.billing.creditAccount.useMutation({
     onSuccess: (data) => {
@@ -156,6 +181,20 @@ export default function BillingPage() {
           >
             <RefreshCw className="h-4 w-4 mr-1" />
             Refresh
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleExport}
+            disabled={isExporting}
+            className="border-slate-700 text-slate-300 hover:bg-slate-800"
+          >
+            {isExporting ? (
+              <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+            ) : (
+              <Download className="h-4 w-4 mr-1" />
+            )}
+            Export CSV
           </Button>
           <Button
             size="sm"

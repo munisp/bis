@@ -1,0 +1,39 @@
+apiVersion: 1
+
+# ─── BIS Platform — Grafana Alert Contact Points ─────────────────────────────
+# Defines notification channels for Grafana Unified Alerting.
+# The BIS notifyOwner webhook is the primary channel; it forwards to the
+# Manus notification API which pushes a notification to the project owner.
+#
+# To use a different channel (Slack, PagerDuty, email), add it here and
+# reference it in notification-policies.yaml.
+
+contactPoints:
+  # ── BIS Owner Webhook ──────────────────────────────────────────────────────
+  # Posts a JSON payload to the BFF /api/trpc/system.notifyOwner endpoint.
+  # The BFF then calls notifyOwner({ title, content }) from server/_core/notification.ts.
+  - orgId: 1
+    name: bis-owner-webhook
+    receivers:
+      - uid: bis-owner-webhook-receiver
+        type: webhook
+        settings:
+          url: "http://bff:3000/api/webhooks/grafana-alert"
+          httpMethod: POST
+          maxAlerts: 10
+          # Authorization header — set GRAFANA_WEBHOOK_SECRET in .env
+          # and read it in the BFF /api/webhooks/grafana-alert handler
+          authorization_scheme: Bearer
+          authorization_credentials: "${GRAFANA_WEBHOOK_SECRET:-bis-grafana-webhook-dev}"
+        disableResolveMessage: false
+
+  # ── Email fallback (disabled by default — set GF_SMTP_* env vars to enable) ──
+  - orgId: 1
+    name: bis-email-fallback
+    receivers:
+      - uid: bis-email-fallback-receiver
+        type: email
+        settings:
+          addresses: "${GRAFANA_ALERT_EMAIL:-ops@bis.platform}"
+          singleEmail: false
+        disableResolveMessage: false
