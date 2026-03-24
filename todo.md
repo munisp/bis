@@ -407,4 +407,38 @@
 - [x] 0 TypeScript errors
 
 ### Archive
-- [ ] Comprehensive project archive v18 generated (>= 17 MB)
+- [x] Comprehensive project archive v18 generated (checkpoint e81d5e5a)
+
+## Phase 19 — Next Steps (Completed)
+
+### Alert Rule Trigger History
+- [x] Add rule_evaluations table to drizzle schema (ruleId, subjectRef, metric, value, threshold, triggered, alertCreated, context, createdAt)
+- [x] Push migration to local PostgreSQL (drizzle/0008_...)
+- [x] Update server/alertRules.ts to log every evaluation (triggered + not-triggered) to rule_evaluations
+- [x] Add alertRules.evaluationHistory procedure (list with ruleId/triggered filters, pagination)
+- [x] Add ruleEvaluations to schema imports in routers.ts
+- [x] Rewrite AlertRulesPage with Tabs (Rules + Trigger History)
+- [x] Trigger History tab: rule/outcome filters, paginated table, evaluation count badge
+
+### PDF Report Branding
+- [x] Add logoUrl column to tenants table in schema.ts
+- [x] Push migration to local PostgreSQL (drizzle/0009_...)
+- [x] Add tenantId optional input to investigations.exportTimeline procedure
+- [x] Fetch tenant name + logoUrl from DB when tenantId provided
+- [x] Fetch logo as base64 (data URI) for pdfmake embedding
+- [x] Add red CONFIDENTIAL classification banner at top of PDF
+- [x] Embed tenant logo (48x48) in PDF header alongside tenant name
+- [x] Add tenants to schema imports in routers.ts
+
+### Bulk Geolocation Update
+- [x] Add bulkLocating state to FieldAgentsPage
+- [x] Add handleLocateAll function (filters active agents, calls getCurrentPosition once, dispatches all updateLocation mutations in parallel via Promise.allSettled)
+- [x] Add Locate All Active Agents button to map view header bar (right-aligned, emerald style, loading spinner)
+- [x] Invalidates fieldAgents.list cache after all mutations settle
+
+### Tests
+- [x] All 26 tests pass (3 test files, 0 failures)
+- [x] 0 TypeScript errors
+
+### Archive
+- [ ] Comprehensive project archive v19 generated

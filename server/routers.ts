@@ -25,6 +25,8 @@ import {
   platformSettings,
   onboardingApplications,
   alertRules,
+  ruleEvaluations,
+  tenants,
 } from "../drizzle/schema";
 import {
   getDashboardStats,
@@ -333,7 +335,7 @@ const investigationsRouter = router({
     }),
 
   exportTimeline: protectedProcedure
-    .input(z.object({ ref: z.string() }))
+    .input(z.object({ ref: z.string(), tenantId: z.number().optional() }))
     .mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new Error("Database unavailable");
@@ -341,6 +343,17 @@ const investigationsRouter = router({
       // Fetch investigation record
       const [inv] = await db.select().from(investigations).where(eq(investigations.ref, input.ref)).limit(1);
       if (!inv) throw new TRPCError({ code: "NOT_FOUND", message: "Investigation not found" });
+
+      // Fetch tenant branding (optional)
+      let tenantName: string | null = null;
+      let tenantLogoUrl: string | null = null;
+      if (input.tenantId) {
+        const [tenant] = await db.select().from(tenants).where(eq(tenants.id, input.tenantId)).limit(1);
+        if (tenant) {
+          tenantName = tenant.name;
+          tenantLogoUrl = tenant.logoUrl ?? null;
+        }
+      }
 
       // Fetch evidence: audit log entries for this investigation
       const entries = await db.select().from(auditLog)
@@ -353,6 +366,19 @@ const investigationsRouter = router({
         .where(eq(fieldTasks.investigationId, inv.id))
         .orderBy(desc(fieldTasks.createdAt))
         .limit(50);
+
+      // Fetch tenant logo as base64 if available
+      let logoBase64: string | null = null;
+      if (tenantLogoUrl) {
+        try {
+          const res = await fetch(tenantLogoUrl);
+          if (res.ok) {
+            const buf = await res.arrayBuffer();
+            const mime = res.headers.get("content-type") ?? "image/png";
+            logoBase64 = `data:${mime};base64,${Buffer.from(buf).toString("base64")}`;
+          }
+        } catch { /* skip logo if fetch fails */ }
+      }
 
       // Build PDF using pdfmake
       // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -385,6 +411,28 @@ const investigationsRouter = router({
         { text: (t as any).address ?? (t as any).assignedAddress ?? "-", style: "cell" },
       ]);
 
+      // Classification banner + header block
+      const classificationBanner: any = {
+        table: {
+          widths: ["*"],
+          body: [[
+            { text: "CONFIDENTIAL — FOR AUTHORISED PERSONNEL ONLY", alignment: "center", bold: true, fontSize: 7, color: "#ffffff", fillColor: "#dc2626", margin: [0, 3, 0, 3] },
+          ]],
+        },
+        layout: "noBorders",
+        margin: [0, 0, 0, 8],
+      };
+
+      const headerColumns: any[] = [
+        { stack: [
+          { text: tenantName ? `${tenantName} — Powered by BIS` : "BIS — Background Intelligence System", style: "label" },
+          { text: `Investigation Report: ${inv.ref}`, style: "header", margin: [0, 2, 0, 0] },
+        ], width: "*" },
+      ];
+      if (logoBase64) {
+        headerColumns.push({ image: logoBase64, width: 48, height: 48, alignment: "right" });
+      }
+
       const docDefinition: any = {
         defaultStyle: { font: "Helvetica", fontSize: 9 },
         styles: {
@@ -396,8 +444,8 @@ const investigationsRouter = router({
           tableHeader: { fontSize: 8, bold: true, color: "#ffffff", fillColor: "#1e293b" },
         },
         content: [
-          { text: "BIS — Background Intelligence System", style: "label" },
-          { text: `Investigation Report: ${inv.ref}`, style: "header", margin: [0, 2, 0, 8] },
+          classificationBanner,
+          { columns: headerColumns, margin: [0, 0, 0, 8] },
           {
             columns: [
               { stack: [
@@ -1546,6 +1594,31 @@ const alertRulesRouter = router({
       await db.delete(alertRules).where(eq(alertRules.id, input.id));
       await writeAuditLog(db, { userId: ctx.user!.id, category: "system", action: `Alert rule deleted: ${input.id}`, targetRef: `rule-${input.id}` });
       return { success: true };
+    }),
+
+  evaluationHistory: protectedProcedure
+    .input(z.object({
+      ruleId: z.number().optional(),
+      triggered: z.boolean().optional(),
+      limit: z.number().min(1).max(200).default(50),
+      offset: z.number().min(0).default(0),
+    }).optional())
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return { rows: [], total: 0 };
+      const conditions: any[] = [];
+      if (input?.ruleId !== undefined) conditions.push(eq(ruleEvaluations.ruleId, input.ruleId));
+      if (input?.triggered !== undefined) conditions.push(eq(ruleEvaluations.triggered, input.triggered));
+      const where = conditions.length ? and(...conditions) : undefined;
+      const [rows, [{ total }]] = await Promise.all([
+        db.select().from(ruleEvaluations)
+          .where(where)
+          .orderBy(desc(ruleEvaluations.createdAt))
+          .limit(input?.limit ?? 50)
+          .offset(input?.offset ?? 0),
+        db.select({ total: count() }).from(ruleEvaluations).where(where),
+      ]);
+      return { rows, total: Number(total) };
     }),
 });
 

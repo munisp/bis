@@ -1,4 +1,4 @@
-// AlertRulesPage.tsx — Threshold-based alert rule configuration
+// AlertRulesPage.tsx — Alert rule configuration + trigger history
 // Design: Forensic Intelligence — dark/light semantic CSS variables
 
 import { useState } from "react";
@@ -11,12 +11,14 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
 import {
   Plus, Trash2, Pencil, Zap, Shield, RefreshCw, Loader2,
-  AlertTriangle, CheckCircle2, Info, TrendingUp
+  AlertTriangle, CheckCircle2, Info, TrendingUp, History,
+  CheckCheck, XCircle, ChevronLeft, ChevronRight
 } from "lucide-react";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
@@ -75,16 +77,33 @@ const DEFAULT_FORM = {
   notifyOwner: true,
 };
 
+const PAGE_SIZE = 20;
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function AlertRulesPage() {
+  const [tab, setTab] = useState<"rules" | "history">("rules");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState({ ...DEFAULT_FORM });
   const [deleteId, setDeleteId] = useState<number | null>(null);
 
+  // History filters
+  const [historyRuleId, setHistoryRuleId] = useState<number | undefined>(undefined);
+  const [historyTriggered, setHistoryTriggered] = useState<boolean | undefined>(undefined);
+  const [historyPage, setHistoryPage] = useState(0);
+
   const utils = trpc.useUtils();
   const { data: rules = [], isLoading, refetch } = trpc.alertRules.list.useQuery();
+
+  const { data: historyData, isLoading: historyLoading } = trpc.alertRules.evaluationHistory.useQuery(
+    { ruleId: historyRuleId, triggered: historyTriggered, limit: PAGE_SIZE, offset: historyPage * PAGE_SIZE },
+    { enabled: tab === "history" }
+  );
+
+  const historyRows = historyData?.rows ?? [];
+  const historyTotal = historyData?.total ?? 0;
+  const totalPages = Math.ceil(historyTotal / PAGE_SIZE);
 
   const createMutation = trpc.alertRules.create.useMutation({
     onSuccess: () => {
@@ -162,15 +181,17 @@ export default function AlertRulesPage() {
   return (
     <BISLayout
       title="Alert Rules"
-      subtitle="Configure threshold-based triggers for automated intelligence alerts"
+      subtitle="Configure threshold-based triggers and review evaluation history"
       actions={
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => refetch()}>
             <RefreshCw size={11} className={isLoading ? "animate-spin" : ""} /> Refresh
           </Button>
-          <Button size="sm" className="h-7 text-xs gap-1.5" onClick={openCreate}>
-            <Plus size={12} /> New Rule
-          </Button>
+          {tab === "rules" && (
+            <Button size="sm" className="h-7 text-xs gap-1.5" onClick={openCreate}>
+              <Plus size={12} /> New Rule
+            </Button>
+          )}
         </div>
       }
     >
@@ -191,79 +212,224 @@ export default function AlertRulesPage() {
         ))}
       </div>
 
-      {/* Rules list */}
-      {isLoading ? (
-        <div className="flex items-center justify-center py-16 text-muted-foreground">
-          <Loader2 size={20} className="animate-spin mr-2" /> Loading rules...
-        </div>
-      ) : (rules as any[]).length === 0 ? (
-        <div className="bis-card p-12 text-center text-muted-foreground">
-          <TrendingUp size={28} className="mx-auto mb-3 opacity-30" />
-          <p className="text-sm font-semibold mb-1">No alert rules configured</p>
-          <p className="text-xs mb-4">Create your first rule to automate intelligence alerting based on risk thresholds.</p>
-          <Button size="sm" className="gap-1.5" onClick={openCreate}><Plus size={12} /> New Rule</Button>
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {(rules as any[]).map((rule: any) => {
-            const sev = SEVERITY_CONFIG[rule.severity] ?? SEVERITY_CONFIG.medium;
-            return (
-              <div key={rule.id} className={cn("bis-card border transition-all", rule.enabled ? "" : "opacity-50")}>
-                <div className="p-4">
-                  <div className="flex items-start gap-3">
-                    <div className={cn("w-8 h-8 rounded-md border flex items-center justify-center shrink-0 mt-0.5", sev.bg, sev.color)}>
-                      {sev.icon}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-sm font-semibold text-foreground">{rule.name}</span>
-                        <Badge variant="outline" className={cn("text-[10px] h-4 px-1.5 capitalize", sev.bg, sev.color)}>
-                          {rule.severity}
-                        </Badge>
-                        {rule.autoEscalate && (
-                          <Badge variant="outline" className="text-[10px] h-4 px-1.5 text-red-400 border-red-500/30 bg-red-500/5">
-                            <Zap size={8} className="mr-0.5" /> Auto-Escalate
-                          </Badge>
-                        )}
-                        {!rule.enabled && (
-                          <Badge variant="outline" className="text-[10px] h-4 px-1.5 text-muted-foreground">Disabled</Badge>
-                        )}
+      <Tabs value={tab} onValueChange={v => setTab(v as any)}>
+        <TabsList className="mb-4 h-8">
+          <TabsTrigger value="rules" className="text-xs gap-1.5 h-6">
+            <Shield size={11} /> Rules
+          </TabsTrigger>
+          <TabsTrigger value="history" className="text-xs gap-1.5 h-6">
+            <History size={11} /> Trigger History
+            {historyTotal > 0 && (
+              <Badge variant="secondary" className="ml-1 h-4 px-1 text-[9px]">{historyTotal}</Badge>
+            )}
+          </TabsTrigger>
+        </TabsList>
+
+        {/* ── Rules Tab ── */}
+        <TabsContent value="rules">
+          {isLoading ? (
+            <div className="flex items-center justify-center py-16 text-muted-foreground">
+              <Loader2 size={20} className="animate-spin mr-2" /> Loading rules...
+            </div>
+          ) : (rules as any[]).length === 0 ? (
+            <div className="bis-card p-12 text-center text-muted-foreground">
+              <TrendingUp size={28} className="mx-auto mb-3 opacity-30" />
+              <p className="text-sm font-semibold mb-1">No alert rules configured</p>
+              <p className="text-xs mb-4">Create your first rule to automate intelligence alerting based on risk thresholds.</p>
+              <Button size="sm" className="gap-1.5" onClick={openCreate}><Plus size={12} /> New Rule</Button>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {(rules as any[]).map((rule: any) => {
+                const sev = SEVERITY_CONFIG[rule.severity] ?? SEVERITY_CONFIG.medium;
+                return (
+                  <div key={rule.id} className={cn("bis-card border transition-all", rule.enabled ? "" : "opacity-50")}>
+                    <div className="p-4">
+                      <div className="flex items-start gap-3">
+                        <div className={cn("w-8 h-8 rounded-md border flex items-center justify-center shrink-0 mt-0.5", sev.bg, sev.color)}>
+                          {sev.icon}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-sm font-semibold text-foreground">{rule.name}</span>
+                            <Badge variant="outline" className={cn("text-[10px] h-4 px-1.5 capitalize", sev.bg, sev.color)}>
+                              {rule.severity}
+                            </Badge>
+                            {rule.autoEscalate && (
+                              <Badge variant="outline" className="text-[10px] h-4 px-1.5 text-red-400 border-red-500/30 bg-red-500/5">
+                                <Zap size={8} className="mr-0.5" /> Auto-Escalate
+                              </Badge>
+                            )}
+                            {!rule.enabled && (
+                              <Badge variant="outline" className="text-[10px] h-4 px-1.5 text-muted-foreground">Disabled</Badge>
+                            )}
+                          </div>
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            <span className="font-mono text-foreground/70">{formatMetric(rule.metric)}</span>
+                            {" "}<span className="font-mono text-primary font-semibold">{OPERATOR_SYMBOL[rule.operator] ?? rule.operator}</span>{" "}
+                            <span className="font-mono font-bold text-foreground">{rule.threshold}</span>
+                            {" "}<span className="text-muted-foreground">{formatUnit(rule.metric)}</span>
+                            {" -> "}<span className="capitalize">{rule.severity} alert</span>
+                          </p>
+                          {rule.description && (
+                            <p className="text-[10px] text-muted-foreground mt-1">{rule.description}</p>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <Switch
+                            checked={rule.enabled}
+                            onCheckedChange={v => toggleMutation.mutate({ id: rule.id, enabled: v })}
+                            className="scale-75"
+                          />
+                          <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => openEdit(rule)}>
+                            <Pencil size={11} />
+                          </Button>
+                          <Button
+                            variant="ghost" size="sm"
+                            className="h-6 w-6 p-0 text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                            onClick={() => setDeleteId(rule.id)}
+                          >
+                            <Trash2 size={11} />
+                          </Button>
+                        </div>
                       </div>
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        <span className="font-mono text-foreground/70">{formatMetric(rule.metric)}</span>
-                        {" "}<span className="font-mono text-primary font-semibold">{OPERATOR_SYMBOL[rule.operator] ?? rule.operator}</span>{" "}
-                        <span className="font-mono font-bold text-foreground">{rule.threshold}</span>
-                        {" "}<span className="text-muted-foreground">{formatUnit(rule.metric)}</span>
-                        {" -> "}<span className="capitalize">{rule.severity} alert</span>
-                      </p>
-                      {rule.description && (
-                        <p className="text-[10px] text-muted-foreground mt-1">{rule.description}</p>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <Switch
-                        checked={rule.enabled}
-                        onCheckedChange={v => toggleMutation.mutate({ id: rule.id, enabled: v })}
-                        className="scale-75"
-                      />
-                      <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => openEdit(rule)}>
-                        <Pencil size={11} />
-                      </Button>
-                      <Button
-                        variant="ghost" size="sm"
-                        className="h-6 w-6 p-0 text-red-400 hover:text-red-300 hover:bg-red-500/10"
-                        onClick={() => setDeleteId(rule.id)}
-                      >
-                        <Trash2 size={11} />
-                      </Button>
                     </div>
                   </div>
-                </div>
+                );
+              })}
+            </div>
+          )}
+        </TabsContent>
+
+        {/* ── Trigger History Tab ── */}
+        <TabsContent value="history">
+          {/* Filters */}
+          <div className="flex items-center gap-2 mb-3 flex-wrap">
+            <Select
+              value={historyRuleId !== undefined ? String(historyRuleId) : "all"}
+              onValueChange={v => { setHistoryRuleId(v === "all" ? undefined : Number(v)); setHistoryPage(0); }}
+            >
+              <SelectTrigger className="h-7 text-xs w-44">
+                <SelectValue placeholder="All rules" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All rules</SelectItem>
+                {(rules as any[]).map((r: any) => (
+                  <SelectItem key={r.id} value={String(r.id)}>{r.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select
+              value={historyTriggered !== undefined ? String(historyTriggered) : "all"}
+              onValueChange={v => { setHistoryTriggered(v === "all" ? undefined : v === "true"); setHistoryPage(0); }}
+            >
+              <SelectTrigger className="h-7 text-xs w-36">
+                <SelectValue placeholder="All outcomes" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All outcomes</SelectItem>
+                <SelectItem value="true">Triggered</SelectItem>
+                <SelectItem value="false">Not triggered</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <span className="text-[10px] text-muted-foreground ml-auto">
+              {historyTotal} evaluation{historyTotal !== 1 ? "s" : ""}
+            </span>
+          </div>
+
+          {historyLoading ? (
+            <div className="flex items-center justify-center py-16 text-muted-foreground">
+              <Loader2 size={20} className="animate-spin mr-2" /> Loading history...
+            </div>
+          ) : historyRows.length === 0 ? (
+            <div className="bis-card p-12 text-center text-muted-foreground">
+              <History size={28} className="mx-auto mb-3 opacity-30" />
+              <p className="text-sm font-semibold mb-1">No evaluations recorded yet</p>
+              <p className="text-xs">Evaluations are logged automatically when investigations, KYC checks, or screenings are processed.</p>
+            </div>
+          ) : (
+            <>
+              <div className="bis-card overflow-hidden">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-border/40 bg-muted/30">
+                      <th className="text-left px-3 py-2 text-[10px] text-muted-foreground uppercase tracking-wider font-medium">Outcome</th>
+                      <th className="text-left px-3 py-2 text-[10px] text-muted-foreground uppercase tracking-wider font-medium">Subject</th>
+                      <th className="text-left px-3 py-2 text-[10px] text-muted-foreground uppercase tracking-wider font-medium">Metric</th>
+                      <th className="text-right px-3 py-2 text-[10px] text-muted-foreground uppercase tracking-wider font-medium">Value</th>
+                      <th className="text-right px-3 py-2 text-[10px] text-muted-foreground uppercase tracking-wider font-medium">Threshold</th>
+                      <th className="text-left px-3 py-2 text-[10px] text-muted-foreground uppercase tracking-wider font-medium">Source</th>
+                      <th className="text-left px-3 py-2 text-[10px] text-muted-foreground uppercase tracking-wider font-medium">Alert</th>
+                      <th className="text-left px-3 py-2 text-[10px] text-muted-foreground uppercase tracking-wider font-medium">Time</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {historyRows.map((row: any) => (
+                      <tr key={row.id} className="border-b border-border/20 hover:bg-muted/20 transition-colors">
+                        <td className="px-3 py-2">
+                          {row.triggered ? (
+                            <span className="flex items-center gap-1 text-red-400 font-medium">
+                              <Zap size={10} /> Triggered
+                            </span>
+                          ) : (
+                            <span className="flex items-center gap-1 text-muted-foreground">
+                              <XCircle size={10} /> Passed
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 font-mono text-foreground/80 max-w-[120px] truncate">{row.subjectRef}</td>
+                        <td className="px-3 py-2 text-foreground/70">{formatMetric(row.metric)}</td>
+                        <td className="px-3 py-2 text-right font-mono font-bold text-foreground">{row.value}</td>
+                        <td className="px-3 py-2 text-right font-mono text-muted-foreground">{row.threshold}</td>
+                        <td className="px-3 py-2 text-muted-foreground max-w-[100px] truncate">{row.context ?? "—"}</td>
+                        <td className="px-3 py-2">
+                          {row.alertCreated ? (
+                            <span className="flex items-center gap-1 text-amber-400">
+                              <CheckCheck size={10} /> Created
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">
+                          {new Date(row.createdAt).toLocaleString()}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-            );
-          })}
-        </div>
-      )}
+
+              {/* Pagination */}
+              {totalPages > 1 && (
+                <div className="flex items-center justify-between mt-3">
+                  <span className="text-[10px] text-muted-foreground">
+                    Page {historyPage + 1} of {totalPages}
+                  </span>
+                  <div className="flex gap-1">
+                    <Button
+                      variant="outline" size="sm" className="h-6 w-6 p-0"
+                      disabled={historyPage === 0}
+                      onClick={() => setHistoryPage(p => p - 1)}
+                    >
+                      <ChevronLeft size={12} />
+                    </Button>
+                    <Button
+                      variant="outline" size="sm" className="h-6 w-6 p-0"
+                      disabled={historyPage >= totalPages - 1}
+                      onClick={() => setHistoryPage(p => p + 1)}
+                    >
+                      <ChevronRight size={12} />
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </TabsContent>
+      </Tabs>
 
       {/* Create / Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={open => { if (!open) { setDialogOpen(false); setEditingId(null); } }}>

@@ -328,6 +328,7 @@ export const tenants = pgTable("tenants", {
   monthlyQuota: integer("monthlyQuota").notNull().default(100),
   usedThisMonth: integer("usedThisMonth").notNull().default(0),
   ngnBalance: real("ngnBalance").notNull().default(0),
+  logoUrl: text("logoUrl"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
 });
@@ -448,3 +449,19 @@ export const alertRules = pgTable("alert_rules", {
 
 export type AlertRule = typeof alertRules.$inferSelect;
 export type InsertAlertRule = typeof alertRules.$inferInsert;
+
+// ─── Alert Rule Evaluations ───────────────────────────────────────────────────
+export const ruleEvaluations = pgTable("rule_evaluations", {
+  id: serial("id").primaryKey(),
+  ruleId: integer("ruleId").notNull().references(() => alertRules.id, { onDelete: "cascade" }),
+  subjectRef: varchar("subjectRef", { length: 255 }).notNull(),
+  metric: varchar("metric", { length: 64 }).notNull(),
+  value: real("value").notNull(),
+  threshold: real("threshold").notNull(),
+  triggered: boolean("triggered").notNull().default(false),
+  alertCreated: boolean("alertCreated").notNull().default(false),
+  context: text("context"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type RuleEvaluation = typeof ruleEvaluations.$inferSelect;
+export type InsertRuleEvaluation = typeof ruleEvaluations.$inferInsert;

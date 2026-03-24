@@ -301,6 +301,38 @@ export default function FieldAgentsPage() {
     );
   };
 
+  const [bulkLocating, setBulkLocating] = useState(false);
+
+  const handleLocateAll = () => {
+    if (!navigator.geolocation) {
+      toast.error('Geolocation not supported by this browser');
+      return;
+    }
+    const activeAgents = (agentList as any[]).filter((a: any) => a.status === 'active');
+    if (activeAgents.length === 0) {
+      toast.info('No active agents to locate');
+      return;
+    }
+    setBulkLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const { latitude: lat, longitude: lng } = pos.coords;
+        const mutations = activeAgents.map((a: any) =>
+          updateLocationMutation.mutateAsync({ id: a.id, lat, lng }).catch(() => null)
+        );
+        await Promise.allSettled(mutations);
+        setBulkLocating(false);
+        utils.fieldAgents.list.invalidate();
+        toast.success(`Locations updated for ${activeAgents.length} active agent${activeAgents.length !== 1 ? 's' : ''}`);
+      },
+      (err) => {
+        toast.error('Could not get location', { description: err.message });
+        setBulkLocating(false);
+      },
+      { enableHighAccuracy: true, timeout: 15000 }
+    );
+  };
+
   const recruitMutation = trpc.fieldAgents.create.useMutation({
     onSuccess: () => {
       toast.success('Agent recruited', { description: `${recruitForm.name} has been added to the network.` });
@@ -454,6 +486,17 @@ export default function FieldAgentsPage() {
           <div className="bis-card overflow-hidden">
             <div className="flex items-center gap-4 px-4 py-2 border-b border-border bg-muted/20 flex-wrap">
               <span className="text-[9px] font-mono text-muted-foreground uppercase tracking-wider">Legend:</span>
+              <button
+                onClick={handleLocateAll}
+                disabled={bulkLocating}
+                className="ml-auto flex items-center gap-1.5 text-[10px] font-mono px-2 py-1 rounded border border-emerald-500/40 text-emerald-400 bg-emerald-500/5 hover:bg-emerald-500/15 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {bulkLocating ? (
+                  <><Loader2 size={10} className="animate-spin" /> Locating…</>
+                ) : (
+                  <><Navigation size={10} /> Locate All Active Agents</>
+                )}
+              </button>
               <span className="flex items-center gap-1.5 text-[10px] font-mono text-emerald-400">
                 <span className="w-3 h-3 rounded-full border-2 border-emerald-400 bg-emerald-400/20" /> Active Agent
               </span>
