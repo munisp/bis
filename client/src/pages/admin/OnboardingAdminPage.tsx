@@ -19,7 +19,7 @@ import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import {
   CheckCircle2, XCircle, Clock, Eye, Search, RefreshCw,
-  Building2, User, Globe, Phone, Mail, FileText, Loader2, Download
+  Building2, User, Globe, Phone, Mail, FileText, Loader2, Download, Maximize2, X as XIcon
 } from "lucide-react";
 
 type OnboardingStatus = "draft" | "submitted" | "awaiting_documents" | "under_review" | "approved" | "rejected";
@@ -42,6 +42,8 @@ function StatusBadge({ status }: { status: OnboardingStatus }) {
     </span>
   );
 }
+
+type DocPreview = { name: string; url: string; isPdf: boolean };
 
 type Application = {
   id: number;
@@ -72,6 +74,7 @@ type Application = {
 
 export default function OnboardingAdminPage() {
   const { user, loading: authLoading } = useAuth();
+  const [docPreview, setDocPreview] = useState<DocPreview | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<Application | null>(null);
@@ -440,6 +443,66 @@ export default function OnboardingAdminPage() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* ── Document Preview Modal ── */}
+      {docPreview && (
+        <div
+          className="fixed inset-0 z-[100] flex flex-col bg-black/90"
+          onClick={() => setDocPreview(null)}
+        >
+          {/* Header */}
+          <div
+            className="flex items-center justify-between px-4 py-3 bg-black/60 border-b border-white/10"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-2 text-white">
+              <FileText className="w-4 h-4 text-white/60" />
+              <span className="text-sm font-medium truncate max-w-[60vw]">{docPreview.name}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <a
+                href={docPreview.url}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 text-xs text-white/70 hover:text-white px-3 py-1.5 rounded border border-white/20 hover:border-white/40 transition-colors"
+              >
+                <Download className="w-3 h-3" /> Download
+              </a>
+              <button
+                onClick={() => setDocPreview(null)}
+                className="p-1.5 rounded text-white/70 hover:text-white hover:bg-white/10 transition-colors"
+              >
+                <XIcon className="w-5 h-5" />
+              </button>
+            </div>
+          </div>
+
+          {/* Content */}
+          <div
+            className="flex-1 overflow-hidden flex items-center justify-center p-4"
+            onClick={e => e.stopPropagation()}
+          >
+            {docPreview.isPdf ? (
+              <iframe
+                src={docPreview.url}
+                title={docPreview.name}
+                className="w-full h-full rounded border border-white/10"
+                style={{ minHeight: "70vh" }}
+              />
+            ) : (
+              <img
+                src={docPreview.url}
+                alt={docPreview.name}
+                className="max-w-full max-h-full object-contain rounded shadow-2xl"
+                style={{ maxHeight: "80vh" }}
+              />
+            )}
+          </div>
+
+          {/* Click-outside hint */}
+          <p className="text-center text-xs text-white/30 pb-3">Click outside to close</p>
+        </div>
+      )}
     </BISLayout>
   );
 }

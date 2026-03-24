@@ -268,4 +268,27 @@
 - [x] Total: 291 rows across 16 tables
 
 ### Archive
-- [ ] Comprehensive project archive v13 generated
+- [x] Comprehensive project archive v13 generated (bis-pwa-archive-v13-20260324.zip)
+
+## Phase 14 — Next Steps (Round 5)
+
+### Connect App to Local PostgreSQL
+- [x] DATABASE_URL already overridden to local PostgreSQL in server/_core/index.ts
+- [x] App confirmed serving seeded data from local PostgreSQL (291 rows)
+
+### Document Preview Modal
+- [x] Add document preview modal to OnboardingAdminPage detail drawer
+- [x] PDF files open in full-screen iframe modal
+- [x] Image files open in full-screen img modal
+- [x] Modal has close button, file name header, download link, click-outside to close
+
+### Bulk KYC Re-Verify
+- [x] Add checkbox column to KYCRecordsPage table (only review/failed rows are selectable)
+- [x] Add Select All / Deselect All header checkbox (selects all eligible rows)
+- [x] Add "Re-verify selected (N)" toolbar button with bulk action bar
+- [x] Sequential parallel trpc.kyc.verify calls with animated progress bar (N of M)
+- [x] Row highlight for selected records (bg-primary/5)
+- [x] Toast summary on completion (X passed, Y failed)
+
+### Archive
+- [ ] Comprehensive project archive v14 generated

@@ -16,7 +16,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { toast } from "sonner";
 import {
   Search, RefreshCw, Download, CheckCircle2, XCircle, Clock,
-  AlertTriangle, Loader2, ShieldCheck, RotateCcw, Eye, ChevronDown
+  AlertTriangle, Loader2, ShieldCheck, RotateCcw, Eye, ChevronDown, ListChecks
 } from "lucide-react";
 
 type KYCStatus = "pending" | "processing" | "passed" | "failed" | "review";
@@ -75,6 +75,29 @@ export default function KYCRecordsPage() {
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<KYCRecord | null>(null);
   const [reVerifying, setReVerifying] = useState<number | null>(null);
+
+  // Bulk selection state
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number } | null>(null);
+
+  const toggleSelect = useCallback((id: number) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const toggleSelectAll = useCallback((records: KYCRecord[]) => {
+    setSelectedIds(prev => {
+      const eligible = records.filter(r => r.status === "review" || r.status === "failed");
+      const allSelected = eligible.every(r => prev.has(r.id));
+      const next = new Set(prev);
+      if (allSelected) { eligible.forEach(r => next.delete(r.id)); }
+      else { eligible.forEach(r => next.add(r.id)); }
+      return next;
+    });
+  }, []);
 
   // Cursor pagination state
   const [pages, setPages] = useState<KYCRecord[][]>([]);
@@ -156,6 +179,36 @@ export default function KYCRecordsPage() {
     });
   };
 
+  const handleBulkReVerify = useCallback(async (records: KYCRecord[]) => {
+    const targets = records.filter(r => selectedIds.has(r.id));
+    if (targets.length === 0) return;
+    setBulkProgress({ done: 0, total: targets.length });
+    let done = 0;
+    const results: { name: string; status: string }[] = [];
+    for (const record of targets) {
+      try {
+        const result = await verifyMutation.mutateAsync({
+          subjectName: record.subjectName,
+          nin: record.nin ?? undefined,
+          bvn: record.bvn ?? undefined,
+          dob: record.dob ?? undefined,
+          phone: record.phone ?? undefined,
+        });
+        results.push({ name: record.subjectName, status: result.status });
+      } catch {
+        results.push({ name: record.subjectName, status: "error" });
+      }
+      done++;
+      setBulkProgress({ done, total: targets.length });
+    }
+    setBulkProgress(null);
+    setSelectedIds(new Set());
+    const passed = results.filter(r => r.status === "passed").length;
+    const failed = results.filter(r => r.status === "error" || r.status === "failed").length;
+    toast.success(`Bulk re-verify complete: ${passed} passed, ${failed} failed / errored`);
+    handleRefresh();
+  }, [selectedIds, verifyMutation, handleRefresh]);
+
   // Flatten all loaded pages
   const allLoaded = useMemo(() => pages.flat(), [pages]);
 
@@ -224,6 +277,41 @@ export default function KYCRecordsPage() {
         </div>
       </div>
 
+      {/* ── Bulk Action Toolbar ── */}
+      {selectedIds.size > 0 && (
+        <div className="flex items-center justify-between bg-primary/10 border border-primary/20 rounded-lg px-4 py-2.5 mb-4">
+          <span className="text-sm font-medium text-foreground">
+            {selectedIds.size} record{selectedIds.size > 1 ? "s" : ""} selected
+          </span>
+          <div className="flex items-center gap-2">
+            {bulkProgress ? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Re-verifying {bulkProgress.done} / {bulkProgress.total}…
+                <div className="w-32 h-1.5 bg-muted rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-primary rounded-full transition-all duration-300"
+                    style={{ width: `${(bulkProgress.done / bulkProgress.total) * 100}%` }}
+                  />
+                </div>
+              </div>
+            ) : (
+              <Button
+                size="sm"
+                onClick={() => handleBulkReVerify(filtered)}
+                disabled={!!bulkProgress}
+              >
+                <ListChecks className="w-4 h-4 mr-1.5" />
+                Re-verify selected ({selectedIds.size})
+              </Button>
+            )}
+            <Button variant="ghost" size="sm" onClick={() => setSelectedIds(new Set())}>
+              Clear
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* ── Status Filter Chips ── */}
       <div className="flex flex-wrap gap-2 mb-5">
         <StatusChip status="all" active={statusFilter === "all"} count={total} onClick={() => setStatusFilter("all")} />
@@ -259,6 +347,16 @@ export default function KYCRecordsPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border bg-muted/30">
+                    <th className="px-4 py-3 w-10">
+                      <input
+                        type="checkbox"
+                        className="rounded border-border cursor-pointer"
+                        checked={filtered.filter(r => r.status === "review" || r.status === "failed").length > 0 &&
+                          filtered.filter(r => r.status === "review" || r.status === "failed").every(r => selectedIds.has(r.id))}
+                        onChange={() => toggleSelectAll(filtered)}
+                        title="Select all eligible records"
+                      />
+                    </th>
                     <th className="text-left px-4 py-3 font-medium text-muted-foreground">Subject</th>
                     <th className="text-left px-4 py-3 font-medium text-muted-foreground">Status</th>
                     <th className="text-left px-4 py-3 font-medium text-muted-foreground">Risk Score</th>
@@ -271,8 +369,20 @@ export default function KYCRecordsPage() {
                   {filtered.map((record, i) => (
                     <tr
                       key={record.id}
-                      className={`border-b border-border/50 hover:bg-muted/20 transition-colors ${i % 2 === 0 ? "" : "bg-muted/10"}`}
+                      className={`border-b border-border/50 hover:bg-muted/20 transition-colors ${selectedIds.has(record.id) ? "bg-primary/5" : i % 2 === 0 ? "" : "bg-muted/10"}`}
                     >
+                      <td className="px-4 py-3 w-10">
+                        {(record.status === "review" || record.status === "failed") ? (
+                          <input
+                            type="checkbox"
+                            className="rounded border-border cursor-pointer"
+                            checked={selectedIds.has(record.id)}
+                            onChange={() => toggleSelect(record.id)}
+                          />
+                        ) : (
+                          <span className="w-4 h-4 block" />
+                        )}
+                      </td>
                       <td className="px-4 py-3">
                         <div className="font-medium text-foreground">{record.subjectName}</div>
                         {record.phone && <div className="text-xs text-muted-foreground">{record.phone}</div>}
