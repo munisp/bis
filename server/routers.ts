@@ -2260,10 +2260,15 @@ const casesRouter = router({
       type: z.string().optional(),
       priority: z.string().optional(),
       search: z.string().optional(),
+      dateFrom: z.date().optional(),
+      dateTo: z.date().optional(),
+      myCases: z.boolean().optional(),
+      leadAnalystId: z.number().optional(),
+      sortBy: z.enum(['created_desc','created_asc','priority','due_date']).optional(),
       page: z.number().min(1).default(1),
       pageSize: z.number().min(1).max(100).default(20),
     }).optional())
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
       const filters: any[] = [];
@@ -2271,11 +2276,22 @@ const casesRouter = router({
       if (input?.type) filters.push(eq(cases.type, input.type as any));
       if (input?.priority) filters.push(eq(cases.priority, input.priority as any));
       if (input?.search) filters.push(ilike(cases.title, `%${input.search}%`));
+      if (input?.dateFrom) filters.push(gte(cases.createdAt, input.dateFrom));
+      if (input?.dateTo) filters.push(lte(cases.createdAt, input.dateTo));
+      if (input?.myCases && ctx.user?.id) filters.push(eq(cases.leadAnalystId, ctx.user.id));
+      if (input?.leadAnalystId) filters.push(eq(cases.leadAnalystId, input.leadAnalystId));
       const page = input?.page ?? 1;
       const pageSize = input?.pageSize ?? 20;
+      let orderByClause: any;
+      switch (input?.sortBy) {
+        case 'created_asc': orderByClause = asc(cases.createdAt); break;
+        case 'priority': orderByClause = desc(cases.priority); break;
+        case 'due_date': orderByClause = asc(cases.dueAt); break;
+        default: orderByClause = desc(cases.createdAt);
+      }
       const rows = await db.select().from(cases)
         .where(filters.length ? and(...filters) : undefined)
-        .orderBy(desc(cases.createdAt))
+        .orderBy(orderByClause)
         .limit(pageSize)
         .offset((page - 1) * pageSize);
       const [{ total }] = await db.select({ total: count() }).from(cases)
@@ -2626,6 +2642,198 @@ const casesRouter = router({
         .orderBy(desc(caseTimeline.createdAt))
         .limit(input.limit);
       return events;
+    }),
+
+  deleteDocument: protectedProcedure
+    .input(z.object({
+      caseRef: z.string(),
+      documentId: z.number(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
+      const [c] = await db.select().from(cases).where(eq(cases.ref, input.caseRef)).limit(1);
+      if (!c) throw new TRPCError({ code: 'NOT_FOUND', message: 'Case not found' });
+      const [doc] = await db.select().from(caseDocuments)
+        .where(and(eq(caseDocuments.id, input.documentId), eq(caseDocuments.caseId, c.id))).limit(1);
+      if (!doc) throw new TRPCError({ code: 'NOT_FOUND', message: 'Document not found' });
+      // Hard delete from DB (S3 key retained in timeline for audit trail)
+      await db.delete(caseDocuments).where(eq(caseDocuments.id, input.documentId));
+      // Add timeline event
+      await db.insert(caseTimeline).values({
+        caseId: c.id,
+        eventType: 'document_deleted',
+        title: `Document deleted: ${doc.filename}`,
+        detail: { fileKey: doc.fileKey, mimeType: doc.mimeType, deletedBy: ctx.user?.name },
+        actorId: ctx.user?.id,
+        actorName: ctx.user?.name,
+        actorRole: ctx.user?.role,
+      });
+      return { success: true };
+    }),
+
+  exportCasePdf: protectedProcedure
+    .input(z.object({ caseRef: z.string() }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
+      const [c] = await db.select().from(cases).where(eq(cases.ref, input.caseRef)).limit(1);
+      if (!c) throw new TRPCError({ code: 'NOT_FOUND', message: 'Case not found' });
+      const parties = await db.select().from(caseParties).where(eq(caseParties.caseId, c.id)).orderBy(asc(caseParties.createdAt));
+      const documents = await db.select().from(caseDocuments).where(eq(caseDocuments.caseId, c.id)).orderBy(desc(caseDocuments.createdAt));
+      const timeline = await db.select().from(caseTimeline).where(eq(caseTimeline.caseId, c.id)).orderBy(desc(caseTimeline.createdAt)).limit(50);
+      const stakeholders = await db.select().from(caseStakeholders).where(eq(caseStakeholders.caseId, c.id));
+
+      // Generate executive summary via LLM
+      let executiveSummary = 'No summary available.';
+      try {
+        const llmRes = await invokeLLM({
+          messages: [
+            { role: 'system', content: 'You are a compliance officer writing a concise executive summary for a regulatory case report. Be factual, professional, and concise (3-5 sentences).' },
+            { role: 'user', content: `Case: ${c.ref} — ${c.title}\nType: ${c.type}\nStatus: ${c.status}\nPriority: ${c.priority}\nSummary: ${c.summary ?? 'N/A'}\nParties: ${parties.map(p => `${p.name} (${p.role})`).join(', ') || 'None'}\nTimeline events: ${timeline.length}\nDocuments: ${documents.length}\n\nWrite a 3-5 sentence executive summary for this compliance case report.` },
+          ],
+        });
+        executiveSummary = (llmRes as any)?.choices?.[0]?.message?.content ?? executiveSummary;
+      } catch { /* LLM unavailable — use fallback */ }
+
+      // Build PDF content as HTML string
+      const now = new Date().toISOString().split('T')[0];
+      const htmlContent = `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><style>
+body { font-family: Arial, sans-serif; font-size: 12px; color: #1a1a1a; margin: 40px; }
+h1 { font-size: 22px; color: #0f172a; border-bottom: 2px solid #0f172a; padding-bottom: 8px; }
+h2 { font-size: 16px; color: #1e40af; margin-top: 24px; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px; }
+table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+th { background: #f1f5f9; text-align: left; padding: 6px 10px; font-size: 11px; }
+td { padding: 6px 10px; border-bottom: 1px solid #e2e8f0; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: bold; }
+.critical { background: #fee2e2; color: #991b1b; }
+.high { background: #ffedd5; color: #9a3412; }
+.medium { background: #dbeafe; color: #1e40af; }
+.low { background: #f1f5f9; color: #475569; }
+.footer { margin-top: 40px; font-size: 10px; color: #94a3b8; border-top: 1px solid #e2e8f0; padding-top: 8px; }
+</style></head><body>
+<h1>BIS Compliance Case Report</h1>
+<p><strong>Generated:</strong> ${now} &nbsp;&nbsp; <strong>By:</strong> ${ctx.user?.name ?? 'System'} &nbsp;&nbsp; <strong>Classification:</strong> CONFIDENTIAL</p>
+
+<h2>Case Overview</h2>
+<table>
+<tr><th>Reference</th><td>${c.ref}</td><th>Status</th><td><span class="badge ${c.status}">${c.status.replace('_',' ')}</span></td></tr>
+<tr><th>Title</th><td colspan="3">${c.title}</td></tr>
+<tr><th>Type</th><td>${c.type.replace('_',' ')}</td><th>Priority</th><td><span class="badge ${c.priority}">${c.priority}</span></td></tr>
+<tr><th>Legal Basis</th><td>${c.legalBasis ?? '—'}</td><th>Jurisdiction</th><td>${c.jurisdiction ?? '—'}</td></tr>
+<tr><th>Regulatory Framework</th><td>${c.regulatoryFramework ?? '—'}</td><th>Risk Score</th><td>${c.riskScore != null ? c.riskScore + '/100' : '—'}</td></tr>
+<tr><th>Created</th><td>${new Date(c.createdAt).toLocaleDateString()}</td><th>Due Date</th><td>${c.dueAt ? new Date(c.dueAt).toLocaleDateString() : '—'}</td></tr>
+</table>
+
+<h2>Executive Summary</h2>
+<p>${executiveSummary}</p>
+
+${parties.length > 0 ? `<h2>Parties (${parties.length})</h2>
+<table><tr><th>Name</th><th>Role</th><th>NIN</th><th>BVN</th><th>Phone</th><th>Email</th></tr>
+${parties.map(p => `<tr><td>${p.name}</td><td>${p.role}</td><td>${p.nin ?? '—'}</td><td>${p.bvn ?? '—'}</td><td>${p.phone ?? '—'}</td><td>${p.email ?? '—'}</td></tr>`).join('')}
+</table>` : ''}
+
+${stakeholders.length > 0 ? `<h2>Stakeholders (${stakeholders.length})</h2>
+<table><tr><th>Name</th><th>Role</th><th>Organisation</th><th>Email</th><th>Access Expires</th></tr>
+${stakeholders.map(s => `<tr><td>${s.name}</td><td>${s.role.replace('_',' ')}</td><td>${s.organisation ?? '—'}</td><td>${s.email}</td><td>${s.accessExpiresAt ? new Date(s.accessExpiresAt).toLocaleDateString() : '—'}</td></tr>`).join('')}
+</table>` : ''}
+
+${documents.length > 0 ? `<h2>Documents (${documents.length})</h2>
+<table><tr><th>Filename</th><th>Type</th><th>Size</th><th>Confidential</th><th>Uploaded</th></tr>
+${documents.map(d => `<tr><td>${d.filename}</td><td>${d.mimeType ?? '—'}</td><td>${d.sizeBytes ? (d.sizeBytes/1024).toFixed(1)+' KB' : '—'}</td><td>${d.confidential ? 'Yes' : 'No'}</td><td>${new Date(d.createdAt).toLocaleDateString()}</td></tr>`).join('')}
+</table>` : ''}
+
+<h2>Case Timeline (last ${timeline.length} events)</h2>
+<table><tr><th>Date</th><th>Event</th><th>Actor</th></tr>
+${timeline.map(e => `<tr><td>${new Date(e.createdAt).toLocaleDateString()}</td><td>${e.title}</td><td>${e.actorName ?? 'System'}</td></tr>`).join('')}
+</table>
+
+<div class="footer">This report was generated by the BIS (Background Intelligence System) compliance platform. Reference: ${c.ref}. Generated: ${new Date().toISOString()}. Recipient should treat this document as confidential.</div>
+</body></html>`;
+
+      // Convert HTML to PDF using weasyprint via child_process
+      const crypto = await import('crypto');
+      const { execSync } = await import('child_process');
+      const tmpDir = '/tmp';
+      const htmlFile = `${tmpDir}/case-${c.ref}-${crypto.randomBytes(4).toString('hex')}.html`;
+      const pdfFile = htmlFile.replace('.html', '.pdf');
+      const { writeFileSync, readFileSync, unlinkSync } = await import('fs');
+      writeFileSync(htmlFile, htmlContent, 'utf8');
+      try {
+        execSync(`weasyprint "${htmlFile}" "${pdfFile}"`, { timeout: 30000 });
+      } catch {
+        // Fallback: return HTML as PDF-like download
+        const htmlBuf = Buffer.from(htmlContent, 'utf8');
+        const suffix = crypto.randomBytes(6).toString('hex');
+        const { url } = await storagePut(`cases/${c.ref}/exports/report-${suffix}.html`, htmlBuf, 'text/html');
+        unlinkSync(htmlFile);
+        await db.insert(caseTimeline).values({
+          caseId: c.id,
+          eventType: 'decision_recorded',
+          title: 'Case report exported (HTML)',
+          detail: { exportUrl: url, exportedBy: ctx.user?.name },
+          actorId: ctx.user?.id,
+          actorName: ctx.user?.name,
+          actorRole: ctx.user?.role,
+        });
+        return { url, format: 'html', filename: `${c.ref}-report.html` };
+      }
+      const pdfBuf = readFileSync(pdfFile);
+      const suffix = crypto.randomBytes(6).toString('hex');
+      const { url } = await storagePut(`cases/${c.ref}/exports/report-${suffix}.pdf`, pdfBuf, 'application/pdf');
+      unlinkSync(htmlFile);
+      unlinkSync(pdfFile);
+      await db.insert(caseTimeline).values({
+        caseId: c.id,
+        eventType: 'decision_recorded',
+        title: 'Case report exported to PDF',
+        detail: { exportUrl: url, exportedBy: ctx.user?.name },
+        actorId: ctx.user?.id,
+        actorName: ctx.user?.name,
+        actorRole: ctx.user?.role,
+      });
+      return { url, format: 'pdf', filename: `${c.ref}-report.pdf` };
+    }),
+
+  exportCaseCsv: protectedProcedure
+    .input(z.object({
+      status: z.string().optional(),
+      type: z.string().optional(),
+      priority: z.string().optional(),
+      search: z.string().optional(),
+      dateFrom: z.date().optional(),
+      dateTo: z.date().optional(),
+      myCases: z.boolean().optional(),
+    }).optional())
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
+      const filters: any[] = [];
+      if (input?.status) filters.push(eq(cases.status, input.status as any));
+      if (input?.type) filters.push(eq(cases.type, input.type as any));
+      if (input?.priority) filters.push(eq(cases.priority, input.priority as any));
+      if (input?.search) filters.push(ilike(cases.title, `%${input.search}%`));
+      if (input?.dateFrom) filters.push(gte(cases.createdAt, input.dateFrom));
+      if (input?.dateTo) filters.push(lte(cases.createdAt, input.dateTo));
+      if (input?.myCases && ctx.user?.id) filters.push(eq(cases.leadAnalystId, ctx.user.id));
+      const rows = await db.select().from(cases)
+        .where(filters.length ? and(...filters) : undefined)
+        .orderBy(desc(cases.createdAt))
+        .limit(1000);
+      const header = 'Ref,Title,Type,Status,Priority,Created,Due Date,Risk Score,Tags';
+      const csvRows = rows.map(r => [
+        r.ref, `"${r.title.replace(/"/g, '""')}"`, r.type, r.status, r.priority,
+        new Date(r.createdAt).toISOString().split('T')[0],
+        r.dueAt ? new Date(r.dueAt).toISOString().split('T')[0] : '',
+        r.riskScore ?? '',
+        `"${((r.tags as string[]) ?? []).join(';')}"`
+      ].join(','));
+      const csv = [header, ...csvRows].join('\n');
+      const crypto = await import('crypto');
+      const suffix = crypto.randomBytes(6).toString('hex');
+      const { url } = await storagePut(`cases/exports/cases-${suffix}.csv`, Buffer.from(csv, 'utf8'), 'text/csv');
+      return { url, count: rows.length };
     }),
 });
 

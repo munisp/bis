@@ -1,0 +1,1 @@
+ALTER TYPE "public"."case_timeline_event_type" ADD VALUE 'document_deleted' BEFORE 'comment_added';

@@ -806,7 +806,7 @@ export const caseDocuments = pgTable("case_documents", {
 export type CaseDocument = typeof caseDocuments.$inferSelect;
 
 export const caseTimelineEventTypeEnum = pgEnum("case_timeline_event_type", [
-  "case_created", "status_changed", "party_added", "document_uploaded",
+  "case_created", "status_changed", "party_added", "document_uploaded", "document_deleted",
   "comment_added", "investigation_linked", "stakeholder_invited",
   "field_task_dispatched", "alert_triggered", "decision_recorded", "case_closed",
 ]);

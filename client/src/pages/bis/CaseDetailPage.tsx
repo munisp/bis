@@ -40,6 +40,9 @@ import {
   X,
   Download,
   Image as ImageIcon,
+  Trash2,
+  FileDown,
+  Loader2,
 } from "lucide-react";
 
 const STATUS_COLORS: Record<string, string> = {
@@ -63,6 +66,7 @@ const TIMELINE_ICONS: Record<string, any> = {
   status_changed: Clock,
   party_added: Users,
   document_uploaded: FileText,
+  document_deleted: Trash2,
   comment_added: MessageSquare,
   stakeholder_invited: UserPlus,
   investigation_linked: ExternalLink,
@@ -82,6 +86,8 @@ export default function CaseDetailPage() {
   const [addCommentOpen, setAddCommentOpen] = useState(false);
   const [updateStatusOpen, setUpdateStatusOpen] = useState(false);
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
+  const [deleteDocId, setDeleteDocId] = useState<number | null>(null);
+  const [exportingPdf, setExportingPdf] = useState(false);
 
   const [partyForm, setPartyForm] = useState({ role: "subject" as const, name: "", nin: "", bvn: "", phone: "", email: "", notes: "" });
   const [stakeholderForm, setStakeholderForm] = useState({ role: "reviewer" as const, name: "", email: "", organisation: "", canComment: false, canViewDocuments: true, expiryDays: 30 });
@@ -136,6 +142,29 @@ export default function CaseDetailPage() {
     onError: (e) => toast.error(e.message),
   });
 
+  const deleteDocument = trpc.cases.deleteDocument.useMutation({
+    onSuccess: () => {
+      utils.cases.get.invalidate({ ref: caseRef });
+      setDeleteDocId(null);
+      toast.success("Document deleted");
+    },
+    onError: (e) => { toast.error(e.message); setDeleteDocId(null); },
+  });
+
+  const exportCasePdf = trpc.cases.exportCasePdf.useMutation({
+    onSuccess: (result) => {
+      setExportingPdf(false);
+      // Trigger download
+      const a = document.createElement("a");
+      a.href = result.url;
+      a.download = result.filename;
+      a.target = "_blank";
+      a.click();
+      toast.success(`Case report exported (${result.format.toUpperCase()})`);
+    },
+    onError: (e) => { setExportingPdf(false); toast.error(e.message); },
+  });
+
   const handleUploadDocument = async () => {
     if (!uploadFile || !caseRef) return;
     const MAX_SIZE = 16 * 1024 * 1024;
@@ -159,6 +188,11 @@ export default function CaseDetailPage() {
     } catch { /* handled by onError */ } finally {
       setUploading(false);
     }
+  };
+
+  const handleExportPdf = () => {
+    setExportingPdf(true);
+    exportCasePdf.mutate({ caseRef });
   };
 
   const copyPortalLink = (token: string) => {
@@ -204,7 +238,11 @@ export default function CaseDetailPage() {
           <h1 className="text-2xl font-bold mt-1">{c.title}</h1>
           {c.summary && <p className="text-muted-foreground mt-1 max-w-2xl">{c.summary}</p>}
         </div>
-        <div className="flex gap-2 shrink-0">
+        <div className="flex gap-2 shrink-0 flex-wrap justify-end">
+          <Button variant="outline" size="sm" onClick={handleExportPdf} disabled={exportingPdf}>
+            {exportingPdf ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <FileDown className="w-4 h-4 mr-1" />}
+            {exportingPdf ? "Generating..." : "Export PDF"}
+          </Button>
           <Button variant="outline" size="sm" onClick={() => setUpdateStatusOpen(true)}>Update Status</Button>
           <Button size="sm" onClick={() => setAddCommentOpen(true)}>
             <MessageSquare className="w-4 h-4 mr-1" /> Add Note
@@ -263,15 +301,13 @@ export default function CaseDetailPage() {
                       <p className="font-medium text-sm">{event.title}</p>
                       <span className="text-xs text-muted-foreground">{new Date(event.createdAt).toLocaleString()}</span>
                     </div>
-                    {event.actorName && (
-                      <p className="text-xs text-muted-foreground mt-0.5">by {event.actorName}</p>
-                    )}
+                    {event.actorName && <p className="text-xs text-muted-foreground mt-0.5">by {event.actorName}</p>}
                   </div>
                 </div>
               );
             })}
             {(c.timeline ?? []).length === 0 && (
-              <div className="pl-6 text-sm text-muted-foreground">No timeline events yet.</div>
+              <p className="text-sm text-muted-foreground pl-6 py-4">No timeline events yet.</p>
             )}
           </div>
         </TabsContent>
@@ -293,13 +329,13 @@ export default function CaseDetailPage() {
                         <span className="font-semibold">{party.name}</span>
                         <Badge variant="outline" className="text-xs capitalize">{party.role}</Badge>
                       </div>
-                      <div className="text-xs text-muted-foreground mt-1 space-x-3">
+                      <div className="text-xs text-muted-foreground mt-0.5 space-x-2">
                         {party.nin && <span>NIN: {party.nin}</span>}
                         {party.bvn && <span>BVN: {party.bvn}</span>}
-                        {party.phone && <span>{party.phone}</span>}
+                        {party.phone && <span>Tel: {party.phone}</span>}
                         {party.email && <span>{party.email}</span>}
                       </div>
-                      {party.notes && <p className="text-xs text-muted-foreground mt-1">{party.notes}</p>}
+                      {party.notes && <p className="text-xs text-muted-foreground mt-1 italic">{party.notes}</p>}
                     </div>
                   </div>
                 </CardContent>
@@ -348,6 +384,15 @@ export default function CaseDetailPage() {
                           <a href={doc.url} download={doc.filename} target="_blank" rel="noopener noreferrer">
                             <Download className="w-4 h-4" />
                           </a>
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                          onClick={() => setDeleteDocId(doc.id)}
+                          title="Delete document"
+                        >
+                          <Trash2 className="w-4 h-4" />
                         </Button>
                       </div>
                     </div>
@@ -406,6 +451,28 @@ export default function CaseDetailPage() {
                 <Button variant="outline" onClick={() => setUploadDocOpen(false)}>Cancel</Button>
                 <Button onClick={handleUploadDocument} disabled={!uploadFile || uploading}>
                   {uploading ? "Uploading..." : "Upload"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          {/* Delete Document Confirm Dialog */}
+          <Dialog open={deleteDocId !== null} onOpenChange={(open) => { if (!open) setDeleteDocId(null); }}>
+            <DialogContent className="max-w-sm">
+              <DialogHeader>
+                <DialogTitle>Delete Document</DialogTitle>
+              </DialogHeader>
+              <p className="text-sm text-muted-foreground py-2">
+                Are you sure you want to delete this document? This action cannot be undone. A record of the deletion will be added to the case timeline.
+              </p>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setDeleteDocId(null)}>Cancel</Button>
+                <Button
+                  variant="destructive"
+                  onClick={() => deleteDocId !== null && deleteDocument.mutate({ caseRef, documentId: deleteDocId })}
+                  disabled={deleteDocument.isPending}
+                >
+                  {deleteDocument.isPending ? "Deleting..." : "Delete"}
                 </Button>
               </DialogFooter>
             </DialogContent>

@@ -876,3 +876,25 @@
 
 ### Archive
 - [x] Comprehensive archive of entire platform (v39)
+
+## Phase 40 — Case Document Delete, Case PDF Export, Advanced Case Search & Filtering
+### Case Document Delete
+- [x] Add deleteDocument tRPC procedure (hard-delete with timeline audit entry)
+- [x] Add Trash icon button on each document row in CaseDetailPage
+- [x] Confirm delete dialog before deletion
+- [x] Refresh document list after deletion
+### Case Export to PDF (Regulatory Reporting)
+- [x] Add exportCasePdf tRPC procedure — generates structured PDF with case metadata, parties, timeline
+- [x] Use invokeLLM to generate an executive summary section for the PDF
+- [x] Export PDF button in CaseDetailPage header
+- [x] PDF includes: metadata table, executive summary, parties list, documents, timeline, stakeholders
+- [x] PDF uploaded to S3 and returned as signed URL for download
+### Advanced Case Search & Filtering
+- [x] Add date range filter (dateFrom / dateTo) to CasesPage
+- [x] Add sort-by dropdown to CasesPage (newest, oldest, priority, due date)
+- [x] Add My Cases toggle to filter to cases where leadAnalystId = current user
+- [x] Update casesRouter.list to support dateFrom, dateTo, sortBy, myCases, leadAnalystId filters
+### Case Export to CSV (Bulk Operations)
+- [x] Add Export CSV button in CasesPage header for bulk export of filtered results
+- [x] Add exportCaseCsv tRPC procedure (up to 1000 rows, respects all active filters)
+- [x] Phase 40 Vitest tests: 19 new tests (deleteDocument, exportCasePdf, exportCaseCsv, filter logic, CSV escaping, preview type detection)
