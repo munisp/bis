@@ -106,7 +106,7 @@ export default function NewInvestigationSlideOver({ open, onClose, onCreated }: 
         subjectName: "", subjectType: "individual", tier: "standard",
         country: "Nigeria", nin: "", bvn: "", rcNumber: "", phone: "",
         email: "", dob: "", address: "", purpose: "", priority: "normal",
-        dataSources: ["nimc", "bvn", "npf", "social"], notes: "", dueAt: "",
+        dataSources: ["nimc", "bvn", "npf", "social"], notes: "",
       });
     },
     onError: (err) => {
@@ -129,7 +129,6 @@ export default function NewInvestigationSlideOver({ open, onClose, onCreated }: 
     priority: "normal",
     dataSources: ["nimc", "bvn", "npf", "social"],
     notes: "",
-    dueAt: "",
   });
 
   const set = (k: string, v: string | string[]) => setForm(p => ({ ...p, [k]: v }));
@@ -157,7 +156,6 @@ export default function NewInvestigationSlideOver({ open, onClose, onCreated }: 
       email: form.email || undefined,
       address: form.address || undefined,
       dataSources: form.dataSources,
-      dueAt: form.dueAt ? new Date(form.dueAt).getTime() : undefined,
     });
   };
 
@@ -438,17 +436,6 @@ export default function NewInvestigationSlideOver({ open, onClose, onCreated }: 
               </div>
 
               <div className="space-y-1.5">
-                <Label className="text-xs font-mono text-muted-foreground uppercase tracking-wider">SLA Deadline <span className="normal-case text-muted-foreground/60">(optional — defaults to 72 h)</span></Label>
-                <Input
-                  type="datetime-local"
-                  value={form.dueAt}
-                  onChange={e => set("dueAt", e.target.value)}
-                  min={new Date(Date.now() + 3_600_000).toISOString().slice(0, 16)}
-                  className="font-mono text-sm"
-                />
-              </div>
-
-              <div className="space-y-1.5">
                 <Label className="text-xs font-mono text-muted-foreground uppercase tracking-wider">Additional Notes</Label>
                 <Textarea
                   placeholder="Special instructions, context, or flags for the investigation team..."
@@ -473,8 +460,6 @@ export default function NewInvestigationSlideOver({ open, onClose, onCreated }: 
                   <span className={cn("font-bold", selectedTier.color)}>{selectedTier.label} — {selectedTier.price}</span>
                   <span className="text-muted-foreground">ETA</span>
                   <span className="text-foreground">{selectedTier.eta}</span>
-                  <span className="text-muted-foreground">SLA Due</span>
-                  <span className="text-foreground">{form.dueAt ? new Date(form.dueAt).toLocaleDateString() : "72 h default"}</span>
                   <span className="text-muted-foreground">Sources</span>
                   <span className="text-foreground">{form.dataSources.length} queued</span>
                 </div>

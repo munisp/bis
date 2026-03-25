@@ -608,7 +608,7 @@ function APIPlayground() {
                 <ChevronRight className="h-3.5 w-3.5 text-muted-foreground ml-auto group-hover:translate-x-0.5 transition-transform" />
               </a>
               <div className="flex items-center gap-2 p-3 rounded-lg border border-border hover:bg-muted/50 transition-colors text-sm cursor-pointer group"
-                onClick={() => { navigator.clipboard.writeText('pip install bis-sdk'); toast.success('Copied to clipboard', { description: 'pip install bis-sdk' }); }}>
+                onClick={() => toast.info("pip install bis-sdk (coming soon)")}>
                 <Download className="h-4 w-4 text-emerald-500 shrink-0" />
                 <div className="min-w-0">
                   <div className="font-medium">Python SDK</div>
@@ -617,7 +617,7 @@ function APIPlayground() {
                 <ChevronRight className="h-3.5 w-3.5 text-muted-foreground ml-auto group-hover:translate-x-0.5 transition-transform" />
               </div>
               <div className="flex items-center gap-2 p-3 rounded-lg border border-border hover:bg-muted/50 transition-colors text-sm cursor-pointer group"
-                onClick={() => { navigator.clipboard.writeText('go get github.com/bis-platform/bis-go'); toast.success('Copied to clipboard', { description: 'go get github.com/bis-platform/bis-go' }); }}>
+                onClick={() => toast.info("go get github.com/bis-platform/bis-go (coming soon)")}>
                 <Download className="h-4 w-4 text-cyan-500 shrink-0" />
                 <div className="min-w-0">
                   <div className="font-medium">Go SDK</div>

@@ -99,7 +99,28 @@ const sourceActivity = [
   { name: "FRSC", checks: 289 }, { name: "MTN", checks: 567 },
 ];
 
-// Ticker data is now fetched from the live DB via trpc.dashboard.liveTicker
+// ─── Ticker seed data ─────────────────────────────────────────────────────
+const TICKER_SEED = [
+  { id: 't1', type: 'alert' as const, text: 'CRITICAL: Emeka Nwosu appears on OFAC SDN list — BIS-2026-0004', time: '11:02' },
+  { id: 't2', type: 'mention' as const, text: 'NEW MENTION: @lagosinsider tweets about Adebayo Okafor court appearance', time: '10:58' },
+  { id: 't3', type: 'report' as const, text: 'INCOMING REPORT via WhatsApp: Land fraud suspect in Ikeja, Lagos', time: '10:55' },
+  { id: 't4', type: 'alert' as const, text: 'HIGH: Fatima Al-Hassan classified as PEP — ward-level political official', time: '10:51' },
+  { id: 't5', type: 'mention' as const, text: 'NEW MENTION: Zenith Logistics Ltd mentioned in Punch investigative report', time: '10:47' },
+  { id: 't6', type: 'report' as const, text: 'INCOMING REPORT via USSD: Fraud suspect in Kano Municipal — N5M collected', time: '10:43' },
+  { id: 't7', type: 'alert' as const, text: 'MEDIUM: Zenith Logistics Ltd director has 2019 fraud charge on record', time: '10:39' },
+  { id: 't8', type: 'mention' as const, text: 'NEW MENTION: TikTok video circulating about Ponzi scheme operator in Abuja', time: '10:35' },
+];
+
+const TICKER_LIVE_POOL = [
+  { type: 'alert' as const, text: 'NEW FLAG: Ibrahim Musa — document tampering score 78.4% on passport scan' },
+  { type: 'mention' as const, text: 'NEW MENTION: Facebook post alleges fraud by Chidinma Eze in Enugu' },
+  { type: 'report' as const, text: 'INCOMING REPORT via Telegram: Cryptocurrency scam — 500+ victims, ₦200M' },
+  { type: 'alert' as const, text: 'CRITICAL: New INTERPOL Red Notice match for subject in BIS-2026-0011' },
+  { type: 'mention' as const, text: 'NEW MENTION: LinkedIn post exposes fake recruitment agency in Surulere' },
+  { type: 'report' as const, text: 'INCOMING REPORT via SMS: School fees fraud — 30 families affected in Enugu' },
+];
+
+let tickerLiveIdx = 0;
 
 // Read a CSS variable from :root at runtime so charts adapt to theme
 function useCSSVar(name: string, fallback: string): string {
@@ -125,12 +146,22 @@ export default function Dashboard() {
   const chartBorder  = useCSSVar('--border',            'oklch(0.22 0.01 264)');
   const chartPrimary = useCSSVar('--chart-1',           'oklch(0.65 0.20 220)');
   const chartDanger  = useCSSVar('--chart-4',           'oklch(0.60 0.22 25)');
-  // Live ticker from real DB (alerts + social mentions)
-  const { data: tickerData } = trpc.dashboard.liveTicker.useQuery(
-    { limit: 10 },
-    { refetchInterval: 15000 } // refresh every 15 seconds
-  );
-  const tickerItems = tickerData?.items ?? [];
+  const [tickerItems, setTickerItems] = useState(TICKER_SEED);
+  const tickerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    tickerRef.current = setInterval(() => {
+      const template = TICKER_LIVE_POOL[tickerLiveIdx % TICKER_LIVE_POOL.length];
+      tickerLiveIdx++;
+      const now = new Date();
+      const timeStr = `${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}`;
+      setTickerItems(prev => [
+        { id: `live_${Date.now()}`, ...template, time: timeStr },
+        ...prev.slice(0, 19),
+      ]);
+    }, 7000);
+    return () => { if (tickerRef.current) clearInterval(tickerRef.current); };
+  }, []);
 
   const utils = trpc.useUtils();
   const { data: stats, isLoading: statsLoading } = trpc.dashboard.stats.useQuery();
@@ -138,13 +169,11 @@ export default function Dashboard() {
   const { data: alertsData } = trpc.alerts.list.useQuery({ limit: 4 });
   const { data: dataSourcesData } = trpc.dataSources.list.useQuery();
   const { data: recentTriggersData } = trpc.alertRules.recentTriggers.useQuery();
-  const { data: slaAtRiskData } = trpc.investigations.slaAtRisk.useQuery({ limit: 5 }, { refetchInterval: 60000 });
 
   const recentInvestigations = recentInvData?.items ?? [];
   const criticalAlerts = (alertsData ?? []).filter((a: any) => a.severity === "critical" || a.severity === "high").slice(0, 4);
   const liveDataSources = dataSourcesData ?? [];
   const recentTriggers = recentTriggersData ?? [];
-  const slaAtRisk = slaAtRiskData ?? [];
 
   const handleRefresh = () => {
     setRefreshing(true);
@@ -435,71 +464,6 @@ export default function Dashboard() {
             </div>
           </div>
         </div>
-      </div>
-
-      {/* ── SLA At Risk Widget ── */}
-      <div className="mt-4 rounded-lg border border-amber-500/30 bg-card">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-amber-500/20">
-          <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
-            <Clock size={13} className="text-amber-400" />
-            SLA At Risk
-            {slaAtRisk.length > 0 && (
-              <span className="ml-1 text-[10px] font-bold uppercase tracking-wider text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded px-1.5 py-0.5">
-                {slaAtRisk.length} investigation{slaAtRisk.length > 1 ? 's' : ''}
-              </span>
-            )}
-          </h3>
-          <Button variant="ghost" size="sm" className="h-6 text-xs gap-1" onClick={() => navigate("/investigations")}>
-            View all <ChevronRight size={11} />
-          </Button>
-        </div>
-        {slaAtRisk.length === 0 ? (
-          <div className="px-4 py-6 text-xs text-muted-foreground text-center flex flex-col items-center gap-1">
-            <CheckCircle size={16} className="text-emerald-400" />
-            All investigations are within SLA
-          </div>
-        ) : (
-          <div className="divide-y divide-border">
-            {slaAtRisk.map((inv: any) => {
-              const dueMs = new Date(inv.dueAt).getTime();
-              const nowMs = Date.now();
-              const diffMs = dueMs - nowMs;
-              const diffH = diffMs / 3_600_000;
-              const diffD = diffH / 24;
-              const timeLabel = diffH < 1
-                ? `${Math.max(0, Math.round(diffMs / 60000))}m left`
-                : diffH < 24
-                ? `${Math.round(diffH)}h left`
-                : `${Math.round(diffD)}d left`;
-              const urgentColor = diffH < 24 ? 'text-red-400' : diffH < 48 ? 'text-amber-400' : 'text-yellow-400';
-              return (
-                <div
-                  key={inv.ref}
-                  className="px-4 py-2.5 flex items-center justify-between gap-3 hover:bg-accent/20 transition-colors cursor-pointer"
-                  onClick={() => navigate(`/investigations?ref=${inv.ref}`)}
-                >
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${diffH < 24 ? 'bg-red-400 animate-pulse' : 'bg-amber-400'}`} />
-                    <div className="min-w-0">
-                      <div className="text-xs font-medium text-foreground truncate">{inv.subjectName}</div>
-                      <div className="text-[10px] text-muted-foreground font-mono">{inv.ref} · {inv.status}</div>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <span className={`text-xs font-mono font-semibold ${urgentColor}`}>{timeLabel}</span>
-                    {inv.riskScore != null && (
-                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${
-                        inv.riskScore >= 75 ? 'text-red-400 bg-red-500/10 border-red-500/30' :
-                        inv.riskScore >= 50 ? 'text-amber-400 bg-amber-500/10 border-amber-500/30' :
-                        'text-emerald-400 bg-emerald-500/10 border-emerald-500/30'
-                      }`}>{inv.riskScore}</span>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
       </div>
 
       {/* ── Rules Activity Widget ── */}

@@ -16,7 +16,6 @@ import {
   ChevronDown, UserCheck, Truck, ChevronLeft, ChevronRight
 } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetFooter } from "@/components/ui/sheet";
-import { SlaCountdown } from "@/components/SlaCountdown";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -24,7 +23,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { getStatusBadgeClass, formatDateTime, formatDate } from "@/lib/bisUtils";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/lib/trpc";
-import GoamlXmlPreviewSheet from "@/components/GoamlXmlPreviewSheet";
 
 // ─── Static module data ───────────────────────────────────────────────────────
 
@@ -156,13 +154,7 @@ export default function InvestigationDetail() {
     toast.info(`@${user} will be notified when this note is saved`);
     setTimeout(() => noteRef.current?.focus(), 0);
   };
-  const [activeTab, setActiveTab] = useState<'overview' | 'evidence' | 'timeline' | 'str-filings'>('overview');
-
-  // ── STR Filings for this investigation
-  const { data: strFilings, isLoading: strFilingsLoading, refetch: refetchFilings } = trpc.goaml.list.useQuery(
-    { investigationRef: params.id ?? "", limit: 50 },
-    { enabled: !!params.id && activeTab === 'str-filings' }
-  );
+  const [activeTab, setActiveTab] = useState<'overview' | 'evidence' | 'timeline'>('overview');
   // Seed evidence items from live audit log when available, else fall back to mock
   const liveEvidenceItems: EvidenceItem[] = (auditData?.items ?? []).map(a => ({
     id: String(a.id),
@@ -278,9 +270,6 @@ export default function InvestigationDetail() {
 
   // ── goAML STR Wizard modal ──────────────────────────────────────────────────
   const [goamlOpen, setGoamlOpen] = useState(false);
-  const [xmlPreviewOpen, setXmlPreviewOpen] = useState(false);
-  const [lastFilingId, setLastFilingId] = useState<number | null>(null);
-  const [lastFilingRef, setLastFilingRef] = useState<string | undefined>(undefined);
   const [goamlStep, setGoamlStep] = useState<0|1|2|3>(0);
   const [goamlForm, setGoamlForm] = useState({
     reportType: "STR" as "STR" | "CTR" | "SAR",
@@ -298,16 +287,9 @@ export default function InvestigationDetail() {
 
   const goamlCreateMutation = trpc.goaml.create.useMutation({
     onSuccess: (data) => {
-      setLastFilingId(data.id);
-      setLastFilingRef(data.filingRef);
+      toast.success(`STR draft created — ${data.filingRef}`);
       setGoamlOpen(false);
       setGoamlStep(0);
-      toast.success(`STR draft created — ${data.filingRef}`, {
-        action: {
-          label: 'Preview XML',
-          onClick: () => setXmlPreviewOpen(true),
-        },
-      });
     },
     onError: (e) => toast.error(e.message),
   });
@@ -572,11 +554,6 @@ export default function InvestigationDetail() {
           <Button variant="outline" size="sm" className="h-7 text-xs gap-1 border-amber-500/40 text-amber-400 hover:bg-amber-500/10" onClick={openGoamlWizard}>
             <Shield size={11} /> File STR
           </Button>
-          {lastFilingId && (
-            <Button variant="outline" size="sm" className="h-7 text-xs gap-1 border-cyan-500/40 text-cyan-400 hover:bg-cyan-500/10" onClick={() => setXmlPreviewOpen(true)}>
-              <FileText size={11} /> Preview XML
-            </Button>
-          )}
           <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => setDispatchOpen(true)}>
             <Truck size={11} /> Dispatch Agent
           </Button>
@@ -632,7 +609,6 @@ export default function InvestigationDetail() {
               <span>Created: {formatDate((liveInv as any)?.createdAt ?? inv.createdAt)}</span>
               <span>Updated: {formatDateTime((liveInv as any)?.updatedAt ?? inv.updatedAt)}</span>
               {assignedToName && <span>Assigned: {assignedToName}</span>}
-              <SlaCountdown dueAt={(liveInv as any)?.dueAt ?? (inv as any).dueAt} />
             </div>
           </div>
           <div className="text-center shrink-0">
@@ -653,7 +629,6 @@ export default function InvestigationDetail() {
           { id: 'overview', label: 'Overview' },
           { id: 'evidence', label: `Evidence (${mergedEvidence.length})` },
           { id: 'timeline', label: 'Processing Log' },
-          { id: 'str-filings', label: `STR Filings${strFilings && strFilings.length > 0 ? ` (${strFilings.length})` : ''}` },
         ] as const).map(tab => (
           <button
             key={tab.id}
@@ -1076,75 +1051,6 @@ export default function InvestigationDetail() {
           )}
         </div>
       )}
-      {/* ── STR Filings Tab ── */}
-      {activeTab === 'str-filings' && (
-        <div className="space-y-3">
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-xs text-muted-foreground font-mono">Suspicious Transaction Reports filed for this investigation</p>
-            <Button size="sm" variant="outline" onClick={() => refetchFilings()} className="text-xs h-7">
-              <RefreshCw size={11} className="mr-1" /> Refresh
-            </Button>
-          </div>
-          {strFilingsLoading && (
-            <div className="flex items-center gap-2 text-xs text-muted-foreground py-6 justify-center">
-              <Loader2 size={13} className="animate-spin" /> Loading STR filings…
-            </div>
-          )}
-          {!strFilingsLoading && (!strFilings || strFilings.length === 0) && (
-            <div className="text-center py-10 text-muted-foreground">
-              <FileText size={32} className="mx-auto mb-3 opacity-30" />
-              <p className="text-sm font-mono">No STR filings yet</p>
-              <p className="text-xs mt-1">Use the <span className="text-amber-400">File STR</span> button to create a Suspicious Transaction Report.</p>
-            </div>
-          )}
-          {(strFilings ?? []).map((filing: any) => {
-            const statusColors: Record<string, string> = {
-              draft: 'text-muted-foreground bg-muted/20 border-border/50',
-              submitted: 'text-blue-400 bg-blue-500/10 border-blue-500/20',
-              accepted: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20',
-              rejected: 'text-red-400 bg-red-500/10 border-red-500/20',
-              pending_review: 'text-amber-400 bg-amber-500/10 border-amber-500/20',
-            };
-            return (
-              <div key={filing.id} className={`p-4 rounded-xl border text-xs ${statusColors[filing.status] ?? statusColors.draft}`}>
-                <div className="flex items-start justify-between gap-3">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono font-bold text-sm">{filing.filingRef ?? `FILING-${filing.id}`}</span>
-                      <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${statusColors[filing.status] ?? ''}`}>
-                        {filing.status.replace('_', ' ').toUpperCase()}
-                      </Badge>
-                    </div>
-                    <div className="text-muted-foreground">
-                      {filing.reportType} · {filing.subjectName}
-                    </div>
-                    {filing.narrative && (
-                      <div className="text-muted-foreground/70 line-clamp-2 max-w-xl">{filing.narrative}</div>
-                    )}
-                    <div className="font-mono text-[10px] text-muted-foreground/60">
-                      Created {formatDateTime(filing.createdAt instanceof Date ? filing.createdAt.toISOString() : String(filing.createdAt))}
-                      {filing.submittedAt && <> · Submitted {formatDateTime(filing.submittedAt instanceof Date ? filing.submittedAt.toISOString() : String(filing.submittedAt))}</>}
-                    </div>
-                  </div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="text-[10px] h-7 shrink-0"
-                    onClick={() => {
-                      setLastFilingId(filing.id);
-                      setLastFilingRef(filing.filingRef ?? `FILING-${filing.id}`);
-                      setXmlPreviewOpen(true);
-                    }}
-                  >
-                    <FileText size={10} className="mr-1" /> View XML
-                  </Button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
       {/* ── Dispatch Field Agent Slide-over ── */}
       <Sheet open={dispatchOpen} onOpenChange={setDispatchOpen}>
         <SheetContent side="right" className="w-[480px] sm:max-w-[480px] overflow-y-auto">
@@ -1423,18 +1329,6 @@ export default function InvestigationDetail() {
           </div>
         </DialogContent>
       </Dialog>
-
-      {/* ── goAML XML Preview Sheet ─────────────────────────────────────────── */}
-      <GoamlXmlPreviewSheet
-        open={xmlPreviewOpen}
-        onOpenChange={setXmlPreviewOpen}
-        filingId={lastFilingId}
-        filingRef={lastFilingRef}
-        onSubmitSuccess={(ref) => {
-          toast.success(`STR submitted to NFIU — ${ref}`);
-          setXmlPreviewOpen(false);
-        }}
-      />
     </BISLayout>
   );
 }

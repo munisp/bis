@@ -97,7 +97,7 @@ export default function InvestigationsScreen() {
           renderItem={({ item }) => (
             <InvestigationCard
               item={item}
-              onPress={() => router.push(`/investigations/${item.ref ?? item.id}`)}
+              onPress={() => router.push(`/investigation/${item.id}`)}
             />
           )}
           contentContainerStyle={styles.list}

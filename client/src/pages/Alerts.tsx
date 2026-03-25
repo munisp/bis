@@ -1,7 +1,7 @@
 // Alerts — live tRPC-backed alert management
 // Design: Forensic Intelligence — dark/light semantic CSS variables
 import { useState, useEffect } from "react";
-import { Link, useLocation } from "wouter";
+import { Link } from "wouter";
 import BISLayout from "@/components/BISLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -65,7 +65,6 @@ function getStatusBadgeClass(status: string): string {
 }
 
 export default function Alerts() {
-  const [, navigate] = useLocation();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [severityFilter, setSeverityFilter] = useState("all");
@@ -190,8 +189,8 @@ export default function Alerts() {
           <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => refetch()}>
             <RefreshCw size={11} className={isLoading ? "animate-spin" : ""} /> Refresh
           </Button>
-          <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => navigate("/alert-rules")}>
-            <Bell size={11} /> Configure Rules
+          <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => toast.info("Alert rules configuration coming soon")}>
+            <Bell size={11} /> Configure
           </Button>
         </div>
       }

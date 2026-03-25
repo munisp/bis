@@ -1,460 +1,358 @@
-/**
- * Alert Detail Screen — bis-mobile
- * Displays full alert information with severity, body, investigation link,
- * acknowledge and resolve (mark resolved) buttons.
- * Route: /alerts/[id]
- */
 import { useState } from "react";
 import {
-  View,
-  Text,
-  ScrollView,
-  TouchableOpacity,
-  ActivityIndicator,
-  Alert,
-  StyleSheet,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity,
+  ActivityIndicator, Modal, TextInput, FlatList, KeyboardAvoidingView, Platform,
 } from "react-native";
-import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { trpc } from "../../lib/trpc";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import { trpc } from "@/lib/trpc";
 
-// ─── Palette ─────────────────────────────────────────────────────────────────
 const COLORS = {
-  bg: "#0f1117",
-  card: "#1a1d27",
-  border: "#2a2d3a",
-  primary: "#818cf8",
-  text: "#e2e8f0",
-  muted: "#6b7280",
-  success: "#22c55e",
-  critical: "#ef4444",
-  high: "#f97316",
-  medium: "#eab308",
-  low: "#22c55e",
+  bg: "#0a0a0f", card: "#0f0f1a", border: "#1e1e2e",
+  primary: "#818cf8", text: "#e2e8f0", muted: "#6b7280",
+  critical: "#ef4444", high: "#f97316", medium: "#eab308", low: "#22c55e",
+  success: "#22c55e", amber: "#f59e0b",
 };
 
 const SEV_COLOR: Record<string, string> = {
-  critical: COLORS.critical,
-  high: COLORS.high,
-  medium: COLORS.medium,
-  low: COLORS.low,
+  critical: COLORS.critical, high: COLORS.high, medium: COLORS.medium, low: COLORS.low,
 };
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-function formatDateTime(d: Date | string | null | undefined): string {
-  if (!d) return "—";
-  return new Date(d).toLocaleString("en-NG", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function SectionLabel({ text }: { text: string }) {
-  return (
-    <Text style={styles.sectionLabel}>{text.toUpperCase()}</Text>
-  );
-}
-
-function InfoRow({ label, value, mono = false }: { label: string; value?: string | null; mono?: boolean }) {
-  if (!value) return null;
-  return (
-    <View style={styles.infoRow}>
-      <Text style={styles.infoLabel}>{label}</Text>
-      <Text style={[styles.infoValue, mono && styles.mono]}>{value}</Text>
-    </View>
-  );
-}
-
-// ─── Main Screen ─────────────────────────────────────────────────────────────
 export default function AlertDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const utils = trpc.useUtils();
-  const [resolving, setResolving] = useState(false);
-  const [acknowledging, setAcknowledging] = useState(false);
+  const alertId = Number(id);
 
-  const alertId = parseInt(id ?? "0", 10);
+  // Escalation sheet state
+  const [escalateOpen, setEscalateOpen] = useState(false);
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const [selectedAgentName, setSelectedAgentName] = useState<string>("");
+  const [instructions, setInstructions] = useState("");
 
-  const { data: alert, isLoading, refetch } = trpc.alerts.getById.useQuery(
+  const { data: alert, isLoading } = trpc.alerts.getById.useQuery(
     { id: alertId },
-    { enabled: alertId > 0, staleTime: 30_000 }
+    { enabled: !isNaN(alertId) }
   );
 
+  const { data: agentsData } = trpc.fieldAgents.list.useQuery(
+    { status: "active", limit: 50 },
+    { enabled: escalateOpen }
+  );
+  const agents: any[] = Array.isArray(agentsData) ? agentsData : (agentsData as any)?.agents ?? [];
+
   const acknowledgeMutation = trpc.alerts.acknowledge.useMutation({
-    onSuccess: () => {
-      utils.alerts.list.invalidate();
-      refetch();
-      setAcknowledging(false);
-    },
-    onError: (err) => {
-      setAcknowledging(false);
-      Alert.alert("Error", err.message ?? "Failed to acknowledge alert");
-    },
+    onSuccess: () => utils.alerts.getById.invalidate({ id: alertId }),
   });
 
   const resolveMutation = trpc.alerts.resolve.useMutation({
     onSuccess: () => {
+      utils.alerts.getById.invalidate({ id: alertId });
       utils.alerts.list.invalidate();
-      setResolving(false);
-      Alert.alert("Resolved", "Alert has been marked as resolved.", [
-        { text: "OK", onPress: () => router.back() },
-      ]);
-    },
-    onError: (err) => {
-      setResolving(false);
-      Alert.alert("Error", err.message ?? "Failed to resolve alert");
     },
   });
 
-  const handleAcknowledge = () => {
-    if (alert?.acknowledged) return;
-    Alert.alert(
-      "Acknowledge Alert",
-      "Mark this alert as acknowledged?",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Acknowledge",
-          onPress: () => {
-            setAcknowledging(true);
-            acknowledgeMutation.mutate({ id: alertId });
-          },
-        },
-      ]
-    );
-  };
+  const escalateMutation = trpc.alerts.escalate.useMutation({
+    onSuccess: () => {
+      setEscalateOpen(false);
+      setSelectedAgentId(null);
+      setSelectedAgentName("");
+      setInstructions("");
+      utils.alerts.getById.invalidate({ id: alertId });
+    },
+  });
 
-  const handleResolve = () => {
-    if (alert?.resolved) return;
-    Alert.alert(
-      "Resolve Alert",
-      "Mark this alert as fully resolved? This action cannot be undone.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Resolve",
-          style: "destructive",
-          onPress: () => {
-            setResolving(true);
-            resolveMutation.mutate({ id: alertId });
-          },
-        },
-      ]
-    );
-  };
-
-  const handleViewInvestigation = () => {
-    if (alert?.investigationRef) {
-      // Navigate to investigation detail — find by ref
-      router.push(`/investigations?ref=${alert.investigationRef}` as any);
-    }
-  };
-
-  // ─── Loading ───────────────────────────────────────────────────────────────
   if (isLoading) {
     return (
-      <View style={[styles.container, styles.centered]}>
-        <ActivityIndicator color={COLORS.primary} size="large" />
-        <Text style={[styles.muted, { marginTop: 12 }]}>Loading alert…</Text>
+      <View style={styles.center}>
+        <ActivityIndicator color={COLORS.primary} />
       </View>
     );
   }
 
   if (!alert) {
     return (
-      <View style={[styles.container, styles.centered]}>
-        <Ionicons name="alert-circle-outline" size={48} color={COLORS.muted} />
-        <Text style={[styles.muted, { marginTop: 12 }]}>Alert not found</Text>
-        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-          <Text style={styles.backButtonText}>Go Back</Text>
+      <View style={styles.center}>
+        <Ionicons name="alert-circle-outline" size={40} color={COLORS.muted} />
+        <Text style={styles.emptyText}>Alert not found</Text>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+          <Text style={styles.backBtnText}>← Go Back</Text>
         </TouchableOpacity>
       </View>
     );
   }
 
-  const sevColor = SEV_COLOR[alert.severity ?? "medium"] ?? COLORS.muted;
-  const isResolved = alert.resolved;
-  const isAcknowledged = alert.acknowledged;
+  const sc = SEV_COLOR[(alert as any).severity] ?? COLORS.muted;
+  const isResolved = (alert as any).resolved;
+  const isAcknowledged = (alert as any).acknowledged;
 
   return (
-    <View style={styles.container}>
-      {/* ── Header ── */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={20} color={COLORS.text} />
-        </TouchableOpacity>
-        <View style={styles.headerCenter}>
-          <Text style={styles.headerTitle} numberOfLines={1}>Alert Detail</Text>
-          <Text style={styles.headerSub}>#{alertId}</Text>
+    <>
+      <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+        {/* Severity banner */}
+        <View style={[styles.severityBanner, { backgroundColor: sc + "20", borderColor: sc + "50" }]}>
+          <View style={[styles.sevDot, { backgroundColor: sc }]} />
+          <Text style={[styles.sevLabel, { color: sc }]}>
+            {(alert as any).severity?.toUpperCase()} ALERT
+          </Text>
+          {isResolved && (
+            <View style={styles.resolvedBadge}>
+              <Ionicons name="checkmark-circle" size={12} color={COLORS.success} />
+              <Text style={styles.resolvedText}>Resolved</Text>
+            </View>
+          )}
         </View>
-        {isResolved && (
-          <View style={[styles.statusPill, { backgroundColor: COLORS.success + "20", borderColor: COLORS.success + "50" }]}>
-            <Ionicons name="checkmark-circle" size={12} color={COLORS.success} />
-            <Text style={[styles.statusPillText, { color: COLORS.success }]}>Resolved</Text>
+
+        {/* Title */}
+        <Text style={styles.title}>{(alert as any).title}</Text>
+
+        {/* Body */}
+        {(alert as any).body && (
+          <View style={styles.section}>
+            <Text style={styles.sectionLabel}>Details</Text>
+            <Text style={styles.bodyText}>{(alert as any).body}</Text>
           </View>
         )}
-      </View>
 
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
-
-        {/* ── Severity Banner ── */}
-        <View style={[styles.severityBanner, { backgroundColor: sevColor + "18", borderColor: sevColor + "40" }]}>
-          <View style={styles.severityLeft}>
-            <Ionicons
-              name={alert.severity === "critical" ? "warning" : alert.severity === "high" ? "alert-circle" : "information-circle"}
-              size={28}
-              color={sevColor}
-            />
-            <View>
-              <Text style={[styles.severityLabel, { color: sevColor }]}>
-                {(alert.severity ?? "UNKNOWN").toUpperCase()}
-              </Text>
-              <Text style={styles.severityType}>{alert.alertType ?? "System Alert"}</Text>
-            </View>
-          </View>
-          <View style={styles.severityRight}>
-            {isAcknowledged && (
-              <View style={[styles.miniPill, { backgroundColor: COLORS.primary + "20", borderColor: COLORS.primary + "40" }]}>
-                <Text style={[styles.miniPillText, { color: COLORS.primary }]}>ACK</Text>
-              </View>
-            )}
+        {/* Metadata */}
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>Metadata</Text>
+          <View style={styles.metaCard}>
+            <MetaRow label="Alert ID" value={`#${(alert as any).id}`} />
+            <MetaRow label="Category" value={(alert as any).category ?? "—"} />
+            <MetaRow label="Subject Ref" value={(alert as any).subjectRef ?? "—"} />
+            <MetaRow label="Created" value={new Date((alert as any).createdAt).toLocaleString()} />
+            <MetaRow label="Acknowledged" value={isAcknowledged ? "Yes" : "No"} valueColor={isAcknowledged ? COLORS.success : COLORS.muted} />
           </View>
         </View>
 
-        {/* ── Title & Body ── */}
-        <View style={styles.card}>
-          <Text style={styles.alertTitle}>{alert.title ?? "Untitled Alert"}</Text>
-          {alert.body ? (
-            <Text style={styles.alertBody}>{alert.body}</Text>
-          ) : null}
-        </View>
-
-        {/* ── Metadata ── */}
-        <View style={styles.card}>
-          <SectionLabel text="Details" />
-          <InfoRow label="Subject Ref" value={alert.subjectRef} mono />
-          <InfoRow label="Source" value={alert.source} />
-          <InfoRow label="Rule" value={(alert as any).ruleName} />
-          <InfoRow label="Created" value={formatDateTime(alert.createdAt)} />
-          {isAcknowledged && (
-            <InfoRow label="Acknowledged" value={formatDateTime(alert.acknowledgedAt)} />
-          )}
-          {isResolved && (
-            <InfoRow label="Resolved" value={formatDateTime(alert.resolvedAt)} />
-          )}
-        </View>
-
-        {/* ── Investigation Link ── */}
-        {alert.investigationRef && (
+        {/* Linked investigation */}
+        {(alert as any).subjectRef && (
           <TouchableOpacity
-            style={[styles.card, styles.linkCard]}
-            onPress={handleViewInvestigation}
-            activeOpacity={0.7}
+            style={styles.linkCard}
+            onPress={() => router.push(`/investigation/${(alert as any).subjectRef}` as any)}
           >
-            <View style={styles.linkCardInner}>
-              <Ionicons name="search-outline" size={18} color={COLORS.primary} />
-              <View style={{ flex: 1 }}>
-                <Text style={styles.linkCardLabel}>Linked Investigation</Text>
-                <Text style={[styles.linkCardRef, { color: COLORS.primary }]}>{alert.investigationRef}</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={16} color={COLORS.muted} />
-            </View>
+            <Ionicons name="search" size={16} color={COLORS.primary} />
+            <Text style={styles.linkText}>View Investigation {(alert as any).subjectRef}</Text>
+            <Ionicons name="chevron-forward" size={14} color={COLORS.muted} />
           </TouchableOpacity>
         )}
 
-        {/* ── Actions ── */}
+        {/* Actions */}
         {!isResolved && (
-          <View style={styles.actionsSection}>
-            <SectionLabel text="Actions" />
-
+          <View style={styles.actions}>
             {!isAcknowledged && (
               <TouchableOpacity
-                style={[styles.actionBtn, styles.ackBtn, acknowledging && styles.btnDisabled]}
-                onPress={handleAcknowledge}
-                disabled={acknowledging}
-                activeOpacity={0.8}
+                style={[styles.actionBtn, styles.ackBtn]}
+                onPress={() => acknowledgeMutation.mutate({ id: alertId })}
+                disabled={acknowledgeMutation.isPending}
               >
-                {acknowledging ? (
-                  <ActivityIndicator size="small" color={COLORS.primary} />
-                ) : (
-                  <Ionicons name="checkmark-outline" size={18} color={COLORS.primary} />
-                )}
-                <Text style={[styles.actionBtnText, { color: COLORS.primary }]}>
-                  {acknowledging ? "Acknowledging…" : "Acknowledge"}
-                </Text>
+                {acknowledgeMutation.isPending
+                  ? <ActivityIndicator size="small" color={COLORS.primary} />
+                  : <Ionicons name="checkmark-outline" size={16} color={COLORS.primary} />
+                }
+                <Text style={[styles.actionBtnText, { color: COLORS.primary }]}>Acknowledge</Text>
               </TouchableOpacity>
             )}
 
             <TouchableOpacity
-              style={[styles.actionBtn, styles.resolveBtn, resolving && styles.btnDisabled]}
-              onPress={handleResolve}
-              disabled={resolving}
-              activeOpacity={0.8}
+              style={[styles.actionBtn, styles.escalateBtn]}
+              onPress={() => setEscalateOpen(true)}
             >
-              {resolving ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <Ionicons name="checkmark-circle-outline" size={18} color="#fff" />
-              )}
-              <Text style={[styles.actionBtnText, { color: "#fff" }]}>
-                {resolving ? "Resolving…" : "Mark Resolved"}
-              </Text>
+              <Ionicons name="person-add-outline" size={16} color={COLORS.amber} />
+              <Text style={[styles.actionBtnText, { color: COLORS.amber }]}>Escalate to Agent</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.actionBtn, styles.resolveBtn]}
+              onPress={() => resolveMutation.mutate({ id: alertId })}
+              disabled={resolveMutation.isPending}
+            >
+              {resolveMutation.isPending
+                ? <ActivityIndicator size="small" color={COLORS.success} />
+                : <Ionicons name="shield-checkmark-outline" size={16} color={COLORS.success} />
+              }
+              <Text style={[styles.actionBtnText, { color: COLORS.success }]}>Mark Resolved</Text>
             </TouchableOpacity>
           </View>
         )}
-
-        {isResolved && (
-          <View style={[styles.card, styles.resolvedCard]}>
-            <Ionicons name="checkmark-circle" size={24} color={COLORS.success} />
-            <Text style={[styles.resolvedText]}>This alert has been resolved.</Text>
-          </View>
-        )}
-
       </ScrollView>
+
+      {/* ── Escalation bottom sheet ── */}
+      <Modal
+        visible={escalateOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setEscalateOpen(false)}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          style={styles.modalOverlay}
+        >
+          <View style={styles.sheet}>
+            {/* Handle */}
+            <View style={styles.sheetHandle} />
+            <View style={styles.sheetHeader}>
+              <Text style={styles.sheetTitle}>Escalate to Field Agent</Text>
+              <TouchableOpacity onPress={() => setEscalateOpen(false)}>
+                <Ionicons name="close" size={20} color={COLORS.muted} />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.sheetSubtitle}>
+              Select an active agent to dispatch for alert #{alertId}
+            </Text>
+
+            {/* Agent list */}
+            <FlatList
+              data={agents}
+              keyExtractor={(a: any) => String(a.id)}
+              style={styles.agentList}
+              renderItem={({ item }: { item: any }) => {
+                const isChosen = selectedAgentId === String(item.id);
+                return (
+                  <TouchableOpacity
+                    style={[styles.agentRow, isChosen && styles.agentRowSelected]}
+                    onPress={() => { setSelectedAgentId(String(item.id)); setSelectedAgentName(item.name); }}
+                  >
+                    <View style={styles.agentAvatar}>
+                      <Text style={styles.agentAvatarText}>{item.name?.charAt(0)?.toUpperCase()}</Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.agentName}>{item.name}</Text>
+                      <Text style={styles.agentMeta}>{item.agentCode} · {item.state ?? "—"} · {item.tier}</Text>
+                    </View>
+                    {isChosen && <Ionicons name="checkmark-circle" size={18} color={COLORS.primary} />}
+                  </TouchableOpacity>
+                );
+              }}
+              ListEmptyComponent={
+                <Text style={[styles.agentMeta, { textAlign: "center", marginVertical: 16 }]}>
+                  No active agents found
+                </Text>
+              }
+            />
+
+            {/* Instructions */}
+            <Text style={styles.inputLabel}>Instructions (optional)</Text>
+            <TextInput
+              style={styles.textInput}
+              placeholder="Add context for the agent…"
+              placeholderTextColor={COLORS.muted}
+              value={instructions}
+              onChangeText={setInstructions}
+              multiline
+              numberOfLines={3}
+            />
+
+            {/* Submit */}
+            <TouchableOpacity
+              style={[styles.submitBtn, (!selectedAgentId || escalateMutation.isPending) && styles.submitBtnDisabled]}
+              disabled={!selectedAgentId || escalateMutation.isPending}
+              onPress={() => escalateMutation.mutate({
+                id: alertId,
+                agentId: selectedAgentId!,
+                agentName: selectedAgentName,
+                instructions: instructions || undefined,
+              })}
+            >
+              {escalateMutation.isPending
+                ? <ActivityIndicator size="small" color="#fff" />
+                : <Ionicons name="send-outline" size={16} color="#fff" />
+              }
+              <Text style={styles.submitBtnText}>
+                {selectedAgentId ? `Escalate to ${selectedAgentName}` : "Select an agent"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+    </>
+  );
+}
+
+function MetaRow({ label, value, valueColor }: { label: string; value: string; valueColor?: string }) {
+  return (
+    <View style={styles.metaRow}>
+      <Text style={styles.metaLabel}>{label}</Text>
+      <Text style={[styles.metaValue, valueColor ? { color: valueColor } : {}]}>{value}</Text>
     </View>
   );
 }
 
-// ─── Styles ──────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
-  centered: { justifyContent: "center", alignItems: "center" },
-  muted: { color: COLORS.muted, fontSize: 13 },
-  mono: { fontFamily: "SpaceMono" },
-
-  // Header
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 16,
-    paddingTop: 56,
-    paddingBottom: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
-    gap: 12,
-  },
-  backBtn: { padding: 4 },
-  headerCenter: { flex: 1 },
-  headerTitle: { fontSize: 16, fontWeight: "700", color: COLORS.text },
-  headerSub: { fontSize: 11, color: COLORS.muted, fontFamily: "SpaceMono" },
-  statusPill: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 8,
-    borderWidth: 1,
-  },
-  statusPillText: { fontSize: 10, fontWeight: "700" },
-
-  // Scroll
-  scroll: { flex: 1 },
-  scrollContent: { padding: 16, gap: 12, paddingBottom: 40 },
-
-  // Severity banner
+  content: { padding: 16, paddingBottom: 40 },
+  center: { flex: 1, backgroundColor: COLORS.bg, alignItems: "center", justifyContent: "center", gap: 12 },
+  emptyText: { fontSize: 14, color: COLORS.muted },
+  backBtn: { marginTop: 8, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: COLORS.border },
+  backBtnText: { fontSize: 13, color: COLORS.primary },
   severityBanner: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    padding: 16,
-    borderRadius: 12,
-    borderWidth: 1,
+    flexDirection: "row", alignItems: "center", gap: 8,
+    padding: 12, borderRadius: 10, borderWidth: 1, marginBottom: 16,
   },
-  severityLeft: { flexDirection: "row", alignItems: "center", gap: 12 },
-  severityLabel: { fontSize: 18, fontWeight: "800", letterSpacing: 1 },
-  severityType: { fontSize: 12, color: COLORS.muted, marginTop: 2 },
-  severityRight: { flexDirection: "row", gap: 6 },
-  miniPill: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
-    borderWidth: 1,
+  sevDot: { width: 8, height: 8, borderRadius: 4 },
+  sevLabel: { fontSize: 12, fontWeight: "700", letterSpacing: 1, flex: 1 },
+  resolvedBadge: { flexDirection: "row", alignItems: "center", gap: 4 },
+  resolvedText: { fontSize: 11, color: COLORS.success, fontWeight: "600" },
+  title: { fontSize: 18, fontWeight: "700", color: COLORS.text, marginBottom: 16, lineHeight: 26 },
+  section: { marginBottom: 16 },
+  sectionLabel: { fontSize: 10, fontWeight: "700", color: COLORS.muted, textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 },
+  bodyText: { fontSize: 14, color: COLORS.text, lineHeight: 22 },
+  metaCard: { backgroundColor: COLORS.card, borderRadius: 10, borderWidth: 1, borderColor: COLORS.border, overflow: "hidden" },
+  metaRow: {
+    flexDirection: "row", justifyContent: "space-between", alignItems: "center",
+    paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: COLORS.border,
   },
-  miniPillText: { fontSize: 9, fontWeight: "700", letterSpacing: 0.5 },
-
-  // Card
-  card: {
-    backgroundColor: COLORS.card,
-    borderRadius: 12,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    gap: 8,
+  metaLabel: { fontSize: 12, color: COLORS.muted },
+  metaValue: { fontSize: 12, color: COLORS.text, fontWeight: "600", fontFamily: "SpaceMono" },
+  linkCard: {
+    flexDirection: "row", alignItems: "center", gap: 10,
+    backgroundColor: COLORS.card, borderRadius: 10, borderWidth: 1, borderColor: COLORS.primary + "40",
+    padding: 14, marginBottom: 16,
   },
-  alertTitle: { fontSize: 16, fontWeight: "700", color: COLORS.text, lineHeight: 22 },
-  alertBody: { fontSize: 13, color: COLORS.muted, lineHeight: 20 },
-
-  // Section label
-  sectionLabel: {
-    fontSize: 10,
-    fontWeight: "700",
-    color: COLORS.muted,
-    letterSpacing: 1,
-    marginBottom: 4,
-  },
-
-  // Info rows
-  infoRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    paddingVertical: 4,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border + "60",
-  },
-  infoLabel: { fontSize: 12, color: COLORS.muted, flex: 1 },
-  infoValue: { fontSize: 12, color: COLORS.text, flex: 2, textAlign: "right" },
-
-  // Link card
-  linkCard: { gap: 0 },
-  linkCardInner: { flexDirection: "row", alignItems: "center", gap: 12 },
-  linkCardLabel: { fontSize: 11, color: COLORS.muted },
-  linkCardRef: { fontSize: 14, fontWeight: "700", fontFamily: "SpaceMono" },
-
-  // Actions
-  actionsSection: { gap: 10 },
+  linkText: { flex: 1, fontSize: 13, color: COLORS.primary, fontWeight: "600" },
+  actions: { gap: 10 },
   actionBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    paddingVertical: 14,
-    borderRadius: 12,
-    borderWidth: 1,
+    flexDirection: "row", alignItems: "center", gap: 10,
+    padding: 14, borderRadius: 12, borderWidth: 1,
   },
-  ackBtn: {
-    backgroundColor: COLORS.primary + "15",
-    borderColor: COLORS.primary + "40",
+  ackBtn: { borderColor: COLORS.primary + "40", backgroundColor: COLORS.primary + "10" },
+  escalateBtn: { borderColor: COLORS.amber + "40", backgroundColor: COLORS.amber + "10" },
+  resolveBtn: { borderColor: COLORS.success + "40", backgroundColor: COLORS.success + "10" },
+  actionBtnText: { fontSize: 14, fontWeight: "600" },
+  // Modal / Sheet
+  modalOverlay: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(0,0,0,0.6)" },
+  sheet: {
+    backgroundColor: COLORS.card, borderTopLeftRadius: 20, borderTopRightRadius: 20,
+    padding: 20, maxHeight: "80%",
   },
-  resolveBtn: {
-    backgroundColor: COLORS.success,
-    borderColor: COLORS.success,
+  sheetHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: COLORS.border, alignSelf: "center", marginBottom: 16 },
+  sheetHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 },
+  sheetTitle: { fontSize: 16, fontWeight: "700", color: COLORS.text },
+  sheetSubtitle: { fontSize: 13, color: COLORS.muted, marginBottom: 16 },
+  agentList: { maxHeight: 200, marginBottom: 16 },
+  agentRow: {
+    flexDirection: "row", alignItems: "center", gap: 10,
+    padding: 10, borderRadius: 10, borderWidth: 1, borderColor: COLORS.border, marginBottom: 6,
   },
-  btnDisabled: { opacity: 0.5 },
-  actionBtnText: { fontSize: 15, fontWeight: "700" },
-
-  // Resolved state
-  resolvedCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    borderColor: COLORS.success + "40",
-    backgroundColor: COLORS.success + "10",
+  agentRowSelected: { borderColor: COLORS.primary, backgroundColor: COLORS.primary + "15" },
+  agentAvatar: {
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: COLORS.primary + "20", alignItems: "center", justifyContent: "center",
   },
-  resolvedText: { fontSize: 14, color: COLORS.success, fontWeight: "600" },
-
-  // Back button (not-found state)
-  backButton: {
-    marginTop: 16,
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: COLORS.border,
+  agentAvatarText: { fontSize: 14, fontWeight: "700", color: COLORS.primary },
+  agentName: { fontSize: 13, fontWeight: "600", color: COLORS.text },
+  agentMeta: { fontSize: 11, color: COLORS.muted, marginTop: 2 },
+  inputLabel: { fontSize: 10, fontWeight: "700", color: COLORS.muted, textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 },
+  textInput: {
+    backgroundColor: COLORS.bg, borderRadius: 10, borderWidth: 1, borderColor: COLORS.border,
+    padding: 12, fontSize: 13, color: COLORS.text, marginBottom: 16, minHeight: 72, textAlignVertical: "top",
   },
-  backButtonText: { color: COLORS.primary, fontSize: 14, fontWeight: "600" },
+  submitBtn: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
+    backgroundColor: COLORS.primary, borderRadius: 12, padding: 14,
+  },
+  submitBtnDisabled: { opacity: 0.5 },
+  submitBtnText: { fontSize: 14, fontWeight: "700", color: "#fff" },
 });

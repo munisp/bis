@@ -695,102 +695,28 @@
 - [x] goAML XML generation (FATF goAML 4.0 schema)
 - [x] goAML vitest tests
 
-## Phase 30 — Native Kafka, goAML XML Preview, Mobile Push Notifications
+## Phase 34 — Bulk SLA, Mobile Escalation, Push Deep-Links
 
-### Native Kafka Consumer (Rust)
-- [x] Add rdkafka dependency to event-processor Cargo.toml
-- [x] Rewrite consumer.rs with real rdkafka StreamConsumer
-- [x] Handle bis.events topic messages with typed BisEvent deserialization
-- [x] Graceful shutdown via tokio CancellationToken
-- [x] Update Dockerfile to install librdkafka-dev
-- [x] Keep HTTP /v1/ingest endpoint as secondary ingestion path
+### Bulk SLA Update
+- [x] Add bulk SLA date-picker dialog to Investigations list multi-select toolbar
+- [x] investigations.bulkUpdateDueAt tRPC procedure (array of refs + new dueAt)
+- [x] "Set SLA" button appears when 1+ rows are selected
+- [x] Confirm dialog shows count of affected investigations
 
-### goAML XML Preview Panel
-- [x] GoamlXmlPreviewSheet component (slide-over with syntax-highlighted XML + copy button)
-- [x] "Preview XML" button in InvestigationDetail action bar (opens after STR draft saved)
-- [x] "Submit to NFIU" confirmation button inside preview panel
-- [x] goaml.getXml procedure used for XML retrieval
+### Mobile Alert Escalation
+- [x] Add "Escalate to Field Agent" bottom sheet in bis-mobile/app/alerts/[id].tsx
+- [x] Fetch field agents list via trpc.fieldAgents.list
+- [x] Agent picker with name/status, optional instructions textarea
+- [x] Wire to trpc.alerts.escalate mutation
 
-### Mobile Push Notifications (Expo)
-- [x] expo-notifications and expo-device added to bis-mobile package.json
-- [x] usePushNotifications hook (token registration, Android channels, foreground handler, tap handler)
-- [x] sendLocalNotification helper for immediate local push
-- [x] bis-mobile root _layout.tsx wires usePushNotifications at startup
-- [x] Alerts screen polls every 60s and fires local push for critical/high alerts
-- [x] notifications tRPC router (registerPushToken, deregisterPushToken, listMyTokens, sendToUser, broadcast)
-- [x] pushDeviceTokens table added to schema.ts and migrated (migration 0015)
-- [x] notificationsRouter registered in appRouter
-- [x] Expo Push API integration (batched 100 tokens/request, ticket tracking)
-
-## Phase 31 — Push Triggers, goAML History, Lakehouse Cron, Archive
-
-### Investigation Status Push Trigger
-- [x] Wire notifications.sendToUser into investigations.updateStatus (flagged/completed)
-- [x] Wire notifications.sendToUser into investigations.assign (new assignee notified)
-- [x] Helper function sendPushToUser() in routers.ts for reuse across procedures
-
-### goAML Filing History Tab
-- [x] Add "STR Filings" tab to InvestigationDetail (alongside Overview, Evidence, Processing Log)
-- [x] goaml.list procedure filtered by investigationId
-- [x] Filing cards with status badge, filingRef, createdAt, and re-open XML preview button
-- [x] Empty state when no filings exist
-
-### Lakehouse Scheduled Sync
-- [x] POST /api/cron/lakehouse-sync Express route (CRON_SECRET bearer auth)
-- [x] lastSyncedAt timestamp stored in platform_settings table
-- [x] LakehouseAnalyticsPage shows "Last synced" timestamp with manual Sync Now button
-- [x] CRON_SECRET env var documented
-
-### Comprehensive Archive
-- [x] Full archive of all services, mobile, infra, docs (bis-platform-v31-20260324.tar.gz, 4.7 MB, 365 entries)
-- [x] Archive includes bis-mobile/ (26 files), services/ (5 services), infra/, drizzle/, server/ (47 files), client/ (142 files)
-- [x] Archive size accurate and complete (287 source files, no node_modules/dist/target)
-
-## Phase 32 — Lakehouse Cron, SLA Timer, Mobile Detail
-
-### Lakehouse Scheduled Cron Job
-- [x] Add node-cron dependency to package.json
-- [x] Schedule lakehouse-sync every 15 minutes in server/_core/index.ts
-- [x] Log sync result (ingested count, errors) to server console
-- [x] Cron job starts automatically on server startup
-- [x] SLA check cron every hour — sends push to assigned analyst when dueAt < 24h
-
-### Investigation SLA Timer
-- [x] Add dueAt column to investigations table in schema.ts
-- [x] Run db:push to migrate dueAt column
-- [x] investigations.updateDueAt procedure for adjusting SLA deadline
-- [x] SlaCountdown component (green/amber/red by time remaining, auto-refresh every 60s)
-- [x] SLA countdown badge in InvestigationDetail header
-- [x] SLA countdown column in Investigations list page
-- [x] SLA cron checks investigations due within 24h and sends push notifications
-
-### Mobile Investigation Detail Screen
-- [x] Create bis-mobile/app/investigations/[id].tsx
-- [x] Subject card with name, country, tier, risk score badge
-- [x] Status update button with confirmation dialog and tRPC mutation
-- [x] SLA countdown display (color-coded)
-- [x] Metadata card (created, updated, assigned, NIN, BVN, dueAt)
-- [x] Risk factors card
-- [x] Biometric verification navigation button
-- [x] Navigation from investigations list screen (uses ref)
-
-## Phase 33 — SLA Wizard, Dashboard Widget, Mobile Alerts, Archive
-
-### SLA Due Date in New Investigation Wizard
-- [x] Add optional "SLA Deadline" date-picker to step 3 of NewInvestigationSlideOver
-- [x] Wire dueAt field to trpc.investigations.create mutation
-- [x] Default to 72h from now if not set
-
-### SLA At Risk Dashboard Widget
-- [x] Add "SLA At Risk" card to Dashboard page (top 5 investigations closest to deadline)
-- [x] Each row links to /investigations/[ref]
-- [x] Color-coded by urgency (red < 24h, amber < 72h)
-
-### Mobile Alert Detail Screen
-- [x] Create bis-mobile/app/alerts/[id].tsx
-- [x] Show alert severity badge, message, linked investigation
-- [x] "Mark Resolved" button wired to trpc.alerts.resolve
-- [x] Navigation from alerts list screen (tappable cards)
+### Push Notification Deep-Link Routing
+- [x] Create usePushNotifications hook (bis-mobile/hooks/usePushNotifications.ts)
+- [x] Route alert notifications → /alerts/[id]
+- [x] Route investigation notifications → /investigation/[id]
+- [x] Route SLA breach notifications → /investigation/[id]
+- [x] Handle app foreground, background, and killed states
+- [x] Android notification channel configured (bis-alerts)
+- [x] Wired into root _layout.tsx
 
 ### Archive
-- [x] Comprehensive archive of entire platform (v33)
+- [x] Comprehensive archive of entire platform (v34)

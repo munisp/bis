@@ -15,10 +15,6 @@ import { messagingRouter } from "./messaging";
 import { socialMonitoringRouter } from "./socialMonitoring";
 import { biometricRouter } from "./biometric";
 import { lakehouseRouter } from "./lakehouse";
-import { notificationsRouter } from "./notifications";
-import { verifyKeycloakToken, getKeycloakLoginUrl } from "./keycloak";
-import { sessionGet, sessionSet, sessionDel, rateLimit } from "./redis";
-import { startInvestigationWorkflow, getWorkflowStatus } from "./temporal";
 import { getDb } from "./db";
 import { evaluateAlertRules } from "./alertRules";
 import {
@@ -38,7 +34,6 @@ import {
   alertRules,
   ruleEvaluations,
   tenants,
-  socialMentions,
 } from "../drizzle/schema";
 import {
   getDashboardStats,
@@ -76,46 +71,6 @@ async function riskEngineFetch(path: string, body: unknown) {
   });
   if (!res.ok) throw new Error(`Risk engine error ${res.status}: ${await res.text()}`);
   return res.json();
-}
-
-/**
- * Fire-and-forget push notification to all active devices for a user.
- * Silently swallows errors so it never blocks the main mutation.
- */
-async function sendPushToUser(
-  userId: number,
-  title: string,
-  body: string,
-  data: Record<string, unknown> = {},
-  channelId: "bis-alerts" | "bis-investigations" = "bis-investigations"
-) {
-  try {
-    const db = await getDb();
-    if (!db) return;
-    const { pushDeviceTokens } = await import("../drizzle/schema");
-    const { eq, and } = await import("drizzle-orm");
-    const tokens = await db
-      .select({ token: pushDeviceTokens.token, platform: pushDeviceTokens.platform })
-      .from(pushDeviceTokens)
-      .where(and(eq(pushDeviceTokens.userId, userId), eq(pushDeviceTokens.active, true)));
-    if (!tokens.length) return;
-    const messages = tokens.map((t) => ({
-      to: t.token,
-      title,
-      body,
-      data,
-      sound: "default" as const,
-      channelId: t.platform === "android" ? channelId : undefined,
-      priority: "high" as const,
-    }));
-    await fetch("https://exp.host/--/api/v2/push/send", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Accept": "application/json" },
-      body: JSON.stringify(messages),
-    });
-  } catch (e) {
-    console.warn("[Push] sendPushToUser failed:", e);
-  }
 }
 
 async function publishEvent(eventType: string, subjectRef: string, severity: string, payload: unknown, source = "bis-bff") {
@@ -213,7 +168,6 @@ const investigationsRouter = router({
       address: z.string().optional(),
       purpose: z.string().optional(),
       dataSources: z.array(z.string()).optional(),
-      dueAt: z.number().optional(),
     }))
     .mutation(async ({ input, ctx }) => {
       const db = await getDb();
@@ -236,7 +190,6 @@ const investigationsRouter = router({
         purpose: input.purpose,
         dataSources: input.dataSources as any,
         createdBy: ctx.user!.id,
-        dueAt: input.dueAt ? new Date(input.dueAt) : new Date(Date.now() + 72 * 3_600_000),
       });
       await writeAuditLog(db, { userId: ctx.user!.id, userEmail: ctx.user!.email ?? undefined, category: "investigation", action: "Investigation created", targetRef: ref });
       await publishEvent("INVESTIGATION_CREATED", ref, "info", { subjectName: input.subjectName, tier: input.tier });
@@ -274,14 +227,6 @@ const investigationsRouter = router({
       ]);
       await writeAuditLog(db, { userId: ctx.user!.id, category: "investigation", action: `Assigned to ${input.assigneeName}`, targetRef: input.ref });
       await publishEvent("INVESTIGATION_ASSIGNED", input.ref, "info", { assigneeId: input.assigneeId, assigneeName: input.assigneeName });
-      // Push notification to the newly assigned analyst
-      sendPushToUser(
-        input.assigneeId,
-        `Investigation Assigned: ${input.ref}`,
-        `You have been assigned investigation ${input.ref} by ${ctx.user!.name ?? "a supervisor"}.`,
-        { type: "investigation", ref: input.ref },
-        "bis-investigations"
-      );
       return { success: true };
     }),
 
@@ -294,24 +239,6 @@ const investigationsRouter = router({
       await writeAuditLog(db, { userId: ctx.user!.id, category: "investigation", action: `Status changed to ${input.status}`, targetRef: input.ref });
       if (input.status === "flagged") {
         await publishEvent("INVESTIGATION_FLAGGED", input.ref, "high", { status: input.status });
-      }
-      // Push notification to the assigned analyst on flagged or completed
-      if (input.status === "flagged" || input.status === "completed") {
-        const [inv] = await db
-          .select({ assignedTo: investigations.assignedTo, subjectName: investigations.subjectName })
-          .from(investigations)
-          .where(eq(investigations.ref, input.ref))
-          .limit(1);
-        if (inv?.assignedTo) {
-          const emoji = input.status === "flagged" ? "🚨" : "✅";
-          sendPushToUser(
-            inv.assignedTo,
-            `${emoji} Investigation ${input.status === "flagged" ? "Flagged" : "Completed"}: ${input.ref}`,
-            `${inv.subjectName} — ${input.ref} has been marked ${input.status}.`,
-            { type: "investigation", ref: input.ref, status: input.status },
-            input.status === "flagged" ? "bis-alerts" : "bis-investigations"
-          );
-        }
       }
       return { success: true };
     }),
@@ -610,7 +537,30 @@ const investigationsRouter = router({
         .set({ dueAt: input.dueAt, updatedAt: new Date() })
         .where(eq(investigations.ref, input.ref));
       await writeAuditLog(db, { userId: ctx.user!.id, category: "investigation", action: `SLA due date ${input.dueAt ? `set to ${input.dueAt.toISOString()}` : 'cleared'}`, targetRef: input.ref });
-      return { ok: true };
+      return { success: true };
+    }),
+
+  bulkUpdateDueAt: writeProcedure
+    .input(z.object({
+      refs: z.array(z.string()).min(1).max(100),
+      dueAt: z.number().nullable(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      const newDueAt = input.dueAt ? new Date(input.dueAt) : null;
+      for (const ref of input.refs) {
+        await db.update(investigations)
+          .set({ dueAt: newDueAt, updatedAt: new Date() })
+          .where(eq(investigations.ref, ref));
+      }
+      await writeAuditLog(db, {
+        userId: ctx.user!.id,
+        category: "investigation",
+        action: `Bulk SLA update: ${input.refs.length} investigations set to ${newDueAt?.toISOString() ?? 'cleared'}`,
+        targetRef: input.refs.join(',').substring(0, 200),
+      });
+      return { updated: input.refs.length };
     }),
 
   slaAtRisk: protectedProcedure
@@ -619,8 +569,8 @@ const investigationsRouter = router({
       const db = await getDb();
       if (!db) return [];
       const now = new Date();
-      const horizon = new Date(now.getTime() + 72 * 3_600_000); // 72h window
-      const rows = await db
+      const horizon = new Date(now.getTime() + 72 * 3_600_000);
+      return db
         .select({
           ref: investigations.ref,
           subjectName: investigations.subjectName,
@@ -639,7 +589,6 @@ const investigationsRouter = router({
         )
         .orderBy(asc(investigations.dueAt))
         .limit(input.limit);
-      return rows;
     }),
 });
 
@@ -788,6 +737,15 @@ const alertsRouter = router({
     return { success: true };
   }),
 
+  getById: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return null;
+      const [alert] = await db.select().from(alerts).where(eq(alerts.id, input.id)).limit(1);
+      return alert ?? null;
+    }),
+
   escalate: writeProcedure
     .input(z.object({
       id: z.number(),
@@ -824,15 +782,6 @@ const alertsRouter = router({
       });
       await writeAuditLog(db, { userId: ctx.user!.id, category: "alert", action: `Alert escalated to agent ${input.agentName}`, targetRef: `alert-${input.id}` });
       return { success: true };
-    }),
-
-  getById: protectedProcedure
-    .input(z.object({ id: z.number() }))
-    .query(async ({ input }) => {
-      const db = await getDb();
-      if (!db) return null;
-      const [row] = await db.select().from(alerts).where(eq(alerts.id, input.id)).limit(1);
-      return row ?? null;
     }),
 });
 
@@ -1162,7 +1111,7 @@ const fieldTasksRouter = router({
 
 const reportsRouter = router({
   list: protectedProcedure
-    .input(z.object({ limit: z.number().default(50) }))
+    .input(z.object({ limit: z.number().default(20) }))
     .query(async ({ input }) => {
       const db = await getDb();
       if (!db) return [];
@@ -1257,65 +1206,6 @@ const dashboardRouter = router({
   stats: protectedProcedure.query(async () => {
     return getDashboardStats();
   }),
-  // Mobile-compatible summary (same data, mobile-friendly shape with aliases)
-  summary: protectedProcedure.query(async () => {
-    const stats = await getDashboardStats();
-    if (!stats) return null;
-    // Compute avgRiskScore from recent investigations
-    const db = await getDb();
-    let avgRiskScore = 0;
-    if (db) {
-      const result = await db.select({ avg: sql<number>`AVG(${investigations.riskScore})` }).from(investigations);
-      avgRiskScore = Math.round(Number(result[0]?.avg ?? 0));
-    }
-    // Count pending KYC records
-    let pendingKyc = 0;
-    if (db) {
-      const result = await db.select({ c: count() }).from(kycRecords).where(eq(kycRecords.status, 'pending'));
-      pendingKyc = Number(result[0]?.c ?? 0);
-    }
-    return {
-      totalInvestigations: stats.totalInvestigations,
-      activeInvestigations: stats.activeInvestigations,
-      flaggedCritical: stats.flaggedCritical,
-      kycVerificationsToday: stats.kycVerificationsToday,
-      kycPassRate: stats.kycPassRate,
-      alertsToday: stats.alertsToday,
-      openAlerts: stats.alertsToday, // alias for mobile
-      pendingKyc,
-      avgRiskScore,
-      activeMonitors: stats.activeMonitors,
-      biometricEnrollments: stats.biometricEnrollments,
-    };
-  }),
-  // Live ticker items from real DB alerts and social mentions
-  liveTicker: protectedProcedure
-    .input(z.object({ limit: z.number().min(1).max(20).default(10) }))
-    .query(async ({ input }) => {
-      const db = await getDb();
-      if (!db) return { items: [] };
-      const [recentAlerts, recentMentions] = await Promise.all([
-        db.select({ id: alerts.id, severity: alerts.severity, title: alerts.title, createdAt: alerts.createdAt })
-          .from(alerts).orderBy(desc(alerts.createdAt)).limit(input.limit),
-        db.select({ id: socialMentions.id, platform: socialMentions.platform, content: socialMentions.content, sentiment: socialMentions.sentiment, riskScore: socialMentions.riskScore, createdAt: socialMentions.createdAt })
-          .from(socialMentions).orderBy(desc(socialMentions.createdAt)).limit(input.limit),
-      ]);
-      const items = [
-        ...recentAlerts.map(a => ({
-          id: `alert-${a.id}`,
-          type: 'alert' as const,
-          text: `${a.severity?.toUpperCase()}: ${a.title}`,
-          time: new Date(a.createdAt).toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit' }),
-        })),
-        ...recentMentions.map(m => ({
-          id: `mention-${m.id}`,
-          type: 'mention' as const,
-          text: `NEW MENTION [${m.platform}]: ${m.content?.slice(0, 80)}`,
-          time: new Date(m.createdAt).toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit' }),
-        })),
-      ].sort((a, b) => 0); // already sorted by createdAt desc from DB
-      return { items: items.slice(0, input.limit) };
-    }),
 });
 
 // ─── Field Agents Router ──────────────────────────────────────────────────────
@@ -1942,100 +1832,6 @@ const alertRulesRouter = router({
     }),
 });
 
-// ─── Middleware Admin Router ─────────────────────────────────────────────────
-// Exposes health/status/diagnostic endpoints for all middleware integrations.
-// All procedures are admin-only to prevent information leakage.
-
-const middlewareRouter = router({
-  // Keycloak OIDC status
-  keycloakStatus: adminProcedure.query(async () => {
-    const url = process.env.KEYCLOAK_URL;
-    const realm = process.env.KEYCLOAK_REALM;
-    if (!url || !realm) return { status: 'disabled', message: 'KEYCLOAK_URL/KEYCLOAK_REALM not configured' };
-    try {
-      const res = await fetch(`${url}/realms/${realm}`, { signal: AbortSignal.timeout(4000) });
-      return res.ok ? { status: 'healthy', realm, url } : { status: 'degraded', httpStatus: res.status };
-    } catch (e: any) { return { status: 'unreachable', error: e.message }; }
-  }),
-  // Keycloak login URL (for external IdP redirect)
-  keycloakLoginUrl: protectedProcedure
-    .input(z.object({ redirectUri: z.string().url() }))
-    .query(async ({ input }) => {
-      const loginUrl = getKeycloakLoginUrl(input.redirectUri);
-      return { url: loginUrl };
-    }),
-  // Permify authorization check
-  permifyCheck: adminProcedure
-    .input(z.object({ entityType: z.string(), entityId: z.string(), permission: z.string(), userId: z.string() }))
-    .mutation(async ({ input }) => {
-      const allowed = await permifyCheck(input.entityType, input.entityId, input.permission, input.userId);
-      return { allowed };
-    }),
-  // Permify status
-  permifyStatus: adminProcedure.query(async () => {
-    const url = process.env.PERMIFY_URL;
-    if (!url) return { status: 'disabled', message: 'PERMIFY_URL not configured' };
-    try {
-      const res = await fetch(`${url}/healthz`, { signal: AbortSignal.timeout(4000) });
-      return res.ok ? { status: 'healthy', url } : { status: 'degraded', httpStatus: res.status };
-    } catch (e: any) { return { status: 'unreachable', error: e.message }; }
-  }),
-  // Redis status
-  redisStatus: adminProcedure.query(async () => {
-    try {
-      const result = await rateLimit('__health_check__', 9999);
-      return { status: 'healthy', rateLimitAllowed: result.allowed };
-    } catch (e: any) { return { status: 'degraded', error: e.message }; }
-  }),
-  // Redis session operations (admin diagnostics)
-  redisSessionGet: adminProcedure
-    .input(z.object({ token: z.string() }))
-    .query(async ({ input }) => {
-      const data = await sessionGet(input.token);
-      return { found: data !== null, data };
-    }),
-  // Temporal workflow status
-  temporalStatus: adminProcedure.query(async () => {
-    const host = process.env.TEMPORAL_HOST;
-    if (!host) return { status: 'disabled', message: 'TEMPORAL_HOST not configured — using direct mode' };
-    try {
-      const res = await fetch(`http://${host}:7233`, { signal: AbortSignal.timeout(4000) });
-      return { status: 'healthy', host };
-    } catch (e: any) { return { status: 'unreachable', host, error: e.message }; }
-  }),
-  // Temporal workflow start (admin trigger)
-  temporalStartWorkflow: adminProcedure
-    .input(z.object({
-      ref: z.string(),
-      subjectName: z.string(),
-      subjectType: z.string(),
-      nin: z.string().optional(),
-      bvn: z.string().optional(),
-      rcNumber: z.string().optional(),
-      tier: z.string().default('standard'),
-    }))
-    .mutation(async ({ input }) => {
-      const result = await startInvestigationWorkflow({
-        ref: input.ref,
-        subjectName: input.subjectName,
-        subjectType: input.subjectType,
-        nin: input.nin,
-        bvn: input.bvn,
-        rcNumber: input.rcNumber,
-        tier: input.tier,
-        gatewayUrl: process.env.BIS_GATEWAY_URL || 'http://localhost:8081',
-        riskUrl: process.env.BIS_RISK_ENGINE_URL || 'http://localhost:8082',
-      });
-      return result;
-    }),
-  // Temporal workflow status check
-  temporalWorkflowStatus: adminProcedure
-    .input(z.object({ workflowId: z.string() }))
-    .query(async ({ input }) => {
-      return getWorkflowStatus(input.workflowId);
-    }),
-});
-
 // ─── App Router ───────────────────────────────────────────────────────────────
 
 export const appRouter = router({
@@ -2073,7 +1869,5 @@ export const appRouter = router({
   socialMonitoring: socialMonitoringRouter,
   biometric: biometricRouter,
   lakehouse: lakehouseRouter,
-  middleware: middlewareRouter,
-  notifications: notificationsRouter,
 });
 export type AppRouter = typeof appRouter;

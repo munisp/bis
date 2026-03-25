@@ -6,16 +6,18 @@ import { useLocation } from "wouter";
 import BISLayout from "@/components/BISLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import NewInvestigationSlideOver from "@/components/NewInvestigationSlideOver";
-import { SlaCountdown } from "@/components/SlaCountdown";
 import { cn } from "@/lib/utils";
 import {
   Search, Plus, Filter, ChevronRight, User, Building2,
   Clock, CheckCircle2, AlertTriangle, Loader2, FileText,
   X, SlidersHorizontal, ArrowUpDown, ArrowUp, ArrowDown,
-  ChevronDown, ChevronUp, Bookmark, BookmarkCheck, Trash2, Download, RefreshCw
+  ChevronDown, ChevronUp, Bookmark, BookmarkCheck, Trash2, Download, RefreshCw,
+  CalendarClock
 } from "lucide-react";
 import { InvestigationStatus, InvestigationTier, getStatusBadgeClass, formatDateTime } from "@/lib/bisUtils";
 import { trpc } from "@/lib/trpc";
@@ -157,6 +159,11 @@ export default function Investigations() {
   const [page, setPage] = useState(0);
   const PAGE_SIZE = 50;
 
+  // Multi-select state
+  const [selectedRefs, setSelectedRefs] = useState<Set<string>>(new Set());
+  const [slaDialogOpen, setSlaDialogOpen] = useState(false);
+  const [bulkDueAt, setBulkDueAt] = useState('');
+
   // Filters
   const [filters, setFilters] = useState<FilterState>(EMPTY_FILTERS);
 
@@ -272,6 +279,17 @@ export default function Investigations() {
     setActivePresetId(null);
   };
 
+  const bulkUpdateDueAtMutation = trpc.investigations.bulkUpdateDueAt.useMutation({
+    onSuccess: (result: { updated: number }) => {
+      toast.success(`SLA updated for ${result.updated} investigation${result.updated !== 1 ? 's' : ''}`);
+      setSlaDialogOpen(false);
+      setBulkDueAt('');
+      setSelectedRefs(new Set());
+      utils.investigations.list.invalidate();
+    },
+    onError: (err: { message?: string }) => toast.error(err.message ?? 'Failed to update SLA'),
+  });
+
   const filtered = useMemo(() => {
     // When using live data, server-side filtering already applied; only do client-side sort + date filter
     const { typeFilter, dateFrom, dateTo } = filters;
@@ -293,6 +311,26 @@ export default function Investigations() {
       return 0;
     });
   }, [sourceList, filters, sortKey, sortDir]);
+
+  // ── Multi-select helpers (depend on filtered) ───────────────────────────────────
+  const toggleSelect = (ref: string) => {
+    setSelectedRefs(prev => {
+      const next = new Set(prev);
+      if (next.has(ref)) next.delete(ref); else next.add(ref);
+      return next;
+    });
+  };
+
+  const allSelected = filtered.length > 0 && filtered.every(inv => selectedRefs.has((inv as any).ref));
+  const someSelected = selectedRefs.size > 0;
+
+  const toggleSelectAll = () => {
+    if (allSelected) {
+      setSelectedRefs(new Set());
+    } else {
+      setSelectedRefs(new Set(filtered.map(inv => (inv as any).ref)));
+    }
+  };
 
   const riskBar = (score: number, id: string) => {
     const color = score >= 80 ? "#f87171" : score >= 60 ? "#fb923c" : score >= 30 ? "#fbbf24" : "#34d399";
@@ -339,6 +377,76 @@ export default function Investigations() {
         </div>
       }
     >
+      {/* ── Bulk SLA Dialog ── */}
+      <Dialog open={slaDialogOpen} onOpenChange={setSlaDialogOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CalendarClock size={16} className="text-amber-400" />
+              Set SLA Deadline
+            </DialogTitle>
+          </DialogHeader>
+          <div className="py-2">
+            <p className="text-sm text-muted-foreground mb-4">
+              Update the SLA deadline for <span className="font-semibold text-foreground">{selectedRefs.size}</span> selected investigation{selectedRefs.size !== 1 ? 's' : ''}.
+            </p>
+            <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider block mb-1.5">
+              New Deadline
+            </label>
+            <Input
+              type="datetime-local"
+              className="h-8 text-xs font-mono"
+              value={bulkDueAt}
+              onChange={e => setBulkDueAt(e.target.value)}
+            />
+            <p className="text-[10px] text-muted-foreground mt-2">
+              Leave empty to clear the SLA deadline from all selected investigations.
+            </p>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" size="sm" onClick={() => setSlaDialogOpen(false)}>Cancel</Button>
+            <Button
+              size="sm"
+              className="gap-1.5"
+              disabled={bulkUpdateDueAtMutation.isPending}
+              onClick={() => bulkUpdateDueAtMutation.mutate({
+                refs: Array.from(selectedRefs),
+                dueAt: bulkDueAt ? new Date(bulkDueAt).getTime() : null,
+              })}
+            >
+              {bulkUpdateDueAtMutation.isPending ? <Loader2 size={12} className="animate-spin" /> : <CalendarClock size={12} />}
+              Apply to {selectedRefs.size}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Bulk action toolbar (appears when rows are selected) ── */}
+      {someSelected && (
+        <div className="flex items-center gap-3 mb-3 px-3 py-2 rounded-lg bg-primary/10 border border-primary/30 text-sm">
+          <Checkbox checked={allSelected} onCheckedChange={toggleSelectAll} className="border-primary" />
+          <span className="text-xs font-mono text-primary font-semibold">{selectedRefs.size} selected</span>
+          <div className="flex items-center gap-2 ml-auto">
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs gap-1.5 border-amber-500/40 text-amber-400 hover:bg-amber-500/10"
+              onClick={() => setSlaDialogOpen(true)}
+            >
+              <CalendarClock size={11} /> Set SLA
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 text-xs text-muted-foreground"
+              onClick={() => setSelectedRefs(new Set())}
+            >
+              <X size={11} /> Clear
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* ── Preset chips row ── */}
       <div className="flex flex-wrap items-center gap-1.5 mb-3">
         <span className="text-[9px] font-mono text-muted-foreground uppercase tracking-wider mr-1">Presets:</span>
@@ -529,6 +637,13 @@ export default function Investigations() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border">
+                <th className="px-4 py-3 w-8">
+                  <Checkbox
+                    checked={allSelected}
+                    onCheckedChange={toggleSelectAll}
+                    aria-label="Select all"
+                  />
+                </th>
                 <th className="text-left px-4 py-3">
                   <button onClick={() => toggleSort('ref')} className="flex items-center text-xs font-semibold text-muted-foreground uppercase tracking-wider hover:text-foreground">
                     Reference <SortIcon col="ref" />
@@ -555,12 +670,21 @@ export default function Investigations() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map(inv => (
+              {filtered.map(inv => {
+                const invRef = (inv as any).ref;
+                const isSelected = selectedRefs.has(invRef);
+                return (
                 <tr
-                  key={(inv as any).id ?? (inv as any).ref}
-                  className="border-b border-border/50 hover:bg-muted/30 transition-colors cursor-pointer"
-                  onClick={() => navigate(`/investigations/${(inv as any).ref ?? (inv as any).id}`)}
+                  key={(inv as any).id ?? invRef}
+                  className={cn(
+                    "border-b border-border/50 hover:bg-muted/30 transition-colors cursor-pointer",
+                    isSelected && "bg-primary/5"
+                  )}
+                  onClick={() => navigate(`/investigations/${invRef ?? (inv as any).id}`)}
                 >
+                  <td className="px-4 py-3" onClick={e => { e.stopPropagation(); toggleSelect(invRef); }}>
+                    <Checkbox checked={isSelected} onCheckedChange={() => toggleSelect(invRef)} aria-label={`Select ${invRef}`} />
+                  </td>
                   <td className="px-4 py-3">
                     <span className="font-mono text-xs text-primary">{inv.ref}</span>
                   </td>
@@ -591,19 +715,17 @@ export default function Investigations() {
                   </td>
                   <td className="px-4 py-3 w-40">{riskBar((inv as any).riskScore ?? 0, String((inv as any).id ?? (inv as any).ref))}</td>
                   <td className="px-4 py-3">
-                    <div className="flex flex-col gap-1">
-                      <span className="text-xs text-muted-foreground">{formatDateTime((inv as any).updatedAt)}</span>
-                      <SlaCountdown dueAt={(inv as any).dueAt} />
-                    </div>
+                    <span className="text-xs text-muted-foreground">{formatDateTime((inv as any).updatedAt)}</span>
                   </td>
                   <td className="px-4 py-3">
                     <ChevronRight size={14} className="text-muted-foreground" />
                   </td>
                 </tr>
-              ))}
+                );
+              })}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-12 text-center">
+                  <td colSpan={8} className="px-4 py-12 text-center">
                     <div className="flex flex-col items-center gap-2 text-muted-foreground">
                       <Search size={24} className="opacity-30" />
                       <p className="text-sm">No investigations match your filters.</p>
