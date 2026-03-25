@@ -853,6 +853,8 @@ export const caseComments = pgTable("case_comments", {
   /** If set, this comment was posted by a stakeholder (not a logged-in user) */
   stakeholderId: integer("stakeholderId"),
   confidential: boolean("confidential").notNull().default(false),
+  editedAt: timestamp("editedAt"),
+  deletedAt: timestamp("deletedAt"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
 });

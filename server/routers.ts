@@ -43,6 +43,7 @@ import {
   caseDocuments,
   caseTimeline,
   caseStakeholders,
+  caseComments,
 } from "../drizzle/schema";
 import {
   getDashboardStats,
@@ -2835,9 +2836,169 @@ ${timeline.map(e => `<tr><td>${new Date(e.createdAt).toLocaleDateString()}</td><
       const { url } = await storagePut(`cases/exports/cases-${suffix}.csv`, Buffer.from(csv, 'utf8'), 'text/csv');
       return { url, count: rows.length };
     }),
-});
 
-// ─── Ollama Router ───────────────────────────────────────────────────────────
+  // ─── Risk Scoring ──────────────────────────────────────────────────────────
+
+  recalculateRiskScore: protectedProcedure
+    .input(z.object({ caseRef: z.string() }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Database unavailable' });
+      const [c] = await db.select().from(cases).where(eq(cases.ref, input.caseRef)).limit(1);
+      if (!c) throw new TRPCError({ code: 'NOT_FOUND', message: 'Case not found' });
+      const parties = await db.select().from(caseParties).where(eq(caseParties.caseId, c.id));
+      const documents = await db.select().from(caseDocuments).where(eq(caseDocuments.caseId, c.id));
+      const timeline = await db.select().from(caseTimeline).where(eq(caseTimeline.caseId, c.id));
+
+      // Composite risk scoring: priority (40%), party count (20%), timeline events (20%), document count (10%), overdue (10%)
+      const PRIORITY_WEIGHTS: Record<string, number> = { low: 10, medium: 35, high: 65, critical: 90 };
+      const priorityScore = PRIORITY_WEIGHTS[c.priority] ?? 35;
+      const partyScore = Math.min(parties.length * 8, 20);
+      const timelineScore = Math.min(timeline.length * 2, 20);
+      const docScore = Math.min(documents.length * 2, 10);
+      const overdueScore = c.dueAt && new Date(c.dueAt) < new Date() ? 10 : 0;
+      const rawScore = priorityScore + partyScore + timelineScore + docScore + overdueScore;
+      const riskScore = Math.min(Math.round(rawScore), 100);
+
+      // Try to get LLM risk assessment for open/active cases
+      let llmRiskNotes: string | undefined;
+      if (['open', 'under_review', 'pending_decision'].includes(c.status)) {
+        try {
+          const llmRes = await invokeLLM({
+            messages: [
+              { role: 'system', content: 'You are a compliance risk analyst. Given a case summary, return a JSON object with fields: riskLevel (low/medium/high/critical), keyRiskFactors (array of strings, max 3), recommendation (string, max 100 chars). Respond ONLY with valid JSON.' },
+              { role: 'user', content: `Case: ${c.title}\nType: ${c.type}\nPriority: ${c.priority}\nParties: ${parties.length}\nSummary: ${c.summary ?? 'N/A'}\nJurisdiction: ${c.jurisdiction ?? 'N/A'}\nLegal basis: ${c.legalBasis ?? 'N/A'}` },
+            ],
+            response_format: { type: 'json_schema', json_schema: { name: 'risk_assessment', strict: true, schema: { type: 'object', properties: { riskLevel: { type: 'string' }, keyRiskFactors: { type: 'array', items: { type: 'string' } }, recommendation: { type: 'string' } }, required: ['riskLevel', 'keyRiskFactors', 'recommendation'], additionalProperties: false } } },
+          });
+          const content = llmRes?.choices?.[0]?.message?.content;
+          if (content) {
+            const parsed = typeof content === 'string' ? JSON.parse(content) : content;
+            llmRiskNotes = `AI Assessment: ${parsed.riskLevel?.toUpperCase()} risk. Factors: ${(parsed.keyRiskFactors ?? []).join('; ')}. ${parsed.recommendation ?? ''}`;
+          }
+        } catch {
+          // LLM optional — proceed without it
+        }
+      }
+
+      await db.update(cases).set({ riskScore, updatedAt: new Date() }).where(eq(cases.id, c.id));
+      await db.insert(caseTimeline).values({
+        caseId: c.id,
+        eventType: 'decision_recorded',
+        title: `Risk score recalculated: ${riskScore}/100${llmRiskNotes ? ` — ${llmRiskNotes}` : ''}`,
+        actorId: ctx.user?.id,
+        actorName: ctx.user?.name ?? 'System',
+      });
+      return { riskScore, llmRiskNotes };
+    }),
+
+  // ─── Lead Analyst Assignment ───────────────────────────────────────────────
+
+  assignLeadAnalyst: protectedProcedure
+    .input(z.object({
+      caseRef: z.string(),
+      analystId: z.number().nullable(),
+      analystName: z.string().optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Database unavailable' });
+      const [c] = await db.select().from(cases).where(eq(cases.ref, input.caseRef)).limit(1);
+      if (!c) throw new TRPCError({ code: 'NOT_FOUND', message: 'Case not found' });
+      await db.update(cases).set({ leadAnalystId: input.analystId, updatedAt: new Date() }).where(eq(cases.id, c.id));
+      const label = input.analystId ? `Assigned to ${input.analystName ?? 'Analyst #' + input.analystId}` : 'Lead analyst unassigned';
+      await db.insert(caseTimeline).values({
+        caseId: c.id,
+        eventType: 'status_changed',
+        title: label,
+        actorId: ctx.user?.id,
+        actorName: ctx.user?.name ?? 'System',
+      });
+      return { success: true };
+    }),
+
+  // ─── Comments CRUD ─────────────────────────────────────────────────────────
+
+  listComments: protectedProcedure
+    .input(z.object({ caseRef: z.string() }))
+    .query(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) return [];
+      const [c] = await db.select().from(cases).where(eq(cases.ref, input.caseRef)).limit(1);
+      if (!c) return [];
+      const rows = await db.select().from(caseComments)
+        .where(and(eq(caseComments.caseId, c.id), eq(caseComments.deletedAt, null as any)))
+        .orderBy(asc(caseComments.createdAt));
+      // Filter confidential comments: only show to analysts/supervisors/admins
+      const role = ctx.user?.role;
+      const canSeeConfidential = role === 'admin' || role === 'analyst' || role === 'supervisor';
+      return rows.filter(r => !r.confidential || canSeeConfidential);
+    }),
+
+  addComment: protectedProcedure
+    .input(z.object({
+      caseRef: z.string(),
+      content: z.string().min(1).max(5000),
+      confidential: z.boolean().default(false),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Database unavailable' });
+      const [c] = await db.select().from(cases).where(eq(cases.ref, input.caseRef)).limit(1);
+      if (!c) throw new TRPCError({ code: 'NOT_FOUND', message: 'Case not found' });
+      const [comment] = await db.insert(caseComments).values({
+        caseId: c.id,
+        content: input.content,
+        authorId: ctx.user?.id,
+        authorName: ctx.user?.name ?? 'Unknown',
+        authorRole: ctx.user?.role,
+        confidential: input.confidential,
+      }).returning();
+      await db.insert(caseTimeline).values({
+        caseId: c.id,
+        eventType: 'comment_added',
+        title: input.confidential ? '[Confidential] Comment added' : `Comment: ${input.content.slice(0, 80)}${input.content.length > 80 ? '…' : ''}`,
+        actorId: ctx.user?.id,
+        actorName: ctx.user?.name ?? 'Unknown',
+      });
+      return comment;
+    }),
+
+  editComment: protectedProcedure
+    .input(z.object({
+      commentId: z.number(),
+      content: z.string().min(1).max(5000),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Database unavailable' });
+      const [comment] = await db.select().from(caseComments).where(eq(caseComments.id, input.commentId)).limit(1);
+      if (!comment) throw new TRPCError({ code: 'NOT_FOUND', message: 'Comment not found' });
+      // Only the author or an admin can edit
+      if (comment.authorId !== ctx.user?.id && ctx.user?.role !== 'admin') {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'You can only edit your own comments' });
+      }
+      if (comment.deletedAt) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Cannot edit a deleted comment' });
+      await db.update(caseComments).set({ content: input.content, editedAt: new Date(), updatedAt: new Date() }).where(eq(caseComments.id, input.commentId));
+      return { success: true };
+    }),
+
+  deleteComment: protectedProcedure
+    .input(z.object({ commentId: z.number() }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Database unavailable' });
+      const [comment] = await db.select().from(caseComments).where(eq(caseComments.id, input.commentId)).limit(1);
+      if (!comment) throw new TRPCError({ code: 'NOT_FOUND', message: 'Comment not found' });
+      if (comment.authorId !== ctx.user?.id && ctx.user?.role !== 'admin') {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'You can only delete your own comments' });
+      }
+      // Soft-delete
+      await db.update(caseComments).set({ deletedAt: new Date(), updatedAt: new Date() }).where(eq(caseComments.id, input.commentId));
+      return { success: true };
+    }),
+});
+// ─── Ollama Router ────────────────────────────────────────────────────────────
 
 const OLLAMA_ADAPTER_URL = process.env.OLLAMA_ADAPTER_URL || "http://localhost:8090";
 const OLLAMA_ADAPTER_KEY = process.env.BIS_GATEWAY_KEY || "dev-gateway-key-change-in-prod";

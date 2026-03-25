@@ -898,3 +898,19 @@
 - [x] Add Export CSV button in CasesPage header for bulk export of filtered results
 - [x] Add exportCaseCsv tRPC procedure (up to 1000 rows, respects all active filters)
 - [x] Phase 40 Vitest tests: 19 new tests (deleteDocument, exportCasePdf, exportCaseCsv, filter logic, CSV escaping, preview type detection)
+
+## Phase 41 — Risk Scoring, Assignment, Comments Thread, LEX Design
+
+- [x] Add recalculateRiskScore tRPC procedure (composite formula + LLM AI assessment)
+- [x] Risk score badge in CaseDetailPage header
+- [x] Recalc Risk button in CaseDetailPage header
+- [x] Add assignLeadAnalyst tRPC procedure with timeline audit entry
+- [x] Assign Lead Analyst dialog in CaseDetailPage (with users.list query)
+- [x] Add caseComments schema columns: editedAt, deletedAt (migration 0022)
+- [x] Add listComments tRPC procedure (confidential filter by role, excludes deleted)
+- [x] Add addComment tRPC procedure (with confidential flag, timeline event)
+- [x] Add editComment tRPC procedure (author or admin only, prevents editing deleted)
+- [x] Add deleteComment tRPC procedure (soft-delete, author or admin only)
+- [x] Full comments thread UI in CaseDetailPage (post, edit, delete, confidential badge)
+- [x] Phase 41 Vitest tests: 30 new tests (risk formula, assignment labels, confidentiality filter, auth, LLM parsing)
+- [x] LEX Architecture Design Document (docs/lex-architecture.md)
