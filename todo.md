@@ -846,3 +846,33 @@
 
 ### Archive
 - [x] Comprehensive archive of entire platform (v38)
+
+## Phase 39 — Document Viewer, Ollama Auto-Pull, Case Activity Feed
+
+### Case Document Viewer
+- [x] Add inline PDF preview using <iframe> in CaseDetailPage Documents tab
+- [x] Add inline image preview using <img> for JPG/PNG documents
+- [x] Add "Preview" (Eye icon) button alongside "Download" for each document row
+- [x] Preview panel opens as a full Dialog (max-w-4xl, 80vh height)
+- [x] Handle unsupported formats gracefully (FileText icon + "Download to view" button)
+- [x] Download button in preview dialog header
+
+### Ollama Model Auto-Pull on Startup
+- [x] Create services/ollama-adapter/scripts/ollama-entrypoint.sh (bash, chmod +x)
+- [x] Script starts ollama serve, waits up to 60s for readiness, then pulls OLLAMA_MODELS list
+- [x] Marker file (/root/.ollama/.models_pulled) prevents re-pull on subsequent startups
+- [x] Per-model failure handling — failed models retried on next container restart
+- [x] SKIP_PULL=true env var for CI environments
+- [x] Update docker-compose.yml ollama service: custom entrypoint + volume mount + 120s start_period
+- [x] OLLAMA_MODELS env var (default: llama3.2,nomic-embed-text)
+
+### Case Activity Feed on Dashboard
+- [x] Add trpc.cases.recentActivity procedure (last N timeline events across open/active cases)
+- [x] Add "Recent Case Activity" widget to Dashboard page (after Rules Activity widget)
+- [x] Each row shows case ref, event title, actor, event type, timestamp
+- [x] Color-coded event type dots (9 event types mapped to distinct colors)
+- [x] Each row navigates to /cases/:id on click
+- [x] "View all" button links to /cases
+
+### Archive
+- [x] Comprehensive archive of entire platform (v39)

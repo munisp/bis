@@ -36,6 +36,10 @@ import {
   ExternalLink,
   Copy,
   Shield,
+  Eye,
+  X,
+  Download,
+  Image as ImageIcon,
 } from "lucide-react";
 
 const STATUS_COLORS: Record<string, string> = {
@@ -111,6 +115,8 @@ export default function CaseDetailPage() {
     onSuccess: () => { utils.cases.get.invalidate({ ref: caseRef }); setAddCommentOpen(false); setCommentText(""); toast.success("Note added"); },
     onError: (e) => toast.error(e.message),
   });
+
+  const [previewDoc, setPreviewDoc] = useState<{ url: string; filename: string; mimeType: string } | null>(null);
 
   const [uploadDocOpen, setUploadDocOpen] = useState(false);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
@@ -313,30 +319,42 @@ export default function CaseDetailPage() {
             </Button>
           </div>
           <div className="space-y-3">
-            {(c.documents ?? []).map((doc: any) => (
-              <Card key={doc.id}>
-                <CardContent className="py-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <FileText className="w-5 h-5 text-muted-foreground" />
-                      <div>
-                        <p className="font-medium text-sm">{doc.filename}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {doc.confidential && <span className="text-red-500 font-medium mr-1">CONFIDENTIAL ·</span>}
-                          {doc.sizeBytes ? `${(doc.sizeBytes / 1024).toFixed(1)} KB` : ""} · {new Date(doc.createdAt).toLocaleDateString()}
-                          {doc.description && ` · ${doc.description}`}
-                        </p>
+            {(c.documents ?? []).map((doc: any) => {
+              const isImage = doc.mimeType?.startsWith("image/");
+              const isPdf = doc.mimeType === "application/pdf";
+              const canPreview = isImage || isPdf;
+              return (
+                <Card key={doc.id}>
+                  <CardContent className="py-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        {isImage ? <ImageIcon className="w-5 h-5 text-muted-foreground" /> : <FileText className="w-5 h-5 text-muted-foreground" />}
+                        <div>
+                          <p className="font-medium text-sm">{doc.filename}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {doc.confidential && <span className="text-red-500 font-medium mr-1">CONFIDENTIAL ·</span>}
+                            {doc.sizeBytes ? `${(doc.sizeBytes / 1024).toFixed(1)} KB` : ""} · {new Date(doc.createdAt).toLocaleDateString()}
+                            {doc.description && ` · ${doc.description}`}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        {canPreview && (
+                          <Button variant="ghost" size="sm" onClick={() => setPreviewDoc({ url: doc.url, filename: doc.filename, mimeType: doc.mimeType })} title="Preview">
+                            <Eye className="w-4 h-4" />
+                          </Button>
+                        )}
+                        <Button variant="ghost" size="sm" asChild title="Download">
+                          <a href={doc.url} download={doc.filename} target="_blank" rel="noopener noreferrer">
+                            <Download className="w-4 h-4" />
+                          </a>
+                        </Button>
                       </div>
                     </div>
-                    <Button variant="ghost" size="sm" asChild>
-                      <a href={doc.url} target="_blank" rel="noopener noreferrer">
-                        <ExternalLink className="w-4 h-4" />
-                      </a>
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
+                  </CardContent>
+                </Card>
+              );
+            })}
             {(c.documents ?? []).length === 0 && (
               <p className="text-sm text-muted-foreground text-center py-8">No documents uploaded yet. Click "Upload Document" to add files.</p>
             )}
@@ -390,6 +408,58 @@ export default function CaseDetailPage() {
                   {uploading ? "Uploading..." : "Upload"}
                 </Button>
               </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          {/* Document Preview Dialog */}
+          <Dialog open={!!previewDoc} onOpenChange={(open) => { if (!open) setPreviewDoc(null); }}>
+            <DialogContent className="max-w-4xl w-full h-[80vh] flex flex-col">
+              <DialogHeader className="flex-shrink-0">
+                <div className="flex items-center justify-between">
+                  <DialogTitle className="truncate max-w-lg">{previewDoc?.filename}</DialogTitle>
+                  <div className="flex items-center gap-2">
+                    {previewDoc && (
+                      <Button variant="outline" size="sm" asChild>
+                        <a href={previewDoc.url} download={previewDoc.filename} target="_blank" rel="noopener noreferrer">
+                          <Download className="w-4 h-4 mr-1" /> Download
+                        </a>
+                      </Button>
+                    )}
+                    <Button variant="ghost" size="sm" onClick={() => setPreviewDoc(null)}>
+                      <X className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </div>
+              </DialogHeader>
+              <div className="flex-1 overflow-hidden rounded-md border bg-muted">
+                {previewDoc?.mimeType?.startsWith("image/") ? (
+                  <div className="w-full h-full flex items-center justify-center p-4">
+                    <img
+                      src={previewDoc.url}
+                      alt={previewDoc.filename}
+                      className="max-w-full max-h-full object-contain rounded"
+                    />
+                  </div>
+                ) : previewDoc?.mimeType === "application/pdf" ? (
+                  <iframe
+                    src={previewDoc.url}
+                    title={previewDoc.filename}
+                    className="w-full h-full border-0"
+                  />
+                ) : (
+                  <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
+                    <FileText className="w-12 h-12" />
+                    <p className="text-sm">Preview not available for this file type.</p>
+                    {previewDoc && (
+                      <Button variant="outline" size="sm" asChild>
+                        <a href={previewDoc.url} download={previewDoc.filename} target="_blank" rel="noopener noreferrer">
+                          <Download className="w-4 h-4 mr-1" /> Download to view
+                        </a>
+                      </Button>
+                    )}
+                  </div>
+                )}
+              </div>
             </DialogContent>
           </Dialog>
         </TabsContent>

@@ -562,12 +562,20 @@ services:
     restart: unless-stopped
     volumes:
       - ollama_data:/root/.ollama
+      # Mount the auto-pull entrypoint script into the container
+      - ./services/ollama-adapter/scripts/ollama-entrypoint.sh:/usr/local/bin/ollama-entrypoint.sh:ro
     ports:
       - "11434:11434"
     networks: [bis-net]
     environment:
-      OLLAMA_HOST: "0.0.0.0"
+      OLLAMA_HOST: "0.0.0.0:11434"
       OLLAMA_DEFAULT_MODEL: ${OLLAMA_DEFAULT_MODEL:-llama3.2}
+      # Comma-separated list of models to pull on first boot
+      OLLAMA_MODELS: ${OLLAMA_MODELS:-llama3.2,nomic-embed-text}
+      # Set SKIP_PULL=true in CI or when models are already cached
+      SKIP_PULL: ${SKIP_PULL:-false}
+    # Override the default entrypoint to use our auto-pull script
+    entrypoint: ["/bin/bash", "/usr/local/bin/ollama-entrypoint.sh"]
     # Optional: GPU passthrough for NVIDIA (uncomment if GPU is available)
     # deploy:
     #   resources:
@@ -581,7 +589,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 60s
+      start_period: 120s  # Allow extra time for model pulls on first boot
 
   # ─── Ollama Adapter (Go) ─────────────────────────────────────────────────────
   ollama-adapter:

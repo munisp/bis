@@ -169,11 +169,13 @@ export default function Dashboard() {
   const { data: alertsData } = trpc.alerts.list.useQuery({ limit: 4 });
   const { data: dataSourcesData } = trpc.dataSources.list.useQuery();
   const { data: recentTriggersData } = trpc.alertRules.recentTriggers.useQuery();
+  const { data: caseActivityData } = trpc.cases.recentActivity.useQuery({ limit: 8 });
 
   const recentInvestigations = recentInvData?.items ?? [];
   const criticalAlerts = (alertsData ?? []).filter((a: any) => a.severity === "critical" || a.severity === "high").slice(0, 4);
   const liveDataSources = dataSourcesData ?? [];
   const recentTriggers = recentTriggersData ?? [];
+  const caseActivity = caseActivityData ?? [];
 
   const handleRefresh = () => {
     setRefreshing(true);
@@ -498,6 +500,62 @@ export default function Dashboard() {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+      </div>
+
+      {/* ── Case Activity Feed Widget ── */}
+      <div className="mt-4 rounded-lg border border-border bg-card">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+          <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-blue-400 shrink-0" />
+            Recent Case Activity
+          </h3>
+          <Button variant="ghost" size="sm" className="h-6 text-xs gap-1" onClick={() => navigate("/cases")}>
+            View all <ChevronRight size={11} />
+          </Button>
+        </div>
+        {caseActivity.length === 0 ? (
+          <div className="px-4 py-6 text-xs text-muted-foreground text-center">No case activity yet</div>
+        ) : (
+          <div className="divide-y divide-border">
+            {caseActivity.map((ev: any) => {
+              const eventColors: Record<string, string> = {
+                case_created: 'bg-emerald-400',
+                status_changed: 'bg-blue-400',
+                document_uploaded: 'bg-violet-400',
+                party_added: 'bg-cyan-400',
+                stakeholder_invited: 'bg-amber-400',
+                investigation_linked: 'bg-orange-400',
+                comment_added: 'bg-slate-400',
+                decision_recorded: 'bg-rose-400',
+                case_closed: 'bg-gray-400',
+              };
+              const dot = eventColors[ev.eventType] ?? 'bg-muted-foreground';
+              return (
+                <div
+                  key={ev.id}
+                  className="px-4 py-2.5 flex items-center justify-between gap-3 hover:bg-accent/20 transition-colors cursor-pointer"
+                  onClick={() => navigate(`/cases/${ev.caseId}`)}
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dot}`} />
+                    <div className="min-w-0">
+                      <div className="text-xs font-medium text-foreground truncate">
+                        <span className="text-muted-foreground font-mono mr-1">{ev.caseRef}</span>
+                        {ev.title}
+                      </div>
+                      <div className="text-[10px] text-muted-foreground truncate">
+                        {ev.actorName ?? 'System'} · {ev.eventType.replace(/_/g, ' ')}
+                      </div>
+                    </div>
+                  </div>
+                  <span className="text-[10px] text-muted-foreground font-mono shrink-0">
+                    {new Date(ev.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

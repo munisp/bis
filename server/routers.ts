@@ -2600,6 +2600,33 @@ const casesRouter = router({
         .where(eq(caseStakeholders.id, sh.id));
       return { success: true, portalUrl };
     }),
+
+  recentActivity: protectedProcedure
+    .input(z.object({ limit: z.number().min(1).max(50).default(10) }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
+      // Fetch recent timeline events joined with case info
+      const events = await db
+        .select({
+          id: caseTimeline.id,
+          eventType: caseTimeline.eventType,
+          title: caseTimeline.title,
+          detail: caseTimeline.detail,
+          actorName: caseTimeline.actorName,
+          createdAt: caseTimeline.createdAt,
+          caseId: cases.id,
+          caseRef: cases.ref,
+          caseTitle: cases.title,
+          caseStatus: cases.status,
+        })
+        .from(caseTimeline)
+        .innerJoin(cases, eq(caseTimeline.caseId, cases.id))
+        .where(sql`${cases.status} NOT IN ('closed', 'archived')`)
+        .orderBy(desc(caseTimeline.createdAt))
+        .limit(input.limit);
+      return events;
+    }),
 });
 
 // ─── Ollama Router ───────────────────────────────────────────────────────────
