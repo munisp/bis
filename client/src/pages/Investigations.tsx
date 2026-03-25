@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import NewInvestigationSlideOver from "@/components/NewInvestigationSlideOver";
+import { SlaCountdown } from "@/components/SlaCountdown";
 import { cn } from "@/lib/utils";
 import {
   Search, Plus, Filter, ChevronRight, User, Building2,
@@ -590,7 +591,10 @@ export default function Investigations() {
                   </td>
                   <td className="px-4 py-3 w-40">{riskBar((inv as any).riskScore ?? 0, String((inv as any).id ?? (inv as any).ref))}</td>
                   <td className="px-4 py-3">
-                    <span className="text-xs text-muted-foreground">{formatDateTime((inv as any).updatedAt)}</span>
+                    <div className="flex flex-col gap-1">
+                      <span className="text-xs text-muted-foreground">{formatDateTime((inv as any).updatedAt)}</span>
+                      <SlaCountdown dueAt={(inv as any).dueAt} />
+                    </div>
                   </td>
                   <td className="px-4 py-3">
                     <ChevronRight size={14} className="text-muted-foreground" />

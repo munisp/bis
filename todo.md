@@ -745,3 +745,31 @@
 - [x] Full archive of all services, mobile, infra, docs (bis-platform-v31-20260324.tar.gz, 4.7 MB, 365 entries)
 - [x] Archive includes bis-mobile/ (26 files), services/ (5 services), infra/, drizzle/, server/ (47 files), client/ (142 files)
 - [x] Archive size accurate and complete (287 source files, no node_modules/dist/target)
+
+## Phase 32 — Lakehouse Cron, SLA Timer, Mobile Detail
+
+### Lakehouse Scheduled Cron Job
+- [x] Add node-cron dependency to package.json
+- [x] Schedule lakehouse-sync every 15 minutes in server/_core/index.ts
+- [x] Log sync result (ingested count, errors) to server console
+- [x] Cron job starts automatically on server startup
+- [x] SLA check cron every hour — sends push to assigned analyst when dueAt < 24h
+
+### Investigation SLA Timer
+- [x] Add dueAt column to investigations table in schema.ts
+- [x] Run db:push to migrate dueAt column
+- [x] investigations.updateDueAt procedure for adjusting SLA deadline
+- [x] SlaCountdown component (green/amber/red by time remaining, auto-refresh every 60s)
+- [x] SLA countdown badge in InvestigationDetail header
+- [x] SLA countdown column in Investigations list page
+- [x] SLA cron checks investigations due within 24h and sends push notifications
+
+### Mobile Investigation Detail Screen
+- [x] Create bis-mobile/app/investigations/[id].tsx
+- [x] Subject card with name, country, tier, risk score badge
+- [x] Status update button with confirmation dialog and tRPC mutation
+- [x] SLA countdown display (color-coded)
+- [x] Metadata card (created, updated, assigned, NIN, BVN, dueAt)
+- [x] Risk factors card
+- [x] Biometric verification navigation button
+- [x] Navigation from investigations list screen (uses ref)

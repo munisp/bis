@@ -74,6 +74,7 @@ export const investigations = pgTable("investigations", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
   completedAt: timestamp("completedAt"),
+  dueAt: timestamp("dueAt"),
 });
 
 export type Investigation = typeof investigations.$inferSelect;
@@ -373,7 +374,7 @@ export type InsertWebhook = typeof webhooks.$inferInsert;
 export const platformSettings = pgTable("platform_settings", {
   id: serial("id").primaryKey(),
   namespace: varchar("namespace", { length: 64 }).notNull().default("default"),
-  key: varchar("key", { length: 128 }).notNull(),
+  key: varchar("key", { length: 128 }).notNull().unique(),
   value: json("value"),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
   updatedBy: varchar("updatedBy", { length: 255 }),

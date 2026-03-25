@@ -598,6 +598,18 @@ const investigationsRouter = router({
       await writeAuditLog(db, { userId: ctx.user!.id, category: "investigation", action: `Timeline PDF exported`, targetRef: input.ref });
       return { url, filename: `BIS-Timeline-${inv.ref}.pdf` };
     }),
+
+  updateDueAt: writeProcedure
+    .input(z.object({ ref: z.string(), dueAt: z.date().nullable() }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      await db.update(investigations)
+        .set({ dueAt: input.dueAt, updatedAt: new Date() })
+        .where(eq(investigations.ref, input.ref));
+      await writeAuditLog(db, { userId: ctx.user!.id, category: "investigation", action: `SLA due date ${input.dueAt ? `set to ${input.dueAt.toISOString()}` : 'cleared'}`, targetRef: input.ref });
+      return { ok: true };
+    }),
 });
 
 // ─── Data Source Lookup Router ────────────────────────────────────────────────

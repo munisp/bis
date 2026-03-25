@@ -16,6 +16,7 @@ import {
   ChevronDown, UserCheck, Truck, ChevronLeft, ChevronRight
 } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetFooter } from "@/components/ui/sheet";
+import { SlaCountdown } from "@/components/SlaCountdown";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -631,6 +632,7 @@ export default function InvestigationDetail() {
               <span>Created: {formatDate((liveInv as any)?.createdAt ?? inv.createdAt)}</span>
               <span>Updated: {formatDateTime((liveInv as any)?.updatedAt ?? inv.updatedAt)}</span>
               {assignedToName && <span>Assigned: {assignedToName}</span>}
+              <SlaCountdown dueAt={(liveInv as any)?.dueAt ?? (inv as any).dueAt} />
             </div>
           </div>
           <div className="text-center shrink-0">

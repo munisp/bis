@@ -20,6 +20,7 @@ import { notifyOwner } from "./notification";
 import { creditTenantAccount } from "../billing";
 import crypto from "crypto";
 import { createOpenClawRouter } from "../openclawEndpoints";
+import cron from "node-cron";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -281,6 +282,80 @@ async function startServer() {
     }
   });
 
+  // ── SLA breach check cron route ─────────────────────────────────────────
+  app.post("/api/cron/sla-check", async (req, res) => {
+    try {
+      const CRON_SECRET = process.env.CRON_SECRET ?? "bis-cron-dev-secret";
+      const authHeader = req.headers["authorization"] ?? "";
+      const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+      if (token !== CRON_SECRET) {
+        res.status(401).json({ error: "Unauthorized" });
+        return;
+      }
+
+      const { getDb } = await import("../db");
+      const db = await getDb();
+      if (!db) { res.status(503).json({ error: "DB unavailable" }); return; }
+      const { investigations, pushDeviceTokens } = await import("../../drizzle/schema");
+      const { and, isNotNull, lte, gt, eq } = await import("drizzle-orm");
+
+      // Find investigations with dueAt within the next 24 hours that are still open
+      const now = new Date();
+      const in24h = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+
+      const approaching = await db
+        .select()
+        .from(investigations)
+        .where(
+          and(
+            isNotNull(investigations.dueAt),
+            lte(investigations.dueAt, in24h),
+            gt(investigations.dueAt, now),
+            eq(investigations.status, "pending")
+          )
+        );
+
+      let notified = 0;
+      const EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send";
+
+      for (const inv of approaching) {
+        if (!inv.assignedTo) continue;
+        // Get push tokens for the assigned analyst
+        const tokens = await db
+          .select()
+          .from(pushDeviceTokens)
+          .where(eq(pushDeviceTokens.userId, inv.assignedTo));
+
+        if (tokens.length === 0) continue;
+
+        const hoursLeft = Math.round((inv.dueAt!.getTime() - now.getTime()) / 3600000);
+        const messages = tokens.map((t: { token: string }) => ({
+          to: t.token,
+          title: `⏰ SLA Alert: ${inv.ref}`,
+          body: `Investigation ${inv.subjectName} is due in ${hoursLeft}h`,
+          data: { investigationId: inv.id, ref: inv.ref },
+          priority: "high",
+        }));
+
+        try {
+          await fetch(EXPO_PUSH_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(messages),
+          });
+          notified++;
+        } catch (pushErr) {
+          console.error(`[SLACron] Push failed for inv ${inv.ref}:`, pushErr);
+        }
+      }
+
+      res.json({ ok: true, checked: approaching.length, notified });
+    } catch (err) {
+      console.error("[SLACron] Error:", err);
+      res.status(500).json({ error: "SLA check failed" });
+    }
+  });
+
   // OpenClaw managed instance + Swagger UI
   app.use(createOpenClawRouter());
 
@@ -308,6 +383,39 @@ async function startServer() {
 
   server.listen(port, () => {
     console.log(`Server running on http://localhost:${port}/`);
+
+    // ── Lakehouse scheduled sync (every 15 minutes) ───────────────────────────
+    const CRON_SECRET = process.env.CRON_SECRET ?? "bis-cron-dev-secret";
+    cron.schedule("*/15 * * * *", async () => {
+      try {
+        const res = await fetch(`http://localhost:${port}/api/cron/lakehouse-sync`, {
+          method: "POST",
+          headers: { "Authorization": `Bearer ${CRON_SECRET}`, "Content-Type": "application/json" },
+        });
+        const data = await res.json() as { ok: boolean; ingested: number; errors: number; syncedAt: string };
+        console.log(`[LakehouseCron] Scheduled sync complete — ingested: ${data.ingested}, errors: ${data.errors}`);
+      } catch (err) {
+        console.error("[LakehouseCron] Scheduled sync failed:", err);
+      }
+    });
+    console.log("[LakehouseCron] Scheduled lakehouse sync every 15 minutes");
+
+    // ── SLA breach check (every hour) ────────────────────────────────────────
+    cron.schedule("0 * * * *", async () => {
+      try {
+        const res = await fetch(`http://localhost:${port}/api/cron/sla-check`, {
+          method: "POST",
+          headers: { "Authorization": `Bearer ${CRON_SECRET}`, "Content-Type": "application/json" },
+        });
+        const data = await res.json() as { ok: boolean; notified: number };
+        if (data.notified > 0) {
+          console.log(`[SLACron] Notified ${data.notified} investigations approaching SLA deadline`);
+        }
+      } catch (err) {
+        console.error("[SLACron] SLA check failed:", err);
+      }
+    });
+    console.log("[SLACron] Scheduled SLA breach check every hour");
   });
 }
 

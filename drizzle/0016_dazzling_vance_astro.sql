@@ -1,0 +1,1 @@
+ALTER TABLE "investigations" ADD COLUMN "dueAt" timestamp;
