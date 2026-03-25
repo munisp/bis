@@ -99,28 +99,7 @@ const sourceActivity = [
   { name: "FRSC", checks: 289 }, { name: "MTN", checks: 567 },
 ];
 
-// ─── Ticker seed data ─────────────────────────────────────────────────────
-const TICKER_SEED = [
-  { id: 't1', type: 'alert' as const, text: 'CRITICAL: Emeka Nwosu appears on OFAC SDN list — BIS-2026-0004', time: '11:02' },
-  { id: 't2', type: 'mention' as const, text: 'NEW MENTION: @lagosinsider tweets about Adebayo Okafor court appearance', time: '10:58' },
-  { id: 't3', type: 'report' as const, text: 'INCOMING REPORT via WhatsApp: Land fraud suspect in Ikeja, Lagos', time: '10:55' },
-  { id: 't4', type: 'alert' as const, text: 'HIGH: Fatima Al-Hassan classified as PEP — ward-level political official', time: '10:51' },
-  { id: 't5', type: 'mention' as const, text: 'NEW MENTION: Zenith Logistics Ltd mentioned in Punch investigative report', time: '10:47' },
-  { id: 't6', type: 'report' as const, text: 'INCOMING REPORT via USSD: Fraud suspect in Kano Municipal — N5M collected', time: '10:43' },
-  { id: 't7', type: 'alert' as const, text: 'MEDIUM: Zenith Logistics Ltd director has 2019 fraud charge on record', time: '10:39' },
-  { id: 't8', type: 'mention' as const, text: 'NEW MENTION: TikTok video circulating about Ponzi scheme operator in Abuja', time: '10:35' },
-];
-
-const TICKER_LIVE_POOL = [
-  { type: 'alert' as const, text: 'NEW FLAG: Ibrahim Musa — document tampering score 78.4% on passport scan' },
-  { type: 'mention' as const, text: 'NEW MENTION: Facebook post alleges fraud by Chidinma Eze in Enugu' },
-  { type: 'report' as const, text: 'INCOMING REPORT via Telegram: Cryptocurrency scam — 500+ victims, ₦200M' },
-  { type: 'alert' as const, text: 'CRITICAL: New INTERPOL Red Notice match for subject in BIS-2026-0011' },
-  { type: 'mention' as const, text: 'NEW MENTION: LinkedIn post exposes fake recruitment agency in Surulere' },
-  { type: 'report' as const, text: 'INCOMING REPORT via SMS: School fees fraud — 30 families affected in Enugu' },
-];
-
-let tickerLiveIdx = 0;
+// Ticker data is now fetched from the live DB via trpc.dashboard.liveTicker
 
 // Read a CSS variable from :root at runtime so charts adapt to theme
 function useCSSVar(name: string, fallback: string): string {
@@ -146,22 +125,12 @@ export default function Dashboard() {
   const chartBorder  = useCSSVar('--border',            'oklch(0.22 0.01 264)');
   const chartPrimary = useCSSVar('--chart-1',           'oklch(0.65 0.20 220)');
   const chartDanger  = useCSSVar('--chart-4',           'oklch(0.60 0.22 25)');
-  const [tickerItems, setTickerItems] = useState(TICKER_SEED);
-  const tickerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  useEffect(() => {
-    tickerRef.current = setInterval(() => {
-      const template = TICKER_LIVE_POOL[tickerLiveIdx % TICKER_LIVE_POOL.length];
-      tickerLiveIdx++;
-      const now = new Date();
-      const timeStr = `${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}`;
-      setTickerItems(prev => [
-        { id: `live_${Date.now()}`, ...template, time: timeStr },
-        ...prev.slice(0, 19),
-      ]);
-    }, 7000);
-    return () => { if (tickerRef.current) clearInterval(tickerRef.current); };
-  }, []);
+  // Live ticker from real DB (alerts + social mentions)
+  const { data: tickerData } = trpc.dashboard.liveTicker.useQuery(
+    { limit: 10 },
+    { refetchInterval: 15000 } // refresh every 15 seconds
+  );
+  const tickerItems = tickerData?.items ?? [];
 
   const utils = trpc.useUtils();
   const { data: stats, isLoading: statsLoading } = trpc.dashboard.stats.useQuery();

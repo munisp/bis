@@ -85,6 +85,32 @@ upstreams:
         unhealthy:
           http_failures: 3
 
+  - id: lakehouse-writer
+    name: BIS Lakehouse Writer (Python)
+    type: roundrobin
+    nodes:
+      "lakehouse-writer:8084": 1
+    checks:
+      active:
+        http_path: /health
+        interval: 15
+        timeout: 3
+        unhealthy:
+          http_failures: 3
+
+  - id: biometric-engine
+    name: BIS Biometric Engine (Python)
+    type: roundrobin
+    nodes:
+      "biometric-engine:8085": 1
+    checks:
+      active:
+        http_path: /health
+        interval: 10
+        timeout: 2
+        unhealthy:
+          http_failures: 3
+
 # ── Routes ────────────────────────────────────────────────────────────────────
 routes:
   # ── tRPC BFF — all tRPC procedures ──────────────────────────────────────────
@@ -231,6 +257,50 @@ routes:
       proxy-rewrite:
         regex_uri:
           - "^/api/events/(.*)"
+          - "/$1"
+
+  # ── Lakehouse Writer ────────────────────────────────────────────────────────
+  - id: lakehouse
+    name: "Lakehouse Writer"
+    uri: /api/lakehouse/*
+    upstream_id: lakehouse-writer
+    plugins:
+      jwt-auth:
+        header: Authorization
+      limit-count:
+        count: 60
+        time_window: 60
+        rejected_code: 429
+        key_type: var
+        key: remote_addr
+      request-id:
+        header_name: X-BIS-Request-ID
+        include_in_response: true
+      proxy-rewrite:
+        regex_uri:
+          - "^/api/lakehouse/(.*)"
+          - "/$1"
+
+  # ── Biometric Engine ─────────────────────────────────────────────────────────
+  - id: biometric
+    name: "Biometric Engine"
+    uri: /api/biometric/*
+    upstream_id: biometric-engine
+    plugins:
+      jwt-auth:
+        header: Authorization
+      limit-count:
+        count: 30
+        time_window: 60
+        rejected_code: 429
+        key_type: var
+        key: remote_addr
+      request-id:
+        header_name: X-BIS-Request-ID
+        include_in_response: true
+      proxy-rewrite:
+        regex_uri:
+          - "^/api/biometric/(.*)"
           - "/$1"
 
   # ── Prometheus metrics (internal only) ───────────────────────────────────────
