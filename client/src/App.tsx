@@ -43,6 +43,7 @@ const DeveloperPortal = lazy(() => import("./pages/DeveloperPortal"));
 const QuickCheck = lazy(() => import("./pages/QuickCheck"));
 const GoamlWizard = lazy(() => import("./pages/GoamlWizard"));
 const TenantBrandingPage           = lazy(() => import("@/pages/TenantBrandingPage"));
+const LakehouseAnalyticsPage       = lazy(() => import("@/pages/bis/LakehouseAnalyticsPage"));
 
 // ─── Page loading skeleton ────────────────────────────────────────────────────
 
@@ -100,6 +101,7 @@ function Router() {
         <Route path="/developer" component={DeveloperPortal} />
         <Route path="/quickcheck" component={QuickCheck} />
         <Route path="/goaml" component={GoamlWizard} />
+        <Route path="/lakehouse" component={LakehouseAnalyticsPage} />
         <Route path="/tenants/:id/settings" component={TenantBrandingPage} />
 
         {/* Fallback */}

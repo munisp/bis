@@ -8,7 +8,7 @@ import {
   Activity, Users, Database, Settings, Bell, ChevronDown,
   ChevronRight, LogOut, Menu, X, AlertTriangle, Car, Pill,
   Briefcase, Globe, MapPin, MessageSquare, Building2, Eye,
-  UserCheck, BarChart3, Key, Zap, CheckCheck, ArrowRight, Sun, Moon, ClipboardList, Wallet, UserSearch, Shield
+  UserCheck, BarChart3, Key, Zap, CheckCheck, ArrowRight, Sun, Moon, ClipboardList, Wallet, UserSearch, Shield, BarChart2
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -107,6 +107,7 @@ const BASE_NAV_GROUPS: NavGroup[] = [
     items: [
       { label: 'QuickCheck', href: '/quickcheck', icon: <UserSearch size={15} /> },
       { label: 'goAML STR Wizard', href: '/goaml', icon: <Shield size={15} /> },
+      { label: 'Lakehouse Analytics', href: '/lakehouse', icon: <BarChart2 size={15} /> },
     ],
   },
 ];

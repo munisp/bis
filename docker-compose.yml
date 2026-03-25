@@ -10,7 +10,7 @@ version: "3.9"
 #   cp .env.example .env && docker compose up -d
 #   docker compose logs -f gateway risk-engine event-processor bff
 #
-# Service count: 17 containers total
+# Service count: 18 containers total
 # Ports:
 #   3001  BFF (Node.js tRPC)
 #   8081  Go Gateway
@@ -20,6 +20,7 @@ version: "3.9"
 #   9091  APISix Prometheus metrics
 #   9090  Prometheus
 #   3000  Grafana
+#   8085  Lakehouse Writer (Delta Lake + DuckDB)
 
 networks:
   bis-net:
@@ -34,8 +35,9 @@ volumes:
   apisix_data:
   prometheus_data:
   grafana_data:
+  lakehouse_data:
 
-# ─── Infrastructure ───────────────────────────────────────────────────────────
+# ── Infrastructure ───────────────────────────────────────────────────────────
 
 services:
 
@@ -519,6 +521,35 @@ services:
       - prometheus
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ─── Lakehouse Writer (Delta Lake + DuckDB) ──────────────────────────────────
+  lakehouse-writer:
+    build:
+      context: ./services/lakehouse-writer
+      dockerfile: Dockerfile
+    container_name: bis-lakehouse-writer
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      LAKEHOUSE_PORT: "8085"
+      LAKEHOUSE_BASE_PATH: /data/lakehouse
+      KAFKA_BROKERS: kafka:9092
+      KAFKA_TOPICS: bis.investigations,bis.alerts,bis.kyc
+      LOG_LEVEL: INFO
+    volumes:
+      - lakehouse_data:/data/lakehouse
+    ports:
+      - "8085:8085"
+    networks: [bis-net]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8085/health"]
       interval: 15s
       timeout: 5s
       retries: 3

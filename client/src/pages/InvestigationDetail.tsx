@@ -13,9 +13,11 @@ import {
   Clock, Loader2, FileText, Download, RefreshCw, Trash2,
   Shield, Activity, Globe, CreditCard, Fingerprint, Search,
   Link2, MessageSquare, Send, Camera, Paperclip, MapPin, X,
-  ChevronDown, UserCheck, Truck
+  ChevronDown, UserCheck, Truck, ChevronLeft, ChevronRight
 } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetFooter } from "@/components/ui/sheet";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { getStatusBadgeClass, formatDateTime, formatDate } from "@/lib/bisUtils";
@@ -266,6 +268,85 @@ export default function InvestigationDetail() {
     },
   });
 
+  // ── goAML STR Wizard modal ──────────────────────────────────────────────────
+  const [goamlOpen, setGoamlOpen] = useState(false);
+  const [goamlStep, setGoamlStep] = useState<0|1|2|3>(0);
+  const [goamlForm, setGoamlForm] = useState({
+    reportType: "STR" as "STR" | "CTR" | "SAR",
+    subjectName: "",
+    subjectBvn: "",
+    subjectNin: "",
+    subjectAccountNumber: "",
+    subjectBank: "",
+    transactionDate: "",
+    transactionAmount: "",
+    transactionCurrency: "NGN",
+    suspiciousActivity: "",
+    narrativeDetails: "",
+  });
+
+  const goamlCreateMutation = trpc.goaml.create.useMutation({
+    onSuccess: (data) => {
+      toast.success(`STR draft created — ${data.filingRef}`);
+      setGoamlOpen(false);
+      setGoamlStep(0);
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const openGoamlWizard = () => {
+    const subject = (liveInv as any) ?? inv;
+    setGoamlForm(prev => ({
+      ...prev,
+      subjectName: subject?.subjectName ?? "",
+      subjectBvn: subject?.bvn ?? "",
+      subjectNin: subject?.nin ?? "",
+    }));
+    setGoamlStep(0);
+    setGoamlOpen(true);
+  };
+
+  const GOAML_SUSPICIOUS_CATEGORIES = [
+    "Structuring / Smurfing", "Unusual cash transactions",
+    "Transactions inconsistent with customer profile",
+    "Politically Exposed Person (PEP) activity", "Sanctions list match",
+    "Terrorist financing indicators", "Cyber-enabled fraud",
+    "Real estate money laundering", "Trade-based money laundering",
+    "Bribery and corruption", "Other suspicious activity",
+  ];
+
+  const NIGERIAN_BANKS = [
+    "Access Bank", "Zenith Bank", "GTBank", "First Bank", "UBA",
+    "Fidelity Bank", "Union Bank", "Sterling Bank", "Polaris Bank",
+    "FCMB", "Kuda Bank", "OPay", "Moniepoint", "PalmPay", "Other",
+  ];
+
+  const goamlCanNext = () => {
+    if (goamlStep === 0) return true;
+    if (goamlStep === 1) return goamlForm.subjectName.trim().length >= 2;
+    if (goamlStep === 2) return true;
+    if (goamlStep === 3) return goamlForm.suspiciousActivity.trim().length >= 5;
+    return true;
+  };
+
+  const handleGoamlSubmit = () => {
+    const subject = (liveInv as any) ?? inv;
+    goamlCreateMutation.mutate({
+      reportType: goamlForm.reportType,
+      investigationRef: subject?.ref,
+      subjectName: goamlForm.subjectName,
+      subjectBvn: goamlForm.subjectBvn || undefined,
+      subjectNin: goamlForm.subjectNin || undefined,
+      subjectAccountNumber: goamlForm.subjectAccountNumber || undefined,
+      subjectBank: goamlForm.subjectBank || undefined,
+      transactionDate: goamlForm.transactionDate ? new Date(goamlForm.transactionDate) : undefined,
+      transactionAmount: goamlForm.transactionAmount ? parseFloat(goamlForm.transactionAmount) : undefined,
+      transactionCurrency: goamlForm.transactionCurrency,
+      suspiciousActivity: goamlForm.suspiciousActivity,
+      narrativeDetails: goamlForm.narrativeDetails || undefined,
+    });
+  };
+
   // ── Field Agent Dispatch slide-over ─────────────────────────────────────────
   const [dispatchOpen, setDispatchOpen] = useState(false);
   const [dispatchAgentId, setDispatchAgentId] = useState("");
@@ -470,6 +551,9 @@ export default function InvestigationDetail() {
               ))}
             </SelectContent>
           </Select>
+          <Button variant="outline" size="sm" className="h-7 text-xs gap-1 border-amber-500/40 text-amber-400 hover:bg-amber-500/10" onClick={openGoamlWizard}>
+            <Shield size={11} /> File STR
+          </Button>
           <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => setDispatchOpen(true)}>
             <Truck size={11} /> Dispatch Agent
           </Button>
@@ -1086,6 +1170,165 @@ export default function InvestigationDetail() {
           </SheetFooter>
         </SheetContent>
       </Sheet>
+
+      {/* ── goAML STR Wizard Modal ─────────────────────────────────────────── */}
+      <Dialog open={goamlOpen} onOpenChange={setGoamlOpen}>
+        <DialogContent className="max-w-lg bg-[#0f0f1a] border-border">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-sm font-mono">
+              <Shield size={14} className="text-amber-400" />
+              goAML STR Wizard
+              <span className="ml-auto text-[10px] font-mono text-muted-foreground">Step {goamlStep + 1} / 4</span>
+            </DialogTitle>
+          </DialogHeader>
+
+          {/* Step indicator */}
+          <div className="flex items-center gap-1 pb-2">
+            {([0,1,2,3] as const).map((s) => (
+              <div key={s} className="flex items-center gap-1">
+                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-mono font-bold border transition-all ${
+                  s < goamlStep ? "bg-emerald-500/20 border-emerald-500/50 text-emerald-300" :
+                  s === goamlStep ? "bg-amber-500/20 border-amber-500/50 text-amber-300" :
+                  "bg-muted/30 border-border text-muted-foreground"
+                }`}>{s + 1}</div>
+                {s < 3 && <div className={`h-px w-8 ${s < goamlStep ? "bg-emerald-500/50" : "bg-border"}`} />}
+              </div>
+            ))}
+            <span className="ml-3 text-[10px] font-mono text-muted-foreground">
+              {["Report Type", "Subject", "Transaction", "Narrative"][goamlStep]}
+            </span>
+          </div>
+
+          {/* Step 0: Report type */}
+          {goamlStep === 0 && (
+            <div className="space-y-3">
+              <div className="grid grid-cols-3 gap-2">
+                {(["STR", "CTR", "SAR"] as const).map(t => (
+                  <button
+                    key={t}
+                    onClick={() => setGoamlForm(p => ({ ...p, reportType: t }))}
+                    className={`p-3 rounded-xl border-2 text-left transition-all ${
+                      goamlForm.reportType === t ? "border-amber-500/60 bg-amber-500/10" : "border-border hover:border-border/80"
+                    }`}
+                  >
+                    <div className="text-sm font-mono font-bold text-foreground">{t}</div>
+                    <div className="text-[10px] text-muted-foreground mt-0.5">
+                      {t === "STR" && "Suspicious Transaction"}
+                      {t === "CTR" && "Cash Transaction ≥₦5M"}
+                      {t === "SAR" && "Suspicious Activity"}
+                    </div>
+                  </button>
+                ))}
+              </div>
+              <div className="bg-muted/10 rounded-lg p-3 border border-border/50 text-xs text-muted-foreground">
+                <span className="text-amber-400 font-semibold">Linked to:</span> {((liveInv as any) ?? inv)?.ref} — {((liveInv as any) ?? inv)?.subjectName}
+              </div>
+            </div>
+          )}
+
+          {/* Step 1: Subject */}
+          {goamlStep === 1 && (
+            <div className="space-y-3">
+              <div>
+                <Label className="text-[10px] font-mono text-muted-foreground mb-1 block">Full Name *</Label>
+                <Input value={goamlForm.subjectName} onChange={e => setGoamlForm(p => ({ ...p, subjectName: e.target.value }))} placeholder="Subject full name" className="text-sm" />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <Label className="text-[10px] font-mono text-muted-foreground mb-1 block">BVN</Label>
+                  <Input value={goamlForm.subjectBvn} onChange={e => setGoamlForm(p => ({ ...p, subjectBvn: e.target.value }))} placeholder="22-digit BVN" className="font-mono text-sm" maxLength={22} />
+                </div>
+                <div>
+                  <Label className="text-[10px] font-mono text-muted-foreground mb-1 block">NIN</Label>
+                  <Input value={goamlForm.subjectNin} onChange={e => setGoamlForm(p => ({ ...p, subjectNin: e.target.value }))} placeholder="11-digit NIN" className="font-mono text-sm" maxLength={11} />
+                </div>
+                <div>
+                  <Label className="text-[10px] font-mono text-muted-foreground mb-1 block">Account Number</Label>
+                  <Input value={goamlForm.subjectAccountNumber} onChange={e => setGoamlForm(p => ({ ...p, subjectAccountNumber: e.target.value }))} placeholder="10-digit NUBAN" className="font-mono text-sm" maxLength={10} />
+                </div>
+                <div>
+                  <Label className="text-[10px] font-mono text-muted-foreground mb-1 block">Bank</Label>
+                  <Select value={goamlForm.subjectBank} onValueChange={v => setGoamlForm(p => ({ ...p, subjectBank: v }))}>
+                    <SelectTrigger className="text-sm"><SelectValue placeholder="Select bank" /></SelectTrigger>
+                    <SelectContent>{NIGERIAN_BANKS.map(b => <SelectItem key={b} value={b}>{b}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Step 2: Transaction */}
+          {goamlStep === 2 && (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <Label className="text-[10px] font-mono text-muted-foreground mb-1 block">Transaction Date</Label>
+                  <Input type="date" value={goamlForm.transactionDate} onChange={e => setGoamlForm(p => ({ ...p, transactionDate: e.target.value }))} className="text-sm" />
+                </div>
+                <div>
+                  <Label className="text-[10px] font-mono text-muted-foreground mb-1 block">Currency</Label>
+                  <Select value={goamlForm.transactionCurrency} onValueChange={v => setGoamlForm(p => ({ ...p, transactionCurrency: v }))}>
+                    <SelectTrigger className="text-sm"><SelectValue /></SelectTrigger>
+                    <SelectContent>{["NGN","USD","GBP","EUR"].map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                <div className="col-span-2">
+                  <Label className="text-[10px] font-mono text-muted-foreground mb-1 block">Amount</Label>
+                  <Input type="number" value={goamlForm.transactionAmount} onChange={e => setGoamlForm(p => ({ ...p, transactionAmount: e.target.value }))} placeholder="0.00" className="font-mono text-sm" />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Step 3: Narrative */}
+          {goamlStep === 3 && (
+            <div className="space-y-3">
+              <div>
+                <Label className="text-[10px] font-mono text-muted-foreground mb-1 block">Suspicious Activity Category *</Label>
+                <Select value={goamlForm.suspiciousActivity} onValueChange={v => setGoamlForm(p => ({ ...p, suspiciousActivity: v }))}>
+                  <SelectTrigger className="text-sm"><SelectValue placeholder="Select category" /></SelectTrigger>
+                  <SelectContent>{GOAML_SUSPICIOUS_CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="text-[10px] font-mono text-muted-foreground mb-1 block">Detailed Narrative</Label>
+                <Textarea
+                  value={goamlForm.narrativeDetails}
+                  onChange={e => setGoamlForm(p => ({ ...p, narrativeDetails: e.target.value }))}
+                  placeholder="Describe the suspicious activity in detail…"
+                  rows={4}
+                  className="text-sm resize-none"
+                />
+              </div>
+              <div className="flex items-start gap-2 p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/30">
+                <AlertTriangle size={12} className="text-amber-400 mt-0.5 flex-shrink-0" />
+                <p className="text-[10px] text-amber-300">Filing a false STR is a criminal offence under MLPPA 2022. This will be saved as a draft for your review before submission to NFIU.</p>
+              </div>
+            </div>
+          )}
+
+          {/* Navigation */}
+          <div className="flex items-center justify-between pt-3 border-t border-border">
+            <Button variant="outline" size="sm" onClick={() => setGoamlStep(s => Math.max(0, s - 1) as 0|1|2|3)} disabled={goamlStep === 0} className="gap-1">
+              <ChevronLeft size={12} /> Back
+            </Button>
+            {goamlStep < 3 ? (
+              <Button size="sm" onClick={() => setGoamlStep(s => (s + 1) as 0|1|2|3)} disabled={!goamlCanNext()} className="gap-1">
+                Next <ChevronRight size={12} />
+              </Button>
+            ) : (
+              <Button
+                size="sm"
+                onClick={handleGoamlSubmit}
+                disabled={goamlCreateMutation.isPending || !goamlCanNext()}
+                className="gap-1 bg-amber-600 hover:bg-amber-700 text-white"
+              >
+                {goamlCreateMutation.isPending ? <><Loader2 size={12} className="animate-spin" /> Saving…</> : <><FileText size={12} /> Save Draft</>}
+              </Button>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </BISLayout>
   );
 }

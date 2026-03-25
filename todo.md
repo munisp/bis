@@ -668,3 +668,29 @@
 - [ ] Seed live demo database (pnpm db:seed)
 - [x] Update production readiness scorecard to 98/100
 - [ ] Final archive with all components
+
+## Phase 28 — Lakehouse, Mobile Shell & goAML STR Wizard
+
+### Lakehouse Integration
+- [x] Delta Lake Python writer service (services/lakehouse-writer/)
+- [x] DuckDB analytics query layer (server/lakehouse.ts tRPC router)
+- [x] Lakehouse service added to docker-compose.yml
+- [x] LakehouseAnalytics page in PWA (charts: investigations over time, risk distribution, alert heatmap)
+- [x] Lakehouse vitest tests
+
+### React Native Mobile Shell (bis-mobile/)
+- [x] Initialize Expo project (bis-mobile/)
+- [x] tRPC client binding (same API as PWA)
+- [x] Authentication screen (Manus OAuth deep-link)
+- [x] Dashboard screen with KPI cards
+- [x] Investigations list + detail screens
+- [x] KYC verification screen with camera
+- [x] Alerts screen
+- [x] README with run instructions
+
+### goAML STR Wizard
+- [x] goaml tRPC router (server/goaml.ts) with submitReport procedure (mock mode)
+- [x] 4-step STR Wizard modal embedded in InvestigationDetail.tsx (pre-fills subject data)
+- [x] "File STR" button wired into Investigation detail page (amber-styled action button)
+- [x] goAML XML generation (FATF goAML 4.0 schema)
+- [x] goAML vitest tests

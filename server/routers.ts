@@ -14,6 +14,7 @@ import { goamlRouter } from "./goaml";
 import { messagingRouter } from "./messaging";
 import { socialMonitoringRouter } from "./socialMonitoring";
 import { biometricRouter } from "./biometric";
+import { lakehouseRouter } from "./lakehouse";
 import { getDb } from "./db";
 import { evaluateAlertRules } from "./alertRules";
 import {
@@ -1795,5 +1796,6 @@ export const appRouter = router({
    messaging: messagingRouter,
   socialMonitoring: socialMonitoringRouter,
   biometric: biometricRouter,
+  lakehouse: lakehouseRouter,
 });
 export type AppRouter = typeof appRouter;
