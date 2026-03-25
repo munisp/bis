@@ -721,3 +721,27 @@
 - [x] pushDeviceTokens table added to schema.ts and migrated (migration 0015)
 - [x] notificationsRouter registered in appRouter
 - [x] Expo Push API integration (batched 100 tokens/request, ticket tracking)
+
+## Phase 31 — Push Triggers, goAML History, Lakehouse Cron, Archive
+
+### Investigation Status Push Trigger
+- [x] Wire notifications.sendToUser into investigations.updateStatus (flagged/completed)
+- [x] Wire notifications.sendToUser into investigations.assign (new assignee notified)
+- [x] Helper function sendPushToUser() in routers.ts for reuse across procedures
+
+### goAML Filing History Tab
+- [x] Add "STR Filings" tab to InvestigationDetail (alongside Overview, Evidence, Processing Log)
+- [x] goaml.list procedure filtered by investigationId
+- [x] Filing cards with status badge, filingRef, createdAt, and re-open XML preview button
+- [x] Empty state when no filings exist
+
+### Lakehouse Scheduled Sync
+- [x] POST /api/cron/lakehouse-sync Express route (CRON_SECRET bearer auth)
+- [x] lastSyncedAt timestamp stored in platform_settings table
+- [x] LakehouseAnalyticsPage shows "Last synced" timestamp with manual Sync Now button
+- [x] CRON_SECRET env var documented
+
+### Comprehensive Archive
+- [x] Full archive of all services, mobile, infra, docs (bis-platform-v31-20260324.tar.gz, 4.7 MB, 365 entries)
+- [x] Archive includes bis-mobile/ (26 files), services/ (5 services), infra/, drizzle/, server/ (47 files), client/ (142 files)
+- [x] Archive size accurate and complete (287 source files, no node_modules/dist/target)

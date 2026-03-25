@@ -234,4 +234,48 @@ export const lakehouseRouter = router({
         return { metric: input.metric, rows: mockQueryResult(sql).rows };
       }
     }),
+
+  /**
+   * Get the timestamp of the last successful lakehouse sync.
+   */
+  getLastSyncedAt: protectedProcedure.query(async () => {
+    try {
+      const { getDb } = await import("./db");
+      const { platformSettings } = await import("../drizzle/schema");
+      const { eq } = await import("drizzle-orm");
+      const db = await getDb();
+      if (!db) return { lastSyncedAt: null };
+      const [row] = await db
+        .select()
+        .from(platformSettings)
+        .where(eq(platformSettings.key, "lakehouse.lastSyncedAt"))
+        .limit(1);
+      return { lastSyncedAt: row?.value ?? null };
+    } catch {
+      return { lastSyncedAt: null };
+    }
+  }),
+
+  /**
+   * Trigger an immediate lakehouse sync (calls the cron endpoint internally).
+   * Only accessible to authenticated users; rate-limited by the cron secret.
+   */
+  triggerSync: protectedProcedure.mutation(async () => {
+    try {
+      const CRON_SECRET = process.env.CRON_SECRET ?? "bis-cron-dev-secret";
+      const res = await fetch("http://localhost:" + (process.env.PORT ?? "3000") + "/api/cron/lakehouse-sync", {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${CRON_SECRET}`, "Content-Type": "application/json" },
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: `Sync failed: ${text}` });
+      }
+      const data = await res.json() as { ok: boolean; ingested: number; errors: number; syncedAt: string };
+      return data;
+    } catch (err) {
+      if (err instanceof TRPCError) throw err;
+      throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Sync trigger failed" });
+    }
+  }),
 });

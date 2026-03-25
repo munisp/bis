@@ -11,7 +11,8 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, LineChart, Line, Legend,
 } from "recharts";
-import { Database, BarChart2, AlertTriangle, FileSearch, Globe, Terminal } from "lucide-react";
+import { Database, BarChart2, AlertTriangle, FileSearch, Globe, Terminal, RefreshCw, Clock } from "lucide-react";
+import { toast } from "sonner";
 
 // ── Colour palette ─────────────────────────────────────────────────────────────
 const SEVERITY_COLORS: Record<string, string> = {
@@ -300,6 +301,18 @@ function DuckDBConsole() {
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function LakehouseAnalyticsPage() {
+  const { data: syncData, refetch: refetchSyncTime } = trpc.lakehouse.getLastSyncedAt.useQuery(
+    undefined,
+    { refetchInterval: 60_000 }
+  );
+  const triggerSync = trpc.lakehouse.triggerSync.useMutation({
+    onSuccess: (data) => {
+      toast.success(`Sync complete — ${data.ingested} rows ingested`);
+      refetchSyncTime();
+    },
+    onError: (err) => toast.error(`Sync failed: ${err.message}`),
+  });
+
   return (
     <div className="space-y-6 p-6">
       {/* Header */}
@@ -310,9 +323,27 @@ export default function LakehouseAnalyticsPage() {
             Delta Lake + DuckDB — immutable event store with ad-hoc SQL analytics
           </p>
         </div>
-        <Badge variant="outline" className="text-xs font-mono">
-          Delta Lake v3 · DuckDB v1.1
-        </Badge>
+        <div className="flex items-center gap-3">
+          {syncData?.lastSyncedAt && (
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Clock size={11} />
+              Last synced: {new Date(syncData.lastSyncedAt as string).toLocaleString()}
+            </div>
+          )}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => triggerSync.mutate()}
+            disabled={triggerSync.isPending}
+            className="text-xs h-8"
+          >
+            <RefreshCw size={12} className={`mr-1.5 ${triggerSync.isPending ? 'animate-spin' : ''}`} />
+            {triggerSync.isPending ? 'Syncing…' : 'Sync Now'}
+          </Button>
+          <Badge variant="outline" className="text-xs font-mono">
+            Delta Lake v3 · DuckDB v1.1
+          </Badge>
+        </div>
       </div>
 
       {/* Table stats */}

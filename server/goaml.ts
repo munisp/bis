@@ -128,6 +128,7 @@ export const goamlRouter = router({
       z.object({
         status: z.enum(["draft", "submitted", "accepted", "rejected", "pending_review"]).optional(),
         search: z.string().optional(),
+        investigationRef: z.string().optional(),
         limit: z.number().min(1).max(100).default(50),
         offset: z.number().min(0).default(0),
       })
@@ -138,6 +139,7 @@ export const goamlRouter = router({
       const conditions = [];
       if (input.status) conditions.push(eq(goamlFilings.status, input.status));
       if (input.search) conditions.push(like(goamlFilings.subjectName, `%${input.search}%`));
+      if (input.investigationRef) conditions.push(eq(goamlFilings.investigationRef, input.investigationRef));
 
       const rows = await db
         .select()

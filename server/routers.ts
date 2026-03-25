@@ -78,6 +78,46 @@ async function riskEngineFetch(path: string, body: unknown) {
   return res.json();
 }
 
+/**
+ * Fire-and-forget push notification to all active devices for a user.
+ * Silently swallows errors so it never blocks the main mutation.
+ */
+async function sendPushToUser(
+  userId: number,
+  title: string,
+  body: string,
+  data: Record<string, unknown> = {},
+  channelId: "bis-alerts" | "bis-investigations" = "bis-investigations"
+) {
+  try {
+    const db = await getDb();
+    if (!db) return;
+    const { pushDeviceTokens } = await import("../drizzle/schema");
+    const { eq, and } = await import("drizzle-orm");
+    const tokens = await db
+      .select({ token: pushDeviceTokens.token, platform: pushDeviceTokens.platform })
+      .from(pushDeviceTokens)
+      .where(and(eq(pushDeviceTokens.userId, userId), eq(pushDeviceTokens.active, true)));
+    if (!tokens.length) return;
+    const messages = tokens.map((t) => ({
+      to: t.token,
+      title,
+      body,
+      data,
+      sound: "default" as const,
+      channelId: t.platform === "android" ? channelId : undefined,
+      priority: "high" as const,
+    }));
+    await fetch("https://exp.host/--/api/v2/push/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Accept": "application/json" },
+      body: JSON.stringify(messages),
+    });
+  } catch (e) {
+    console.warn("[Push] sendPushToUser failed:", e);
+  }
+}
+
 async function publishEvent(eventType: string, subjectRef: string, severity: string, payload: unknown, source = "bis-bff") {
   try {
     await fetch(`${EVENT_PROCESSOR_URL}/v1/events`, {
@@ -232,6 +272,14 @@ const investigationsRouter = router({
       ]);
       await writeAuditLog(db, { userId: ctx.user!.id, category: "investigation", action: `Assigned to ${input.assigneeName}`, targetRef: input.ref });
       await publishEvent("INVESTIGATION_ASSIGNED", input.ref, "info", { assigneeId: input.assigneeId, assigneeName: input.assigneeName });
+      // Push notification to the newly assigned analyst
+      sendPushToUser(
+        input.assigneeId,
+        `Investigation Assigned: ${input.ref}`,
+        `You have been assigned investigation ${input.ref} by ${ctx.user!.name ?? "a supervisor"}.`,
+        { type: "investigation", ref: input.ref },
+        "bis-investigations"
+      );
       return { success: true };
     }),
 
@@ -244,6 +292,24 @@ const investigationsRouter = router({
       await writeAuditLog(db, { userId: ctx.user!.id, category: "investigation", action: `Status changed to ${input.status}`, targetRef: input.ref });
       if (input.status === "flagged") {
         await publishEvent("INVESTIGATION_FLAGGED", input.ref, "high", { status: input.status });
+      }
+      // Push notification to the assigned analyst on flagged or completed
+      if (input.status === "flagged" || input.status === "completed") {
+        const [inv] = await db
+          .select({ assignedTo: investigations.assignedTo, subjectName: investigations.subjectName })
+          .from(investigations)
+          .where(eq(investigations.ref, input.ref))
+          .limit(1);
+        if (inv?.assignedTo) {
+          const emoji = input.status === "flagged" ? "🚨" : "✅";
+          sendPushToUser(
+            inv.assignedTo,
+            `${emoji} Investigation ${input.status === "flagged" ? "Flagged" : "Completed"}: ${input.ref}`,
+            `${inv.subjectName} — ${input.ref} has been marked ${input.status}.`,
+            { type: "investigation", ref: input.ref, status: input.status },
+            input.status === "flagged" ? "bis-alerts" : "bis-investigations"
+          );
+        }
       }
       return { success: true };
     }),

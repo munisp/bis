@@ -172,6 +172,115 @@ async function startServer() {
     }
   });
 
+  // ── Lakehouse cron sync ─────────────────────────────────────────────────────
+  // POST /api/cron/lakehouse-sync — ingests latest investigations/alerts/kyc rows
+  // into the Delta Lake lakehouse-writer service. Protected by CRON_SECRET.
+  app.post("/api/cron/lakehouse-sync", async (req, res) => {
+    try {
+      const expectedSecret = process.env.CRON_SECRET ?? "bis-cron-dev-secret";
+      const authHeader = req.headers["authorization"] ?? "";
+      const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+      if (token !== expectedSecret) {
+        res.status(401).json({ error: "Unauthorized" });
+        return;
+      }
+
+      const LAKEHOUSE_URL = process.env.BIS_LAKEHOUSE_URL ?? "http://localhost:8087";
+
+      // Fetch recent rows from DB and push to lakehouse
+      const { getDb } = await import("../db");
+      const { investigations, alerts, kycRecords } = await import("../../drizzle/schema");
+      const { desc } = await import("drizzle-orm");
+      const db = await getDb();
+      if (!db) {
+        res.status(503).json({ error: "Database unavailable" });
+        return;
+      }
+
+      const [recentInvestigations, recentAlerts, recentKyc] = await Promise.all([
+        db.select().from(investigations).orderBy(desc(investigations.updatedAt)).limit(100),
+        db.select().from(alerts).orderBy(desc(alerts.createdAt)).limit(100),
+        db.select().from(kycRecords).orderBy(desc(kycRecords.createdAt)).limit(100),
+      ]);
+
+      let ingested = 0;
+      let errors = 0;
+
+      // Ingest investigations
+      for (const inv of recentInvestigations) {
+        try {
+          await fetch(`${LAKEHOUSE_URL}/ingest/investigation`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              id: String(inv.id),
+              ref: inv.ref,
+              subject_name: inv.subjectName,
+              subject_type: inv.subjectType,
+              status: inv.status,
+              risk_score: inv.riskScore ?? 0,
+              country: inv.country ?? "NG",
+              tier: inv.tier ?? "standard",
+              created_at: inv.createdAt instanceof Date ? inv.createdAt.toISOString() : String(inv.createdAt),
+            }),
+          });
+          ingested++;
+        } catch { errors++; }
+      }
+
+      // Ingest alerts
+      for (const alert of recentAlerts) {
+        try {
+          await fetch(`${LAKEHOUSE_URL}/ingest/alert`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              id: String(alert.id),
+              title: alert.title,
+              severity: alert.severity,
+              status: alert.resolved ? "resolved" : alert.acknowledged ? "acknowledged" : "open",
+              subject_ref: alert.subjectRef ?? "",
+              created_at: alert.createdAt instanceof Date ? alert.createdAt.toISOString() : String(alert.createdAt),
+            }),
+          });
+          ingested++;
+        } catch { errors++; }
+      }
+
+      // Ingest KYC records
+      for (const kyc of recentKyc) {
+        try {
+          await fetch(`${LAKEHOUSE_URL}/ingest/kyc`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              id: String(kyc.id),
+              subject_name: kyc.subjectName,
+              subject_ref: kyc.subjectRef ?? "",
+              status: kyc.status,
+              risk_score: kyc.riskScore ?? 0,
+              created_at: kyc.createdAt instanceof Date ? kyc.createdAt.toISOString() : String(kyc.createdAt),
+            }),
+          });
+          ingested++;
+        } catch { errors++; }
+      }
+
+      // Persist last sync timestamp in platform_settings
+      const { platformSettings } = await import("../../drizzle/schema");
+      await db.insert(platformSettings)
+        .values({ key: "lakehouse.lastSyncedAt", value: new Date().toISOString(), namespace: "lakehouse" })
+        .onConflictDoUpdate({ target: platformSettings.key, set: { value: new Date().toISOString(), updatedAt: new Date() } });
+
+      const summary = { ingested, errors, rows: recentInvestigations.length + recentAlerts.length + recentKyc.length, syncedAt: new Date().toISOString() };
+      console.log(`[LakehouseSync] ${JSON.stringify(summary)}`);
+      res.json({ ok: true, ...summary });
+    } catch (err) {
+      console.error("[LakehouseSync] Error:", err);
+      res.status(500).json({ error: "Sync failed" });
+    }
+  });
+
   // OpenClaw managed instance + Swagger UI
   app.use(createOpenClawRouter());
 
