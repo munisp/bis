@@ -34,6 +34,9 @@ import {
   alertRules,
   ruleEvaluations,
   tenants,
+  fieldAgentPlaybooks,
+  duplicateIdentityChecks,
+  hostedVerificationLinks,
 } from "../drizzle/schema";
 import {
   getDashboardStats,
@@ -1871,6 +1874,291 @@ const alertRulesRouter = router({
 
 // ─── App Router ───────────────────────────────────────────────────────────────
 
+// ── Field Agent Playbooks Router ─────────────────────────────────────────────────────
+const SEED_PLAYBOOKS = [
+  {
+    title: "KYC Physical Visit",
+    category: "kyc_physical" as const,
+    description: "Standard playbook for physical KYC verification of an individual at their stated residential address.",
+    estimatedHours: 4,
+    requiredTier: "junior" as const,
+    steps: JSON.stringify([
+      { order: 1, action: "Confirm assignment and review subject brief", required: true },
+      { order: 2, action: "Travel to stated address; photograph exterior on arrival", required: true },
+      { order: 3, action: "Knock and introduce yourself as a BIS verification officer", required: true },
+      { order: 4, action: "Request to see original ID (NIN slip, passport, or driver's licence)", required: true },
+      { order: 5, action: "Photograph ID alongside subject's face (with consent)", required: true },
+      { order: 6, action: "Interview 2+ neighbours to confirm residency duration", required: true },
+      { order: 7, action: "Photograph interior of residence (living room only, with consent)", required: false },
+      { order: 8, action: "Complete BIS field report form and upload to platform", required: true },
+    ]),
+    dataToCollect: JSON.stringify([
+      "Full name as on ID", "NIN or BVN", "Date of birth", "Residential address (GPS coordinates)",
+      "Duration of residence at address", "Landlord name and phone", "Employer or business name",
+      "2 neighbour statements", "Front and back of ID document", "Face photograph",
+    ]),
+    safetyNotes: "Do not enter the premises alone. If the subject is hostile or the environment feels unsafe, withdraw and report immediately. Always carry your BIS ID card and a charged mobile phone.",
+    legalNotes: "You must obtain verbal consent before photographing any person or their property. Do not retain copies of ID documents beyond the investigation period. All data collected is subject to NDPR.",
+    nigeriaContext: "Many Lagos addresses are informal. Use Google Maps Plus Codes or WhatsApp location pins to confirm. In northern states, engage a local community liaison before visiting.",
+    isActive: true,
+    version: 1,
+  },
+  {
+    title: "Business Premises Inspection (KYB)",
+    category: "kyb_premises" as const,
+    description: "Verify that a registered business is genuinely operating at its stated CAC-registered address.",
+    estimatedHours: 6,
+    requiredTier: "senior" as const,
+    steps: JSON.stringify([
+      { order: 1, action: "Obtain CAC registration certificate and stated business address", required: true },
+      { order: 2, action: "Arrive at premises; photograph signage, entrance, and street view", required: true },
+      { order: 3, action: "Confirm business name matches CAC certificate", required: true },
+      { order: 4, action: "Interview a staff member (not the director) about business operations", required: true },
+      { order: 5, action: "Request to see utility bill or tenancy agreement for the premises", required: true },
+      { order: 6, action: "Photograph interior (reception/trading floor) with consent", required: false },
+      { order: 7, action: "Interview a neighbouring business about the subject company", required: true },
+      { order: 8, action: "Verify director identity if present (photograph ID)", required: false },
+      { order: 9, action: "Complete KYB field report and upload all evidence", required: true },
+    ]),
+    dataToCollect: JSON.stringify([
+      "Business name (as displayed)", "RC Number", "Physical address with GPS", "Operating hours",
+      "Number of visible staff", "Nature of business (observed)", "Utility bill or tenancy agreement",
+      "Neighbour statement", "Photographs (min 4)", "Director identity (if present)",
+    ]),
+    safetyNotes: "For businesses in high-risk sectors (bureau de change, logistics, pharmaceuticals), request a senior agent. Do not accept hospitality from the subject.",
+    legalNotes: "Business premises inspections are lawful under the CBN KYC Framework and EFCC Act. Carry a copy of the client's authorisation letter.",
+    nigeriaContext: "Many Nigerian SMEs operate from shared office spaces or market stalls. Alaba International, Computer Village, and Ladipo Market require prior coordination with market association leadership.",
+    isActive: true,
+    version: 1,
+  },
+  {
+    title: "Asset Verification",
+    category: "asset_verification" as const,
+    description: "Physically verify and document assets declared by a subject (vehicles, real estate, equipment).",
+    estimatedHours: 8,
+    requiredTier: "lead" as const,
+    steps: JSON.stringify([
+      { order: 1, action: "Review asset list provided by client (type, value, location)", required: true },
+      { order: 2, action: "For vehicles: confirm plate number, chassis number, and engine number", required: true },
+      { order: 3, action: "For real estate: visit property and photograph from all angles", required: true },
+      { order: 4, action: "Check land registry records at the relevant State Land Registry", required: true },
+      { order: 5, action: "Interview a neighbour or estate agent about the property", required: true },
+      { order: 6, action: "Confirm title document (C of O, Deed of Assignment) with subject", required: true },
+      { order: 7, action: "Estimate market value based on comparable properties in the area", required: false },
+      { order: 8, action: "Submit asset verification report with all photographs and documents", required: true },
+    ]),
+    dataToCollect: JSON.stringify([
+      "Asset type and description", "Asset location (GPS)", "Serial/chassis/plate numbers",
+      "Title document reference", "Estimated market value", "Encumbrances (mortgages, liens)",
+      "Photographs (min 6 per asset)", "Land registry confirmation", "Neighbour/agent statement",
+    ]),
+    safetyNotes: "Do not enter gated estates without prior appointment. For high-value assets, request a two-agent team.",
+    legalNotes: "Asset verification does not constitute a legal search. Advise clients to obtain a formal search at the relevant land registry for conclusive title confirmation.",
+    nigeriaContext: "Land tenure in Nigeria is complex. Distinguish between C of O (strongest title), Deed of Assignment, and Governor's Consent. Lekki and Ikoyi properties may be on reclaimed land with disputed titles.",
+    isActive: true,
+    version: 1,
+  },
+  {
+    title: "Surveillance & Lifestyle Observation",
+    category: "surveillance" as const,
+    description: "Discreet observation of a subject's lifestyle, movements, and associates over a defined period.",
+    estimatedHours: 16,
+    requiredTier: "specialist" as const,
+    steps: JSON.stringify([
+      { order: 1, action: "Receive surveillance brief with subject photo, vehicle, and known locations", required: true },
+      { order: 2, action: "Conduct static observation at subject's home address (morning departure)", required: true },
+      { order: 3, action: "Document vehicle(s) used, departure times, and destinations", required: true },
+      { order: 4, action: "Observe workplace or business premises during operating hours", required: true },
+      { order: 5, action: "Note known associates (photograph if in public space)", required: true },
+      { order: 6, action: "Document lifestyle indicators (vehicle class, clothing, dining)", required: false },
+      { order: 7, action: "Compile surveillance log with timestamps and photographs", required: true },
+    ]),
+    dataToCollect: JSON.stringify([
+      "Subject movements log (time, location, mode of transport)", "Vehicle registration numbers",
+      "Known associates (names/descriptions)", "Lifestyle indicators", "Photographs (public spaces only)",
+      "Anomalies or red flags observed",
+    ]),
+    safetyNotes: "Surveillance must be conducted from public spaces only. Do not trespass. If the subject appears to be aware of surveillance, abort and report immediately. Never confront the subject.",
+    legalNotes: "Surveillance in public spaces is lawful. Do not photograph persons inside private premises. All surveillance must be authorised in writing by the client and approved by a BIS supervisor.",
+    nigeriaContext: "Traffic in Lagos can make mobile surveillance difficult. Use motorcycle agents for dense urban areas. In Abuja, many high-value subjects live in gated estates — static observation from public roads is the only option.",
+    isActive: true,
+    version: 1,
+  },
+];
+
+const playbooksRouter = router({
+  list: protectedProcedure
+    .input(z.object({ category: z.string().optional(), activeOnly: z.boolean().optional() }).optional())
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return [];
+      const rows = await db.select().from(fieldAgentPlaybooks)
+        .where(input?.activeOnly !== false ? eq(fieldAgentPlaybooks.isActive, true) : undefined)
+        .orderBy(asc(fieldAgentPlaybooks.category), asc(fieldAgentPlaybooks.title));
+      // Auto-seed if empty
+      if (rows.length === 0) {
+        await db.insert(fieldAgentPlaybooks).values(SEED_PLAYBOOKS);
+        return db.select().from(fieldAgentPlaybooks).orderBy(asc(fieldAgentPlaybooks.category), asc(fieldAgentPlaybooks.title));
+      }
+      return rows;
+    }),
+
+  get: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
+      const [row] = await db.select().from(fieldAgentPlaybooks).where(eq(fieldAgentPlaybooks.id, input.id));
+      if (!row) throw new TRPCError({ code: 'NOT_FOUND', message: 'Playbook not found' });
+      return row;
+    }),
+
+  create: adminProcedure
+    .input(z.object({
+      title: z.string().min(3).max(200),
+      category: z.enum(["kyc_physical", "kyb_premises", "asset_verification", "surveillance", "address_verification", "interview", "evidence_collection", "emergency"]),
+      description: z.string(),
+      estimatedHours: z.number().min(1).max(200),
+      requiredTier: z.enum(["junior", "senior", "lead", "specialist"]),
+      steps: z.string(),
+      dataToCollect: z.string(),
+      safetyNotes: z.string().optional(),
+      legalNotes: z.string().optional(),
+      nigeriaContext: z.string().optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
+      const [row] = await db.insert(fieldAgentPlaybooks).values(input).returning();
+      return row;
+    }),
+});
+
+// ── Duplicate Identity Check Router ─────────────────────────────────────────────────
+const duplicateCheckRouter = router({
+  check: protectedProcedure
+    .input(z.object({
+      subjectName: z.string().min(2),
+      nin: z.string().optional(),
+      bvn: z.string().optional(),
+      phone: z.string().optional(),
+      faceImageUrl: z.string().optional(),
+      investigationRef: z.string().optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
+      // Check for existing records with matching NIN, BVN, or phone
+      const conditions = [];
+      if (input.nin) conditions.push(eq(duplicateIdentityChecks.nin, input.nin));
+      if (input.bvn) conditions.push(eq(duplicateIdentityChecks.bvn, input.bvn));
+      if (input.phone) conditions.push(eq(duplicateIdentityChecks.phone, input.phone));
+
+      // Also check investigations table for matches
+      const invConditions = [];
+      if (input.nin) invConditions.push(eq(investigations.nin, input.nin));
+      if (input.bvn) invConditions.push(eq(investigations.bvn, input.bvn));
+      if (input.phone) invConditions.push(eq(investigations.phone, input.phone));
+
+      const existingInvs = invConditions.length > 0
+        ? await db.select({ ref: investigations.ref, subjectName: investigations.subjectName, status: investigations.status })
+            .from(investigations)
+            .where(invConditions.length === 1 ? invConditions[0] : sql`${invConditions.map(c => sql`(${c})`).reduce((a, b) => sql`${a} OR ${b}`)}`)
+            .limit(10)
+        : [];
+
+      const matchCount = existingInvs.length;
+      const status = matchCount === 0 ? 'no_match' : matchCount >= 2 ? 'confirmed_duplicate' : 'possible_match';
+      const confidenceScore = matchCount === 0 ? 0 : Math.min(95, 40 + matchCount * 25);
+
+      const [record] = await db.insert(duplicateIdentityChecks).values({
+        subjectName: input.subjectName,
+        nin: input.nin,
+        bvn: input.bvn,
+        phone: input.phone,
+        faceImageUrl: input.faceImageUrl,
+        investigationRef: input.investigationRef,
+        status: status as any,
+        matchCount,
+        matchDetails: JSON.stringify(existingInvs),
+        confidenceScore,
+        requestedBy: ctx.user.id,
+        completedAt: new Date(),
+      }).returning();
+
+      // Write audit log
+      await db.insert(auditLog).values({
+        userId: ctx.user.id,
+        userEmail: ctx.user.email ?? undefined,
+        category: 'kyc',
+        action: 'duplicate_identity_check',
+        targetRef: input.investigationRef ?? record.id.toString(),
+        result: 'success',
+        detail: { status, matchCount, confidenceScore },
+      });
+
+      return { ...record, matches: existingInvs };
+    }),
+
+  history: protectedProcedure
+    .input(z.object({ limit: z.number().min(1).max(100).default(20) }))
+    .query(async ({ ctx }) => {
+      const db = await getDb();
+      if (!db) return [];
+      return db.select().from(duplicateIdentityChecks)
+        .where(eq(duplicateIdentityChecks.requestedBy, ctx.user.id))
+        .orderBy(desc(duplicateIdentityChecks.createdAt))
+        .limit(20);
+    }),
+});
+
+// ── Hosted Verification Link Router ─────────────────────────────────────────────────
+const hostedLinkRouter = router({
+  create: protectedProcedure
+    .input(z.object({
+      subjectName: z.string().optional(),
+      investigationRef: z.string().optional(),
+      requiredChecks: z.array(z.enum(["nin", "bvn", "selfie", "document", "address", "phone"])).min(1),
+      expiryHours: z.number().min(1).max(168).default(48),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
+      const token = Buffer.from(crypto.randomUUID()).toString('base64url').replace(/[^a-zA-Z0-9]/g, '').slice(0, 32);
+      const expiresAt = new Date(Date.now() + input.expiryHours * 3600 * 1000);
+      const [link] = await db.insert(hostedVerificationLinks).values({
+        token,
+        investigationRef: input.investigationRef,
+        subjectName: input.subjectName,
+        requiredChecks: JSON.stringify(input.requiredChecks),
+        expiresAt,
+        createdBy: ctx.user.id,
+      }).returning();
+      return { ...link, url: `${process.env.VITE_OAUTH_PORTAL_URL ?? ''}/verify/${token}` };
+    }),
+
+  list: protectedProcedure
+    .query(async ({ ctx }) => {
+      const db = await getDb();
+      if (!db) return [];
+      return db.select().from(hostedVerificationLinks)
+        .where(eq(hostedVerificationLinks.createdBy, ctx.user.id))
+        .orderBy(desc(hostedVerificationLinks.createdAt))
+        .limit(50);
+    }),
+
+  revoke: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
+      await db.update(hostedVerificationLinks)
+        .set({ status: 'revoked' })
+        .where(eq(hostedVerificationLinks.id, input.id));
+      return { success: true };
+    }),
+});
+
 export const appRouter = router({
   system: systemRouter,
   auth: router({
@@ -1906,5 +2194,8 @@ export const appRouter = router({
   socialMonitoring: socialMonitoringRouter,
   biometric: biometricRouter,
   lakehouse: lakehouseRouter,
+  playbooks: playbooksRouter,
+  duplicateCheck: duplicateCheckRouter,
+  hostedLinks: hostedLinkRouter,
 });
 export type AppRouter = typeof appRouter;

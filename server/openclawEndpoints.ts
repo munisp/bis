@@ -10,6 +10,9 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { invokeLLM } from "./_core/llm";
+import { getDb } from "./db";
+import { apiTokens } from "../drizzle/schema";
+import { eq } from "drizzle-orm";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -167,6 +170,33 @@ export function createOpenClawRouter(): Router {
 
     try {
       const { result, tokens_consumed } = await executeOpenClawAction(action, prompt);
+
+      // ── Token billing: debit tokens_consumed from the calling tenant's balance ──
+      try {
+        const db = await getDb();
+        if (db) {
+          // Find the API token record to get the tenantId
+          // Look up by prefix (first 20 chars of the token) since we store hash not plaintext
+          const tokenPrefix = token.slice(0, 20);
+          const [tokenRecord] = await db
+            .select({ id: apiTokens.id, tenantId: apiTokens.tenantId, tokensConsumed: apiTokens.tokensConsumed })
+            .from(apiTokens)
+            .where(eq(apiTokens.prefix, tokenPrefix))
+            .limit(1);
+          if (tokenRecord) {
+            // Increment tokensConsumed on the api_tokens record
+            await db
+              .update(apiTokens)
+              .set({ tokensConsumed: (tokenRecord.tokensConsumed ?? 0) + tokens_consumed })
+              .where(eq(apiTokens.id, tokenRecord.id));
+            console.log(`[OpenClaw] Billed ${tokens_consumed} tokens to tenant=${tokenRecord.tenantId} action=${action}`);
+          }
+        }
+      } catch (billingErr) {
+        // Non-fatal — log and continue so the action result is still returned
+        console.warn("[OpenClaw] Token billing failed (non-fatal):", billingErr);
+      }
+
       return res.json({ result, tokens_consumed, action });
     } catch (err) {
       console.error("[OpenClaw] Action error:", err);

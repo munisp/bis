@@ -744,3 +744,40 @@
 
 ### Archive
 - [x] Comprehensive archive of entire platform (v35)
+
+## Phase 36 — Smile ID Gaps, OpenClaw Social Monitoring, Field Playbook, Zero-Footprint
+
+### Smile ID Gap Implementation
+- [x] Duplicate account detection page/procedure (DuplicateIdentityCheckPage + trpc.duplicateCheck.*)
+- [x] No-code hosted verification link generator (HostedVerificationLinksPage + trpc.hostedLinks.*)
+- [x] Pan-Africa document type stubs in KYC (Ghana, Kenya, South Africa, Rwanda) — DB + procedures
+- [x] DB migration 0017 applied (fieldAgentPlaybooks, duplicateIdentityChecks, hostedVerificationLinks)
+
+### OpenClaw Social & Messaging Channel Monitoring
+- [x] social_monitor action added to OpenClaw executor (Twitter/X, LinkedIn, news OSINT)
+- [x] channel_monitor action added (WhatsApp/Telegram channel intelligence stub + architecture doc)
+- [x] New actions documented in analysis document with architecture explanation
+- [x] OpenClaw token billing wired: tokensConsumed column on api_tokens, debit on each execute call
+- [x] DB migration 0018 applied (tokensConsumed column)
+
+### Field Agent Playbook System
+- [x] fieldAgentPlaybooks table added to schema.ts
+- [x] tRPC procedures: playbooks.list, playbooks.get, playbooks.create (admin)
+- [x] FieldAgentPlaybooksPage.tsx created with two-pane browser + step checklist
+- [x] Agent Playbooks added to BISLayout sidebar (DATA SOURCES section)
+- [x] Mobile playbook screen: bis-mobile/app/playbook/[id].tsx (step-by-step with data collection)
+
+### Zero-Footprint Hardening
+- [x] ZeroFootprintPage reviewed — already wired to trpc.screening.create
+- [x] Real tRPC procedure for zero-footprint search (OSINT aggregation via LLM)
+- [x] Results persisted to screening_requests table
+- [x] Audit log entry on each zero-footprint search
+- [x] Result history displayed on the page
+
+### Suggested Next Steps (from Phase 35)
+- [x] SLA breach vitest test (server/slaBreachChecker.test.ts — 6 tests, all passing)
+- [x] OpenClaw token billing: tokensConsumed debited on each execute call (non-fatal, prefix-based lookup)
+- [x] Bulk archive action in Investigations toolbar (destructive confirmation dialog + Archive button)
+
+### Archive
+- [x] Comprehensive archive of entire platform (v36)

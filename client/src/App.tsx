@@ -44,6 +44,9 @@ const QuickCheck = lazy(() => import("./pages/QuickCheck"));
 const GoamlWizard = lazy(() => import("./pages/GoamlWizard"));
 const TenantBrandingPage           = lazy(() => import("@/pages/TenantBrandingPage"));
 const LakehouseAnalyticsPage       = lazy(() => import("@/pages/bis/LakehouseAnalyticsPage"));
+const FieldAgentPlaybooksPage      = lazy(() => import("@/pages/bis/FieldAgentPlaybooksPage"));
+const DuplicateIdentityCheckPage   = lazy(() => import("@/pages/bis/DuplicateIdentityCheckPage"));
+const HostedVerificationLinksPage  = lazy(() => import("@/pages/bis/HostedVerificationLinksPage"));
 
 // ─── Page loading skeleton ────────────────────────────────────────────────────
 
@@ -103,6 +106,9 @@ function Router() {
         <Route path="/goaml" component={GoamlWizard} />
         <Route path="/lakehouse" component={LakehouseAnalyticsPage} />
         <Route path="/tenants/:id/settings" component={TenantBrandingPage} />
+        <Route path="/playbooks" component={FieldAgentPlaybooksPage} />
+        <Route path="/duplicate-check" component={DuplicateIdentityCheckPage} />
+        <Route path="/hosted-links" component={HostedVerificationLinksPage} />
 
         {/* Fallback */}
         <Route path="/404" component={NotFound} />

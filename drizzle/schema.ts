@@ -506,6 +506,7 @@ export const apiTokens = pgTable("api_tokens", {
   /** Requests per minute limit */
   rateLimit: integer("rateLimit").notNull().default(60),
   usageCount: integer("usageCount").notNull().default(0),
+  tokensConsumed: integer("tokensConsumed").notNull().default(0),
   lastUsedAt: timestamp("lastUsedAt"),
   expiresAt: timestamp("expiresAt"),
   active: boolean("active").notNull().default(true),
@@ -659,3 +660,69 @@ export type SocialMonitorConfig = typeof socialMonitorConfigs.$inferSelect;
 export type InsertSocialMonitorConfig = typeof socialMonitorConfigs.$inferInsert;
 export type SocialMention = typeof socialMentions.$inferSelect;
 export type InsertSocialMention = typeof socialMentions.$inferInsert;
+
+// ── Field Agent Playbooks ─────────────────────────────────────────────────────
+export const playbookCategoryEnum = pgEnum("playbook_category", [
+  "kyc_physical", "kyb_premises", "asset_verification", "surveillance",
+  "address_verification", "interview", "evidence_collection", "emergency",
+]);
+
+export const fieldAgentPlaybooks = pgTable("field_agent_playbooks", {
+  id: serial("id").primaryKey(),
+  title: varchar("title", { length: 200 }).notNull(),
+  category: playbookCategoryEnum("category").notNull(),
+  description: text("description").notNull(),
+  estimatedHours: integer("estimatedHours").notNull().default(4),
+  requiredTier: agentTierEnum("requiredTier").notNull().default("junior"),
+  steps: text("steps").notNull(),
+  dataToCollect: text("dataToCollect").notNull(),
+  safetyNotes: text("safetyNotes"),
+  legalNotes: text("legalNotes"),
+  nigeriaContext: text("nigeriaContext"),
+  isActive: boolean("isActive").notNull().default(true),
+  version: integer("version").notNull().default(1),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+export type FieldAgentPlaybook = typeof fieldAgentPlaybooks.$inferSelect;
+export type InsertFieldAgentPlaybook = typeof fieldAgentPlaybooks.$inferInsert;
+
+// ── Duplicate Identity Checks ─────────────────────────────────────────────────
+export const duplicateCheckStatusEnum = pgEnum("duplicate_check_status", ["pending", "no_match", "possible_match", "confirmed_duplicate"]);
+
+export const duplicateIdentityChecks = pgTable("duplicate_identity_checks", {
+  id: serial("id").primaryKey(),
+  investigationRef: varchar("investigationRef", { length: 50 }),
+  subjectName: varchar("subjectName", { length: 200 }).notNull(),
+  faceImageUrl: varchar("faceImageUrl", { length: 500 }),
+  nin: varchar("nin", { length: 20 }),
+  bvn: varchar("bvn", { length: 20 }),
+  phone: varchar("phone", { length: 20 }),
+  status: duplicateCheckStatusEnum("status").notNull().default("pending"),
+  matchCount: integer("matchCount").notNull().default(0),
+  matchDetails: text("matchDetails"),
+  confidenceScore: integer("confidenceScore").notNull().default(0),
+  requestedBy: integer("requestedBy"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  completedAt: timestamp("completedAt"),
+});
+export type DuplicateIdentityCheck = typeof duplicateIdentityChecks.$inferSelect;
+
+// ── Hosted Verification Links ─────────────────────────────────────────────────
+export const hostedLinkStatusEnum = pgEnum("hosted_link_status", ["active", "completed", "expired", "revoked"]);
+
+export const hostedVerificationLinks = pgTable("hosted_verification_links", {
+  id: serial("id").primaryKey(),
+  token: varchar("token", { length: 64 }).notNull().unique(),
+  tenantId: integer("tenantId"),
+  investigationRef: varchar("investigationRef", { length: 50 }),
+  subjectName: varchar("subjectName", { length: 200 }),
+  requiredChecks: text("requiredChecks").notNull(),
+  expiresAt: timestamp("expiresAt").notNull(),
+  status: hostedLinkStatusEnum("status").notNull().default("active"),
+  completedAt: timestamp("completedAt"),
+  resultRef: varchar("resultRef", { length: 50 }),
+  createdBy: integer("createdBy"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type HostedVerificationLink = typeof hostedVerificationLinks.$inferSelect;

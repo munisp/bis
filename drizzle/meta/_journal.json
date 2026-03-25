@@ -120,6 +120,20 @@
       "when": 1774434997057,
       "tag": "0016_mighty_norman_osborn",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1774436141203,
+      "tag": "0017_yielding_star_brand",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1774436817343,
+      "tag": "0018_careless_jane_foster",
+      "breakpoints": true
     }
   ]
 }

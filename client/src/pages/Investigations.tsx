@@ -17,7 +17,7 @@ import {
   Clock, CheckCircle2, AlertTriangle, Loader2, FileText,
   X, SlidersHorizontal, ArrowUpDown, ArrowUp, ArrowDown,
   ChevronDown, ChevronUp, Bookmark, BookmarkCheck, Trash2, Download, RefreshCw,
-  CalendarClock
+  CalendarClock, Archive
 } from "lucide-react";
 import { InvestigationStatus, InvestigationTier, getStatusBadgeClass, formatDateTime } from "@/lib/bisUtils";
 import { trpc } from "@/lib/trpc";
@@ -165,6 +165,7 @@ export default function Investigations() {
   const [bulkDueAt, setBulkDueAt] = useState('');
   const [statusDialogOpen, setStatusDialogOpen] = useState(false);
   const [bulkStatus, setBulkStatus] = useState<'pending' | 'active' | 'completed' | 'archived'>('active');
+  const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
 
   // Filters
   const [filters, setFilters] = useState<FilterState>(EMPTY_FILTERS);
@@ -479,6 +480,46 @@ export default function Investigations() {
         </DialogContent>
       </Dialog>
 
+      {/* ── Bulk Archive Dialog ── */}
+      <Dialog open={archiveDialogOpen} onOpenChange={setArchiveDialogOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Archive size={16} className="text-red-400" />
+              Archive Investigations
+            </DialogTitle>
+          </DialogHeader>
+          <div className="py-2">
+            <p className="text-sm text-muted-foreground mb-2">
+              You are about to archive{" "}
+              <span className="font-semibold text-foreground">{selectedRefs.size}</span>{" "}
+              investigation{selectedRefs.size !== 1 ? 's' : ''}.
+            </p>
+            <p className="text-xs text-amber-500 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
+              Archived investigations are hidden from the default list view but remain searchable. This action can be reversed by changing the status back to active.
+            </p>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" size="sm" onClick={() => setArchiveDialogOpen(false)}>Cancel</Button>
+            <Button
+              size="sm"
+              variant="destructive"
+              className="gap-1.5"
+              disabled={bulkUpdateStatusMutation.isPending}
+              onClick={() => bulkUpdateStatusMutation.mutate({
+                refs: Array.from(selectedRefs),
+                status: 'archived',
+              }, {
+                onSuccess: () => setArchiveDialogOpen(false),
+              })}
+            >
+              {bulkUpdateStatusMutation.isPending ? <Loader2 size={12} className="animate-spin" /> : <Archive size={12} />}
+              Archive {selectedRefs.size}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* ── Bulk action toolbar (appears when rows are selected) ── */}
       {someSelected && (
         <div className="flex items-center gap-3 mb-3 px-3 py-2 rounded-lg bg-primary/10 border border-primary/30 text-sm">
@@ -500,6 +541,14 @@ export default function Investigations() {
               onClick={() => setSlaDialogOpen(true)}
             >
               <CalendarClock size={11} /> Set SLA
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs gap-1.5 border-red-500/40 text-red-400 hover:bg-red-500/10"
+              onClick={() => setArchiveDialogOpen(true)}
+            >
+              <Archive size={11} /> Archive
             </Button>
             <Button
               size="sm"

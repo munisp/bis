@@ -8,7 +8,8 @@ import {
   Activity, Users, Database, Settings, Bell, ChevronDown,
   ChevronRight, LogOut, Menu, X, AlertTriangle, Car, Pill,
   Briefcase, Globe, MapPin, MessageSquare, Building2, Eye,
-  UserCheck, BarChart3, Key, Zap, CheckCheck, ArrowRight, Sun, Moon, ClipboardList, Wallet, UserSearch, Shield, BarChart2
+  UserCheck, BarChart3, Key, Zap, CheckCheck, ArrowRight, Sun, Moon, ClipboardList, Wallet, UserSearch, Shield, BarChart2,
+  BookOpen, Link2
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -85,6 +86,7 @@ const BASE_NAV_GROUPS: NavGroup[] = [
     items: [
       { label: 'Nigerian Data Bundle', href: '/nigeria-data-bundle', icon: <MapPin size={15} /> },
       { label: 'Field Agents', href: '/field-agents', icon: <Users size={15} /> },
+      { label: 'Agent Playbooks', href: '/playbooks', icon: <BookOpen size={15} /> },
       { label: 'Data Sources', href: '/data-sources', icon: <Database size={15} /> },
     ],
   },
@@ -108,6 +110,8 @@ const BASE_NAV_GROUPS: NavGroup[] = [
       { label: 'QuickCheck', href: '/quickcheck', icon: <UserSearch size={15} /> },
       { label: 'goAML STR Wizard', href: '/goaml', icon: <Shield size={15} /> },
       { label: 'Lakehouse Analytics', href: '/lakehouse', icon: <BarChart2 size={15} /> },
+      { label: 'Duplicate ID Check', href: '/duplicate-check', icon: <UserSearch size={15} /> },
+      { label: 'Hosted Verify Links', href: '/hosted-links', icon: <Link2 size={15} /> },
     ],
   },
 ];
