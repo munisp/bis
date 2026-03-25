@@ -44,6 +44,10 @@ function AppWithPush() {
           name="investigation/[id]"
           options={{ title: "Investigation Detail" }}
         />
+        <Stack.Screen
+          name="alerts/[id]"
+          options={{ title: "Alert Detail" }}
+        />
         <Stack.Screen name="+not-found" />
       </Stack>
       <StatusBar style="light" />

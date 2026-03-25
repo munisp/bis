@@ -4,6 +4,7 @@ import {
   ActivityIndicator, RefreshControl,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
 import { trpc } from "@/lib/trpc";
 import { sendLocalNotification } from "@/hooks/usePushNotifications";
 
@@ -18,9 +19,10 @@ const SEV_COLOR: Record<string, string> = {
 };
 
 export default function AlertsScreen() {
+  const router = useRouter();
   const utils = trpc.useUtils();
   const { data, isLoading, refetch, isRefetching } = trpc.alerts.list.useQuery(
-    { page: 1, limit: 30, resolved: false },
+    { limit: 30 },
     {
       staleTime: 30_000,
       // Poll every 60 seconds to detect new alerts in the background
@@ -32,7 +34,7 @@ export default function AlertsScreen() {
     onSuccess: () => utils.alerts.list.invalidate(),
   });
 
-  const alerts = (data as any)?.alerts ?? [];
+  const alerts = Array.isArray(data) ? data : [];
 
   // Track previously seen alert IDs to detect truly new arrivals
   const seenIdsRef = useRef<Set<number>>(new Set());
@@ -77,22 +79,29 @@ export default function AlertsScreen() {
           renderItem={({ item }: { item: any }) => {
             const sc = SEV_COLOR[item.severity] ?? COLORS.muted;
             return (
-              <View style={[styles.card, { borderLeftColor: sc, borderLeftWidth: 3 }]}>
+              <TouchableOpacity
+                style={[styles.card, { borderLeftColor: sc, borderLeftWidth: 3 }]}
+                onPress={() => router.push(`/alerts/${item.id}` as any)}
+                activeOpacity={0.75}
+              >
                 <View style={styles.cardHeader}>
                   <View style={[styles.sevBadge, { backgroundColor: sc + "20" }]}>
                     <Text style={[styles.sevText, { color: sc }]}>
                       {item.severity?.toUpperCase()}
                     </Text>
                   </View>
-                  {!item.acknowledged && (
-                    <TouchableOpacity
-                      onPress={() => acknowledgeMutation.mutate({ alertId: item.id })}
-                      style={styles.ackButton}
-                    >
-                      <Ionicons name="checkmark-outline" size={14} color={COLORS.primary} />
-                      <Text style={styles.ackText}>Ack</Text>
-                    </TouchableOpacity>
-                  )}
+                  <View style={{ flexDirection: "row", gap: 6, alignItems: "center" }}>
+                    {!item.acknowledged && (
+                      <TouchableOpacity
+                        onPress={() => acknowledgeMutation.mutate({ id: item.id })}
+                        style={styles.ackButton}
+                      >
+                        <Ionicons name="checkmark-outline" size={14} color={COLORS.primary} />
+                        <Text style={styles.ackText}>Ack</Text>
+                      </TouchableOpacity>
+                    )}
+                    <Ionicons name="chevron-forward" size={14} color={COLORS.muted} />
+                  </View>
                 </View>
                 <Text style={styles.cardTitle}>{item.title}</Text>
                 {item.body && (
@@ -103,7 +112,7 @@ export default function AlertsScreen() {
                 <Text style={styles.cardDate}>
                   {new Date(item.createdAt).toLocaleString()}
                 </Text>
-              </View>
+              </TouchableOpacity>
             );
           }}
           ListEmptyComponent={

@@ -47,7 +47,7 @@ import {
   getMonitors, createMonitor, updateMonitor,
   getScreeningRequests, createScreeningRequest, updateScreeningRequest,
 } from "./db";
-import { eq, desc, and, ilike, gte, lte, sql, count } from "drizzle-orm";
+import { eq, desc, asc, and, ilike, gte, lte, sql, count } from "drizzle-orm";
 import { z } from "zod";
 
 // ─── Service URLs ─────────────────────────────────────────────────────────────
@@ -213,6 +213,7 @@ const investigationsRouter = router({
       address: z.string().optional(),
       purpose: z.string().optional(),
       dataSources: z.array(z.string()).optional(),
+      dueAt: z.number().optional(),
     }))
     .mutation(async ({ input, ctx }) => {
       const db = await getDb();
@@ -235,6 +236,7 @@ const investigationsRouter = router({
         purpose: input.purpose,
         dataSources: input.dataSources as any,
         createdBy: ctx.user!.id,
+        dueAt: input.dueAt ? new Date(input.dueAt) : new Date(Date.now() + 72 * 3_600_000),
       });
       await writeAuditLog(db, { userId: ctx.user!.id, userEmail: ctx.user!.email ?? undefined, category: "investigation", action: "Investigation created", targetRef: ref });
       await publishEvent("INVESTIGATION_CREATED", ref, "info", { subjectName: input.subjectName, tier: input.tier });
@@ -610,6 +612,35 @@ const investigationsRouter = router({
       await writeAuditLog(db, { userId: ctx.user!.id, category: "investigation", action: `SLA due date ${input.dueAt ? `set to ${input.dueAt.toISOString()}` : 'cleared'}`, targetRef: input.ref });
       return { ok: true };
     }),
+
+  slaAtRisk: protectedProcedure
+    .input(z.object({ limit: z.number().default(5) }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return [];
+      const now = new Date();
+      const horizon = new Date(now.getTime() + 72 * 3_600_000); // 72h window
+      const rows = await db
+        .select({
+          ref: investigations.ref,
+          subjectName: investigations.subjectName,
+          riskScore: investigations.riskScore,
+          status: investigations.status,
+          dueAt: investigations.dueAt,
+          priority: investigations.priority,
+        })
+        .from(investigations)
+        .where(
+          and(
+            lte(investigations.dueAt, horizon),
+            gte(investigations.dueAt, now),
+            sql`${investigations.status} NOT IN ('completed','archived')`
+          )
+        )
+        .orderBy(asc(investigations.dueAt))
+        .limit(input.limit);
+      return rows;
+    }),
 });
 
 // ─── Data Source Lookup Router ────────────────────────────────────────────────
@@ -793,6 +824,15 @@ const alertsRouter = router({
       });
       await writeAuditLog(db, { userId: ctx.user!.id, category: "alert", action: `Alert escalated to agent ${input.agentName}`, targetRef: `alert-${input.id}` });
       return { success: true };
+    }),
+
+  getById: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return null;
+      const [row] = await db.select().from(alerts).where(eq(alerts.id, input.id)).limit(1);
+      return row ?? null;
     }),
 });
 

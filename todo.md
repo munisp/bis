@@ -773,3 +773,24 @@
 - [x] Risk factors card
 - [x] Biometric verification navigation button
 - [x] Navigation from investigations list screen (uses ref)
+
+## Phase 33 — SLA Wizard, Dashboard Widget, Mobile Alerts, Archive
+
+### SLA Due Date in New Investigation Wizard
+- [x] Add optional "SLA Deadline" date-picker to step 3 of NewInvestigationSlideOver
+- [x] Wire dueAt field to trpc.investigations.create mutation
+- [x] Default to 72h from now if not set
+
+### SLA At Risk Dashboard Widget
+- [x] Add "SLA At Risk" card to Dashboard page (top 5 investigations closest to deadline)
+- [x] Each row links to /investigations/[ref]
+- [x] Color-coded by urgency (red < 24h, amber < 72h)
+
+### Mobile Alert Detail Screen
+- [x] Create bis-mobile/app/alerts/[id].tsx
+- [x] Show alert severity badge, message, linked investigation
+- [x] "Mark Resolved" button wired to trpc.alerts.resolve
+- [x] Navigation from alerts list screen (tappable cards)
+
+### Archive
+- [x] Comprehensive archive of entire platform (v33)

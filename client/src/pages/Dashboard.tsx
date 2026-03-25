@@ -138,11 +138,13 @@ export default function Dashboard() {
   const { data: alertsData } = trpc.alerts.list.useQuery({ limit: 4 });
   const { data: dataSourcesData } = trpc.dataSources.list.useQuery();
   const { data: recentTriggersData } = trpc.alertRules.recentTriggers.useQuery();
+  const { data: slaAtRiskData } = trpc.investigations.slaAtRisk.useQuery({ limit: 5 }, { refetchInterval: 60000 });
 
   const recentInvestigations = recentInvData?.items ?? [];
   const criticalAlerts = (alertsData ?? []).filter((a: any) => a.severity === "critical" || a.severity === "high").slice(0, 4);
   const liveDataSources = dataSourcesData ?? [];
   const recentTriggers = recentTriggersData ?? [];
+  const slaAtRisk = slaAtRiskData ?? [];
 
   const handleRefresh = () => {
     setRefreshing(true);
@@ -433,6 +435,71 @@ export default function Dashboard() {
             </div>
           </div>
         </div>
+      </div>
+
+      {/* ── SLA At Risk Widget ── */}
+      <div className="mt-4 rounded-lg border border-amber-500/30 bg-card">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-amber-500/20">
+          <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+            <Clock size={13} className="text-amber-400" />
+            SLA At Risk
+            {slaAtRisk.length > 0 && (
+              <span className="ml-1 text-[10px] font-bold uppercase tracking-wider text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded px-1.5 py-0.5">
+                {slaAtRisk.length} investigation{slaAtRisk.length > 1 ? 's' : ''}
+              </span>
+            )}
+          </h3>
+          <Button variant="ghost" size="sm" className="h-6 text-xs gap-1" onClick={() => navigate("/investigations")}>
+            View all <ChevronRight size={11} />
+          </Button>
+        </div>
+        {slaAtRisk.length === 0 ? (
+          <div className="px-4 py-6 text-xs text-muted-foreground text-center flex flex-col items-center gap-1">
+            <CheckCircle size={16} className="text-emerald-400" />
+            All investigations are within SLA
+          </div>
+        ) : (
+          <div className="divide-y divide-border">
+            {slaAtRisk.map((inv: any) => {
+              const dueMs = new Date(inv.dueAt).getTime();
+              const nowMs = Date.now();
+              const diffMs = dueMs - nowMs;
+              const diffH = diffMs / 3_600_000;
+              const diffD = diffH / 24;
+              const timeLabel = diffH < 1
+                ? `${Math.max(0, Math.round(diffMs / 60000))}m left`
+                : diffH < 24
+                ? `${Math.round(diffH)}h left`
+                : `${Math.round(diffD)}d left`;
+              const urgentColor = diffH < 24 ? 'text-red-400' : diffH < 48 ? 'text-amber-400' : 'text-yellow-400';
+              return (
+                <div
+                  key={inv.ref}
+                  className="px-4 py-2.5 flex items-center justify-between gap-3 hover:bg-accent/20 transition-colors cursor-pointer"
+                  onClick={() => navigate(`/investigations?ref=${inv.ref}`)}
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${diffH < 24 ? 'bg-red-400 animate-pulse' : 'bg-amber-400'}`} />
+                    <div className="min-w-0">
+                      <div className="text-xs font-medium text-foreground truncate">{inv.subjectName}</div>
+                      <div className="text-[10px] text-muted-foreground font-mono">{inv.ref} · {inv.status}</div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className={`text-xs font-mono font-semibold ${urgentColor}`}>{timeLabel}</span>
+                    {inv.riskScore != null && (
+                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${
+                        inv.riskScore >= 75 ? 'text-red-400 bg-red-500/10 border-red-500/30' :
+                        inv.riskScore >= 50 ? 'text-amber-400 bg-amber-500/10 border-amber-500/30' :
+                        'text-emerald-400 bg-emerald-500/10 border-emerald-500/30'
+                      }`}>{inv.riskScore}</span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* ── Rules Activity Widget ── */}
