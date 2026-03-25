@@ -2447,7 +2447,15 @@ const casesRouter = router({
         actorId: ctx.user?.id,
         actorName: ctx.user?.name,
       });
-      return { ...stakeholder, portalUrl: `/cases/portal?token=${accessToken}` };
+      // Send notification with portal link (origin must be passed from frontend)
+      const portalUrl = `/stakeholder-portal?token=${accessToken}`;
+      notifyOwner({
+        title: `[BIS] Stakeholder Invited — ${c.ref}`,
+        content: `**${input.name}** (${input.role}${input.organisation ? `, ${input.organisation}` : ''}) has been invited to case **${c.ref}: ${c.title}**.\n\nPortal access link: ${portalUrl}\n\nExpires: ${expiresAt.toISOString().split('T')[0]}\n\nInvited by: ${ctx.user?.name ?? 'System'}`,
+      }).catch(() => {/* non-fatal */});
+      // Update lastNotifiedAt
+      await db.update(caseStakeholders).set({ lastNotifiedAt: new Date() }).where(eq(caseStakeholders.id, stakeholder.id));
+      return { ...stakeholder, portalUrl };
     }),
 
   portalAccess: publicProcedure
@@ -2504,6 +2512,94 @@ const casesRouter = router({
     const [{ total }] = await db.select({ total: count() }).from(cases);
     return { total, statusCounts, typeCounts };
   }),
+
+  uploadDocument: protectedProcedure
+    .input(z.object({
+      caseRef: z.string(),
+      fileName: z.string().min(1).max(255),
+      mimeType: z.string(),
+      fileBase64: z.string(), // base64-encoded file content
+      fileSize: z.number().max(16 * 1024 * 1024), // 16 MB max
+      confidential: z.boolean().default(false),
+      description: z.string().optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
+      const [c] = await db.select().from(cases).where(eq(cases.ref, input.caseRef)).limit(1);
+      if (!c) throw new TRPCError({ code: 'NOT_FOUND', message: 'Case not found' });
+      // Validate file type
+      const allowedTypes = ['application/pdf','application/msword','application/vnd.openxmlformats-officedocument.wordprocessingml.document','application/vnd.ms-excel','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','image/png','image/jpeg','image/jpg','text/plain'];
+      if (!allowedTypes.includes(input.mimeType)) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'File type not allowed. Permitted: PDF, DOCX, XLSX, PNG, JPG, TXT' });
+      }
+      // Upload to S3
+      const crypto = await import('crypto');
+      const suffix = crypto.randomBytes(8).toString('hex');
+      const ext = input.fileName.split('.').pop() ?? 'bin';
+      const fileKey = `cases/${c.ref}/docs/${suffix}.${ext}`;
+      const fileBuffer = Buffer.from(input.fileBase64, 'base64');
+      const { url } = await storagePut(fileKey, fileBuffer, input.mimeType);
+      // Persist metadata
+      const [doc] = await db.insert(caseDocuments).values({
+        caseId: c.id,
+        filename: input.fileName,
+        fileKey,
+        url,
+        mimeType: input.mimeType,
+        sizeBytes: input.fileSize,
+        confidential: input.confidential,
+        description: input.description,
+        uploadedBy: ctx.user?.id,
+      }).returning();
+      // Add timeline event
+      await db.insert(caseTimeline).values({
+        caseId: c.id,
+        eventType: 'document_uploaded',
+        title: `Document uploaded: ${input.fileName}`,
+        detail: { fileKey, mimeType: input.mimeType, fileSize: input.fileSize },
+        actorId: ctx.user?.id,
+        actorName: ctx.user?.name,
+        actorRole: ctx.user?.role,
+      });
+      return doc;
+    }),
+
+  listDocuments: protectedProcedure
+    .input(z.object({ caseRef: z.string() }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
+      const [c] = await db.select().from(cases).where(eq(cases.ref, input.caseRef)).limit(1);
+      if (!c) throw new TRPCError({ code: 'NOT_FOUND' });
+      return db.select().from(caseDocuments)
+        .where(eq(caseDocuments.caseId, c.id))
+        .orderBy(desc(caseDocuments.createdAt));
+    }),
+
+  resendInvite: protectedProcedure
+    .input(z.object({
+      stakeholderId: z.number(),
+      origin: z.string().url(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
+      const [sh] = await db.select().from(caseStakeholders)
+        .where(eq(caseStakeholders.id, input.stakeholderId)).limit(1);
+      if (!sh) throw new TRPCError({ code: 'NOT_FOUND', message: 'Stakeholder not found' });
+      const [c] = await db.select().from(cases).where(eq(cases.id, sh.caseId)).limit(1);
+      if (!c) throw new TRPCError({ code: 'NOT_FOUND', message: 'Case not found' });
+      const portalUrl = `${input.origin}/stakeholder-portal?token=${sh.accessToken}`;
+      await notifyOwner({
+        title: `[BIS] Case Portal Invite Re-sent — ${c.ref}`,
+        content: `Stakeholder **${sh.name}** (${sh.role}) has been re-invited to case **${c.ref}: ${c.title}**.\n\nPortal link: ${portalUrl}\n\nExpires: ${sh.accessExpiresAt?.toISOString() ?? 'N/A'}`,
+      });
+      await db.update(caseStakeholders)
+        .set({ lastNotifiedAt: new Date() })
+        .where(eq(caseStakeholders.id, sh.id));
+      return { success: true, portalUrl };
+    }),
 });
 
 // ─── Ollama Router ───────────────────────────────────────────────────────────

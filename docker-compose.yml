@@ -36,6 +36,7 @@ volumes:
   prometheus_data:
   grafana_data:
   lakehouse_data:
+  ollama_data:
 
 # ── Infrastructure ───────────────────────────────────────────────────────────
 
@@ -550,6 +551,143 @@ services:
     networks: [bis-net]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8085/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ─── Ollama Local LLM ────────────────────────────────────────────────────────
+  ollama:
+    image: ollama/ollama:latest
+    container_name: bis-ollama
+    restart: unless-stopped
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "11434:11434"
+    networks: [bis-net]
+    environment:
+      OLLAMA_HOST: "0.0.0.0"
+      OLLAMA_DEFAULT_MODEL: ${OLLAMA_DEFAULT_MODEL:-llama3.2}
+    # Optional: GPU passthrough for NVIDIA (uncomment if GPU is available)
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # ─── Ollama Adapter (Go) ─────────────────────────────────────────────────────
+  ollama-adapter:
+    build:
+      context: ./services/ollama-adapter
+      dockerfile: Dockerfile
+    container_name: bis-ollama-adapter
+    restart: unless-stopped
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      PORT: "8090"
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_DEFAULT_MODEL: ${OLLAMA_DEFAULT_MODEL:-llama3.2}
+      BIS_API_KEY: ${OLLAMA_ADAPTER_API_KEY:-bis_ollama_dev_key}
+      ML_ENRICHMENT_URL: http://ml-enrichment:8091
+      LOG_LEVEL: INFO
+    ports:
+      - "8090:8090"
+    networks: [bis-net]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8090/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ─── ML Enrichment Service (Python/FastAPI) ───────────────────────────────────
+  ml-enrichment:
+    build:
+      context: ./services/ml-enrichment
+      dockerfile: Dockerfile
+    container_name: bis-ml-enrichment
+    restart: unless-stopped
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      PORT: "8091"
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_DEFAULT_MODEL: ${OLLAMA_DEFAULT_MODEL:-llama3.2}
+      BIS_API_KEY: ${ML_ENRICHMENT_API_KEY:-bis_ml_dev_key}
+      DATABASE_URL: ${DATABASE_URL}
+      LOG_LEVEL: INFO
+    ports:
+      - "8091:8091"
+    networks: [bis-net]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8091/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ─── Case Manager Service (Go) ───────────────────────────────────────────────
+  case-manager:
+    build:
+      context: ./services/case-manager
+      dockerfile: Dockerfile
+    container_name: bis-case-manager
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      PORT: "8092"
+      DATABASE_URL: ${DATABASE_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      KAFKA_BROKERS: kafka:9092
+      KAFKA_TOPIC_CASES: bis.cases
+      ML_ENRICHMENT_URL: http://ml-enrichment:8091
+      LOG_LEVEL: INFO
+    ports:
+      - "8092:8092"
+    networks: [bis-net]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8092/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ─── Event Emitter Service (Rust) ────────────────────────────────────────────
+  event-emitter:
+    build:
+      context: ./services/event-emitter
+      dockerfile: Dockerfile
+    container_name: bis-event-emitter
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: "8093"
+      KAFKA_BROKERS: kafka:9092
+      KAFKA_CONSUMER_GROUP: bis-event-emitter
+      KAFKA_TOPICS: bis.cases,bis.investigations,bis.alerts,bis.kyc
+      DATABASE_URL: ${DATABASE_URL}
+      LOG_LEVEL: INFO
+    ports:
+      - "8093:8093"
+    networks: [bis-net]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8093/health"]
       interval: 15s
       timeout: 5s
       retries: 3

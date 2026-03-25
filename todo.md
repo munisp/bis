@@ -820,3 +820,29 @@
 - [x] Rust: services/event-emitter/ — Kafka consumer/producer, audit pipeline, Axum health endpoint
 - [x] DB migration 0019: cases, case_parties, case_documents, case_timeline, case_stakeholders, case_comments, ollamaModels
 - [x] DB migration 0020: tokenQuota column on api_tokens
+
+## Phase 38 — Case Document Upload, Ollama Docker, Stakeholder Notifications
+
+### Case Document Upload to S3
+- [x] Add trpc.cases.uploadDocument procedure (base64 → storagePut → case_documents row + timeline event)
+- [x] Add trpc.cases.listDocuments procedure (list by caseId with metadata)
+- [x] Wire "Upload Document" button and dialog in CaseDetailPage Documents tab
+- [x] File type validation (PDF, DOCX, XLSX, PNG, JPG, TXT — max 16 MB)
+- [x] Confidential flag support with red CONFIDENTIAL badge in document list
+
+### Ollama Docker Compose Service
+- [x] Add ollama service to docker-compose.yml with persistent ollama_data volume
+- [x] OLLAMA_DEFAULT_MODEL env var (default: llama3.2)
+- [x] Optional NVIDIA GPU passthrough config (commented out, documented)
+- [x] Add ollama-adapter, ml-enrichment, case-manager, event-emitter services to docker-compose.yml
+- [x] Create Dockerfiles for all four polyglot services (Go, Python, Rust)
+- [x] services/README.md with env var documentation and docker compose usage guide
+
+### Case Stakeholder Email Notifications
+- [x] Wire notifyOwner into cases.inviteStakeholder (portal link + expiry + inviter name)
+- [x] Add trpc.cases.resendInvite procedure (re-sends notification, updates lastNotifiedAt)
+- [x] Add lastNotifiedAt column to case_stakeholders (migration 0020)
+- [x] notifyOwner called non-fatally so invite succeeds even if notification fails
+
+### Archive
+- [x] Comprehensive archive of entire platform (v38)

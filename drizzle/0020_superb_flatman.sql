@@ -1,0 +1,1 @@
+ALTER TABLE "case_stakeholders" ADD COLUMN "lastNotifiedAt" timestamp;

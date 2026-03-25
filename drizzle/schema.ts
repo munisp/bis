@@ -838,6 +838,7 @@ export const caseStakeholders = pgTable("case_stakeholders", {
   canViewDocuments: boolean("canViewDocuments").notNull().default(true),
   lastAccessedAt: timestamp("lastAccessedAt"),
   invitedBy: integer("invitedBy"),
+  lastNotifiedAt: timestamp("lastNotifiedAt"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 export type CaseStakeholder = typeof caseStakeholders.$inferSelect;

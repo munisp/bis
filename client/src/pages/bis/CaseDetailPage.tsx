@@ -112,6 +112,49 @@ export default function CaseDetailPage() {
     onError: (e) => toast.error(e.message),
   });
 
+  const [uploadDocOpen, setUploadDocOpen] = useState(false);
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadDescription, setUploadDescription] = useState("");
+  const [uploadConfidential, setUploadConfidential] = useState(false);
+  const [uploading, setUploading] = useState(false);
+
+  const uploadDocument = trpc.cases.uploadDocument.useMutation({
+    onSuccess: () => {
+      utils.cases.get.invalidate({ ref: caseRef });
+      setUploadDocOpen(false);
+      setUploadFile(null);
+      setUploadDescription("");
+      setUploadConfidential(false);
+      toast.success("Document uploaded successfully");
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const handleUploadDocument = async () => {
+    if (!uploadFile || !caseRef) return;
+    const MAX_SIZE = 16 * 1024 * 1024;
+    if (uploadFile.size > MAX_SIZE) { toast.error("File exceeds 16 MB limit"); return; }
+    setUploading(true);
+    try {
+      const arrayBuffer = await uploadFile.arrayBuffer();
+      const uint8 = new Uint8Array(arrayBuffer);
+      let binary = '';
+      for (let i = 0; i < uint8.length; i++) binary += String.fromCharCode(uint8[i]);
+      const base64 = btoa(binary);
+      await uploadDocument.mutateAsync({
+        caseRef,
+        fileName: uploadFile.name,
+        mimeType: uploadFile.type || "application/octet-stream",
+        fileBase64: base64,
+        fileSize: uploadFile.size,
+        confidential: uploadConfidential,
+        description: uploadDescription || undefined,
+      });
+    } catch { /* handled by onError */ } finally {
+      setUploading(false);
+    }
+  };
+
   const copyPortalLink = (token: string) => {
     const url = `${window.location.origin}/cases/portal?token=${token}`;
     navigator.clipboard.writeText(url);
@@ -264,6 +307,11 @@ export default function CaseDetailPage() {
 
         {/* Documents */}
         <TabsContent value="documents" className="mt-4">
+          <div className="flex justify-end mb-3">
+            <Button size="sm" onClick={() => setUploadDocOpen(true)}>
+              <FilePlus className="w-4 h-4 mr-1" /> Upload Document
+            </Button>
+          </div>
           <div className="space-y-3">
             {(c.documents ?? []).map((doc: any) => (
               <Card key={doc.id}>
@@ -274,7 +322,9 @@ export default function CaseDetailPage() {
                       <div>
                         <p className="font-medium text-sm">{doc.filename}</p>
                         <p className="text-xs text-muted-foreground">
-                          {doc.category} · {doc.sizeBytes ? `${(doc.sizeBytes / 1024).toFixed(1)} KB` : ""} · {new Date(doc.createdAt).toLocaleDateString()}
+                          {doc.confidential && <span className="text-red-500 font-medium mr-1">CONFIDENTIAL ·</span>}
+                          {doc.sizeBytes ? `${(doc.sizeBytes / 1024).toFixed(1)} KB` : ""} · {new Date(doc.createdAt).toLocaleDateString()}
+                          {doc.description && ` · ${doc.description}`}
                         </p>
                       </div>
                     </div>
@@ -288,9 +338,60 @@ export default function CaseDetailPage() {
               </Card>
             ))}
             {(c.documents ?? []).length === 0 && (
-              <p className="text-sm text-muted-foreground text-center py-8">No documents uploaded yet.</p>
+              <p className="text-sm text-muted-foreground text-center py-8">No documents uploaded yet. Click "Upload Document" to add files.</p>
             )}
           </div>
+
+          {/* Upload Document Dialog */}
+          <Dialog open={uploadDocOpen} onOpenChange={setUploadDocOpen}>
+            <DialogContent className="max-w-md">
+              <DialogHeader>
+                <DialogTitle>Upload Document</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4 py-2">
+                <div>
+                  <Label>File <span className="text-red-500">*</span></Label>
+                  <Input
+                    type="file"
+                    accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.txt"
+                    className="mt-1 cursor-pointer"
+                    onChange={(e) => setUploadFile(e.target.files?.[0] ?? null)}
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">PDF, DOCX, XLSX, PNG, JPG, TXT — max 16 MB</p>
+                </div>
+                <div>
+                  <Label>Description</Label>
+                  <Input
+                    className="mt-1"
+                    placeholder="Optional description"
+                    value={uploadDescription}
+                    onChange={(e) => setUploadDescription(e.target.value)}
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="confidential"
+                    checked={uploadConfidential}
+                    onChange={(e) => setUploadConfidential(e.target.checked)}
+                    className="rounded"
+                  />
+                  <Label htmlFor="confidential" className="cursor-pointer">Mark as Confidential</Label>
+                </div>
+                {uploadFile && (
+                  <p className="text-sm text-muted-foreground">
+                    Selected: <span className="font-medium">{uploadFile.name}</span> ({(uploadFile.size / 1024).toFixed(1)} KB)
+                  </p>
+                )}
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setUploadDocOpen(false)}>Cancel</Button>
+                <Button onClick={handleUploadDocument} disabled={!uploadFile || uploading}>
+                  {uploading ? "Uploading..." : "Upload"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </TabsContent>
 
         {/* Stakeholders */}
