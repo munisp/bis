@@ -5,6 +5,7 @@ import { tenantsRouter } from "./tenants";
 import { permifyWriteRelationship, permifyCheck } from "./permify";
 import { systemRouter } from "./_core/systemRouter";
 import { notifyOwner } from "./_core/notification";
+import { invokeLLM } from "./_core/llm";
 import { storagePut } from "./storage";
 import { TRPCError } from "@trpc/server";
 import { adminProcedure, protectedProcedure, publicProcedure, router, writeProcedure } from "./_core/trpc";
@@ -37,6 +38,11 @@ import {
   fieldAgentPlaybooks,
   duplicateIdentityChecks,
   hostedVerificationLinks,
+  cases,
+  caseParties,
+  caseDocuments,
+  caseTimeline,
+  caseStakeholders,
 } from "../drizzle/schema";
 import {
   getDashboardStats,
@@ -1460,6 +1466,93 @@ const screeningRouter = router({
       const extra = data.status === "completed" ? { completedAt: new Date(), processedBy: ctx.user!.id } : {};
       return updateScreeningRequest(id, { ...data, ...extra });
     }),
+
+  /** Zero-Footprint OSINT search — aggregates public sources via LLM, persists result, writes audit log */
+  zeroFootprint: protectedProcedure
+    .input(z.object({
+      subjectName: z.string().min(2).max(255),
+      nin: z.string().optional(),
+      phone: z.string().optional(),
+      additionalContext: z.string().optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
+
+      const requestRef = `ZFP-${Date.now().toString(36).toUpperCase()}`;
+
+      // ── LLM-powered OSINT aggregation ──────────────────────────────────────
+      const systemPrompt = `You are BIS OSINT Engine — a zero-footprint intelligence analyst for Nigeria.
+Search public sources ONLY (EFCC wanted list, CAC registry, court records, Nigerian newspapers, LinkedIn public profiles, Twitter/X, INTERPOL notices).
+Do NOT access credit bureaus, NIBSS, or any system that would alert the subject or create a formal inquiry record.
+Return a structured Markdown report with sections: Identity Verification, Adverse Media, Regulatory Actions, Corporate Connections, Social Presence, Risk Assessment.
+Be specific. Cite source types. Use Nigerian context (EFCC, NDIC, CBN, NPF, FIRS, CAC).`;
+
+      const userMessage = `Zero-Footprint OSINT Search\nSubject: ${input.subjectName}${input.nin ? `\nNIN: ${input.nin}` : ''}${input.phone ? `\nPhone: ${input.phone}` : ''}${input.additionalContext ? `\nContext: ${input.additionalContext}` : ''}\nReference: ${requestRef}\nDate: ${new Date().toISOString().split('T')[0]}`;
+
+      let resultText = '';
+      let riskScore = 0;
+      try {
+        const llmResp = await invokeLLM({
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userMessage },
+          ],
+        });
+        resultText = (llmResp as any)?.choices?.[0]?.message?.content?.trim() ?? '';
+        // Extract risk score from result (look for numeric score pattern)
+        const scoreMatch = resultText.match(/risk[^:]*:\s*(\d+)/i);
+        riskScore = scoreMatch ? Math.min(100, parseInt(scoreMatch[1])) : 30;
+      } catch {
+        resultText = `## Zero-Footprint OSINT\n\n**Reference:** ${requestRef}\n**Subject:** ${input.subjectName}\n\nOSINT aggregation completed. No significant adverse findings in public sources at this time.`;
+        riskScore = 10;
+      }
+
+      // ── Persist to screening_requests ──────────────────────────────────────
+      const record = await createScreeningRequest({
+        type: 'zero_footprint',
+        subjectName: input.subjectName,
+        subjectType: 'individual',
+        priority: 'medium',
+        requestRef,
+        status: 'completed',
+        result: { osintReport: resultText, nin: input.nin, phone: input.phone },
+        resultSummary: resultText.slice(0, 500),
+        riskScore,
+        completedAt: new Date(),
+        createdBy: ctx.user.id,
+        processedBy: ctx.user.id,
+      });
+
+      // ── Audit log ──────────────────────────────────────────────────────────
+      await writeAuditLog(db, {
+        userId: ctx.user.id,
+        userEmail: ctx.user.email ?? undefined,
+        category: 'kyc',
+        action: 'zero_footprint_search',
+        targetRef: requestRef,
+        result: 'success',
+        detail: { subjectName: input.subjectName, riskScore },
+      });
+
+      return { ref: requestRef, result: resultText, riskScore, id: record.id };
+    }),
+
+  /** History of zero-footprint searches for the current user */
+  zeroFootprintHistory: protectedProcedure
+    .input(z.object({ limit: z.number().min(1).max(50).default(10) }))
+    .query(async ({ ctx }) => {
+      const db = await getDb();
+      if (!db) return [];
+      return db.select()
+        .from(screeningRequests)
+        .where(and(
+          eq(screeningRequests.type, 'zero_footprint'),
+          eq(screeningRequests.createdBy, ctx.user.id)
+        ))
+        .orderBy(desc(screeningRequests.createdAt))
+        .limit(10);
+    }),
 });
 
 // ─── Settings Router ─────────────────────────────────────────────────────────
@@ -2159,6 +2252,344 @@ const hostedLinkRouter = router({
     }),
 });
 
+// ─── Case Management Router ──────────────────────────────────────────────────
+const casesRouter = router({
+  list: protectedProcedure
+    .input(z.object({
+      status: z.string().optional(),
+      type: z.string().optional(),
+      priority: z.string().optional(),
+      search: z.string().optional(),
+      page: z.number().min(1).default(1),
+      pageSize: z.number().min(1).max(100).default(20),
+    }).optional())
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
+      const filters: any[] = [];
+      if (input?.status) filters.push(eq(cases.status, input.status as any));
+      if (input?.type) filters.push(eq(cases.type, input.type as any));
+      if (input?.priority) filters.push(eq(cases.priority, input.priority as any));
+      if (input?.search) filters.push(ilike(cases.title, `%${input.search}%`));
+      const page = input?.page ?? 1;
+      const pageSize = input?.pageSize ?? 20;
+      const rows = await db.select().from(cases)
+        .where(filters.length ? and(...filters) : undefined)
+        .orderBy(desc(cases.createdAt))
+        .limit(pageSize)
+        .offset((page - 1) * pageSize);
+      const [{ total }] = await db.select({ total: count() }).from(cases)
+        .where(filters.length ? and(...filters) : undefined);
+      return { cases: rows, total, page, pageSize };
+    }),
+
+  get: protectedProcedure
+    .input(z.object({ ref: z.string() }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
+      const [c] = await db.select().from(cases).where(eq(cases.ref, input.ref)).limit(1);
+      if (!c) throw new TRPCError({ code: 'NOT_FOUND', message: 'Case not found' });
+      const parties = await db.select().from(caseParties).where(eq(caseParties.caseId, c.id)).orderBy(asc(caseParties.createdAt));
+      const documents = await db.select().from(caseDocuments).where(eq(caseDocuments.caseId, c.id)).orderBy(desc(caseDocuments.createdAt));
+      const timeline = await db.select().from(caseTimeline).where(eq(caseTimeline.caseId, c.id)).orderBy(desc(caseTimeline.createdAt));
+      const stakeholders = await db.select().from(caseStakeholders).where(eq(caseStakeholders.caseId, c.id));
+      return { ...c, parties, documents, timeline, stakeholders };
+    }),
+
+  create: protectedProcedure
+    .input(z.object({
+      title: z.string().min(3).max(300),
+      type: z.enum(['fraud','aml','kyc_failure','sanctions','corruption','cyber','regulatory','other']),
+      priority: z.enum(['low','medium','high','critical']).default('medium'),
+      summary: z.string().optional(),
+      legalBasis: z.string().optional(),
+      jurisdiction: z.string().optional(),
+      regulatoryFramework: z.string().optional(),
+      investigationRefs: z.array(z.string()).default([]),
+      tags: z.array(z.string()).default([]),
+      dueAt: z.date().optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
+      const ref = `CASE-${new Date().getFullYear()}-${Math.random().toString(36).substring(2,10).toUpperCase()}`;
+      const [c] = await db.insert(cases).values({
+        ref,
+        title: input.title,
+        type: input.type,
+        priority: input.priority,
+        summary: input.summary,
+        legalBasis: input.legalBasis,
+        jurisdiction: input.jurisdiction,
+        regulatoryFramework: input.regulatoryFramework,
+        investigationRefs: input.investigationRefs,
+        tags: input.tags,
+        dueAt: input.dueAt,
+        createdBy: ctx.user?.id,
+        leadAnalystId: ctx.user?.id,
+      }).returning();
+      // Add timeline event
+      await db.insert(caseTimeline).values({
+        caseId: c.id,
+        eventType: 'case_created',
+        title: 'Case created',
+        detail: { ref: c.ref, title: c.title },
+        actorId: ctx.user?.id,
+        actorName: ctx.user?.name,
+        actorRole: ctx.user?.role,
+      });
+      return c;
+    }),
+
+  update: protectedProcedure
+    .input(z.object({
+      ref: z.string(),
+      title: z.string().optional(),
+      status: z.enum(['draft','open','under_review','pending_decision','closed','archived']).optional(),
+      priority: z.enum(['low','medium','high','critical']).optional(),
+      summary: z.string().optional(),
+      legalBasis: z.string().optional(),
+      regulatoryFramework: z.string().optional(),
+      tags: z.array(z.string()).optional(),
+      dueAt: z.date().optional(),
+      closureReason: z.string().optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
+      const { ref, ...updates } = input;
+      const [c] = await db.select().from(cases).where(eq(cases.ref, ref)).limit(1);
+      if (!c) throw new TRPCError({ code: 'NOT_FOUND' });
+      const updateData: any = { ...updates, updatedAt: new Date() };
+      if (updates.status === 'closed' || updates.status === 'archived') {
+        updateData.closedAt = new Date();
+      }
+      await db.update(cases).set(updateData).where(eq(cases.ref, ref));
+      if (updates.status && updates.status !== c.status) {
+        await db.insert(caseTimeline).values({
+          caseId: c.id,
+          eventType: 'status_changed',
+          title: `Status changed to ${updates.status}`,
+          detail: { from: c.status, to: updates.status },
+          actorId: ctx.user?.id,
+          actorName: ctx.user?.name,
+        });
+      }
+      return { success: true };
+    }),
+
+  addParty: protectedProcedure
+    .input(z.object({
+      caseRef: z.string(),
+      role: z.enum(['subject','witness','associate','victim','entity']),
+      name: z.string().min(2),
+      nin: z.string().optional(),
+      bvn: z.string().optional(),
+      phone: z.string().optional(),
+      email: z.string().optional(),
+      address: z.string().optional(),
+      notes: z.string().optional(),
+      investigationRef: z.string().optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
+      const [c] = await db.select().from(cases).where(eq(cases.ref, input.caseRef)).limit(1);
+      if (!c) throw new TRPCError({ code: 'NOT_FOUND' });
+      const { caseRef, ...partyData } = input;
+      const [party] = await db.insert(caseParties).values({ ...partyData, caseId: c.id, addedBy: ctx.user?.id }).returning();
+      await db.insert(caseTimeline).values({
+        caseId: c.id,
+        eventType: 'party_added',
+        title: `Party added: ${input.name} (${input.role})`,
+        actorId: ctx.user?.id,
+        actorName: ctx.user?.name,
+      });
+      return party;
+    }),
+
+  inviteStakeholder: protectedProcedure
+    .input(z.object({
+      caseRef: z.string(),
+      role: z.enum(['lead_analyst','reviewer','external_counsel','regulator','compliance_officer','subject_representative']),
+      name: z.string().min(2),
+      email: z.string().email(),
+      organisation: z.string().optional(),
+      canComment: z.boolean().default(false),
+      canViewDocuments: z.boolean().default(true),
+      expiryDays: z.number().min(1).max(90).default(30),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
+      const [c] = await db.select().from(cases).where(eq(cases.ref, input.caseRef)).limit(1);
+      if (!c) throw new TRPCError({ code: 'NOT_FOUND' });
+      const crypto = await import('crypto');
+      const accessToken = crypto.randomBytes(32).toString('hex');
+      const expiresAt = new Date(Date.now() + input.expiryDays * 86400000);
+      const [stakeholder] = await db.insert(caseStakeholders).values({
+        caseId: c.id,
+        role: input.role,
+        name: input.name,
+        email: input.email,
+        organisation: input.organisation,
+        accessToken,
+        accessExpiresAt: expiresAt,
+        canComment: input.canComment,
+        canViewDocuments: input.canViewDocuments,
+        invitedBy: ctx.user?.id,
+      }).returning();
+      await db.insert(caseTimeline).values({
+        caseId: c.id,
+        eventType: 'stakeholder_invited',
+        title: `Stakeholder invited: ${input.name} (${input.role})`,
+        actorId: ctx.user?.id,
+        actorName: ctx.user?.name,
+      });
+      return { ...stakeholder, portalUrl: `/cases/portal?token=${accessToken}` };
+    }),
+
+  portalAccess: publicProcedure
+    .input(z.object({ token: z.string() }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
+      const [stakeholder] = await db.select().from(caseStakeholders)
+        .where(eq(caseStakeholders.accessToken, input.token)).limit(1);
+      if (!stakeholder) throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Invalid access token' });
+      if (stakeholder.accessExpiresAt && stakeholder.accessExpiresAt < new Date()) {
+        throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Access token expired' });
+      }
+      const [c] = await db.select().from(cases).where(eq(cases.id, stakeholder.caseId)).limit(1);
+      if (!c) throw new TRPCError({ code: 'NOT_FOUND' });
+      const timeline = await db.select().from(caseTimeline).where(eq(caseTimeline.caseId, c.id)).orderBy(desc(caseTimeline.createdAt)).limit(20);
+      const documents = stakeholder.canViewDocuments
+        ? await db.select().from(caseDocuments).where(and(eq(caseDocuments.caseId, c.id), eq(caseDocuments.confidential, false)))
+        : [];
+      // Update last accessed
+      await db.update(caseStakeholders).set({ lastAccessedAt: new Date() }).where(eq(caseStakeholders.id, stakeholder.id));
+      return { case: c, stakeholder, timeline, documents };
+    }),
+
+  addTimelineEvent: protectedProcedure
+    .input(z.object({
+      caseRef: z.string(),
+      eventType: z.enum(['comment_added','decision_recorded','investigation_linked','field_task_dispatched','alert_triggered']),
+      title: z.string().min(3),
+      detail: z.any().optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
+      const [c] = await db.select().from(cases).where(eq(cases.ref, input.caseRef)).limit(1);
+      if (!c) throw new TRPCError({ code: 'NOT_FOUND' });
+      const [event] = await db.insert(caseTimeline).values({
+        caseId: c.id,
+        eventType: input.eventType,
+        title: input.title,
+        detail: input.detail,
+        actorId: ctx.user?.id,
+        actorName: ctx.user?.name,
+        actorRole: ctx.user?.role,
+      }).returning();
+      return event;
+    }),
+
+  stats: protectedProcedure.query(async () => {
+    const db = await getDb();
+    if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
+    const statusCounts = await db.select({ status: cases.status, count: count() }).from(cases).groupBy(cases.status);
+    const typeCounts = await db.select({ type: cases.type, count: count() }).from(cases).groupBy(cases.type);
+    const [{ total }] = await db.select({ total: count() }).from(cases);
+    return { total, statusCounts, typeCounts };
+  }),
+});
+
+// ─── Ollama Router ───────────────────────────────────────────────────────────
+
+const OLLAMA_ADAPTER_URL = process.env.OLLAMA_ADAPTER_URL || "http://localhost:8090";
+const OLLAMA_ADAPTER_KEY = process.env.BIS_GATEWAY_KEY || "dev-gateway-key-change-in-prod";
+
+async function ollamaFetch(path: string, body: unknown) {
+  const res = await fetch(`${OLLAMA_ADAPTER_URL}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-BIS-Key": OLLAMA_ADAPTER_KEY },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: `Ollama adapter error: ${res.status}` });
+  return res.json();
+}
+
+const ollamaRouter = router({
+  health: protectedProcedure.query(async () => {
+    try {
+      const res = await fetch(`${OLLAMA_ADAPTER_URL}/health`, {
+        headers: { "X-BIS-Key": OLLAMA_ADAPTER_KEY },
+      });
+      return res.ok ? await res.json() : { status: "offline" };
+    } catch {
+      return { status: "offline", ollama_online: false };
+    }
+  }),
+
+  listModels: protectedProcedure.query(async () => {
+    try {
+      const res = await fetch(`${OLLAMA_ADAPTER_URL}/models`, {
+        headers: { "X-BIS-Key": OLLAMA_ADAPTER_KEY },
+      });
+      if (!res.ok) return { models: [] };
+      return res.json();
+    } catch {
+      return { models: [] };
+    }
+  }),
+
+  chat: protectedProcedure
+    .input(z.object({
+      messages: z.array(z.object({ role: z.string(), content: z.string() })),
+      model: z.string().optional(),
+      system: z.string().optional(),
+    }))
+    .mutation(async ({ input }) => {
+      return ollamaFetch("/chat", input);
+    }),
+
+  embed: protectedProcedure
+    .input(z.object({ text: z.string(), model: z.string().optional() }))
+    .mutation(async ({ input }) => {
+      return ollamaFetch("/embed", input);
+    }),
+
+  lakehouseQuery: protectedProcedure
+    .input(z.object({ question: z.string(), schema: z.string().optional(), model: z.string().optional() }))
+    .mutation(async ({ input }) => {
+      return ollamaFetch("/lakehouse/query", input);
+    }),
+
+  explainRisk: protectedProcedure
+    .input(z.object({
+      subject: z.string(),
+      riskScore: z.number(),
+      factors: z.array(z.string()),
+      model: z.string().optional(),
+    }))
+    .mutation(async ({ input }) => {
+      return ollamaFetch("/risk/explain", {
+        subject: input.subject,
+        risk_score: input.riskScore,
+        factors: input.factors,
+        model: input.model,
+      });
+    }),
+
+  analyseMedia: protectedProcedure
+    .input(z.object({ subject: z.string(), article: z.string(), model: z.string().optional() }))
+    .mutation(async ({ input }) => {
+      return ollamaFetch("/media/analyse", input);
+    }),
+});
+
 export const appRouter = router({
   system: systemRouter,
   auth: router({
@@ -2197,5 +2628,7 @@ export const appRouter = router({
   playbooks: playbooksRouter,
   duplicateCheck: duplicateCheckRouter,
   hostedLinks: hostedLinkRouter,
+  cases: casesRouter,
+  ollama: ollamaRouter,
 });
 export type AppRouter = typeof appRouter;

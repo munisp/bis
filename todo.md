@@ -781,3 +781,42 @@
 
 ### Archive
 - [x] Comprehensive archive of entire platform (v36)
+
+## Phase 37 — Case Management, Ollama Integration, Suggested Next Steps
+
+### Suggested Next Steps (from Phase 36)
+- [x] Live OSINT for Zero-Footprint: trpc.screening.zeroFootprint procedure with LLM-powered OSINT synthesis
+- [x] Playbook execution persistence on mobile: bis-mobile/app/playbook/[id].tsx with step completion + submit
+- [x] OpenClaw token quota enforcement: tokenQuota column, 429 QUOTA_EXCEEDED, prefix-based lookup
+
+### Case Management Platform
+- [x] DB tables: cases, case_parties, case_documents, case_timeline, case_stakeholders, case_comments (migration 0019)
+- [x] tRPC procedures: cases CRUD, parties CRUD, documents list, timeline events, stakeholder invites
+- [x] Stakeholder access model: role-based (lead_analyst, reviewer, external_counsel, regulator, subject)
+- [x] Stakeholder portal: StakeholderPortalPage.tsx with token-gated read-only case view
+- [x] CasesPage: list with filters (status, priority, type, assigned analyst) + create dialog
+- [x] CaseDetailPage: tabbed view (Overview, Parties, Documents, Timeline, Stakeholders, Comments)
+- [x] Case-to-Investigation linking (cases reference investigations via investigationId)
+- [x] Case status workflow: draft → open → under_review → pending_decision → closed
+- [x] Registered /cases and /cases/:id routes in App.tsx and sidebar
+
+### Ollama Local LLM Integration
+- [x] services/ollama-adapter/cmd/server/main.go — Go HTTP adapter with BIS auth, chat, embed, model management
+- [x] trpc.ollama.* procedures: health, listModels, chat, embed, lakehouseQuery, explainRisk, analyseMedia
+- [x] OllamaManagementPage.tsx: model list, health status, chat playground, Lakehouse AI query panel
+- [x] Ollama as OpenClaw fallback: 3-tier fallback (cloud LLM → Ollama → deterministic)
+- [x] Python ML service: POST /risk/explain with Ollama + deterministic fallback
+- [x] Python ML service: adverse media summaries via Ollama (already wired in Phase 37)
+- [x] Docker Compose: ollama service config documented in services/ollama-adapter/
+- [x] Ollama AI Engine added to BISLayout PLATFORM nav section
+
+### Archive
+- [x] Comprehensive archive of entire platform (v37)
+
+### Phase 37 — Polyglot Architecture Additions
+- [x] Go: services/case-manager/ — Full Case Management API (chi router, repository pattern, JWT middleware)
+- [x] Go: services/ollama-adapter/ — Ollama HTTP adapter with BIS auth + all AI endpoints
+- [x] Python: services/ml-enrichment/ — Risk scoring, adverse media NLP, Ollama proxy, Lakehouse, case enrichment
+- [x] Rust: services/event-emitter/ — Kafka consumer/producer, audit pipeline, Axum health endpoint
+- [x] DB migration 0019: cases, case_parties, case_documents, case_timeline, case_stakeholders, case_comments, ollamaModels
+- [x] DB migration 0020: tokenQuota column on api_tokens

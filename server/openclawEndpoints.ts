@@ -95,6 +95,7 @@ For risk scores, use a deterministic score based on the subject name and checks 
   const userMessage = `Action: ${action}\nDescription: ${actionDescriptions[action] ?? action}\nUser prompt: ${prompt}\nReference: ${ref}`;
 
   let result: string;
+  // 1. Try cloud LLM (Manus built-in)
   try {
     const llmResp = await invokeLLM({
       messages: [
@@ -102,11 +103,40 @@ For risk scores, use a deterministic score based on the subject name and checks 
         { role: 'user', content: userMessage },
       ],
     });
-    result = (llmResp as any)?.choices?.[0]?.message?.content?.trim() ?? `## ${action}\n\nAction completed. Reference: ${ref}`;
+    result = (llmResp as any)?.choices?.[0]?.message?.content?.trim() ?? '';
+    if (result) return { result, tokens_consumed: tokenCosts[action] ?? 1 };
   } catch (err) {
-    // Fallback to a structured response if LLM is unavailable
-    result = `## ${action.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}\n\n**Reference:** ${ref}\n**Date:** ${new Date().toISOString().split('T')[0]}\n\nAction processed. Please review the BIS platform for full results.`;
+    console.warn('[OpenClaw] Cloud LLM failed, trying Ollama fallback:', (err as Error).message);
   }
+  // 2. Ollama local fallback
+  const OLLAMA_ADAPTER = process.env.OLLAMA_ADAPTER_URL || 'http://localhost:8090';
+  const GATEWAY_KEY = process.env.BIS_GATEWAY_KEY || 'dev-gateway-key-change-in-prod';
+  try {
+    const ollamaResp = await fetch(`${OLLAMA_ADAPTER}/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-BIS-Key': GATEWAY_KEY },
+      body: JSON.stringify({
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userMessage },
+        ],
+        system: systemPrompt,
+      }),
+      signal: AbortSignal.timeout(90_000),
+    });
+    if (ollamaResp.ok) {
+      const ollamaData = await ollamaResp.json() as any;
+      const ollamaText = ollamaData?.message?.content?.trim() ?? '';
+      if (ollamaText) {
+        result = ollamaText;
+        return { result, tokens_consumed: tokenCosts[action] ?? 1 };
+      }
+    }
+  } catch (ollamaErr) {
+    console.warn('[OpenClaw] Ollama fallback failed:', (ollamaErr as Error).message);
+  }
+  // 3. Deterministic structured fallback
+  result = `## ${action.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}\n\n**Reference:** ${ref}\n**Date:** ${new Date().toISOString().split('T')[0]}\n\nAction processed. Please review the BIS platform for full results.`;
 
   return { result, tokens_consumed: tokenCosts[action] ?? 1 };
 }
@@ -169,14 +199,45 @@ export function createOpenClawRouter(): Router {
     }
 
     try {
+      // ── Quota enforcement: check before executing ─────────────────────────────
+      const tokenCostPrecheck: Record<string, number> = {
+        kyc_verify: 6, sanctions_screen: 4, adverse_media: 5, risk_score: 8,
+        create_investigation: 3, dispatch_field_agent: 160, get_investigation: 1,
+        list_alerts: 1, full_due_diligence: 30, social_monitor: 8, channel_monitor: 10,
+      };
+      const estimatedCost = tokenCostPrecheck[action] ?? 1;
+      try {
+        const db = await getDb();
+        if (db) {
+          const tokenPrefix = token.slice(0, 20);
+          const [tokenRecord] = await db
+            .select({ id: apiTokens.id, tokenQuota: (apiTokens as any).tokenQuota, tokensConsumed: apiTokens.tokensConsumed })
+            .from(apiTokens)
+            .where(eq(apiTokens.prefix, tokenPrefix))
+            .limit(1);
+          if (tokenRecord) {
+            const quota = (tokenRecord as any).tokenQuota as number | null;
+            const consumed = tokenRecord.tokensConsumed ?? 0;
+            if (quota !== null && quota !== undefined && consumed + estimatedCost > quota) {
+              return res.status(429).json({
+                code: "QUOTA_EXCEEDED",
+                message: `Token quota exceeded. Consumed: ${consumed}, Quota: ${quota}, Required: ${estimatedCost}. Please top up your token balance.`,
+                tokens_consumed: consumed,
+                token_quota: quota,
+              });
+            }
+          }
+        }
+      } catch (quotaErr) {
+        console.warn("[OpenClaw] Quota check failed (non-fatal):", quotaErr);
+      }
+
       const { result, tokens_consumed } = await executeOpenClawAction(action, prompt);
 
       // ── Token billing: debit tokens_consumed from the calling tenant's balance ──
       try {
         const db = await getDb();
         if (db) {
-          // Find the API token record to get the tenantId
-          // Look up by prefix (first 20 chars of the token) since we store hash not plaintext
           const tokenPrefix = token.slice(0, 20);
           const [tokenRecord] = await db
             .select({ id: apiTokens.id, tenantId: apiTokens.tenantId, tokensConsumed: apiTokens.tokensConsumed })
@@ -184,7 +245,6 @@ export function createOpenClawRouter(): Router {
             .where(eq(apiTokens.prefix, tokenPrefix))
             .limit(1);
           if (tokenRecord) {
-            // Increment tokensConsumed on the api_tokens record
             await db
               .update(apiTokens)
               .set({ tokensConsumed: (tokenRecord.tokensConsumed ?? 0) + tokens_consumed })
@@ -193,7 +253,6 @@ export function createOpenClawRouter(): Router {
           }
         }
       } catch (billingErr) {
-        // Non-fatal — log and continue so the action result is still returned
         console.warn("[OpenClaw] Token billing failed (non-fatal):", billingErr);
       }
 

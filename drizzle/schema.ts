@@ -507,6 +507,8 @@ export const apiTokens = pgTable("api_tokens", {
   rateLimit: integer("rateLimit").notNull().default(60),
   usageCount: integer("usageCount").notNull().default(0),
   tokensConsumed: integer("tokensConsumed").notNull().default(0),
+  /** Maximum tokens allowed per billing period; null = unlimited */
+  tokenQuota: integer("tokenQuota"),
   lastUsedAt: timestamp("lastUsedAt"),
   expiresAt: timestamp("expiresAt"),
   active: boolean("active").notNull().default(true),
@@ -726,3 +728,151 @@ export const hostedVerificationLinks = pgTable("hosted_verification_links", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 export type HostedVerificationLink = typeof hostedVerificationLinks.$inferSelect;
+
+// ─── Case Management ──────────────────────────────────────────────────────────
+
+export const caseStatusEnum = pgEnum("case_status", [
+  "draft", "open", "under_review", "pending_decision", "closed", "archived",
+]);
+export const casePriorityEnum = pgEnum("case_priority", ["low", "medium", "high", "critical"]);
+export const caseTypeEnum = pgEnum("case_type", [
+  "fraud", "aml", "kyc_failure", "sanctions", "corruption", "cyber", "regulatory", "other",
+]);
+export const casePartyRoleEnum = pgEnum("case_party_role", [
+  "subject", "witness", "associate", "victim", "entity",
+]);
+export const caseStakeholderRoleEnum = pgEnum("case_stakeholder_role", [
+  "lead_analyst", "reviewer", "external_counsel", "regulator", "compliance_officer", "subject_representative",
+]);
+
+export const cases = pgTable("cases", {
+  id: serial("id").primaryKey(),
+  ref: varchar("ref", { length: 30 }).notNull().unique(),
+  title: varchar("title", { length: 300 }).notNull(),
+  type: caseTypeEnum("type").notNull().default("other"),
+  status: caseStatusEnum("status").notNull().default("draft"),
+  priority: casePriorityEnum("priority").notNull().default("medium"),
+  summary: text("summary"),
+  legalBasis: text("legalBasis"),
+  jurisdiction: varchar("jurisdiction", { length: 100 }),
+  regulatoryFramework: varchar("regulatoryFramework", { length: 200 }),
+  leadAnalystId: integer("leadAnalystId"),
+  tenantId: integer("tenantId"),
+  investigationRefs: json("investigationRefs").$type<string[]>().default([]),
+  tags: json("tags").$type<string[]>().default([]),
+  dueAt: timestamp("dueAt"),
+  closedAt: timestamp("closedAt"),
+  closureReason: text("closureReason"),
+  riskScore: integer("riskScore"),
+  createdBy: integer("createdBy"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+export type Case = typeof cases.$inferSelect;
+export type InsertCase = typeof cases.$inferInsert;
+
+export const caseParties = pgTable("case_parties", {
+  id: serial("id").primaryKey(),
+  caseId: integer("caseId").notNull().references(() => cases.id, { onDelete: "cascade" }),
+  role: casePartyRoleEnum("role").notNull().default("subject"),
+  name: varchar("name", { length: 200 }).notNull(),
+  nin: varchar("nin", { length: 20 }),
+  bvn: varchar("bvn", { length: 20 }),
+  phone: varchar("phone", { length: 20 }),
+  email: varchar("email", { length: 200 }),
+  address: text("address"),
+  entityType: varchar("entityType", { length: 50 }),
+  notes: text("notes"),
+  investigationRef: varchar("investigationRef", { length: 50 }),
+  addedBy: integer("addedBy"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type CaseParty = typeof caseParties.$inferSelect;
+
+export const caseDocuments = pgTable("case_documents", {
+  id: serial("id").primaryKey(),
+  caseId: integer("caseId").notNull().references(() => cases.id, { onDelete: "cascade" }),
+  filename: varchar("filename", { length: 300 }).notNull(),
+  mimeType: varchar("mimeType", { length: 100 }),
+  fileKey: varchar("fileKey", { length: 500 }).notNull(),
+  url: text("url").notNull(),
+  sizeBytes: integer("sizeBytes"),
+  category: varchar("category", { length: 100 }),
+  description: text("description"),
+  confidential: boolean("confidential").notNull().default(false),
+  uploadedBy: integer("uploadedBy"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type CaseDocument = typeof caseDocuments.$inferSelect;
+
+export const caseTimelineEventTypeEnum = pgEnum("case_timeline_event_type", [
+  "case_created", "status_changed", "party_added", "document_uploaded",
+  "comment_added", "investigation_linked", "stakeholder_invited",
+  "field_task_dispatched", "alert_triggered", "decision_recorded", "case_closed",
+]);
+
+export const caseTimeline = pgTable("case_timeline", {
+  id: serial("id").primaryKey(),
+  caseId: integer("caseId").notNull().references(() => cases.id, { onDelete: "cascade" }),
+  eventType: caseTimelineEventTypeEnum("eventType").notNull(),
+  title: varchar("title", { length: 300 }).notNull(),
+  detail: json("detail"),
+  actorId: integer("actorId"),
+  actorName: varchar("actorName", { length: 200 }),
+  actorRole: varchar("actorRole", { length: 100 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type CaseTimelineEvent = typeof caseTimeline.$inferSelect;
+
+export const caseStakeholders = pgTable("case_stakeholders", {
+  id: serial("id").primaryKey(),
+  caseId: integer("caseId").notNull().references(() => cases.id, { onDelete: "cascade" }),
+  role: caseStakeholderRoleEnum("role").notNull(),
+  name: varchar("name", { length: 200 }).notNull(),
+  email: varchar("email", { length: 200 }).notNull(),
+  organisation: varchar("organisation", { length: 200 }),
+  /** Secure token for portal access (no login required) */
+  accessToken: varchar("accessToken", { length: 64 }).unique(),
+  accessExpiresAt: timestamp("accessExpiresAt"),
+  canComment: boolean("canComment").notNull().default(false),
+  canViewDocuments: boolean("canViewDocuments").notNull().default(true),
+  lastAccessedAt: timestamp("lastAccessedAt"),
+  invitedBy: integer("invitedBy"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type CaseStakeholder = typeof caseStakeholders.$inferSelect;
+
+export const caseComments = pgTable("case_comments", {
+  id: serial("id").primaryKey(),
+  caseId: integer("caseId").notNull().references(() => cases.id, { onDelete: "cascade" }),
+  content: text("content").notNull(),
+  authorId: integer("authorId"),
+  authorName: varchar("authorName", { length: 200 }),
+  authorRole: varchar("authorRole", { length: 100 }),
+  /** If set, this comment was posted by a stakeholder (not a logged-in user) */
+  stakeholderId: integer("stakeholderId"),
+  confidential: boolean("confidential").notNull().default(false),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+export type CaseComment = typeof caseComments.$inferSelect;
+
+// ─── Ollama / LLM Config ──────────────────────────────────────────────────────
+
+export const ollamaModels = pgTable("ollama_models", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 100 }).notNull().unique(),
+  displayName: varchar("displayName", { length: 200 }),
+  family: varchar("family", { length: 50 }),
+  parameterSize: varchar("parameterSize", { length: 20 }),
+  quantization: varchar("quantization", { length: 20 }),
+  sizeBytes: integer("sizeBytes"),
+  status: varchar("status", { length: 20 }).notNull().default("available"),
+  useCase: json("useCase").$type<string[]>().default([]),
+  isDefault: boolean("isDefault").notNull().default(false),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type OllamaModel = typeof ollamaModels.$inferSelect;
+
+// ─── Token Quota (OpenClaw) ───────────────────────────────────────────────────
+// tokenQuota column added to apiTokens above via migration

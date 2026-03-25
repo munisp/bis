@@ -47,6 +47,10 @@ const LakehouseAnalyticsPage       = lazy(() => import("@/pages/bis/LakehouseAna
 const FieldAgentPlaybooksPage      = lazy(() => import("@/pages/bis/FieldAgentPlaybooksPage"));
 const DuplicateIdentityCheckPage   = lazy(() => import("@/pages/bis/DuplicateIdentityCheckPage"));
 const HostedVerificationLinksPage  = lazy(() => import("@/pages/bis/HostedVerificationLinksPage"));
+const CasesPage                    = lazy(() => import("@/pages/bis/CasesPage"));
+const CaseDetailPage               = lazy(() => import("@/pages/bis/CaseDetailPage"));
+const StakeholderPortalPage        = lazy(() => import("@/pages/bis/StakeholderPortalPage"));
+const OllamaManagementPage         = lazy(() => import("@/pages/bis/OllamaManagementPage"));
 
 // ─── Page loading skeleton ────────────────────────────────────────────────────
 
@@ -109,6 +113,10 @@ function Router() {
         <Route path="/playbooks" component={FieldAgentPlaybooksPage} />
         <Route path="/duplicate-check" component={DuplicateIdentityCheckPage} />
         <Route path="/hosted-links" component={HostedVerificationLinksPage} />
+        <Route path="/cases" component={CasesPage} />
+        <Route path="/cases/portal" component={StakeholderPortalPage} />
+        <Route path="/cases/:ref" component={CaseDetailPage} />
+        <Route path="/ollama" component={OllamaManagementPage} />
 
         {/* Fallback */}
         <Route path="/404" component={NotFound} />

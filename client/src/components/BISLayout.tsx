@@ -9,7 +9,7 @@ import {
   ChevronRight, LogOut, Menu, X, AlertTriangle, Car, Pill,
   Briefcase, Globe, MapPin, MessageSquare, Building2, Eye,
   UserCheck, BarChart3, Key, Zap, CheckCheck, ArrowRight, Sun, Moon, ClipboardList, Wallet, UserSearch, Shield, BarChart2,
-  BookOpen, Link2
+  BookOpen, Link2, Brain
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -44,6 +44,7 @@ const BASE_NAV_GROUPS: NavGroup[] = [
     items: [
       { label: 'Dashboard', href: '/', icon: <LayoutDashboard size={15} /> },
       { label: 'Investigations', href: '/investigations', icon: <Search size={15} /> },
+      { label: 'Case Management', href: '/cases', icon: <Briefcase size={15} /> },
       { label: 'Reports', href: '/reports', icon: <FileText size={15} /> },
       { label: 'Alerts', href: '/alerts', icon: <AlertTriangle size={15} />, badgeVariant: 'destructive' },
       { label: 'Alert Rules', href: '/alert-rules', icon: <Zap size={15} /> },
@@ -101,6 +102,7 @@ const BASE_NAV_GROUPS: NavGroup[] = [
       { label: 'Settings', href: '/settings', icon: <Settings size={15} /> },
       { label: 'Audit Log', href: '/audit-log', icon: <ClipboardList size={15} /> },
       { label: 'Developer Portal', href: '/developer', icon: <Key size={15} /> },
+      { label: 'Ollama AI Engine', href: '/ollama', icon: <Brain size={15} /> },
     ],
   },
   {
