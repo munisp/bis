@@ -2,7 +2,7 @@
 
 **Document type:** Technical Architecture Proposal  
 **System:** Background Intelligence System (BIS)  
-**Version:** 1.0 — Phase 41  
+**Version:** 2.0 — Phase 42 (State-Scoped Jurisdiction)  
 **Author:** Manus AI  
 **Date:** March 2026
 
@@ -10,318 +10,333 @@
 
 ## 1. Executive Summary
 
-The Law Enforcement Extension (LEX) is a proposed module within BIS that allows **third-party agencies** — including Nigerian law enforcement units that operate primarily on paper — to submit criminal and incident reports directly into the BIS case management system. LEX is designed to bridge the gap between analogue field operations and digital intelligence workflows, while maintaining rigorous **validation, chain-of-custody, and anti-fabrication controls** to ensure that only credible, corroborated submissions influence BIS case outcomes.
-
-This document covers the submission model, identity and agency verification, multi-layer validation architecture, data ingestion pipeline, and the governance framework that governs how LEX reports are treated relative to internally generated BIS cases.
+The Law Enforcement Extension (LEX) is a module within BIS that allows **third-party law enforcement agencies** — including Nigerian police units, the EFCC, ICPC, and state security services — to submit criminal and incident reports directly into the BIS case management system. Every agency in LEX is **tied to a specific Nigerian state** (and optionally a Local Government Area and command unit), and every submission is validated against that geographic scope. This jurisdictional binding is the primary structural control that prevents cross-state fabrication, impersonation, and data pollution.
 
 ---
 
-## 2. Problem Statement
+## 2. The Nigerian State Jurisdiction Model
 
-### 2.1 The Paper-First Reality of Nigerian Law Enforcement
+Nigeria is divided into **36 states plus the Federal Capital Territory (FCT)**. Law enforcement in Nigeria is organised along these state lines: the Nigeria Police Force has a **State Command** in each state, with **Area Commands** and **Divisional Police Headquarters** at the LGA level. The EFCC and ICPC operate **Zonal Offices** that map to groups of states.
 
-Nigerian law enforcement agencies — including the Nigeria Police Force (NPF), the Economic and Financial Crimes Commission (EFCC), the Independent Corrupt Practices Commission (ICPC), and state-level security services — conduct the majority of their investigative and incident documentation work on paper. Occurrence books, arrest reports, charge sheets, and witness statements are physically signed, stamped, and filed. Digital infrastructure is sparse, inconsistent, and rarely interoperable.
+LEX mirrors this structure exactly. An agency registered in BIS is always associated with:
 
-This creates a structural gap: BIS analysts may be investigating a subject who is simultaneously under active police investigation, but neither party knows. Criminal intelligence that could accelerate a compliance case sits in a physical folder at a police station. Conversely, BIS risk profiles that could assist a prosecution are invisible to the arresting officer.
+1. **State** — one of the 37 jurisdictions (36 states + FCT Abuja).
+2. **LGA** — the specific Local Government Area of the command unit (optional but recommended).
+3. **Command Unit** — a free-text label for the specific station or office (e.g., "Apapa Area Command", "Lagos Zonal Office").
 
-### 2.2 The Fabrication Risk
+This three-level hierarchy means that a submission from the Lagos State Command cannot be used to report an incident in Kano, and a Kano Divisional HQ cannot submit on behalf of Abuja FCT. The jurisdiction is enforced at both the **submission intake layer** and the **geospatial validation layer**.
 
-Opening a digital submission channel to external agencies introduces a significant **integrity risk**. Without controls, a bad actor could:
+### 2.1 The 37 Jurisdictions
 
-- Submit fabricated incident reports to artificially inflate a subject's risk score.
-- Use LEX submissions to harass individuals or competitors by triggering BIS investigations.
-- Impersonate a legitimate law enforcement officer to lend credibility to false claims.
-- Collude with an insider to launder fabricated reports through the system.
+| Code | State | Code | State |
+|---|---|---|---|
+| `AB` | Abia | `KW` | Kwara |
+| `AD` | Adamawa | `LA` | Lagos |
+| `AK` | Akwa Ibom | `NA` | Nasarawa |
+| `AN` | Anambra | `NI` | Niger |
+| `BA` | Bauchi | `OG` | Ogun |
+| `BY` | Bayelsa | `ON` | Ondo |
+| `BE` | Benue | `OS` | Osun |
+| `BO` | Borno | `OY` | Oyo |
+| `CR` | Cross River | `PL` | Plateau |
+| `DE` | Delta | `RI` | Rivers |
+| `EB` | Ebonyi | `SO` | Sokoto |
+| `ED` | Edo | `TA` | Taraba |
+| `EK` | Ekiti | `YO` | Yobe |
+| `EN` | Enugu | `ZA` | Zamfara |
+| `GO` | Gombe | `FC` | FCT Abuja |
+| `IM` | Imo | | |
+| `JI` | Jigawa | | |
+| `KD` | Kaduna | | |
+| `KN` | Kano | | |
+| `KT` | Katsina | | |
+| `KE` | Kebbi | | |
+| `KO` | Kogi | | |
 
-The architecture must treat every LEX submission as **untrusted by default** and require corroboration before it affects any BIS case or investigation.
+### 2.2 Agency Code Format
 
----
-
-## 3. Design Principles
-
-The following principles govern all LEX design decisions:
-
-| Principle | Description |
-|---|---|
-| **Zero trust on intake** | Every submission is unverified until it passes all validation gates. |
-| **Immutable audit trail** | Every action — submission, review, approval, rejection — is permanently logged. |
-| **Separation of concerns** | LEX submissions are quarantined from live BIS data until validated. |
-| **Human-in-the-loop** | No LEX submission automatically modifies a case or risk score without analyst approval. |
-| **Graceful degradation** | The system must work even when the submitting agency has no internet access. |
-| **Privacy by design** | Personally identifiable information in submissions is encrypted at rest and access-controlled. |
-
----
-
-## 4. Agency Onboarding and Identity Verification
-
-### 4.1 Agency Registration
-
-Before any submission can be accepted, the **agency itself** must be registered in BIS. This is a one-time, offline-initiated process:
-
-1. The agency's commanding officer or designated data officer submits a formal request on official letterhead, including: agency name, command unit, state, the names and ranks of up to five authorised submitters, and a contact email address.
-2. A BIS administrator verifies the agency's existence against the Nigeria Police Force directory, EFCC public records, or equivalent government registries.
-3. Upon approval, the agency receives an **Agency Code** (e.g., `NPF-LAGOS-APAPA-001`) and a set of **Submitter Credentials** — one per named officer.
-
-### 4.2 Submitter Identity
-
-Each authorised submitter receives:
-
-- A **Submitter ID** (non-guessable UUID).
-- A **PIN** delivered via a separate channel (e.g., SMS to a verified phone number registered with the agency).
-- An optional **physical QR code card** that encodes their Submitter ID for scanning at submission kiosks.
-
-Submitters are not required to have email addresses or smartphones. The system is designed to work with feature phones via SMS or through a designated **LEX Submission Officer** at each agency who acts as the digital intermediary.
-
-### 4.3 Credential Rotation and Revocation
-
-Credentials are valid for 12 months and must be renewed by the agency's commanding officer. Any credential can be revoked instantly by a BIS administrator. Revocation is logged and all pending submissions from the revoked submitter are placed in a "suspended" queue pending review.
-
----
-
-## 5. Submission Channels
-
-LEX supports three submission channels, ordered from most to least digital:
-
-### 5.1 Web Portal (Preferred)
-
-A dedicated, mobile-optimised web portal at `/lex/submit` accepts structured form submissions. The form is designed for low-bandwidth environments (no images required, progressive enhancement, works on 2G). Fields are pre-validated client-side to reduce round trips.
-
-The portal supports:
-
-- Incident type selection (arrest, seizure, witness statement, court order, intelligence tip).
-- Subject identification (name, NIN if known, phone, address, physical description).
-- Incident narrative (free text, up to 5,000 characters).
-- Supporting document upload (photos of physical documents, up to 5 files, 5 MB each).
-- GPS coordinates (auto-populated from device if available, manual entry otherwise).
-- Submitter authentication via Submitter ID + PIN.
-
-### 5.2 SMS Gateway
-
-For agencies with no internet access, a structured SMS format is supported:
+Every registered agency receives a structured **Agency Code** that encodes its jurisdiction:
 
 ```
-LEX [SubmitterID] [PIN] [IncidentType] [SubjectName] [NIN/Phone] [Narrative (max 160 chars)]
+{AgencyType}-{StateCode}-{CommandUnit}-{Sequence}
+
+Examples:
+  NPF-LA-APAPA-001      → Nigeria Police Force, Lagos, Apapa Area Command
+  EFCC-FC-ABUJA-001     → EFCC, FCT Abuja, Zonal Office
+  ICPC-KN-KANO-001      → ICPC, Kano, Kano Office
+  NPF-RI-PORTHARCOURT-002 → NPF, Rivers State, Port Harcourt Command (2nd unit)
 ```
 
-The SMS gateway parses incoming messages, validates the Submitter ID and PIN, and creates a draft LEX submission flagged as "SMS — requires document follow-up". The submitter receives a confirmation SMS with a **Reference Code** they can use to attach documents later via the portal or by physical mail.
-
-### 5.3 Physical Submission (Offline)
-
-For agencies that cannot use either channel, BIS provides a **standardised LEX paper form** (Form LEX-01). The form includes:
-
-- A unique pre-printed barcode tied to the issuing agency.
-- Fields for all required incident data.
-- A signature block for the submitting officer and a countersignature block for their supervisor.
-
-Completed forms are physically delivered to a designated BIS intake point (or scanned and emailed by the agency's administrative officer). A BIS data entry operator digitises the form, attaches a scan, and creates the LEX submission on behalf of the officer. The operator's ID is recorded alongside the original submitter's ID.
+The Agency Code is immutable once assigned. If a unit is reorganised or renamed, a new code is issued and the old one is retired (not deleted).
 
 ---
 
-## 6. The LEX Submission Data Model
+## 3. Data Model
 
-LEX submissions are stored in a dedicated `lex_submissions` table, **separate from the main `cases` table**, until validated.
+### 3.1 `lex_agencies`
+
+```
+lex_agencies
+├── id                  (PK, serial)
+├── agencyCode          (unique, e.g. NPF-LA-APAPA-001)
+├── name                (full official name)
+├── type                (npf | efcc | icpc | dss | nscdc | customs | immigration | other)
+├── state               (enum: 37 Nigerian states/FCT)
+├── lga                 (varchar, optional)
+├── commandUnit         (varchar, e.g. "Apapa Area Command")
+├── contactName         (commanding officer name)
+├── contactPhone        (verified phone)
+├── contactEmail        (optional)
+├── status              (active | suspended | retired)
+├── registeredBy        (FK → users, BIS admin who approved)
+├── registeredAt
+├── suspendedAt
+├── suspendedReason
+└── notes
+```
+
+### 3.2 `lex_submitters`
+
+```
+lex_submitters
+├── id                  (PK, serial)
+├── submitterId         (UUID, non-guessable)
+├── agencyId            (FK → lex_agencies)
+├── name
+├── rank                (e.g. "Inspector", "Detective Superintendent")
+├── phone               (verified, used for PIN delivery)
+├── pinHash             (bcrypt hash of 6-digit PIN)
+├── reputationScore     (integer, starts at 50)
+├── status              (active | suspended | revoked)
+├── lastSubmissionAt
+├── totalSubmissions
+├── validatedSubmissions
+├── rejectedSubmissions
+├── createdAt
+└── revokedAt
+```
+
+### 3.3 `lex_submissions`
 
 ```
 lex_submissions
-├── id                  (PK)
-├── submissionRef       (e.g. LEX-2026-0042)
-├── agencyCode          (FK → lex_agencies)
+├── id                  (PK, serial)
+├── submissionRef       (e.g. LEX-2026-LA-0042)
+├── agencyId            (FK → lex_agencies)
 ├── submitterId         (FK → lex_submitters)
 ├── channel             (web | sms | physical)
-├── incidentType        (arrest | seizure | witness_statement | court_order | intel_tip)
+├── incidentType        (arrest | seizure | witness_statement | court_order | intel_tip | missing_person | homicide | fraud | cybercrime | other)
+├── incidentState       (enum: 37 states — must match agency.state)
+├── incidentLga         (varchar)
+├── incidentAddress     (text)
+├── gpsLat / gpsLng
+├── incidentDate
 ├── subjectName
 ├── subjectNin
 ├── subjectPhone
 ├── subjectAddress
-├── narrative           (encrypted at rest)
-├── gpsLat / gpsLng
-├── incidentDate
+├── narrative           (text, encrypted at rest)
 ├── documents           (JSON array of S3 keys)
-├── status              (pending | under_review | validated | rejected | escalated)
-├── validationScore     (0–100, computed)
-├── validationNotes     (JSON, per-check results)
-├── reviewedBy          (FK → users, BIS analyst)
+├── status              (pending | under_review | validated | rejected | escalated | expunged)
+├── validationScore     (0–100)
+├── validationNotes     (JSON: per-layer results)
+├── reviewedBy          (FK → users)
 ├── reviewedAt
-├── linkedCaseId        (FK → cases, set after validation)
+├── linkedCaseId        (FK → cases)
 ├── rejectionReason
 ├── createdAt
 └── updatedAt
 ```
 
+The `submissionRef` includes the **state code** (e.g., `LEX-2026-LA-0042` for Lagos), making the jurisdiction immediately visible in any reference.
+
 ---
 
-## 7. Multi-Layer Validation Architecture
+## 4. Jurisdiction Enforcement
 
-This is the most critical component of LEX. Every submission passes through **five validation layers** before a BIS analyst can approve it for case linkage.
+Jurisdiction enforcement operates at three points in the pipeline:
 
-### Layer 1 — Structural Validation (Automated, Instant)
+### 4.1 Submission Intake (Layer 1 — Structural)
 
-Checks that the submission is technically complete:
+When a submission arrives via the web portal or SMS:
 
-- Submitter ID and PIN are valid and not revoked.
-- Required fields (incident type, subject name, narrative) are present.
-- Narrative is at least 50 characters (filters out accidental or test submissions).
-- Incident date is not in the future and not more than 5 years in the past.
-- If documents are attached, they pass virus scanning and format validation.
+- The system resolves the submitter's agency and reads `agency.state`.
+- The submission form pre-populates `incidentState` with the agency's state and **does not allow the submitter to change it** to a different state.
+- If a submitter attempts to submit via the API with a mismatched `incidentState`, the submission is rejected with error `LEX_JURISDICTION_MISMATCH`.
 
-**Outcome:** Pass/Fail. Failures are returned to the submitter immediately with a specific error code.
+This is the primary control. A Lagos police officer physically cannot submit an incident in Kano through the LEX portal.
 
-### Layer 2 — Identity Cross-Check (Automated, Near-Instant)
-
-If the submission includes a subject NIN or BVN, BIS queries its existing identity data:
-
-- Does the NIN/BVN exist in BIS's identity database?
-- Is the subject already linked to an active BIS investigation or case?
-- Does the subject appear on any sanctions or PEP list?
-
-This layer does **not** validate the submission — it enriches it. The results are attached as `validationNotes` and surfaced to the reviewing analyst. A subject who is already under BIS investigation is a positive corroboration signal; a subject with no prior BIS history is neutral.
-
-### Layer 3 — Geospatial Plausibility (Automated)
+### 4.2 Geospatial Validation (Layer 3 — Automated)
 
 If GPS coordinates are provided:
 
-- Are the coordinates within Nigeria? (Bounding box check.)
-- Does the stated incident location match the submitting agency's jurisdiction? (A Lagos police unit submitting an incident in Kano is flagged for review.)
-- If multiple submissions from the same agency reference the same GPS point within 24 hours, they are flagged as potentially duplicated.
+- The coordinates are reverse-geocoded to determine the Nigerian state.
+- If the resolved state does not match `agency.state`, the submission is flagged with `GEOSPATIAL_JURISDICTION_MISMATCH` and the validation score is reduced by 20 points.
+- The flag is surfaced to the reviewing analyst as a warning, not an automatic rejection (the GPS may be inaccurate, or the incident may be at a state border).
 
-### Layer 4 — Duplicate and Velocity Detection (Automated)
+### 4.3 Analyst Review Queue (Layer 5 — Human)
 
-- Has the same submitter submitted more than 5 reports in the last 24 hours? (Velocity spike — flagged.)
-- Does this submission share >80% text similarity with another submission from the same agency in the last 30 days? (Potential duplicate or copy-paste fabrication — flagged.)
-- Has the same subject NIN/phone been submitted by more than 3 different agencies in the last 7 days? (Coordinated targeting — escalated to BIS supervisor.)
-
-Text similarity is computed using a simple trigram overlap algorithm that runs entirely in-process with no external dependency.
-
-### Layer 5 — Human Review (Manual, Required)
-
-No LEX submission can be linked to a BIS case without explicit approval from a **BIS analyst** (role: `analyst` or above). The analyst review interface presents:
-
-- The full submission with all enrichment data from Layers 1–4.
-- A **Validation Score** (0–100) computed from the automated layers, with a breakdown.
-- A side-by-side view of any existing BIS case or investigation linked to the subject.
-- The submitting officer's submission history (how many submissions, how many validated, how many rejected).
-- A map view of the incident location.
-
-The analyst can:
-
-- **Validate** — approve the submission and link it to an existing or new BIS case.
-- **Reject** — reject with a mandatory reason code.
-- **Request clarification** — send a structured query back to the submitting agency (via SMS or portal notification).
-- **Escalate** — refer to a supervisor for a second opinion.
-
-**Validation Score thresholds:**
-
-| Score | Analyst Action Required |
-|---|---|
-| 80–100 | Recommended for approval; analyst can approve with one click |
-| 50–79 | Standard review required |
-| 20–49 | Enhanced review required; supervisor co-sign recommended |
-| 0–19 | Automatic hold; supervisor must approve before analyst can act |
+The analyst review queue is **filtered by state by default**. A BIS analyst assigned to Lagos will see only LEX submissions from Lagos agencies. Supervisors can view all states. This prevents a single analyst from being overwhelmed by submissions from across the country and ensures that analysts with local knowledge review the submissions most relevant to their expertise.
 
 ---
 
-## 8. Anti-Fabrication Controls
+## 5. Submission Channels
 
-Beyond the five validation layers, LEX implements the following specific anti-fabrication measures:
+### 5.1 Web Portal
 
-### 8.1 Supervisor Countersignature
+The portal at `/lex/submit` is a mobile-optimised form. The state field is **read-only** and pre-filled from the submitter's agency registration. The LGA field is a dropdown filtered to the agency's state.
 
-All physical (Form LEX-01) submissions require a countersignature from the submitting officer's direct supervisor. The supervisor's name and rank are recorded. BIS does not verify the countersignature cryptographically, but its presence creates a **chain of accountability** within the submitting agency — if a submission is later found to be fabricated, the supervisor is also implicated.
+### 5.2 SMS Gateway
 
-### 8.2 Document Authenticity Signals
+The SMS format includes the state code for audit purposes, but the system ignores any state the submitter provides and uses the agency's registered state instead:
 
-When documents are uploaded (photos of physical forms, court orders, etc.):
+```
+LEX [SubmitterID] [PIN] [IncidentType] [SubjectName] [NIN/Phone] [Narrative]
+```
 
-- **EXIF metadata** is extracted and stored: device model, timestamp, GPS coordinates embedded in the photo. A photo taken at a different time or place than the stated incident is flagged.
-- **LLM-assisted OCR review**: the document is OCR'd and an LLM prompt checks whether the content is internally consistent with the submission narrative. Inconsistencies are surfaced as a flag, not an automatic rejection.
-- **Duplicate image detection**: perceptual hashing detects if the same image has been submitted in a previous LEX submission (potentially reused across fabricated reports).
+### 5.3 Physical Form (LEX-01)
 
-### 8.3 Submitter Reputation Score
+The physical form is **pre-printed per state**. Each state has its own form variant with the state code and agency code pre-printed in the header. A Lagos form cannot be submitted as a Kano form — the barcode encodes the agency code, which encodes the state.
 
-Each submitter accumulates a **Reputation Score** based on their submission history:
+---
 
-- +10 for each validated submission.
-- −20 for each rejected submission (fabrication or error).
-- −5 for each submission that required clarification.
-- −30 for any submission flagged as coordinated targeting.
+## 6. Multi-Layer Validation Architecture
 
-Submitters with a Reputation Score below 0 are automatically placed in enhanced review. Submitters below −50 are suspended pending agency review.
+Every submission passes through five layers before a BIS analyst can approve it.
 
-### 8.4 Agency-Level Anomaly Detection
+| Layer | Type | Description |
+|---|---|---|
+| **1 — Structural** | Automated | Submitter auth, required fields, jurisdiction match, file validation |
+| **2 — Identity Cross-Check** | Automated | NIN/BVN lookup against BIS identity database, existing case/investigation check |
+| **3 — Geospatial** | Automated | GPS-to-state reverse geocode, jurisdiction match, duplicate location detection |
+| **4 — Duplicate & Velocity** | Automated | Submitter rate limiting, text similarity, cross-agency targeting detection |
+| **5 — Human Review** | Manual | BIS analyst approval, state-scoped queue, mandatory for all submissions |
 
-At the agency level, BIS tracks:
+### Validation Score Breakdown
 
-- Submission volume over time (unusual spikes are flagged).
-- Validation rate (agencies with <30% validation rate trigger an audit).
-- Subject diversity (an agency that repeatedly submits reports on the same individual is flagged for potential harassment).
+| Check | Max Points | Notes |
+|---|---|---|
+| Structural pass | 20 | All required fields present, auth valid |
+| Jurisdiction match (GPS) | 15 | GPS confirms agency's state |
+| Subject NIN/BVN found in BIS | 15 | Corroborates subject identity |
+| Subject linked to existing BIS case | 10 | Positive corroboration signal |
+| Document attached | 10 | At least one supporting document |
+| Document has valid EXIF metadata | 5 | Photo taken at plausible time/location |
+| No velocity flag | 10 | Submitter not exceeding rate limits |
+| No duplicate flag | 10 | No text similarity match |
+| Submitter reputation ≥ 50 | 5 | Submitter has good track record |
 
-### 8.5 Immutable Audit Trail
+**Total: 100 points**
 
-Every action in the LEX pipeline is written to the BIS `audit_log` table with category `"lex"`. Entries cannot be deleted or modified. This log is available to BIS supervisors and, in the event of a legal challenge, can be produced as evidence of the chain of custody for any submission.
+### Analyst Action Thresholds
+
+| Score | Required Action |
+|---|---|
+| 80–100 | One-click approval recommended |
+| 50–79 | Standard analyst review |
+| 20–49 | Enhanced review; supervisor co-sign recommended |
+| 0–19 | Automatic hold; supervisor must unlock before analyst can act |
+
+---
+
+## 7. Anti-Fabrication Controls
+
+### 7.1 State-Scoped Reputation Scoring
+
+Each submitter's **Reputation Score** is tracked at the agency level. A submitter who moves from one agency to another (e.g., a transferred officer) starts with a fresh score at the new agency. This prevents a submitter from building reputation at one agency and exploiting it at another.
+
+Score adjustments:
+
+| Event | Change |
+|---|---|
+| Submission validated | +10 |
+| Submission rejected (error) | −15 |
+| Submission rejected (fabrication) | −30 |
+| Submission required clarification | −5 |
+| Coordinated targeting flag | −40 |
+
+Submitters below 0 enter enhanced review. Below −50, the submitter is suspended and the agency's commanding officer is notified via SMS.
+
+### 7.2 Cross-State Targeting Detection
+
+If the same subject NIN or phone number is submitted by agencies in **three or more different states** within 7 days, the submissions are escalated to a BIS supervisor with a `CROSS_STATE_TARGETING` flag. This pattern is a strong signal of coordinated fabrication or harassment.
+
+### 7.3 State-Level Agency Anomaly Detection
+
+At the state level, BIS tracks:
+
+- **Submission volume per state per week** — unusual spikes (>3× the 4-week average) trigger a state-level audit.
+- **Validation rate per state** — states with <30% validation rate over 30 days trigger a review of all pending submissions from that state.
+- **Agency-level concentration** — if one agency accounts for >60% of all LEX submissions from its state in a given week, it is flagged for review.
+
+### 7.4 Document Authenticity
+
+- EXIF metadata extracted from uploaded photos (timestamp, GPS, device model).
+- LLM-assisted OCR consistency check: does the document content match the submission narrative?
+- Perceptual hash deduplication: the same image cannot be used in two different submissions.
+
+---
+
+## 8. LEX Admin Panel (BIS Internal)
+
+BIS administrators manage LEX through a dedicated admin panel with the following views:
+
+| View | Description |
+|---|---|
+| **Agency Registry** | List all agencies, filterable by state, type, status. Register new agency. |
+| **Submitter Management** | List submitters for a selected agency. Issue credentials, revoke, view reputation score. |
+| **Submission Review Queue** | State-scoped queue of pending submissions. Validate, reject, escalate, request clarification. |
+| **State Analytics** | Per-state submission volume, validation rate, top submitters, anomaly flags. |
+| **Audit Log** | Full immutable log of all LEX actions, filterable by state, agency, submitter, date. |
 
 ---
 
 ## 9. Integration with BIS Case Management
 
-Once a LEX submission is validated by an analyst, it is integrated into BIS as follows:
+When a LEX submission is validated:
 
-1. A new **Case** is created (or the submission is linked to an existing case) with type `"criminal_report"` and source `"lex"`.
-2. The submitting agency and officer are recorded as a **Case Stakeholder** with role `"law_enforcement"`.
-3. The original submission documents are attached to the case as **Case Documents** with `confidential = true` by default.
-4. A **Timeline Event** of type `"document_uploaded"` is created with a note indicating the LEX source.
-5. The subject's risk score is **recalculated** using the standard `recalculateRiskScore` procedure, which now incorporates the new case data.
-6. If the submission triggered any alert rules (e.g., a sanctions hit on the subject NIN), those alerts are fired normally.
-
-Crucially, the LEX submission itself is **never deleted** — it remains in `lex_submissions` with status `"validated"` and a `linkedCaseId` pointing to the resulting case. This preserves the original, unmodified submission as a permanent record.
+1. A **Case** is created (or linked to an existing case) with type `"criminal_report"`, source `"lex"`, and jurisdiction set to the submission's state.
+2. The submitting agency is added as a **Case Stakeholder** with role `"law_enforcement"` and the agency's state is recorded.
+3. The submission's `incidentState` populates the case's `jurisdiction` field, enabling state-based case filtering in the main Cases list.
+4. The subject's risk score is recalculated.
+5. BIS analysts in the relevant state are notified via the alert system.
 
 ---
 
-## 10. Privacy and Data Protection
-
-LEX submissions contain sensitive personal data about individuals who may not be convicted of any offence. The following controls apply:
-
-- **Encryption at rest**: the `narrative` field and all document S3 keys are encrypted using AES-256. The encryption key is stored in the BIS secrets manager, separate from the database.
-- **Access control**: only BIS analysts and above can view LEX submission details. The submitting agency cannot view how their submission was processed or what BIS case it was linked to.
-- **Retention policy**: rejected LEX submissions are purged after 90 days. Validated submissions are retained for 7 years (aligned with Nigerian financial crime record-keeping requirements).
-- **Right to erasure**: if a subject successfully challenges a LEX submission as fabricated, the submission is marked `"expunged"` and excluded from all queries. The original record is retained in a restricted archive for legal purposes but is invisible to normal BIS operations.
-
----
-
-## 11. Implementation Roadmap
+## 10. Implementation Roadmap
 
 | Phase | Deliverable | Effort |
 |---|---|---|
-| **LEX-1** | Agency and submitter registration UI (admin panel) | 1 week |
-| **LEX-2** | `lex_submissions` schema, web portal, SMS gateway stub | 2 weeks |
-| **LEX-3** | Automated validation layers 1–4, validation score engine | 2 weeks |
-| **LEX-4** | Analyst review UI, approval/rejection workflow | 1 week |
-| **LEX-5** | Case integration, risk score recalculation, audit trail | 1 week |
-| **LEX-6** | Document authenticity signals (EXIF, LLM OCR, perceptual hash) | 2 weeks |
-| **LEX-7** | Submitter reputation score, agency anomaly detection | 1 week |
-| **LEX-8** | Physical form (LEX-01) design, print-ready PDF generation | 1 week |
-| **LEX-9** | Pilot with one agency, feedback loop, hardening | 2 weeks |
+| **LEX-1** | Nigerian states enum, `lex_agencies`, `lex_submitters`, `lex_submissions` schema | 3 days |
+| **LEX-2** | LEX admin panel: agency registry + submitter management (state filter) | 1 week |
+| **LEX-3** | LEX submission portal (`/lex/submit`): state-locked form, submitter auth | 1 week |
+| **LEX-4** | Automated validation layers 1–4, validation score engine | 1 week |
+| **LEX-5** | Analyst review queue (state-scoped), approval/rejection workflow | 1 week |
+| **LEX-6** | Case integration, risk score recalculation, audit trail | 3 days |
+| **LEX-7** | Document authenticity signals (EXIF, LLM OCR, perceptual hash) | 1 week |
+| **LEX-8** | Reputation scoring, cross-state targeting detection, state anomaly detection | 1 week |
+| **LEX-9** | Physical form (LEX-01) per-state PDF generation | 3 days |
+| **LEX-10** | Pilot with one state (recommended: Lagos or FCT Abuja) | 2 weeks |
 
-Total estimated effort: **13 weeks** for a production-ready LEX module.
+Total estimated effort: **~10 weeks** for a production-ready state-scoped LEX module.
 
 ---
 
-## 12. Key Risks and Mitigations
+## 11. Key Risks and Mitigations
 
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
-| Fabricated submissions from compromised submitter credentials | Medium | High | Reputation scoring, velocity detection, human review gate |
-| Coordinated targeting of a single subject by multiple agencies | Low | High | Cross-agency velocity check, supervisor escalation |
-| SMS channel used for bulk spam submissions | Medium | Medium | Rate limiting (5/day/submitter), structural validation |
-| EXIF metadata stripped from uploaded photos | High | Low | Flag as "no metadata" — not a rejection, but reduces validation score |
-| Agency refuses to participate due to data sovereignty concerns | Medium | Medium | Data residency guarantee (all data stored in Nigerian data centre or sovereign cloud) |
-| BIS analyst approves fabricated submission due to workload | Low | High | Mandatory supervisor co-sign for low-score submissions, random audit of 10% of approvals |
+| Officer submits incident from wrong state (genuine error) | High | Low | GPS flag surfaced to analyst as warning, not rejection |
+| Fabricated submissions from compromised credentials | Medium | High | Reputation scoring, velocity detection, human review gate |
+| Cross-state coordinated targeting | Low | High | Cross-state targeting detection, supervisor escalation |
+| Agency refuses participation citing data sovereignty | Medium | Medium | Data residency guarantee; state-level data can be ring-fenced |
+| Analyst approves fabricated submission | Low | High | Supervisor co-sign for low-score submissions; 10% random audit |
+| State with no digital infrastructure cannot participate | High | Medium | SMS gateway + physical Form LEX-01 as fallback |
 
 ---
 
-## 13. Conclusion
+## 12. Conclusion
 
-LEX is a pragmatic bridge between Nigeria's paper-first law enforcement reality and BIS's digital intelligence platform. By designing for the lowest common denominator — feature phones, physical forms, and offline workflows — while maintaining strict validation and anti-fabrication controls, LEX can meaningfully expand the intelligence surface available to BIS analysts without compromising the integrity of the platform.
+Tying LEX agencies to Nigerian states is not merely an organisational convenience — it is a **core security control**. The state binding eliminates the largest class of fabrication attacks (cross-jurisdiction impersonation), enables jurisdiction-aware analyst routing, and produces submission references that are immediately interpretable by any BIS user. The three-level hierarchy (state → LGA → command unit) mirrors how Nigerian law enforcement is actually organised, making the system intuitive for the agencies that will use it.
 
-The five-layer validation architecture, combined with submitter reputation scoring, document authenticity signals, and a mandatory human review gate, ensures that no fabricated submission can automatically damage a subject's risk profile. The immutable audit trail provides the legal defensibility required for any submission that ultimately contributes to a prosecution or regulatory action.
-
-The recommended next step is to pilot LEX with a single agency — ideally the EFCC, which has a higher baseline of digital literacy than general police units — before rolling out to broader law enforcement partners.
+The recommended pilot state is **Lagos** (highest law enforcement density, best baseline digital literacy) or **FCT Abuja** (proximity to federal agencies like EFCC and ICPC). A successful pilot in one state provides the template for a national rollout.

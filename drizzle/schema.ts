@@ -879,3 +879,105 @@ export type OllamaModel = typeof ollamaModels.$inferSelect;
 
 // ─── Token Quota (OpenClaw) ───────────────────────────────────────────────────
 // tokenQuota column added to apiTokens above via migration
+
+// ─── LEX — Law Enforcement Extension ─────────────────────────────────────────
+
+export const nigerianStateEnum = pgEnum("nigerian_state", [
+  "AB", "AD", "AK", "AN", "BA", "BY", "BE", "BO", "CR", "DE",
+  "EB", "ED", "EK", "EN", "GO", "IM", "JI", "KD", "KN", "KT",
+  "KE", "KO", "KW", "LA", "NA", "NI", "OG", "ON", "OS", "OY",
+  "PL", "RI", "SO", "TA", "YO", "ZA", "FC",
+]);
+
+export const lexAgencyTypeEnum = pgEnum("lex_agency_type", [
+  "npf", "efcc", "icpc", "dss", "nscdc", "customs", "immigration", "other",
+]);
+
+export const lexAgencyStatusEnum = pgEnum("lex_agency_status", [
+  "active", "suspended", "retired",
+]);
+
+export const lexSubmitterStatusEnum = pgEnum("lex_submitter_status", [
+  "active", "suspended", "revoked",
+]);
+
+export const lexSubmissionStatusEnum = pgEnum("lex_submission_status", [
+  "pending", "under_review", "validated", "rejected", "escalated", "expunged",
+]);
+
+export const lexIncidentTypeEnum = pgEnum("lex_incident_type", [
+  "arrest", "seizure", "witness_statement", "court_order", "intel_tip",
+  "missing_person", "homicide", "fraud", "cybercrime", "other",
+]);
+
+export const lexChannelEnum = pgEnum("lex_channel", ["web", "sms", "physical"]);
+
+export const lexAgencies = pgTable("lex_agencies", {
+  id: serial("id").primaryKey(),
+  agencyCode: varchar("agencyCode", { length: 64 }).notNull().unique(),
+  name: varchar("name", { length: 255 }).notNull(),
+  type: lexAgencyTypeEnum("type").notNull(),
+  state: nigerianStateEnum("state").notNull(),
+  lga: varchar("lga", { length: 100 }),
+  commandUnit: varchar("commandUnit", { length: 255 }),
+  contactName: varchar("contactName", { length: 255 }),
+  contactPhone: varchar("contactPhone", { length: 20 }),
+  contactEmail: varchar("contactEmail", { length: 320 }),
+  status: lexAgencyStatusEnum("status").notNull().default("active"),
+  registeredBy: integer("registeredBy"),
+  registeredAt: timestamp("registeredAt").defaultNow().notNull(),
+  suspendedAt: timestamp("suspendedAt"),
+  suspendedReason: text("suspendedReason"),
+  notes: text("notes"),
+});
+export type LexAgency = typeof lexAgencies.$inferSelect;
+
+export const lexSubmitters = pgTable("lex_submitters", {
+  id: serial("id").primaryKey(),
+  submitterId: varchar("submitterId", { length: 64 }).notNull().unique(),
+  agencyId: integer("agencyId").notNull().references(() => lexAgencies.id, { onDelete: "cascade" }),
+  name: varchar("name", { length: 255 }).notNull(),
+  rank: varchar("rank", { length: 100 }),
+  phone: varchar("phone", { length: 20 }).notNull(),
+  pinHash: varchar("pinHash", { length: 255 }).notNull(),
+  reputationScore: integer("reputationScore").notNull().default(50),
+  status: lexSubmitterStatusEnum("status").notNull().default("active"),
+  lastSubmissionAt: timestamp("lastSubmissionAt"),
+  totalSubmissions: integer("totalSubmissions").notNull().default(0),
+  validatedSubmissions: integer("validatedSubmissions").notNull().default(0),
+  rejectedSubmissions: integer("rejectedSubmissions").notNull().default(0),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  revokedAt: timestamp("revokedAt"),
+});
+export type LexSubmitter = typeof lexSubmitters.$inferSelect;
+
+export const lexSubmissions = pgTable("lex_submissions", {
+  id: serial("id").primaryKey(),
+  submissionRef: varchar("submissionRef", { length: 32 }).notNull().unique(),
+  agencyId: integer("agencyId").notNull().references(() => lexAgencies.id),
+  submitterId: integer("submitterId").references(() => lexSubmitters.id),
+  channel: lexChannelEnum("channel").notNull().default("web"),
+  incidentType: lexIncidentTypeEnum("incidentType").notNull(),
+  incidentState: nigerianStateEnum("incidentState").notNull(),
+  incidentLga: varchar("incidentLga", { length: 100 }),
+  incidentAddress: text("incidentAddress"),
+  gpsLat: real("gpsLat"),
+  gpsLng: real("gpsLng"),
+  incidentDate: timestamp("incidentDate"),
+  subjectName: varchar("subjectName", { length: 255 }),
+  subjectNin: varchar("subjectNin", { length: 11 }),
+  subjectPhone: varchar("subjectPhone", { length: 20 }),
+  subjectAddress: text("subjectAddress"),
+  narrative: text("narrative").notNull(),
+  documents: json("documents").$type<string[]>().default([]),
+  status: lexSubmissionStatusEnum("status").notNull().default("pending"),
+  validationScore: integer("validationScore"),
+  validationNotes: json("validationNotes"),
+  reviewedBy: integer("reviewedBy"),
+  reviewedAt: timestamp("reviewedAt"),
+  linkedCaseId: integer("linkedCaseId").references(() => cases.id),
+  rejectionReason: text("rejectionReason"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+export type LexSubmission = typeof lexSubmissions.$inferSelect;

@@ -914,3 +914,34 @@
 - [x] Full comments thread UI in CaseDetailPage (post, edit, delete, confidential badge)
 - [x] Phase 41 Vitest tests: 30 new tests (risk formula, assignment labels, confidentiality filter, auth, LLM parsing)
 - [x] LEX Architecture Design Document (docs/lex-architecture.md)
+
+## Phase 42 — LEX State-Scoped Jurisdiction
+
+- [ ] Update LEX architecture document: agencies tied to Nigerian states + LGAs
+- [ ] Add Nigerian states enum to schema (all 36 states + FCT)
+- [ ] Add lex_agencies table (agencyCode, name, type, state, lga, commandUnit, status, registeredBy)
+- [ ] Add lex_submitters table (submitterId, agencyId, name, rank, phone, pin hash, reputationScore, status)
+- [ ] Add lex_submissions table (submissionRef, agencyCode, state, incidentType, subject fields, narrative, validationScore, status, linkedCaseId)
+- [ ] Build LEX admin panel: agency list, register agency, manage submitters (state filter)
+- [ ] Build LEX submission portal (/lex/submit): structured form with state/LGA picker, submitter auth
+- [ ] Jurisdiction enforcement: incident GPS/state must match agency's registered state
+- [ ] Build LEX analyst review queue: filter by state, validation score, incident type
+- [ ] Add LEX nav entry to DashboardLayout sidebar
+- [ ] Vitest tests for state jurisdiction checks, validation score, reputation scoring
+
+## Phase 42 — LEX State-Scoped Implementation
+- [x] Update LEX architecture document with Nigerian state/LGA jurisdiction model
+- [x] Add lex_agencies, lex_submitters, lex_submissions tables to schema (migration 0023)
+- [x] Add lexRouter to server with 10 procedures (listAgencies, getAgency, createAgency, updateAgencyStatus, createSubmitter, revokeSubmitter, listSubmissions, getSubmission, submitIncident, reviewSubmission, stateStats, nigerianStates)
+- [x] Jurisdiction enforcement: submissions always tagged to agency's registered state (not submitter input)
+- [x] Velocity limiting: max 5 submissions per submitter per 24h
+- [x] PIN authentication: SHA-256(pin + submitterId) stored, plain PIN shown once and never stored
+- [x] Validation scoring: structural (20) + identity fields (10) + GPS in Nigeria (10/-15) + reputation (5)
+- [x] Reputation scoring: +10 on validate, -15 on reject, 0 on escalate
+- [x] Build LexAdminPage (/lex/admin): agency registration, submitter management, PIN display dialog
+- [x] Build LexSubmitPage (/lex/submit): 3-step portal (auth → form → success) with GPS capture
+- [x] Build LexReviewPage (/lex/review): state-filtered queue, detail panel, review actions, state stats
+- [x] Add LEX section to BISLayout sidebar navigation
+- [x] Register /lex/submit, /lex/admin, /lex/review routes in App.tsx
+- [x] Write 42 Vitest tests for LEX (state lookup, agency code generation, validation scoring, GPS bounding box, submission refs, velocity limits, PIN format, reputation scoring)
+- [x] All 186 tests passing

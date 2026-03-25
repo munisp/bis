@@ -16,6 +16,7 @@ import { messagingRouter } from "./messaging";
 import { socialMonitoringRouter } from "./socialMonitoring";
 import { biometricRouter } from "./biometric";
 import { lakehouseRouter } from "./lakehouse";
+import { lexRouter } from "./lex";
 import { getDb } from "./db";
 import { evaluateAlertRules } from "./alertRules";
 import {
@@ -44,6 +45,12 @@ import {
   caseTimeline,
   caseStakeholders,
   caseComments,
+  lexAgencies,
+  lexSubmitters,
+  lexSubmissions,
+  nigerianStateEnum,
+  lexAgencyTypeEnum,
+  lexIncidentTypeEnum,
 } from "../drizzle/schema";
 import {
   getDashboardStats,
@@ -3122,5 +3129,6 @@ export const appRouter = router({
   hostedLinks: hostedLinkRouter,
   cases: casesRouter,
   ollama: ollamaRouter,
+  lex: lexRouter,
 });
 export type AppRouter = typeof appRouter;

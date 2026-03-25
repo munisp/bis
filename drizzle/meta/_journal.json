@@ -162,6 +162,13 @@
       "when": 1774448521367,
       "tag": "0022_wonderful_bloodaxe",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1774450116328,
+      "tag": "0023_brief_living_lightning",
+      "breakpoints": true
     }
   ]
 }
