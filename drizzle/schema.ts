@@ -657,3 +657,17 @@ export type SocialMonitorConfig = typeof socialMonitorConfigs.$inferSelect;
 export type InsertSocialMonitorConfig = typeof socialMonitorConfigs.$inferInsert;
 export type SocialMention = typeof socialMentions.$inferSelect;
 export type InsertSocialMention = typeof socialMentions.$inferInsert;
+
+// ─── Push Device Tokens (Expo Push Notifications) ────────────────────────────
+export const pushDeviceTokens = pgTable("push_device_tokens", {
+  id: serial("id").primaryKey(),
+  userId: integer("userId").notNull(),
+  token: varchar("token", { length: 500 }).notNull().unique(),
+  platform: varchar("platform", { length: 10 }).notNull().default("ios"), // ios | android
+  deviceName: varchar("deviceName", { length: 200 }),
+  active: boolean("active").notNull().default(true),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+export type PushDeviceToken = typeof pushDeviceTokens.$inferSelect;
+export type InsertPushDeviceToken = typeof pushDeviceTokens.$inferInsert;

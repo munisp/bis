@@ -23,6 +23,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { getStatusBadgeClass, formatDateTime, formatDate } from "@/lib/bisUtils";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/lib/trpc";
+import GoamlXmlPreviewSheet from "@/components/GoamlXmlPreviewSheet";
 
 // ─── Static module data ───────────────────────────────────────────────────────
 
@@ -270,6 +271,9 @@ export default function InvestigationDetail() {
 
   // ── goAML STR Wizard modal ──────────────────────────────────────────────────
   const [goamlOpen, setGoamlOpen] = useState(false);
+  const [xmlPreviewOpen, setXmlPreviewOpen] = useState(false);
+  const [lastFilingId, setLastFilingId] = useState<number | null>(null);
+  const [lastFilingRef, setLastFilingRef] = useState<string | undefined>(undefined);
   const [goamlStep, setGoamlStep] = useState<0|1|2|3>(0);
   const [goamlForm, setGoamlForm] = useState({
     reportType: "STR" as "STR" | "CTR" | "SAR",
@@ -287,9 +291,16 @@ export default function InvestigationDetail() {
 
   const goamlCreateMutation = trpc.goaml.create.useMutation({
     onSuccess: (data) => {
-      toast.success(`STR draft created — ${data.filingRef}`);
+      setLastFilingId(data.id);
+      setLastFilingRef(data.filingRef);
       setGoamlOpen(false);
       setGoamlStep(0);
+      toast.success(`STR draft created — ${data.filingRef}`, {
+        action: {
+          label: 'Preview XML',
+          onClick: () => setXmlPreviewOpen(true),
+        },
+      });
     },
     onError: (e) => toast.error(e.message),
   });
@@ -554,6 +565,11 @@ export default function InvestigationDetail() {
           <Button variant="outline" size="sm" className="h-7 text-xs gap-1 border-amber-500/40 text-amber-400 hover:bg-amber-500/10" onClick={openGoamlWizard}>
             <Shield size={11} /> File STR
           </Button>
+          {lastFilingId && (
+            <Button variant="outline" size="sm" className="h-7 text-xs gap-1 border-cyan-500/40 text-cyan-400 hover:bg-cyan-500/10" onClick={() => setXmlPreviewOpen(true)}>
+              <FileText size={11} /> Preview XML
+            </Button>
+          )}
           <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => setDispatchOpen(true)}>
             <Truck size={11} /> Dispatch Agent
           </Button>
@@ -1329,6 +1345,18 @@ export default function InvestigationDetail() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* ── goAML XML Preview Sheet ─────────────────────────────────────────── */}
+      <GoamlXmlPreviewSheet
+        open={xmlPreviewOpen}
+        onOpenChange={setXmlPreviewOpen}
+        filingId={lastFilingId}
+        filingRef={lastFilingRef}
+        onSubmitSuccess={(ref) => {
+          toast.success(`STR submitted to NFIU — ${ref}`);
+          setXmlPreviewOpen(false);
+        }}
+      />
     </BISLayout>
   );
 }

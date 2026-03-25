@@ -19,3 +19,5 @@ uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 tokio-stream = "0.1"
 dashmap = "5"
+rdkafka = { version = "0.36", features = ["tokio"] }
+tokio-util = { version = "0.7", features = ["rt"] }

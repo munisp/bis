@@ -694,3 +694,30 @@
 - [x] "File STR" button wired into Investigation detail page (amber-styled action button)
 - [x] goAML XML generation (FATF goAML 4.0 schema)
 - [x] goAML vitest tests
+
+## Phase 30 — Native Kafka, goAML XML Preview, Mobile Push Notifications
+
+### Native Kafka Consumer (Rust)
+- [x] Add rdkafka dependency to event-processor Cargo.toml
+- [x] Rewrite consumer.rs with real rdkafka StreamConsumer
+- [x] Handle bis.events topic messages with typed BisEvent deserialization
+- [x] Graceful shutdown via tokio CancellationToken
+- [x] Update Dockerfile to install librdkafka-dev
+- [x] Keep HTTP /v1/ingest endpoint as secondary ingestion path
+
+### goAML XML Preview Panel
+- [x] GoamlXmlPreviewSheet component (slide-over with syntax-highlighted XML + copy button)
+- [x] "Preview XML" button in InvestigationDetail action bar (opens after STR draft saved)
+- [x] "Submit to NFIU" confirmation button inside preview panel
+- [x] goaml.getXml procedure used for XML retrieval
+
+### Mobile Push Notifications (Expo)
+- [x] expo-notifications and expo-device added to bis-mobile package.json
+- [x] usePushNotifications hook (token registration, Android channels, foreground handler, tap handler)
+- [x] sendLocalNotification helper for immediate local push
+- [x] bis-mobile root _layout.tsx wires usePushNotifications at startup
+- [x] Alerts screen polls every 60s and fires local push for critical/high alerts
+- [x] notifications tRPC router (registerPushToken, deregisterPushToken, listMyTokens, sendToUser, broadcast)
+- [x] pushDeviceTokens table added to schema.ts and migrated (migration 0015)
+- [x] notificationsRouter registered in appRouter
+- [x] Expo Push API integration (batched 100 tokens/request, ticket tracking)

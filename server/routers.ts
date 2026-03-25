@@ -15,6 +15,7 @@ import { messagingRouter } from "./messaging";
 import { socialMonitoringRouter } from "./socialMonitoring";
 import { biometricRouter } from "./biometric";
 import { lakehouseRouter } from "./lakehouse";
+import { notificationsRouter } from "./notifications";
 import { verifyKeycloakToken, getKeycloakLoginUrl } from "./keycloak";
 import { sessionGet, sessionSet, sessionDel, rateLimit } from "./redis";
 import { startInvestigationWorkflow, getWorkflowStatus } from "./temporal";
@@ -1955,5 +1956,6 @@ export const appRouter = router({
   biometric: biometricRouter,
   lakehouse: lakehouseRouter,
   middleware: middlewareRouter,
+  notifications: notificationsRouter,
 });
 export type AppRouter = typeof appRouter;
