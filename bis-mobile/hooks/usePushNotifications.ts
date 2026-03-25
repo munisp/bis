@@ -24,6 +24,7 @@ import * as Notifications from "expo-notifications";
 import * as Device from "expo-device";
 import Constants from "expo-constants";
 import { useRouter } from "expo-router";
+import { trpc } from "@/lib/trpc";
 
 // Configure how foreground notifications are presented
 Notifications.setNotificationHandler({
@@ -69,9 +70,14 @@ export function usePushNotifications() {
   const router = useRouter();
   const notificationListener = useRef<Notifications.EventSubscription | null>(null);
   const responseListener = useRef<Notifications.EventSubscription | null>(null);
+  const registerToken = trpc.users.registerPushToken.useMutation();
 
   useEffect(() => {
-    registerForPushNotificationsAsync();
+    registerForPushNotificationsAsync().then((token) => {
+      if (token) {
+        registerToken.mutate({ token });
+      }
+    });
 
     // Foreground notification received — no navigation, just display
     notificationListener.current = Notifications.addNotificationReceivedListener(

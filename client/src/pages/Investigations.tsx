@@ -163,6 +163,8 @@ export default function Investigations() {
   const [selectedRefs, setSelectedRefs] = useState<Set<string>>(new Set());
   const [slaDialogOpen, setSlaDialogOpen] = useState(false);
   const [bulkDueAt, setBulkDueAt] = useState('');
+  const [statusDialogOpen, setStatusDialogOpen] = useState(false);
+  const [bulkStatus, setBulkStatus] = useState<'pending' | 'active' | 'completed' | 'archived'>('active');
 
   // Filters
   const [filters, setFilters] = useState<FilterState>(EMPTY_FILTERS);
@@ -279,6 +281,16 @@ export default function Investigations() {
     setActivePresetId(null);
   };
 
+  const bulkUpdateStatusMutation = trpc.investigations.bulkUpdateStatus.useMutation({
+    onSuccess: (result: { updated: number }) => {
+      toast.success(`Status updated for ${result.updated} investigation${result.updated !== 1 ? 's' : ''}`);
+      setStatusDialogOpen(false);
+      setSelectedRefs(new Set());
+      utils.investigations.list.invalidate();
+    },
+    onError: (err: { message?: string }) => toast.error(err.message ?? 'Failed to update status'),
+  });
+
   const bulkUpdateDueAtMutation = trpc.investigations.bulkUpdateDueAt.useMutation({
     onSuccess: (result: { updated: number }) => {
       toast.success(`SLA updated for ${result.updated} investigation${result.updated !== 1 ? 's' : ''}`);
@@ -377,6 +389,52 @@ export default function Investigations() {
         </div>
       }
     >
+      {/* ── Bulk Status Dialog ── */}
+      <Dialog open={statusDialogOpen} onOpenChange={setStatusDialogOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CheckCircle2 size={16} className="text-blue-400" />
+              Change Status
+            </DialogTitle>
+          </DialogHeader>
+          <div className="py-2">
+            <p className="text-sm text-muted-foreground mb-4">
+              Update the status for <span className="font-semibold text-foreground">{selectedRefs.size}</span> selected investigation{selectedRefs.size !== 1 ? 's' : ''}.
+            </p>
+            <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider block mb-1.5">
+              New Status
+            </label>
+            <Select value={bulkStatus} onValueChange={(v) => setBulkStatus(v as any)}>
+              <SelectTrigger className="h-8 text-xs font-mono">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="pending">Pending</SelectItem>
+                <SelectItem value="active">Active</SelectItem>
+                <SelectItem value="completed">Completed</SelectItem>
+                <SelectItem value="archived">Archived</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" size="sm" onClick={() => setStatusDialogOpen(false)}>Cancel</Button>
+            <Button
+              size="sm"
+              className="gap-1.5"
+              disabled={bulkUpdateStatusMutation.isPending}
+              onClick={() => bulkUpdateStatusMutation.mutate({
+                refs: Array.from(selectedRefs),
+                status: bulkStatus,
+              })}
+            >
+              {bulkUpdateStatusMutation.isPending ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
+              Apply to {selectedRefs.size}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* ── Bulk SLA Dialog ── */}
       <Dialog open={slaDialogOpen} onOpenChange={setSlaDialogOpen}>
         <DialogContent className="max-w-sm">
@@ -427,6 +485,14 @@ export default function Investigations() {
           <Checkbox checked={allSelected} onCheckedChange={toggleSelectAll} className="border-primary" />
           <span className="text-xs font-mono text-primary font-semibold">{selectedRefs.size} selected</span>
           <div className="flex items-center gap-2 ml-auto">
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs gap-1.5 border-blue-500/40 text-blue-400 hover:bg-blue-500/10"
+              onClick={() => setStatusDialogOpen(true)}
+            >
+              <CheckCircle2 size={11} /> Change Status
+            </Button>
             <Button
               size="sm"
               variant="outline"

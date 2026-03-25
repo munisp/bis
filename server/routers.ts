@@ -590,6 +590,32 @@ const investigationsRouter = router({
         .orderBy(asc(investigations.dueAt))
         .limit(input.limit);
     }),
+
+  bulkUpdateStatus: writeProcedure
+    .input(z.object({
+      refs: z.array(z.string()).min(1).max(100),
+      status: z.enum(["pending", "active", "completed", "archived"]),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      for (const ref of input.refs) {
+        await db.update(investigations)
+          .set({
+            status: input.status as any,
+            updatedAt: new Date(),
+            ...(input.status === "completed" ? { completedAt: new Date() } : {}),
+          })
+          .where(eq(investigations.ref, ref));
+      }
+      await writeAuditLog(db, {
+        userId: ctx.user!.id,
+        category: "investigation",
+        action: `Bulk status update: ${input.refs.length} investigations set to '${input.status}'`,
+        targetRef: input.refs.join(',').substring(0, 200),
+      });
+      return { updated: input.refs.length };
+    }),
 });
 
 // ─── Data Source Lookup Router ────────────────────────────────────────────────
@@ -1196,6 +1222,17 @@ const usersRouter = router({
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       await db.update(users).set({ role: "readonly" as any, updatedAt: new Date() }).where(eq(users.id, input.id));
       await writeAuditLog(db, { userId: ctx.user.id, category: "user", action: "User deactivated", targetRef: String(input.id) });
+      return { success: true };
+    }),
+
+  registerPushToken: protectedProcedure
+    .input(z.object({ token: z.string().min(1).max(512) }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      await db.update(users)
+        .set({ pushToken: input.token, updatedAt: new Date() })
+        .where(eq(users.id, ctx.user.id));
       return { success: true };
     }),
 });

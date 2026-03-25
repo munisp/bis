@@ -23,6 +23,7 @@ const DEMO_USER: User = {
   createdAt: new Date("2026-01-01T00:00:00Z"),
   updatedAt: new Date("2026-01-01T00:00:00Z"),
   lastSignedIn: new Date(),
+  pushToken: null,
 };
 
 export async function createContext(

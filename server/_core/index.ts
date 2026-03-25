@@ -20,6 +20,7 @@ import { notifyOwner } from "./notification";
 import { creditTenantAccount } from "../billing";
 import crypto from "crypto";
 import { createOpenClawRouter } from "../openclawEndpoints";
+import { startSlaBreachScheduler } from "../slaBreachChecker";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -202,4 +203,6 @@ async function startServer() {
   });
 }
 
-startServer().catch(console.error);
+startServer()
+  .then(() => startSlaBreachScheduler())
+  .catch(console.error);

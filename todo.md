@@ -720,3 +720,27 @@
 
 ### Archive
 - [x] Comprehensive archive of entire platform (v34)
+
+## Phase 35 — Push Token Persistence, SLA Breach Cron, Bulk Status Update
+
+### Push Token Persistence
+- [x] Add pushToken column to users table in schema.ts
+- [x] Add trpc.users.registerPushToken procedure (saves Expo push token to DB)
+- [x] Call registerPushToken from usePushNotifications hook after successful registration
+- [x] pushToken: null added to DEMO_USER in context.ts (DB migration 0016)
+
+### SLA Breach Alert Rule (Cron Job)
+- [x] Add checkSlaBreaches() in server/slaBreachChecker.ts (queries dueAt < now+1h)
+- [x] Create critical alert record (type=system, sourceService=sla-checker) per breach
+- [x] Publish Expo push notifications to all registered device tokens
+- [x] 2-hour dedup guard to prevent repeated alerts
+- [x] startSlaBreachScheduler() wired into server/_core/index.ts (15-min interval)
+
+### Bulk Status Update
+- [x] Add "Change Status" dialog to Investigations multi-select toolbar
+- [x] Add trpc.investigations.bulkUpdateStatus procedure (array of refs + new status)
+- [x] Status options: pending, active, completed, archived
+- [x] Clear selection after successful update
+
+### Archive
+- [x] Comprehensive archive of entire platform (v35)

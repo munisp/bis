@@ -41,6 +41,7 @@ export const users = pgTable("users", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
+  pushToken: varchar("pushToken", { length: 512 }),
 });
 
 export type User = typeof users.$inferSelect;
