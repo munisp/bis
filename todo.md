@@ -1197,3 +1197,29 @@
 - [x] Full test suite: 260 Vitest + 24 Go + 36 Python — all pass
 - [ ] Save checkpoint
 - [x] Generate final comprehensive archive (bis-platform-v47-final-20260412.zip — 1,232 files, 208.9 MB uncompressed, 79.1 MB compressed — largest ever by uncompressed size)
+
+## Phase 48 — Next Steps (Round 3)
+
+### Step 1: CSP Nonce Enforcement
+- [x] Generate per-request nonce in request-ID middleware
+- [x] Replace 'unsafe-inline' in Helmet scriptSrc with nonce
+- [x] Inject nonce into Vite HTML template via server-side rendering
+- [x] Verify CSP headers in browser devtools
+
+### Step 2: SMS PIN Expiry and Retry Lockout
+- [x] Add SQLite-backed PIN TTL (10 minutes) in Go lex-intake (pin_sessions + pin_attempts tables)
+- [x] Add 3-attempt retry lockout per phone number (VerifyPIN with lockout counter)
+- [x] Add PIN expiry error response to SMS gateway (/pin/issue + /pin/verify endpoints)
+- [x] Add 10 tests for PIN expiry and lockout (sms_gateway_test.go)
+
+### Step 3: Stakeholder Portal Landing Page
+- [x] Create /stakeholder-portal public landing page (StakeholderPortalLandingPage.tsx)
+- [x] Add feature highlights (6 features: financial crime, KYC/KYB, goAML, pan-Africa, zero-footprint, field agents)
+- [x] Wire "Request Access" CTA to trpc.onboarding.create
+- [x] Add route to App.tsx (/stakeholder-portal)
+
+### Step 4: Archive
+- [x] Run full test suite (260 Vitest + 34 Go + 36 Python — all passing)
+- [x] TypeScript: 0 errors
+- [x] Save checkpoint
+- [x] Generate final comprehensive archive

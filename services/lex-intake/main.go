@@ -112,9 +112,195 @@ func (s *Store) migrate() error {
 			count         INTEGER NOT NULL DEFAULT 0,
 			PRIMARY KEY (submitter_id, window_start)
 		);
+		-- PIN sessions: issued PINs with 10-minute TTL
+		CREATE TABLE IF NOT EXISTS pin_sessions (
+			phone         TEXT NOT NULL PRIMARY KEY,
+			pin_hash      TEXT NOT NULL,
+			agency_code   TEXT NOT NULL,
+			issued_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			expires_at    DATETIME NOT NULL,
+			used          INTEGER NOT NULL DEFAULT 0
+		);
+		-- PIN attempt counters: tracks failed attempts per phone (reset after 10 min)
+		CREATE TABLE IF NOT EXISTS pin_attempts (
+			phone         TEXT NOT NULL PRIMARY KEY,
+			attempts      INTEGER NOT NULL DEFAULT 0,
+			window_start  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			locked_until  DATETIME
+		);
 		CREATE INDEX IF NOT EXISTS idx_submissions_status ON submissions(status);
 		CREATE INDEX IF NOT EXISTS idx_submissions_submitter ON submissions(submitter_id);
 	`)
+	return err
+}
+
+// ─── PIN Management ────────────────────────────────────────────────────────────
+
+// PINTTLMinutes is the lifetime of an issued PIN in minutes.
+const PINTTLMinutes = 10
+
+// PINMaxAttempts is the maximum number of failed PIN attempts before lockout.
+const PINMaxAttempts = 3
+
+// IssuePIN stores a PIN for the given phone number with a 10-minute TTL.
+// Any previous PIN for the same phone is replaced.
+func (s *Store) IssuePIN(phone, pinHash, agencyCode string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now().UTC()
+	expiresAt := now.Add(PINTTLMinutes * time.Minute)
+	_, err := s.db.Exec(`
+		INSERT INTO pin_sessions (phone, pin_hash, agency_code, issued_at, expires_at, used)
+		VALUES (?, ?, ?, ?, ?, 0)
+		ON CONFLICT(phone) DO UPDATE SET
+			pin_hash    = excluded.pin_hash,
+			agency_code = excluded.agency_code,
+			issued_at   = excluded.issued_at,
+			expires_at  = excluded.expires_at,
+			used        = 0
+	`, phone, pinHash, agencyCode,
+		now.Format("2006-01-02 15:04:05"),
+		expiresAt.Format("2006-01-02 15:04:05"))
+	if err != nil {
+		return err
+	}
+	// Reset attempt counter when a new PIN is issued
+	_, err = s.db.Exec(`DELETE FROM pin_attempts WHERE phone = ?`, phone)
+	return err
+}
+
+// VerifyPINResult is the outcome of a PIN verification attempt.
+type VerifyPINResult struct {
+	Valid     bool
+	Expired   bool
+	Locked    bool
+	Used      bool
+	Attempts  int
+	Remaining int // remaining attempts before lockout
+}
+
+// parseFlexTime parses a datetime string in either RFC3339 or SQLite datetime format.
+func parseFlexTime(s string) (time.Time, error) {
+	formats := []string{
+		time.RFC3339,
+		"2006-01-02 15:04:05",
+		"2006-01-02T15:04:05Z",
+		"2006-01-02T15:04:05",
+	}
+	for _, f := range formats {
+		if t, err := time.Parse(f, s); err == nil {
+			return t.UTC(), nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("cannot parse time %q", s)
+}
+
+// VerifyPIN checks the supplied pinHash against the stored session for phone.
+// It enforces expiry (10 min) and lockout (3 failed attempts).
+// On success the session is marked used so replay is prevented.
+func (s *Store) VerifyPIN(phone, pinHash string) VerifyPINResult {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now().UTC()
+
+	// Check lockout first
+	var attempts int
+	var lockedUntilStr sql.NullString
+	err := s.db.QueryRow(
+		`SELECT attempts, locked_until FROM pin_attempts WHERE phone = ?`, phone,
+	).Scan(&attempts, &lockedUntilStr)
+	if err != nil && err != sql.ErrNoRows {
+		return VerifyPINResult{}
+	}
+	if lockedUntilStr.Valid {
+		lockedUntil, parseErr := parseFlexTime(lockedUntilStr.String)
+		if parseErr == nil && now.Before(lockedUntil) {
+			return VerifyPINResult{Locked: true, Attempts: attempts}
+		}
+		// Lockout expired — reset
+		s.db.Exec(`DELETE FROM pin_attempts WHERE phone = ?`, phone)
+		attempts = 0
+	}
+
+	// Fetch PIN session
+	var storedHash, expiresAtStr string
+	var used int
+	err = s.db.QueryRow(
+		`SELECT pin_hash, expires_at, used FROM pin_sessions WHERE phone = ?`, phone,
+	).Scan(&storedHash, &expiresAtStr, &used)
+	if err == sql.ErrNoRows {
+		// No PIN issued — treat as expired
+		return VerifyPINResult{Expired: true}
+	}
+	if err != nil {
+		return VerifyPINResult{}
+	}
+
+	// Check expiry
+	expiresAt, parseErr := parseFlexTime(expiresAtStr)
+	if parseErr != nil || now.After(expiresAt) {
+		s.db.Exec(`DELETE FROM pin_sessions WHERE phone = ?`, phone)
+		return VerifyPINResult{Expired: true}
+	}
+
+	// Check already used
+	if used == 1 {
+		return VerifyPINResult{Used: true}
+	}
+
+	// Verify hash
+	if storedHash != pinHash {
+		// Increment failed attempts
+		newAttempts := attempts + 1
+		remaining := PINMaxAttempts - newAttempts
+		if newAttempts >= PINMaxAttempts {
+			// Lock for 10 minutes
+			lockedUntil := now.Add(PINTTLMinutes * time.Minute)
+			s.db.Exec(`
+				INSERT INTO pin_attempts (phone, attempts, window_start, locked_until)
+				VALUES (?, ?, ?, ?)
+				ON CONFLICT(phone) DO UPDATE SET
+					attempts     = excluded.attempts,
+					window_start = excluded.window_start,
+					locked_until = excluded.locked_until
+			`, phone, newAttempts,
+				now.Format("2006-01-02 15:04:05"),
+				lockedUntil.Format("2006-01-02 15:04:05"))
+			return VerifyPINResult{Locked: true, Attempts: newAttempts, Remaining: 0}
+		}
+		s.db.Exec(`
+			INSERT INTO pin_attempts (phone, attempts, window_start)
+			VALUES (?, ?, ?)
+			ON CONFLICT(phone) DO UPDATE SET
+				attempts     = excluded.attempts,
+				window_start = excluded.window_start
+		`, phone, newAttempts, now.Format("2006-01-02 15:04:05"))
+		if remaining < 0 {
+			remaining = 0
+		}
+		return VerifyPINResult{Valid: false, Attempts: newAttempts, Remaining: remaining}
+	}
+
+	// Correct PIN — mark as used and clear attempts
+	s.db.Exec(`UPDATE pin_sessions SET used = 1 WHERE phone = ?`, phone)
+	s.db.Exec(`DELETE FROM pin_attempts WHERE phone = ?`, phone)
+	return VerifyPINResult{Valid: true, Remaining: PINMaxAttempts}
+}
+
+// CleanupExpiredPINs removes expired PIN sessions and old attempt records.
+// Should be called periodically (e.g., every 15 minutes).
+func (s *Store) CleanupExpiredPINs() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now().UTC().Format("2006-01-02 15:04:05")
+	_, err := s.db.Exec(`DELETE FROM pin_sessions WHERE expires_at < ?`, now)
+	if err != nil {
+		return err
+	}
+	// Remove unlocked attempt records older than 1 hour
+	oldWindow := time.Now().UTC().Add(-1 * time.Hour).Format("2006-01-02 15:04:05")
+	_, err = s.db.Exec(`DELETE FROM pin_attempts WHERE locked_until IS NULL AND window_start < ?`, oldWindow)
 	return err
 }
 
@@ -530,6 +716,98 @@ func (s *Server) handleQueue(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, http.StatusOK, map[string]any{"count": len(result), "items": result})
 }
 
+// ─── PIN HTTP Handlers ───────────────────────────────────────────────────────
+
+// POST /pin/issue — issue a PIN for a phone number (used by BIS server or admin tools)
+// Body: {"phone":"+2348012345678","agencyCode":"NPF-LA-001","pinHash":"sha256:..."}
+func (s *Server) handlePINIssue(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		jsonResponse(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	var body struct {
+		Phone      string `json:"phone"`
+		AgencyCode string `json:"agencyCode"`
+		PINHash    string `json:"pinHash"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return
+	}
+	if body.Phone == "" || body.AgencyCode == "" || body.PINHash == "" {
+		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "phone, agencyCode, and pinHash are required"})
+		return
+	}
+	if err := s.store.IssuePIN(body.Phone, body.PINHash, body.AgencyCode); err != nil {
+		log.Printf("[pin/issue] error: %v", err)
+		jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": "failed to issue PIN"})
+		return
+	}
+	jsonResponse(w, http.StatusOK, map[string]any{
+		"ok":        true,
+		"ttlMinutes": PINTTLMinutes,
+		"maxAttempts": PINMaxAttempts,
+		"message":   fmt.Sprintf("PIN issued for %s. Expires in %d minutes.", body.Phone, PINTTLMinutes),
+	})
+}
+
+// POST /pin/verify — verify a PIN for a phone number
+// Body: {"phone":"+2348012345678","pinHash":"sha256:..."}
+func (s *Server) handlePINVerify(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		jsonResponse(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	var body struct {
+		Phone   string `json:"phone"`
+		PINHash string `json:"pinHash"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return
+	}
+	if body.Phone == "" || body.PINHash == "" {
+		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "phone and pinHash are required"})
+		return
+	}
+	result := s.store.VerifyPIN(body.Phone, body.PINHash)
+	switch {
+	case result.Locked:
+		jsonResponse(w, http.StatusTooManyRequests, map[string]any{
+			"ok":       false,
+			"locked":   true,
+			"attempts": result.Attempts,
+			"error":    fmt.Sprintf("Account locked after %d failed attempts. Try again in %d minutes.", PINMaxAttempts, PINTTLMinutes),
+		})
+	case result.Expired:
+		jsonResponse(w, http.StatusUnauthorized, map[string]any{
+			"ok":      false,
+			"expired": true,
+			"error":   "PIN has expired. Please request a new PIN.",
+		})
+	case result.Used:
+		jsonResponse(w, http.StatusUnauthorized, map[string]any{
+			"ok":   false,
+			"used": true,
+			"error": "PIN has already been used. Please request a new PIN.",
+		})
+	case result.Valid:
+		jsonResponse(w, http.StatusOK, map[string]any{
+			"ok":      true,
+			"valid":   true,
+			"message": "PIN verified successfully.",
+		})
+	default:
+		jsonResponse(w, http.StatusUnauthorized, map[string]any{
+			"ok":        false,
+			"valid":     false,
+			"attempts":  result.Attempts,
+			"remaining": result.Remaining,
+			"error":     fmt.Sprintf("Invalid PIN. %d attempt(s) remaining before lockout.", result.Remaining),
+		})
+	}
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 func main() {
@@ -547,6 +825,17 @@ func main() {
 	// Start background sync worker
 	go syncWorker(store, bis, cfg.SyncInterval)
 
+	// Start PIN cleanup worker (every 15 minutes)
+	go func() {
+		ticker := time.NewTicker(15 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			if err := store.CleanupExpiredPINs(); err != nil {
+				log.Printf("[pin-cleanup] error: %v", err)
+			}
+		}
+	}()
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/submit", srv.handleSubmit)
 	mux.HandleFunc("/sms", srv.handleSMS)
@@ -554,6 +843,8 @@ func main() {
 	mux.HandleFunc("/sms/termii", srv.handleTermiiWebhook) // Termii webhook
 	mux.HandleFunc("/status", srv.handleStatus)
 	mux.HandleFunc("/queue", srv.handleQueue)
+	mux.HandleFunc("/pin/issue", srv.handlePINIssue)   // Issue a PIN for a phone number
+	mux.HandleFunc("/pin/verify", srv.handlePINVerify) // Verify a PIN
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
 	})

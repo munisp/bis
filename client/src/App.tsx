@@ -50,6 +50,7 @@ const HostedVerificationLinksPage  = lazy(() => import("@/pages/bis/HostedVerifi
 const CasesPage                    = lazy(() => import("@/pages/bis/CasesPage"));
 const CaseDetailPage               = lazy(() => import("@/pages/bis/CaseDetailPage"));
 const StakeholderPortalPage        = lazy(() => import("@/pages/bis/StakeholderPortalPage"));
+const StakeholderPortalLandingPage = lazy(() => import("@/pages/StakeholderPortalLandingPage"));
 const OllamaManagementPage         = lazy(() => import("@/pages/bis/OllamaManagementPage"));
 
 // LEX — Law Enforcement Extension
@@ -129,6 +130,7 @@ function Router() {
         <Route path="/hosted-links" component={HostedVerificationLinksPage} />
         <Route path="/cases" component={CasesPage} />
         <Route path="/cases/portal" component={StakeholderPortalPage} />
+        <Route path="/stakeholder-portal" component={StakeholderPortalLandingPage} />
         <Route path="/cases/:ref" component={CaseDetailPage} />
         <Route path="/ollama" component={OllamaManagementPage} />
         {/* LEX — Law Enforcement Extension */}

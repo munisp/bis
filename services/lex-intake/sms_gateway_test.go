@@ -185,3 +185,213 @@ func TestSendOutboundSMS_TermiiNoCredentials(t *testing.T) {
 	}
 	os.Unsetenv("SMS_PROVIDER")
 }
+
+// ─── PIN Expiry and Lockout Tests ─────────────────────────────────────────────
+
+func TestIssuePIN_And_VerifyPIN_Valid(t *testing.T) {
+	store := newTestStore(t)
+	phone := "+2348012345678"
+	pinHash := "sha256:NPF-LA-001:123456"
+
+	if err := store.IssuePIN(phone, pinHash, "NPF-LA-001"); err != nil {
+		t.Fatalf("IssuePIN: %v", err)
+	}
+
+	result := store.VerifyPIN(phone, pinHash)
+	if !result.Valid {
+		t.Errorf("expected valid PIN, got: %+v", result)
+	}
+	if result.Expired || result.Locked || result.Used {
+		t.Errorf("unexpected flags: %+v", result)
+	}
+}
+
+func TestVerifyPIN_NoSession_ReturnsExpired(t *testing.T) {
+	store := newTestStore(t)
+	result := store.VerifyPIN("+2348000000000", "sha256:hash")
+	if !result.Expired {
+		t.Errorf("expected Expired=true for phone with no PIN session, got: %+v", result)
+	}
+}
+
+func TestVerifyPIN_WrongPIN_IncrementsAttempts(t *testing.T) {
+	store := newTestStore(t)
+	phone := "+2348012345678"
+	pinHash := "sha256:correct"
+	wrongHash := "sha256:wrong"
+
+	if err := store.IssuePIN(phone, pinHash, "NPF-LA-001"); err != nil {
+		t.Fatalf("IssuePIN: %v", err)
+	}
+
+	// First wrong attempt
+	r1 := store.VerifyPIN(phone, wrongHash)
+	if r1.Valid || r1.Locked {
+		t.Errorf("expected invalid but not locked on attempt 1: %+v", r1)
+	}
+	if r1.Attempts != 1 {
+		t.Errorf("expected 1 attempt, got %d", r1.Attempts)
+	}
+	if r1.Remaining != PINMaxAttempts-1 {
+		t.Errorf("expected %d remaining, got %d", PINMaxAttempts-1, r1.Remaining)
+	}
+
+	// Second wrong attempt
+	r2 := store.VerifyPIN(phone, wrongHash)
+	if r2.Valid || r2.Locked {
+		t.Errorf("expected invalid but not locked on attempt 2: %+v", r2)
+	}
+	if r2.Attempts != 2 {
+		t.Errorf("expected 2 attempts, got %d", r2.Attempts)
+	}
+}
+
+func TestVerifyPIN_ThreeWrongAttempts_TriggersLockout(t *testing.T) {
+	store := newTestStore(t)
+	phone := "+2348012345678"
+	pinHash := "sha256:correct"
+	wrongHash := "sha256:wrong"
+
+	if err := store.IssuePIN(phone, pinHash, "NPF-LA-001"); err != nil {
+		t.Fatalf("IssuePIN: %v", err)
+	}
+
+	// 3 wrong attempts should trigger lockout
+	for i := 1; i <= PINMaxAttempts; i++ {
+		r := store.VerifyPIN(phone, wrongHash)
+		if i < PINMaxAttempts && r.Locked {
+			t.Errorf("should not be locked on attempt %d", i)
+		}
+		if i == PINMaxAttempts && !r.Locked {
+			t.Errorf("should be locked after %d attempts, got: %+v", PINMaxAttempts, r)
+		}
+	}
+
+	// Subsequent attempt should also be locked
+	rLocked := store.VerifyPIN(phone, pinHash) // even correct PIN
+	if !rLocked.Locked {
+		t.Errorf("expected locked after %d failed attempts, got: %+v", PINMaxAttempts, rLocked)
+	}
+}
+
+func TestVerifyPIN_ReplayPrevented(t *testing.T) {
+	store := newTestStore(t)
+	phone := "+2348012345678"
+	pinHash := "sha256:correct"
+
+	if err := store.IssuePIN(phone, pinHash, "NPF-LA-001"); err != nil {
+		t.Fatalf("IssuePIN: %v", err)
+	}
+
+	// First use — should succeed
+	r1 := store.VerifyPIN(phone, pinHash)
+	if !r1.Valid {
+		t.Fatalf("expected valid on first use: %+v", r1)
+	}
+
+	// Second use — should be marked as used
+	r2 := store.VerifyPIN(phone, pinHash)
+	if !r2.Used {
+		t.Errorf("expected Used=true on replay, got: %+v", r2)
+	}
+}
+
+func TestIssuePIN_ResetsAttemptCounter(t *testing.T) {
+	store := newTestStore(t)
+	phone := "+2348012345678"
+	pinHash := "sha256:correct"
+	wrongHash := "sha256:wrong"
+
+	if err := store.IssuePIN(phone, pinHash, "NPF-LA-001"); err != nil {
+		t.Fatalf("IssuePIN: %v", err)
+	}
+
+	// 2 wrong attempts
+	store.VerifyPIN(phone, wrongHash)
+	store.VerifyPIN(phone, wrongHash)
+
+	// Re-issue PIN — should reset counter
+	if err := store.IssuePIN(phone, "sha256:newpin", "NPF-LA-001"); err != nil {
+		t.Fatalf("IssuePIN (re-issue): %v", err)
+	}
+
+	// Now correct PIN should work
+	r := store.VerifyPIN(phone, "sha256:newpin")
+	if !r.Valid {
+		t.Errorf("expected valid after re-issue, got: %+v", r)
+	}
+}
+
+func TestHandlePINIssue_And_Verify_HTTP(t *testing.T) {
+	store := newTestStore(t)
+	srv := &Server{store: store, bis: NewBISClient("http://localhost:9999", ""), config: Config{}}
+
+	// Issue PIN via HTTP
+	issueBody := `{"phone":"+2348012345678","agencyCode":"NPF-LA-001","pinHash":"sha256:test:1234"}`
+	req := httptest.NewRequest(http.MethodPost, "/pin/issue", strings.NewReader(issueBody))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	srv.handlePINIssue(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 from /pin/issue, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// Verify PIN via HTTP
+	verifyBody := `{"phone":"+2348012345678","pinHash":"sha256:test:1234"}`
+	req2 := httptest.NewRequest(http.MethodPost, "/pin/verify", strings.NewReader(verifyBody))
+	req2.Header.Set("Content-Type", "application/json")
+	rr2 := httptest.NewRecorder()
+	srv.handlePINVerify(rr2, req2)
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("expected 200 from /pin/verify, got %d: %s", rr2.Code, rr2.Body.String())
+	}
+}
+
+func TestHandlePINVerify_Lockout_Returns429(t *testing.T) {
+	store := newTestStore(t)
+	srv := &Server{store: store, bis: NewBISClient("http://localhost:9999", ""), config: Config{}}
+
+	// Issue PIN
+	issueBody := `{"phone":"+2348099999999","agencyCode":"NPF-KN-001","pinHash":"sha256:correct"}`
+	req := httptest.NewRequest(http.MethodPost, "/pin/issue", strings.NewReader(issueBody))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	srv.handlePINIssue(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("issue failed: %s", rr.Body.String())
+	}
+
+	// 3 wrong attempts to trigger lockout
+	for i := 0; i < PINMaxAttempts; i++ {
+		vBody := `{"phone":"+2348099999999","pinHash":"sha256:wrong"}`
+		vReq := httptest.NewRequest(http.MethodPost, "/pin/verify", strings.NewReader(vBody))
+		vReq.Header.Set("Content-Type", "application/json")
+		vRR := httptest.NewRecorder()
+		srv.handlePINVerify(vRR, vReq)
+	}
+
+	// Next attempt should return 429
+	vBody := `{"phone":"+2348099999999","pinHash":"sha256:correct"}`
+	vReq := httptest.NewRequest(http.MethodPost, "/pin/verify", strings.NewReader(vBody))
+	vReq.Header.Set("Content-Type", "application/json")
+	vRR := httptest.NewRecorder()
+	srv.handlePINVerify(vRR, vReq)
+	if vRR.Code != http.StatusTooManyRequests {
+		t.Errorf("expected 429 after lockout, got %d: %s", vRR.Code, vRR.Body.String())
+	}
+}
+
+func TestHandlePINVerify_Expired_Returns401(t *testing.T) {
+	store := newTestStore(t)
+	srv := &Server{store: store, bis: NewBISClient("http://localhost:9999", ""), config: Config{}}
+
+	// Verify with no PIN issued — should return 401 expired
+	vBody := `{"phone":"+2348011111111","pinHash":"sha256:anyhash"}`
+	vReq := httptest.NewRequest(http.MethodPost, "/pin/verify", strings.NewReader(vBody))
+	vReq.Header.Set("Content-Type", "application/json")
+	vRR := httptest.NewRecorder()
+	srv.handlePINVerify(vRR, vReq)
+	if vRR.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 for expired/missing PIN, got %d: %s", vRR.Code, vRR.Body.String())
+	}
+}

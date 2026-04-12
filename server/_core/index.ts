@@ -88,6 +88,19 @@ async function startServer() {
   // ── Security headers (helmet) ──────────────────────────────────────────────
   // In dev we relax CSP so Vite HMR works; in production enforce strict policy.
   const isDev = process.env.NODE_ENV === "development";
+
+  // ── CSP Nonce middleware ─────────────────────────────────────────────────────
+  // Generate a fresh nonce for every request and store in res.locals.
+  // The nonce is injected into <script> tags in the HTML template (serveStatic)
+  // and referenced in the Helmet CSP scriptSrc directive.
+  if (!isDev) {
+    app.use((_req: Request, res: Response, next: NextFunction) => {
+      const nonce = crypto.randomBytes(16).toString("base64");
+      (res.locals as { nonce?: string }).nonce = nonce;
+      next();
+    });
+  }
+
   app.use(
     helmet({
       contentSecurityPolicy: isDev
@@ -95,7 +108,16 @@ async function startServer() {
         : {
             directives: {
               defaultSrc: ["'self'"],
-              scriptSrc: ["'self'", "'unsafe-inline'", "https://maps.googleapis.com"],
+              // Use per-request nonce instead of 'unsafe-inline'
+              scriptSrc: [
+                "'self'",
+                "https://maps.googleapis.com",
+                // Helmet CSP directive functions receive IncomingMessage / ServerResponse
+                (_req: import("http").IncomingMessage, res: import("http").ServerResponse) => {
+                  const nonce = (res as import("http").ServerResponse & { locals?: { nonce?: string } }).locals?.nonce;
+                  return nonce ? `'nonce-${nonce}'` : "'unsafe-inline'";
+                },
+              ],
               styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
               fontSrc: ["'self'", "https://fonts.gstatic.com"],
               imgSrc: ["'self'", "data:", "https:", "blob:"],

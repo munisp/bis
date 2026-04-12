@@ -60,8 +60,16 @@ export function serveStatic(app: Express) {
 
   app.use(express.static(distPath));
 
-  // fall through to index.html if the file doesn't exist
-  app.use("{*path}", (_req, res) => {
-    res.sendFile(path.resolve(distPath, "index.html"));
+  // fall through to index.html — inject CSP nonce into the HTML
+  app.use("{*path}", (req: import("express").Request, res: import("express").Response) => {
+    const indexPath = path.resolve(distPath, "index.html");
+    let html = fs.readFileSync(indexPath, "utf-8");
+    // Inject nonce from res.locals (set by Helmet nonce middleware)
+    const nonce: string | undefined = (res.locals as { nonce?: string }).nonce;
+    if (nonce) {
+      html = html.replace(/<script/g, `<script nonce="${nonce}"`);
+    }
+    res.setHeader("Content-Type", "text/html");
+    res.send(html);
   });
 }
