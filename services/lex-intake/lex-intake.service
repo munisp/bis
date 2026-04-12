@@ -1,0 +1,53 @@
+[Unit]
+Description=BIS LEX Intake Microservice
+Documentation=https://github.com/your-org/bis-pwa/tree/main/services/lex-intake
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=lexintake
+Group=lexintake
+
+# Binary location (installed by install.sh)
+ExecStart=/usr/local/bin/lex-intake
+
+# Restart policy: always restart on failure, with 5s backoff
+Restart=always
+RestartSec=5
+
+# Environment — override these in /etc/lex-intake/env
+EnvironmentFile=-/etc/lex-intake/env
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/lex-intake
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictRealtime=true
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+# Resource limits
+LimitNOFILE=65536
+MemoryMax=256M
+CPUQuota=50%
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=lex-intake
+
+[Install]
+WantedBy=multi-user.target

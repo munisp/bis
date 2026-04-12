@@ -929,6 +929,9 @@ export const lexAgencies = pgTable("lex_agencies", {
   suspendedAt: timestamp("suspendedAt"),
   suspendedReason: text("suspendedReason"),
   notes: text("notes"),
+  flagged: boolean("flagged").notNull().default(false),
+  flagReason: text("flagReason"),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
 });
 export type LexAgency = typeof lexAgencies.$inferSelect;
 

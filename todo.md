@@ -983,3 +983,65 @@
 - [x] LexSubmitPage: connectivity detection, offline queue UI, sync status banner
 - [x] Vitest Phase 43: 43 new tests (state codes, CSV, validation score, GPS bounds, Levenshtein, NIN, phone)
 - [x] Total tests: 227 Vitest + 11 Go + 36 Python = 274 passing
+
+## Phase 44 — Security Audit + Feature Completion
+
+### Security Audit & Fixes
+- [ ] Run npm audit and identify vulnerable dependencies
+- [ ] Static analysis: scan for SQL injection, XSS, CSRF, IDOR patterns
+- [ ] Audit authentication flows (JWT, session, OAuth)
+- [ ] Audit authorization (missing protectedProcedure, IDOR on IDs)
+- [ ] Audit input validation (missing z.string() constraints, unbounded inputs)
+- [ ] Audit rate limiting (missing on public endpoints)
+- [ ] Audit security headers (CSP, HSTS, X-Frame-Options)
+- [ ] Audit CORS configuration
+- [ ] Audit secrets handling (env vars, no hardcoded secrets)
+- [ ] Audit file upload security (MIME type, size limits)
+- [ ] Audit Go microservice security
+- [ ] Audit Python microservice security
+- [ ] Fix all critical/high vulnerabilities
+- [ ] Fix all medium vulnerabilities
+- [ ] Write security regression tests
+- [ ] Generate vulnerability report with CVSS scores
+
+### Go Microservice Packaging
+- [ ] Write Dockerfile for lex-intake
+- [ ] Write systemd unit file for lex-intake
+- [ ] Write install.sh script for field deployment
+- [ ] Write README for field IT staff
+
+### SMS Gateway
+- [ ] Add Termii/Africa's Talking webhook to Go lex-intake
+- [ ] Parse structured SMS format
+- [ ] Return reference number via SMS reply
+- [ ] Add SMS tests
+
+### LEX Supervisor Dashboard
+- [ ] Create LexSupervisorPage.tsx
+- [ ] supervisorStats tRPC procedure
+- [ ] flagAgency tRPC procedure
+- [ ] Anomaly detection for fabrication patterns
+- [ ] Register route and nav item
+
+## Phase 44 — Security Audit + Go Packaging + SMS Gateway + LEX Supervisor
+
+- [x] Full platform security audit (dependency scan + static analysis + code review)
+- [x] Fix critical CVE-2025-27152: upgrade axios to 1.15.0
+- [x] Fix critical CVE-2024-45296: upgrade express to 5.2.1 (path-to-regexp ReDoS)
+- [x] Fix high CVE: upgrade drizzle-orm to 0.45.2
+- [x] Add helmet security headers middleware
+- [x] Add CORS middleware (allowlist: localhost, *.manus.computer, *.manus.space)
+- [x] Add express-rate-limit (4 tiers: general 200/15min, auth 10/15min, LEX 30/15min, LLM 20/min)
+- [x] Fix uncapped pagination limits (max 200 rows per page, max 1000 for CSV export)
+- [x] Fix file extension path traversal in uploadDocument procedure
+- [x] Add input size limits on LLM messages (4000 chars) and LEX narrative (5000 chars)
+- [x] Go lex-intake: Dockerfile (multi-stage), systemd unit (non-root), install.sh
+- [x] Go lex-intake: SMS gateway (Africa's Talking + Termii webhook handlers)
+- [x] Go lex-intake: HMAC-SHA256 signature verification on SMS webhooks
+- [x] LEX Supervisor Dashboard page (state filter, agency table, flag/unflag, trend charts)
+- [x] LEX supervisor tRPC procedures (supervisorStateOverview, stateTrend, flagAgency)
+- [x] Add flagged/flagReason/updatedAt columns to lex_agencies table (migration 0024)
+- [x] Security audit report (docs/security-audit-phase44.md)
+- [x] 33 new Vitest tests (Phase 44 security + supervisor procedures) — 260 total passing
+- [x] Go tests: 22/22 passing (including SMS gateway tests)
+- [x] Python tests: 36/36 passing

@@ -4,7 +4,7 @@
  */
 
 import { TRPCError } from "@trpc/server";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { z } from "zod";
 import { lexAgencies, lexSubmissions, lexSubmitters, cases, caseParties, caseTimeline } from "../drizzle/schema";
 import { invokeLLM } from "./_core/llm";
@@ -721,5 +721,125 @@ ${sub.validationScore != null ? `
       });
 
       return { ok: true, caseRef: targetCase.ref };
+    }),
+
+  // ── Supervisor Dashboard ──────────────────────────────────────────────────
+
+  supervisorStateOverview: protectedProcedure
+    .input(z.object({
+      state: z.string().optional(),
+      dateFrom: z.date().optional(),
+      dateTo: z.date().optional(),
+    }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      const agencyRows = await db
+        .select()
+        .from(lexAgencies)
+        .where(input.state ? eq(lexAgencies.state, input.state as any) : undefined)
+        .orderBy(lexAgencies.state, lexAgencies.name);
+
+      if (agencyRows.length === 0) return { agencies: [], stateSummary: [] };
+
+      const agencyIds = agencyRows.map(a => a.id);
+      const dateFilter = input.dateFrom && input.dateTo
+        ? and(gte(lexSubmissions.createdAt, input.dateFrom), lte(lexSubmissions.createdAt, input.dateTo))
+        : undefined;
+
+      const subRows = await db
+        .select()
+        .from(lexSubmissions)
+        .where(
+          dateFilter
+            ? and(inArray(lexSubmissions.agencyId, agencyIds), dateFilter)
+            : inArray(lexSubmissions.agencyId, agencyIds)
+        );
+
+      const statsMap = new Map<number, { total: number; pending: number; validated: number; rejected: number; escalated: number; linked: number; scoreSum: number; scoreCount: number }>();
+      for (const a of agencyRows) statsMap.set(a.id, { total: 0, pending: 0, validated: 0, rejected: 0, escalated: 0, linked: 0, scoreSum: 0, scoreCount: 0 });
+      for (const s of subRows) {
+        const stat = statsMap.get(s.agencyId);
+        if (!stat) continue;
+        stat.total++;
+        if (s.status === "pending") stat.pending++;
+        else if (s.status === "validated") stat.validated++;
+        else if (s.status === "rejected") stat.rejected++;
+        else if (s.status === "escalated") stat.escalated++;
+        if (s.linkedCaseId) stat.linked++;
+        if (s.validationScore !== null && s.validationScore !== undefined) { stat.scoreSum += s.validationScore; stat.scoreCount++; }
+      }
+
+      const agencies = agencyRows.map(a => {
+        const stat = statsMap.get(a.id)!;
+        const validationRate = stat.total > 0 ? Math.round((stat.validated / stat.total) * 100) : 0;
+        const rejectionRate = stat.total > 0 ? Math.round((stat.rejected / stat.total) * 100) : 0;
+        const avgScore = stat.scoreCount > 0 ? Math.round(stat.scoreSum / stat.scoreCount) : 0;
+        const autoFlagged = (rejectionRate > 50 && stat.total >= 5) || (avgScore < 30 && stat.total >= 5);
+        return {
+          id: a.id, agencyCode: a.agencyCode, name: a.name, type: a.type,
+          state: a.state, lga: a.lga, status: a.status,
+          flagged: a.flagged || autoFlagged, flagReason: a.flagReason,
+          stats: { total: stat.total, pending: stat.pending, validated: stat.validated, rejected: stat.rejected, escalated: stat.escalated, linked: stat.linked, validationRate, rejectionRate, avgScore },
+        };
+      });
+
+      const stateMap = new Map<string, { total: number; validated: number; agencies: number; flagged: number }>();
+      for (const a of agencies) {
+        const s = stateMap.get(a.state) ?? { total: 0, validated: 0, agencies: 0, flagged: 0 };
+        s.total += a.stats.total; s.validated += a.stats.validated; s.agencies++;
+        if (a.flagged) s.flagged++;
+        stateMap.set(a.state, s);
+      }
+      const stateSummary = Array.from(stateMap.entries()).map(([state, s]) => ({
+        state, ...s, validationRate: s.total > 0 ? Math.round((s.validated / s.total) * 100) : 0,
+      }));
+      return { agencies, stateSummary };
+    }),
+
+  flagAgency: writeProcedure
+    .input(z.object({ agencyId: z.number(), flagged: z.boolean(), reason: z.string().max(500).optional() }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const [agency] = await db.select().from(lexAgencies).where(eq(lexAgencies.id, input.agencyId)).limit(1);
+      if (!agency) throw new TRPCError({ code: "NOT_FOUND" });
+      await db.update(lexAgencies)
+        .set({ flagged: input.flagged, flagReason: input.flagged ? (input.reason ?? null) : null, updatedAt: new Date() })
+        .where(eq(lexAgencies.id, input.agencyId));
+      try { const { auditLog } = await import("../drizzle/schema"); await db.insert(auditLog).values({ userId: ctx.user.id, category: "system" as any, action: `Agency ${agency.agencyCode} ${input.flagged ? "flagged" : "unflagged"}`, targetRef: String(input.agencyId), result: "success" }); } catch(e) { console.warn("[LEX Audit]", e); }
+      return { ok: true, agencyCode: agency.agencyCode, flagged: input.flagged };
+    }),
+
+  stateTrend: protectedProcedure
+    .input(z.object({ state: z.string().optional(), days: z.number().int().min(7).max(90).default(30) }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const since = new Date(Date.now() - input.days * 24 * 60 * 60 * 1000);
+      const agencyFilter = input.state
+        ? await db.select({ id: lexAgencies.id }).from(lexAgencies).where(eq(lexAgencies.state, input.state as any))
+        : null;
+      const agencyIds = agencyFilter ? agencyFilter.map(a => a.id) : null;
+      const subs = await db
+        .select({ createdAt: lexSubmissions.createdAt, status: lexSubmissions.status })
+        .from(lexSubmissions)
+        .where(
+          agencyIds && agencyIds.length > 0
+            ? and(gte(lexSubmissions.createdAt, since), inArray(lexSubmissions.agencyId, agencyIds))
+            : gte(lexSubmissions.createdAt, since)
+        );
+      const dayMap = new Map<string, { total: number; validated: number; rejected: number }>();
+      for (const s of subs) {
+        const day = s.createdAt.toISOString().slice(0, 10);
+        const d = dayMap.get(day) ?? { total: 0, validated: 0, rejected: 0 };
+        d.total++;
+        if (s.status === "validated") d.validated++;
+        if (s.status === "rejected") d.rejected++;
+        dayMap.set(day, d);
+      }
+      const trend = Array.from(dayMap.entries()).sort(([a], [b]) => a.localeCompare(b)).map(([date, d]) => ({ date, ...d }));
+      return { trend, days: input.days, state: input.state ?? "all" };
     }),
 });

@@ -550,6 +550,8 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/submit", srv.handleSubmit)
 	mux.HandleFunc("/sms", srv.handleSMS)
+	mux.HandleFunc("/sms/at", srv.handleATWebhook)       // Africa's Talking webhook
+	mux.HandleFunc("/sms/termii", srv.handleTermiiWebhook) // Termii webhook
 	mux.HandleFunc("/status", srv.handleStatus)
 	mux.HandleFunc("/queue", srv.handleQueue)
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {

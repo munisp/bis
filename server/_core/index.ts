@@ -11,6 +11,9 @@ if (!_dbUrl.startsWith("postgresql") && !_dbUrl.startsWith("postgres")) {
 import express from "express";
 import { createServer } from "http";
 import net from "net";
+import helmet from "helmet";
+import cors from "cors";
+import rateLimit from "express-rate-limit";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
 import { appRouter } from "../routers";
@@ -44,26 +47,200 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 async function startServer() {
   const app = express();
   const server = createServer(app);
-  // Configure body parser with larger size limit for file uploads
-  app.use(express.json({ limit: "50mb" }));
-  app.use(express.urlencoded({ limit: "50mb", extended: true }));
+  // Trust the first proxy hop (Manus reverse proxy) for correct IP detection
+  app.set("trust proxy", 1);
+
+  // ── Security headers (helmet) ──────────────────────────────────────────────
+  // In dev we relax CSP so Vite HMR works; in production enforce strict policy.
+  const isDev = process.env.NODE_ENV === "development";
+  app.use(
+    helmet({
+      contentSecurityPolicy: isDev
+        ? false // Vite HMR requires inline scripts in dev
+        : {
+            directives: {
+              defaultSrc: ["'self'"],
+              scriptSrc: ["'self'", "'unsafe-inline'", "https://maps.googleapis.com"],
+              styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+              fontSrc: ["'self'", "https://fonts.gstatic.com"],
+              imgSrc: ["'self'", "data:", "https:", "blob:"],
+              connectSrc: ["'self'", "https://api.manus.im", "wss:"],
+              frameSrc: ["'none'"],
+              objectSrc: ["'none'"],
+              upgradeInsecureRequests: [],
+            },
+          },
+      // HSTS: 1 year, include subdomains
+      strictTransportSecurity: {
+        maxAge: 31536000,
+        includeSubDomains: true,
+        preload: true,
+      },
+      // Prevent clickjacking
+      frameguard: { action: "deny" },
+      // Prevent MIME sniffing
+      noSniff: true,
+      // Disable X-Powered-By
+      hidePoweredBy: true,
+      // XSS protection (legacy browsers)
+      xssFilter: true,
+      // Referrer policy
+      referrerPolicy: { policy: "strict-origin-when-cross-origin" },
+    })
+  );
+
+  // ── CORS ───────────────────────────────────────────────────────────────────
+  // Allow the frontend origin (same host in dev, explicit in prod).
+  // Credentials (session cookies) require explicit origin — no wildcard.
+  const allowedOrigins = [
+    "http://localhost:3000",
+    "http://localhost:5173",
+    ...(process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(",") : []),
+  ];
+  // Ensure cors middleware is applied correctly
+  const corsMiddleware = cors({
+      origin: (origin, callback) => {
+        // Allow same-origin requests (no origin header)
+        if (!origin) { callback(null, true); return; }
+        // Allow Manus preview/deployment domains
+        if (origin.includes(".manus.computer") || origin.includes(".manus.space")) {
+          callback(null, true); return;
+        }
+        // Allow explicitly listed origins
+        if (allowedOrigins.some(o => origin.startsWith(o))) {
+          callback(null, true); return;
+        }
+        callback(new Error(`CORS: origin ${origin} not allowed`));
+      },
+      credentials: true,
+      methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+      allowedHeaders: ["Content-Type", "Authorization", "x-paystack-signature"],
+      maxAge: 86400, // 24h preflight cache
+    });
+  app.use(corsMiddleware);
+  // Express 5 does not support wildcard options — CORS preflight is handled per-route by the cors middleware above
+
+  // ── Rate limiting ──────────────────────────────────────────────────────────
+  // Global limiter: 300 req/15min per IP (generous for authenticated users)
+  const globalLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 300,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Too many requests, please try again later." },
+    skip: req => req.path.startsWith("/api/webhooks"), // webhooks have their own auth
+  });
+  app.use(globalLimiter);
+
+  // Strict limiter for public LEX submission endpoint (unauthenticated)
+  const lexSubmitLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000, // 1 hour
+    max: 20, // 20 submissions per IP per hour
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Submission rate limit exceeded. Please try again later." },
+  });
+  app.use("/api/trpc/lex.submitIncident", lexSubmitLimiter);
+
+  // Auth endpoint limiter (prevent brute-force)
+  const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 30,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Too many authentication attempts." },
+  });
+  app.use("/api/oauth", authLimiter);
+
+  // ── Body parsers ───────────────────────────────────────────────────────────
+  // Note: Paystack webhook needs raw body — registered BEFORE json parser below
+  app.post("/api/webhooks/paystack", express.raw({ type: "application/json" }), async (req, res) => {
+    try {
+      const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY ?? "";
+      const signature = req.headers["x-paystack-signature"] as string | undefined;
+
+      // Validate HMAC-SHA512 signature when secret is configured
+      if (PAYSTACK_SECRET && signature) {
+        const expected = crypto
+          .createHmac("sha512", PAYSTACK_SECRET)
+          .update(req.body as Buffer)
+          .digest("hex");
+        // Use timingSafeEqual to prevent timing attacks
+        const expectedBuf = Buffer.from(expected, "hex");
+        const signatureBuf = Buffer.from(signature, "hex");
+        const isValid =
+          expectedBuf.length === signatureBuf.length &&
+          crypto.timingSafeEqual(expectedBuf, signatureBuf);
+        if (!isValid) {
+          console.warn("[PaystackWebhook] Invalid signature — request rejected");
+          res.status(401).json({ error: "Invalid signature" });
+          return;
+        }
+      } else if (PAYSTACK_SECRET && !signature) {
+        res.status(401).json({ error: "Missing x-paystack-signature header" });
+        return;
+      }
+
+      const body = JSON.parse((req.body as Buffer).toString("utf8")) as {
+        event?: string;
+        data?: {
+          reference?: string;
+          amount?: number;
+          status?: string;
+          metadata?: { tenant_id?: string; [key: string]: unknown };
+          customer?: { email?: string };
+        };
+      };
+
+      console.log(`[PaystackWebhook] event=${body.event} ref=${body.data?.reference}`);
+
+      if (body.event === "charge.success" && body.data?.status === "success") {
+        const reference = body.data.reference ?? "";
+        const amountKobo = body.data.amount ?? 0;
+        const tenantId = String(body.data.metadata?.tenant_id ?? body.data.customer?.email ?? "unknown");
+
+        if (amountKobo > 0 && tenantId !== "unknown") {
+          const result = await creditTenantAccount({ tenantId, amountKobo, reference });
+          console.log(`[PaystackWebhook] Credited tenant=${tenantId} amount=${amountKobo} kobo recorded=${result.recorded} transferId=${result.transferId}`);
+          await notifyOwner({
+            title: `Payment Received — ₦${(amountKobo / 100).toLocaleString()}`,
+            content: `Tenant **${tenantId}** topped up ₦${(amountKobo / 100).toLocaleString()} via Paystack.\nReference: \`${reference}\`\nTigerBeetle transfer: \`${result.transferId}\` (recorded=${result.recorded})`,
+          });
+        }
+      }
+
+      res.status(200).json({ received: true });
+    } catch (err) {
+      console.error("[PaystackWebhook] Error:", err);
+      res.status(200).json({ received: true, error: "Processing error" });
+    }
+  });
+
+  // JSON body parser (after Paystack raw handler)
+  // Limit to 10mb for API calls; file uploads use base64 in JSON which is larger
+  app.use(express.json({ limit: "16mb" }));
+  app.use(express.urlencoded({ limit: "16mb", extended: true }));
+
   // OAuth callback under /api/oauth/callback
   registerOAuthRoutes(app);
 
   // ── Grafana alert webhook ──────────────────────────────────────────────────
-  // Receives Unified Alerting POST payloads from Grafana and forwards them to
-  // the platform owner via notifyOwner(). Protected by a bearer token.
   app.post("/api/webhooks/grafana-alert", async (req, res) => {
     try {
       const expectedToken = process.env.GRAFANA_WEBHOOK_SECRET ?? "bis-grafana-webhook-dev";
       const authHeader = req.headers["authorization"] ?? "";
       const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-      if (token !== expectedToken) {
+      // Timing-safe comparison
+      const expectedBuf = Buffer.from(expectedToken);
+      const tokenBuf = Buffer.from(token);
+      const isValid =
+        expectedBuf.length === tokenBuf.length &&
+        crypto.timingSafeEqual(expectedBuf, tokenBuf);
+      if (!isValid) {
         res.status(401).json({ error: "Unauthorized" });
         return;
       }
 
-      // Grafana Unified Alerting payload shape
       const body = req.body as {
         title?: string;
         message?: string;
@@ -80,8 +257,6 @@ async function startServer() {
 
       const state = body.state ?? (body.alerts?.[0]?.status ?? "unknown");
       const title = body.title ?? `BIS Alert — ${state.toUpperCase()}`;
-
-      // Build a human-readable content block
       const lines: string[] = [];
       if (body.message) lines.push(body.message);
       if (body.alerts && body.alerts.length > 0) {
@@ -96,80 +271,12 @@ async function startServer() {
         });
       }
       const content = lines.join("\n") || `Alert state: ${state}`;
-
       const delivered = await notifyOwner({ title, content });
       console.log(`[GrafanaWebhook] Notification delivered=${delivered} title="${title}"`);
       res.json({ ok: true, delivered });
     } catch (err) {
       console.error("[GrafanaWebhook] Error:", err);
       res.status(500).json({ error: "Internal server error" });
-    }
-  });
-
-  // ── Paystack charge webhook ───────────────────────────────────────────────
-  // Receives charge.success events from Paystack and auto-credits the tenant's
-  // TigerBeetle account. Validates x-paystack-signature (HMAC-SHA512).
-  // Must be registered BEFORE the json body-parser so we can read the raw body.
-  app.post("/api/webhooks/paystack", express.raw({ type: "application/json" }), async (req, res) => {
-    try {
-      const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY ?? "";
-      const signature = req.headers["x-paystack-signature"] as string | undefined;
-
-      // Validate HMAC-SHA512 signature when secret is configured
-      if (PAYSTACK_SECRET && signature) {
-        const expected = crypto
-          .createHmac("sha512", PAYSTACK_SECRET)
-          .update(req.body as Buffer)
-          .digest("hex");
-        if (expected !== signature) {
-          console.warn("[PaystackWebhook] Invalid signature — request rejected");
-          res.status(401).json({ error: "Invalid signature" });
-          return;
-        }
-      } else if (PAYSTACK_SECRET && !signature) {
-        // Secret configured but no signature header — reject
-        res.status(401).json({ error: "Missing x-paystack-signature header" });
-        return;
-      }
-      // If PAYSTACK_SECRET is not set, allow through (dev/test mode)
-
-      const body = JSON.parse((req.body as Buffer).toString("utf8")) as {
-        event?: string;
-        data?: {
-          reference?: string;
-          amount?: number; // kobo
-          status?: string;
-          metadata?: { tenant_id?: string; [key: string]: unknown };
-          customer?: { email?: string };
-        };
-      };
-
-      console.log(`[PaystackWebhook] event=${body.event} ref=${body.data?.reference}`);
-
-      if (body.event === "charge.success" && body.data?.status === "success") {
-        const reference = body.data.reference ?? "";
-        const amountKobo = body.data.amount ?? 0;
-        // tenant_id is passed in Paystack metadata during initiation
-        const tenantId = String(body.data.metadata?.tenant_id ?? body.data.customer?.email ?? "unknown");
-
-        if (amountKobo > 0 && tenantId !== "unknown") {
-          const result = await creditTenantAccount({ tenantId, amountKobo, reference });
-          console.log(`[PaystackWebhook] Credited tenant=${tenantId} amount=${amountKobo} kobo recorded=${result.recorded} transferId=${result.transferId}`);
-
-          // Notify platform owner
-          await notifyOwner({
-            title: `Payment Received — ₦${(amountKobo / 100).toLocaleString()}`,
-            content: `Tenant **${tenantId}** topped up ₦${(amountKobo / 100).toLocaleString()} via Paystack.\nReference: \`${reference}\`\nTigerBeetle transfer: \`${result.transferId}\` (recorded=${result.recorded})`,
-          });
-        }
-      }
-
-      // Always return 200 to acknowledge receipt
-      res.status(200).json({ received: true });
-    } catch (err) {
-      console.error("[PaystackWebhook] Error:", err);
-      // Still return 200 to prevent Paystack from retrying on server errors
-      res.status(200).json({ received: true, error: "Processing error" });
     }
   });
 
@@ -184,6 +291,7 @@ async function startServer() {
       createContext,
     })
   );
+
   // development mode uses Vite, production mode uses static files
   if (process.env.NODE_ENV === "development") {
     await setupVite(app, server);

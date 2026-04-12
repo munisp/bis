@@ -169,6 +169,13 @@
       "when": 1774450116328,
       "tag": "0023_brief_living_lightning",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1775959363964,
+      "tag": "0024_fair_mulholland_black",
+      "breakpoints": true
     }
   ]
 }

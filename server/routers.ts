@@ -140,7 +140,7 @@ const investigationsRouter = router({
       tier: z.string().optional(),
       minRisk: z.number().optional(),
       maxRisk: z.number().optional(),
-      limit: z.number().default(50),
+      limit: z.number().min(1).max(250).default(50),
       offset: z.number().default(0),
     }))
     .query(async ({ input }) => {
@@ -581,7 +581,7 @@ const investigationsRouter = router({
     }),
 
   slaAtRisk: protectedProcedure
-    .input(z.object({ limit: z.number().default(5) }))
+    .input(z.object({ limit: z.number().min(1).max(25).default(5) }))
     .query(async ({ input }) => {
       const db = await getDb();
       if (!db) return [];
@@ -724,7 +724,7 @@ const alertsRouter = router({
   list: protectedProcedure
     .input(z.object({
       unreadOnly: z.boolean().default(false),
-      limit: z.number().default(50),
+      limit: z.number().min(1).max(250).default(50),
       subjectRef: z.string().optional(),
     }))
     .query(async ({ input }) => {
@@ -1065,7 +1065,7 @@ const auditRouter = router({
       result: z.string().optional(),
       targetRef: z.string().optional(),
       userId: z.number().optional(), // filter by actor user id (for deep-link from admin/users)
-      limit: z.number().default(100),
+      limit: z.number().min(1).max(500).default(100),
       offset: z.number().default(0),
     }))
     .query(async ({ input }) => {
@@ -1096,7 +1096,7 @@ const auditRouter = router({
 
 const fieldTasksRouter = router({
   list: protectedProcedure
-    .input(z.object({ status: z.string().optional(), agentId: z.string().optional(), limit: z.number().default(50) }))
+    .input(z.object({ status: z.string().optional(), agentId: z.string().optional(), limit: z.number().min(1).max(250).default(50) }))
     .query(async ({ input }) => {
       const db = await getDb();
       if (!db) return [];
@@ -1154,7 +1154,7 @@ const fieldTasksRouter = router({
 
 const reportsRouter = router({
   list: protectedProcedure
-    .input(z.object({ limit: z.number().default(20) }))
+    .input(z.object({ limit: z.number().min(1).max(100).default(20) }))
     .query(async ({ input }) => {
       const db = await getDb();
       if (!db) return [];
@@ -1203,7 +1203,7 @@ const usersRouter = router({
     .input(z.object({
       role: z.string().optional(),
       search: z.string().optional(),
-      limit: z.number().default(100),
+      limit: z.number().min(1).max(500).default(100),
     }).optional())
     .query(async ({ input }) => {
       const db = await getDb();
@@ -1674,7 +1674,7 @@ const onboardingRouter = router({
     }),
 
   list: adminProcedure
-    .input(z.object({ limit: z.number().default(50), offset: z.number().default(0) }))
+    .input(z.object({ limit: z.number().min(1).max(250).default(50), offset: z.number().default(0) }))
     .query(async ({ input }) => {
       const db = await getDb();
       if (!db) return { items: [], total: 0 };
@@ -2560,7 +2560,9 @@ const casesRouter = router({
       // Upload to S3
       const crypto = await import('crypto');
       const suffix = crypto.randomBytes(8).toString('hex');
-      const ext = input.fileName.split('.').pop() ?? 'bin';
+      // Sanitize extension: only allow alphanumeric chars, max 10 chars (prevents path traversal)
+      const rawExt = input.fileName.split('.').pop() ?? 'bin';
+      const ext = rawExt.replace(/[^a-zA-Z0-9]/g, '').slice(0, 10) || 'bin';
       const fileKey = `cases/${c.ref}/docs/${suffix}.${ext}`;
       const fileBuffer = Buffer.from(input.fileBase64, 'base64');
       const { url } = await storagePut(fileKey, fileBuffer, input.mimeType);
@@ -3046,7 +3048,7 @@ const ollamaRouter = router({
 
   chat: protectedProcedure
     .input(z.object({
-      messages: z.array(z.object({ role: z.string(), content: z.string() })),
+      messages: z.array(z.object({ role: z.string().max(20), content: z.string().max(32000) })).max(100),
       model: z.string().optional(),
       system: z.string().optional(),
     }))

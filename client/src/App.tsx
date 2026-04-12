@@ -57,6 +57,7 @@ const LexAdminPage      = lazy(() => import("@/pages/lex/LexAdminPage"));
 const LexSubmitPage     = lazy(() => import("@/pages/lex/LexSubmitPage"));
 const LexReviewPage     = lazy(() => import("@/pages/lex/LexReviewPage"));
 const LexAnalyticsPage  = lazy(() => import("@/pages/lex/LexAnalyticsPage"));
+const LexSupervisorPage = lazy(() => import("@/pages/lex/LexSupervisorPage"));
 
 // ─── Page loading skeleton ────────────────────────────────────────────────────
 
@@ -128,6 +129,7 @@ function Router() {
         <Route path="/lex/admin" component={LexAdminPage} />
         <Route path="/lex/review" component={LexReviewPage} />
         <Route path="/lex/analytics" component={LexAnalyticsPage} />
+        <Route path="/lex/supervisor" component={LexSupervisorPage} />
 
         {/* Fallback */}
         <Route path="/404" component={NotFound} />

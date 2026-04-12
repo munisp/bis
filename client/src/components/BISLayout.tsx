@@ -121,6 +121,7 @@ const BASE_NAV_GROUPS: NavGroup[] = [
     defaultOpen: true,
     items: [
       { label: 'LEX Analytics', href: '/lex/analytics', icon: <BarChart2 size={15} /> },
+      { label: 'Supervisor View', href: '/lex/supervisor', icon: <Shield size={15} /> },
       { label: 'LEX Admin', href: '/lex/admin', icon: <Building2 size={15} /> },
       { label: 'Review Queue', href: '/lex/review', icon: <ClipboardCheck size={15} /> },
       { label: 'Submit Incident', href: '/lex/submit', icon: <SendToBack size={15} /> },
