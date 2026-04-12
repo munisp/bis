@@ -13,14 +13,18 @@
 // Short state codes: LA=Lagos, AB=Abuja, KN=Kano, RS=Rivers, OY=Oyo, etc.
 //
 // Response: plain text "OK:<localRef>" or "ERR:<reason>" (feature-phone compatible)
+// Outbound: after successful submission, a return SMS is sent to the officer's phone.
 
 package main
 
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"net/url"
+	"os"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -255,6 +259,19 @@ func (s *Server) processSMSSubmission(w http.ResponseWriter, senderPhone, text, 
 		if err == nil {
 			s.store.Enqueue(localRef, parsed.AgencyCode, parsed.AgencyCode, pinHash, string(payload))
 			log.Printf("[sms] Synced immediately → BIS ref %s", bisRef)
+			// ── Outbound confirmation SMS ──────────────────────────────────────
+			if senderPhone != "" {
+				confirmMsg := fmt.Sprintf("BIS LEX: Submission received. Ref: %s. Agency: %s. Type: %s. State: %s. Keep this ref for tracking.",
+					bisRef, parsed.AgencyCode, parsed.IncidentType, strings.ToUpper(parsed.StateCode))
+				go func() {
+					result := SendOutboundSMS(senderPhone, confirmMsg)
+					if result.Success {
+						log.Printf("[sms/outbound] Confirmation sent to %s (msgId=%s)", senderPhone, result.MessageID)
+					} else {
+						log.Printf("[sms/outbound] Confirmation failed to %s: %s", senderPhone, result.Error)
+					}
+				}()
+			}
 			w.Header().Set("Content-Type", "text/plain")
 			fmt.Fprintf(w, "OK:%s — Submission received. BIS ref: %s", localRef, bisRef)
 			return
@@ -272,7 +289,133 @@ func (s *Server) processSMSSubmission(w http.ResponseWriter, senderPhone, text, 
 	}
 
 	log.Printf("[sms] Queued offline: %s (state=%s, type=%s)", localRef, parsed.StateFull, parsed.IncidentType)
+	// Outbound confirmation for queued submission
+	if senderPhone != "" {
+		confirmMsg := fmt.Sprintf("BIS LEX: Submission queued (offline). Local ref: %s. Agency: %s. Will sync when connected.",
+			localRef, parsed.AgencyCode)
+		go func() {
+			result := SendOutboundSMS(senderPhone, confirmMsg)
+			if result.Success {
+				log.Printf("[sms/outbound] Queued confirmation sent to %s", senderPhone)
+			} else {
+				log.Printf("[sms/outbound] Queued confirmation failed to %s: %s", senderPhone, result.Error)
+			}
+		}()
+	}
 	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(http.StatusAccepted)
 	fmt.Fprintf(w, "OK:%s — Queued offline. Will sync when connected.", localRef)
+}
+
+// ─── Outbound SMS Confirmation ────────────────────────────────────────────────
+// SendOutboundSMS sends a return SMS to the officer's phone with the submission
+// reference number. Supports Africa's Talking and Termii providers.
+// Provider is selected via the SMS_PROVIDER env var (default: africas_talking).
+// Failures are logged but do not affect the submission result.
+
+// OutboundSMSResult captures the result of an outbound SMS attempt.
+type OutboundSMSResult struct {
+	Provider  string
+	MessageID string
+	Success   bool
+	Error     string
+}
+
+// SendOutboundSMS sends a confirmation SMS to the given phone number.
+// It is fire-and-forget — errors are logged but not propagated.
+func SendOutboundSMS(toPhone, message string) OutboundSMSResult {
+	provider := os.Getenv("SMS_PROVIDER")
+	if provider == "" {
+		provider = "africas_talking"
+	}
+	switch provider {
+	case "termii":
+		return sendTermiiOutbound(toPhone, message)
+	default:
+		return sendATOutbound(toPhone, message)
+	}
+}
+
+// sendATOutbound sends via Africa's Talking SMS API.
+func sendATOutbound(toPhone, message string) OutboundSMSResult {
+	apiKey := os.Getenv("AT_API_KEY")
+	username := os.Getenv("AT_USERNAME")
+	senderID := os.Getenv("AT_SENDER_ID")
+	if senderID == "" {
+		senderID = "BIS-LEX"
+	}
+	if apiKey == "" || username == "" {
+		log.Printf("[sms/at/outbound] AT_API_KEY or AT_USERNAME not set — skipping outbound SMS")
+		return OutboundSMSResult{Provider: "africas_talking", Success: false, Error: "credentials not configured"}
+	}
+	endpoint := "https://api.africastalking.com/version1/messaging"
+	data := url.Values{}
+	data.Set("username", username)
+	data.Set("to", toPhone)
+	data.Set("message", message)
+	data.Set("from", senderID)
+	req, err := http.NewRequest("POST", endpoint, strings.NewReader(data.Encode()))
+	if err != nil {
+		log.Printf("[sms/at/outbound] request build error: %v", err)
+		return OutboundSMSResult{Provider: "africas_talking", Success: false, Error: err.Error()}
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("apiKey", apiKey)
+	req.Header.Set("Accept", "application/json")
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("[sms/at/outbound] HTTP error: %v", err)
+		return OutboundSMSResult{Provider: "africas_talking", Success: false, Error: err.Error()}
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		log.Printf("[sms/at/outbound] Sent to %s: %s", toPhone, string(body))
+		return OutboundSMSResult{Provider: "africas_talking", Success: true, MessageID: string(body)}
+	}
+	log.Printf("[sms/at/outbound] Failed status=%d body=%s", resp.StatusCode, string(body))
+	return OutboundSMSResult{Provider: "africas_talking", Success: false, Error: fmt.Sprintf("status %d", resp.StatusCode)}
+}
+
+// sendTermiiOutbound sends via Termii SMS API.
+func sendTermiiOutbound(toPhone, message string) OutboundSMSResult {
+	apiKey := os.Getenv("TERMII_API_KEY")
+	senderID := os.Getenv("TERMII_SENDER_ID")
+	if senderID == "" {
+		senderID = "BIS-LEX"
+	}
+	if apiKey == "" {
+		log.Printf("[sms/termii/outbound] TERMII_API_KEY not set — skipping outbound SMS")
+		return OutboundSMSResult{Provider: "termii", Success: false, Error: "credentials not configured"}
+	}
+	endpoint := "https://api.ng.termii.com/api/sms/send"
+	payload, _ := json.Marshal(map[string]any{
+		"to":      toPhone,
+		"from":    senderID,
+		"sms":     message,
+		"type":    "plain",
+		"channel": "generic",
+		"api_key": apiKey,
+	})
+	req, err := http.NewRequest("POST", endpoint, strings.NewReader(string(payload)))
+	if err != nil {
+		log.Printf("[sms/termii/outbound] request build error: %v", err)
+		return OutboundSMSResult{Provider: "termii", Success: false, Error: err.Error()}
+	}
+	req.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("[sms/termii/outbound] HTTP error: %v", err)
+		return OutboundSMSResult{Provider: "termii", Success: false, Error: err.Error()}
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		log.Printf("[sms/termii/outbound] Sent to %s: %s", toPhone, string(body))
+		return OutboundSMSResult{Provider: "termii", Success: true, MessageID: string(body)}
+	}
+	log.Printf("[sms/termii/outbound] Failed status=%d body=%s", resp.StatusCode, string(body))
+	return OutboundSMSResult{Provider: "termii", Success: false, Error: fmt.Sprintf("status %d", resp.StatusCode)}
 }

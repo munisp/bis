@@ -699,3 +699,60 @@ services:
       interval: 15s
       timeout: 5s
       retries: 3
+
+  # ─── LEX Intake Service (Go) ──────────────────────────────────────────────────
+  lex-intake:
+    build:
+      context: ./services/lex-intake
+      dockerfile: Dockerfile
+    container_name: bis-lex-intake
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: "8087"
+      BIS_API_URL: http://bff:3001
+      BIS_API_KEY: ${BIS_API_KEY:-bis-api-key-change-in-prod}
+      AT_API_KEY: ${AT_API_KEY:-sandbox}
+      AT_USERNAME: ${AT_USERNAME:-sandbox}
+      AT_SHORTCODE: ${AT_SHORTCODE:-20880}
+      TERMII_API_KEY: ${TERMII_API_KEY:-}
+      TERMII_SENDER_ID: ${TERMII_SENDER_ID:-BIS}
+      SMS_PROVIDER: ${SMS_PROVIDER:-africas_talking}
+      LEX_HMAC_SECRET: ${LEX_HMAC_SECRET:-lex-hmac-secret-change-in-prod}
+      DATABASE_URL: ${DATABASE_URL}
+      LOG_LEVEL: INFO
+    ports:
+      - "8087:8087"
+    networks: [bis-net]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8087/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ─── LEX Validator Service (Python) ──────────────────────────────────────────
+  lex-validator:
+    build:
+      context: ./services/lex-validator
+      dockerfile: Dockerfile
+    container_name: bis-lex-validator
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: "8088"
+      BIS_API_URL: http://bff:3001
+      BIS_API_KEY: ${BIS_API_KEY:-bis-api-key-change-in-prod}
+      DATABASE_URL: ${DATABASE_URL}
+      LOG_LEVEL: INFO
+    ports:
+      - "8089:8088"
+    networks: [bis-net]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8088/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3

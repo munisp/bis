@@ -146,6 +146,9 @@ export const auditLog = pgTable("audit_log", {
   result: auditResultEnum("result").notNull().default("success"),
   ipAddress: varchar("ipAddress", { length: 45 }),
   detail: json("detail"),
+  // HMAC-SHA256 integrity hash for tamper detection
+  // Computed as: HMAC-SHA256(AUDIT_HMAC_SECRET, userId|category|action|targetRef|result|createdAt)
+  integrityHash: varchar("integrityHash", { length: 64 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 

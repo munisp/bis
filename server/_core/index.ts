@@ -24,6 +24,7 @@ import { creditTenantAccount } from "../billing";
 import crypto from "crypto";
 import { createOpenClawRouter } from "../openclawEndpoints";
 import { startSlaBreachScheduler } from "../slaBreachChecker";
+import { validateEnv } from "../envValidation";
 
 // ── Structured logger ─────────────────────────────────────────────────────────
 function log(level: "info" | "warn" | "error", msg: string, meta?: Record<string, unknown>) {
@@ -52,6 +53,9 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 }
 
 async function startServer() {
+  // Validate environment variables before starting
+  validateEnv();
+
   const app = express();
   const server = createServer(app);
   // Trust the first proxy hop (Manus reverse proxy) for correct IP detection
@@ -377,6 +381,45 @@ async function startServer() {
 
   // OpenClaw managed instance + Swagger UI
   app.use(createOpenClawRouter());
+
+  // ── CSRF validation middleware ────────────────────────────────────────────
+  // Validates X-CSRF-Token header on all state-changing tRPC mutations.
+  // Only enforced in production; dev mode is relaxed for Vite HMR.
+  if (!isDev) {
+    app.use("/api/trpc", (req: Request, res: Response, next: NextFunction) => {
+      // Only validate POST requests (tRPC mutations use POST)
+      if (req.method !== "POST") return next();
+      const csrfHeader = req.headers["x-csrf-token"] as string | undefined;
+      // Parse _csrf cookie from Cookie header manually (avoid cookie-parser dep)
+      const cookieHeader = req.headers["cookie"] ?? "";
+      const csrfCookieMatch = cookieHeader.match(/(?:^|;\s*)_csrf=([^;]+)/);
+      const csrfCookie = csrfCookieMatch ? decodeURIComponent(csrfCookieMatch[1]) : undefined;
+      // If no CSRF cookie exists yet (first visit), allow through
+      if (!csrfCookie) return next();
+      // Validate token matches cookie using timing-safe comparison
+      if (!csrfHeader) {
+        log("warn", "CSRF token missing", { path: req.path, ip: req.ip });
+        res.status(403).json({ error: "CSRF token required" });
+        return;
+      }
+      try {
+        const headerBuf = Buffer.from(csrfHeader);
+        const cookieBuf = Buffer.from(csrfCookie);
+        const isValid =
+          headerBuf.length === cookieBuf.length &&
+          crypto.timingSafeEqual(headerBuf, cookieBuf);
+        if (!isValid) {
+          log("warn", "CSRF token mismatch", { path: req.path, ip: req.ip });
+          res.status(403).json({ error: "CSRF token invalid" });
+          return;
+        }
+      } catch {
+        res.status(403).json({ error: "CSRF token invalid" });
+        return;
+      }
+      next();
+    });
+  }
 
   // tRPC API
   app.use(

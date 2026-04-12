@@ -119,10 +119,29 @@ async function writeAuditLog(db: NonNullable<Awaited<ReturnType<typeof getDb>>>,
   detail?: unknown;
 }) {
   try {
+    const result = entry.result ?? "success";
+    const createdAt = new Date();
+    // Compute HMAC-SHA256 integrity hash for tamper detection
+    const AUDIT_HMAC_SECRET = process.env.AUDIT_HMAC_SECRET ?? process.env.JWT_SECRET ?? "bis-audit-hmac-dev";
+    const payload = [
+      String(entry.userId ?? ""),
+      entry.category,
+      entry.action,
+      entry.targetRef ?? "",
+      result,
+      createdAt.toISOString(),
+    ].join("|");
+    const { createHmac } = await import("crypto");
+    const integrityHash = createHmac("sha256", AUDIT_HMAC_SECRET)
+      .update(payload)
+      .digest("hex")
+      .slice(0, 64);
     await db.insert(auditLog).values({
       ...entry,
-      result: entry.result ?? "success",
+      result,
       detail: entry.detail as any,
+      integrityHash,
+      createdAt,
     });
   } catch (e) {
     console.warn("[AuditLog] Failed to write:", e);
@@ -1096,6 +1115,39 @@ const auditRouter = router({
       return res.ok ? await res.json() : [];
     } catch { return []; }
   }),
+
+  /**
+   * Verify the HMAC integrity of audit log entries.
+   * Checks a batch of entries and returns which ones have been tampered with.
+   * Admin-only: used by the audit log viewer to show a tamper indicator.
+   */
+  verifyIntegrity: adminProcedure
+    .input(z.object({ ids: z.array(z.number()).min(1).max(100) }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      const AUDIT_HMAC_SECRET = process.env.AUDIT_HMAC_SECRET ?? process.env.JWT_SECRET ?? "bis-audit-hmac-dev";
+      const { createHmac } = await import("crypto");
+      const entries = await db.select().from(auditLog).where(inArray(auditLog.id, input.ids));
+      const results = entries.map((entry) => {
+        if (!entry.integrityHash) return { id: entry.id, valid: null, reason: "no_hash" };
+        const payload = [
+          String(entry.userId ?? ""),
+          entry.category,
+          entry.action,
+          entry.targetRef ?? "",
+          entry.result,
+          entry.createdAt.toISOString(),
+        ].join("|");
+        const expected = createHmac("sha256", AUDIT_HMAC_SECRET)
+          .update(payload)
+          .digest("hex")
+          .slice(0, 64);
+        const valid = expected === entry.integrityHash;
+        return { id: entry.id, valid, reason: valid ? "ok" : "hash_mismatch" };
+      });
+      return { results, checkedCount: results.length, tamperedCount: results.filter((r) => r.valid === false).length };
+    }),
 });
 
 // ─── Field Tasks Router ───────────────────────────────────────────────────────
