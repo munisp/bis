@@ -53,9 +53,10 @@ const StakeholderPortalPage        = lazy(() => import("@/pages/bis/StakeholderP
 const OllamaManagementPage         = lazy(() => import("@/pages/bis/OllamaManagementPage"));
 
 // LEX — Law Enforcement Extension
-const LexAdminPage   = lazy(() => import("@/pages/lex/LexAdminPage"));
-const LexSubmitPage  = lazy(() => import("@/pages/lex/LexSubmitPage"));
-const LexReviewPage  = lazy(() => import("@/pages/lex/LexReviewPage"));
+const LexAdminPage      = lazy(() => import("@/pages/lex/LexAdminPage"));
+const LexSubmitPage     = lazy(() => import("@/pages/lex/LexSubmitPage"));
+const LexReviewPage     = lazy(() => import("@/pages/lex/LexReviewPage"));
+const LexAnalyticsPage  = lazy(() => import("@/pages/lex/LexAnalyticsPage"));
 
 // ─── Page loading skeleton ────────────────────────────────────────────────────
 
@@ -126,6 +127,7 @@ function Router() {
         <Route path="/lex/submit" component={LexSubmitPage} />
         <Route path="/lex/admin" component={LexAdminPage} />
         <Route path="/lex/review" component={LexReviewPage} />
+        <Route path="/lex/analytics" component={LexAnalyticsPage} />
 
         {/* Fallback */}
         <Route path="/404" component={NotFound} />

@@ -945,3 +945,41 @@
 - [x] Register /lex/submit, /lex/admin, /lex/review routes in App.tsx
 - [x] Write 42 Vitest tests for LEX (state lookup, agency code generation, validation scoring, GPS bounding box, submission refs, velocity limits, PIN format, reputation scoring)
 - [x] All 186 tests passing
+
+## Phase 43 — LEX Analytics, Auto-linking, PDF, Go/Python Services, Offline PWA
+- [ ] LEX analytics dashboard: Nigeria map heatmap (state-level submission volume + validation rate)
+- [ ] LEX analytics dashboard: incident type breakdown chart per state
+- [ ] LEX analytics dashboard: top agencies by submission volume
+- [ ] LEX-to-Case auto-linking: NIN/phone exact match + LLM name similarity check
+- [ ] LEX-to-Case auto-linking: "Possible Match" banner in review panel
+- [ ] LEX-to-Case auto-linking: one-click link submission to case
+- [ ] Form LEX-01 PDF: printable incident report from validated submission
+- [ ] Form LEX-01 PDF: includes QR code with submission ref
+- [ ] Go microservice (lex-intake): high-throughput HTTP intake endpoint, offline queue via SQLite, sync to BIS
+- [ ] Go microservice (lex-intake): JWT/PIN auth, rate limiting, gzip compression for low bandwidth
+- [ ] Go microservice (lex-intake): SMS submission support via USSD/HTTP callback
+- [ ] Python microservice (lex-matcher): NIN/BVN cross-reference, name similarity (Levenshtein + LLM)
+- [ ] Python microservice (lex-matcher): duplicate detection across submissions and cases
+- [ ] Python microservice (lex-matcher): REST API consumed by BIS tRPC procedures
+- [ ] Offline PWA: service worker for LEX submit portal
+- [ ] Offline PWA: IndexedDB queue for submissions when offline
+- [ ] Offline PWA: background sync when connection restored
+- [ ] Offline PWA: low-bandwidth mode (text-only, no images, compressed payloads)
+- [ ] Offline PWA: install prompt for home screen
+
+## Phase 43 Completed
+- [x] LEX analytics dashboard with Nigeria state heatmap (Google Maps + recharts)
+- [x] agencyStats and incidentTypeStats tRPC procedures
+- [x] LEX-to-Case auto-linking (NIN exact, phone exact, LLM name similarity)
+- [x] findMatchingCases and linkToCase tRPC procedures
+- [x] Form LEX-01 PDF generation (weasyprint + QR code + S3 upload)
+- [x] generateLex01Pdf tRPC procedure
+- [x] Go microservice: lex-intake (SQLite offline queue, SMS gateway, sync, rate limiting)
+- [x] Go tests: 11/11 passing
+- [x] Python microservice: lex-validator (NIN dedup, name fuzzy match, GPS bounds, LLM heuristic)
+- [x] Python tests: 36/36 passing
+- [x] Offline PWA: vite-plugin-pwa + Workbox service worker (CacheFirst + StaleWhileRevalidate)
+- [x] IndexedDB offline queue (lexOfflineQueue.ts) with background sync loop
+- [x] LexSubmitPage: connectivity detection, offline queue UI, sync status banner
+- [x] Vitest Phase 43: 43 new tests (state codes, CSV, validation score, GPS bounds, Levenshtein, NIN, phone)
+- [x] Total tests: 227 Vitest + 11 Go + 36 Python = 274 passing

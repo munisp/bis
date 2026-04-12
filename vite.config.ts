@@ -5,6 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { defineConfig, type Plugin, type ViteDevServer } from "vite";
 import { vitePluginManusRuntime } from "vite-plugin-manus-runtime";
+import { VitePWA } from "vite-plugin-pwa";
 
 // =============================================================================
 // Manus Debug Collector - Vite Plugin
@@ -150,7 +151,49 @@ function vitePluginManusDebugCollector(): Plugin {
   };
 }
 
-const plugins = [react(), tailwindcss(), jsxLocPlugin(), vitePluginManusRuntime(), vitePluginManusDebugCollector()];
+const lexPWA = VitePWA({
+  registerType: "autoUpdate",
+  scope: "/lex/",
+  manifest: {
+    name: "BIS LEX — Field Submission Portal",
+    short_name: "LEX Submit",
+    description: "Law Enforcement Extension — offline-capable incident reporting",
+    theme_color: "#1e293b",
+    background_color: "#0f172a",
+    display: "standalone",
+    orientation: "portrait",
+    start_url: "/lex/submit",
+    scope: "/lex/",
+    icons: [
+      { src: "/favicon.ico", sizes: "64x64", type: "image/x-icon" },
+    ],
+  },
+  workbox: {
+    navigateFallback: "/lex/submit",
+    navigateFallbackAllowlist: [/^\/lex\//],
+    runtimeCaching: [
+      {
+        urlPattern: /\/api\/trpc\/lex\.listAgencies/,
+        handler: "StaleWhileRevalidate",
+        options: {
+          cacheName: "lex-api-cache",
+          expiration: { maxEntries: 10, maxAgeSeconds: 24 * 60 * 60 },
+        },
+      },
+      {
+        urlPattern: /\.(js|css|woff2?|png|svg|ico)$/,
+        handler: "CacheFirst",
+        options: {
+          cacheName: "lex-static-cache",
+          expiration: { maxEntries: 50, maxAgeSeconds: 7 * 24 * 60 * 60 },
+        },
+      },
+    ],
+  },
+  devOptions: { enabled: false },
+});
+
+const plugins = [react(), tailwindcss(), jsxLocPlugin(), vitePluginManusRuntime(), vitePluginManusDebugCollector(), lexPWA];
 
 export default defineConfig({
   plugins,
