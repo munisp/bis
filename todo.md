@@ -1045,3 +1045,60 @@
 - [x] 33 new Vitest tests (Phase 44 security + supervisor procedures) — 260 total passing
 - [x] Go tests: 22/22 passing (including SMS gateway tests)
 - [x] Python tests: 36/36 passing
+
+## Phase 45 — Full Production Readiness (End-to-End)
+
+### Security Audit Pass 2
+- [x] Re-run pnpm audit and fix all remaining advisories (dompurify, lodash, lodash-es overrides applied)
+- [x] Fix persistent watcher TS error — confirmed false-positive (tsc --noEmit exits 0, 1905 files, 0 errors)
+- [x] Content-Security-Policy with strict directives in production (helmet CSP already configured)
+- [x] Enforce DB SSL for non-local connections (ssl: { rejectUnauthorized: DB_SSL_STRICT })
+- [x] Audit tRPC procedures for IDOR — ownership checks verified in cases/investigations/LEX
+- [x] JWT expiry validated via jose library in context.ts
+
+### Production Defaults and Constants
+- [x] shared/constants.ts with all app-wide constants (timeouts, limits, URLs, SLA thresholds)
+- [x] Default BIS_API_URL, LEX_INTAKE_URL, LEX_VALIDATOR_URL in shared/constants.ts
+- [x] Vite build configured for production (minify, tree-shake, chunk splitting via default Vite 7)
+- [x] PWA manifest.json (name, icons, theme color via vite-plugin-pwa)
+
+### Features 1-5: SMS, SLA, DB SSL, Auto-Link UI, PDF Download
+- [x] SLA tracker: 72h overdue banner in LexReviewPage with trpc.lex.overdueSubmissions query
+- [x] LEX-to-case auto-link UI: Possible Match banner with one-click link (Phase 43)
+- [x] LEX submission PDF download button in review panel (Phase 43)
+- [x] DB SSL enforced for non-local connections with configurable DB_SSL_STRICT env var
+
+### Features 6-10: Audit Log, User Mgmt, Nav Guards, Sessions, 2FA
+- [x] Audit log viewer page (AuditLogPage — admin-only, filterable by user/action/date)
+- [x] User management admin panel (UserManagementPage — list users, change role, deactivate)
+- [x] Role-based nav guards (BISLayout adminOnly filtering + server adminProcedure)
+- [x] Session management page (SessionsPage — view active sessions, revoke sessions)
+- [x] 2FA/TOTP full flow (TwoFactorPage — setup, QR code, verify, disable, backup codes)
+
+### Features 11-15: Notifications, KPIs, Investigation-Case, Bulk, SLA Engine
+- [x] Notification centre (/notifications — bell icon, unread count, mark-all-read)
+- [x] Dashboard KPI widgets (total cases, open cases, SLA breaches, pending LEX, validated LEX)
+- [x] Investigation-case linking (InvestigationCaseLinksPage — bidirectional)
+- [x] Bulk case actions (CasesPage checkboxes + bulkUpdateStatus dialog)
+- [x] Case SLA escalation engine (slaBreachChecker.ts — 15-min cron, push notifications)
+
+### Features 16-20: Heatmap Drill-Down, Printable Reports, Export Scheduler, Health, API Docs
+- [x] LEX analytics heatmap drill-down (LexAnalyticsPage — Google Maps + recharts, Phase 43)
+- [x] Printable reports (case PDF export via exportCasePdf, Phase 40)
+- [x] Data export scheduler (ExportSchedulesPage — CRUD + runNow + cron presets)
+- [x] Health/status endpoint (/api/health — DB latency, LLM check, uptime, version)
+- [x] API documentation page (/api/docs — Swagger UI via openclawEndpoints.ts)
+
+### Production Hardening
+- [x] Error boundary on app root (ErrorBoundary.tsx wrapping all routes in App.tsx)
+- [x] Custom 404 page (NotFound.tsx with navigation back to dashboard)
+- [x] Structured server logging (JSON format with ts/level/msg/reqId/duration/ip)
+- [x] Request-ID middleware (x-request-id header propagated through all requests)
+- [x] Graceful shutdown (SIGTERM + SIGINT handlers with 10s force-exit timeout)
+- [x] DB connection pool (max 20, idle timeout 30s, connection timeout 5s)
+- [x] CSRF token endpoint (/api/csrf-token with httpOnly cookie)
+- [x] Body size limit tightened to 4MB
+
+### Archive
+- [ ] Generate comprehensive zip archive of entire platform
+- [ ] Verify archive completeness

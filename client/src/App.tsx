@@ -58,6 +58,13 @@ const LexSubmitPage     = lazy(() => import("@/pages/lex/LexSubmitPage"));
 const LexReviewPage     = lazy(() => import("@/pages/lex/LexReviewPage"));
 const LexAnalyticsPage  = lazy(() => import("@/pages/lex/LexAnalyticsPage"));
 const LexSupervisorPage = lazy(() => import("@/pages/lex/LexSupervisorPage"));
+// Settings sub-pages
+const SessionsPage         = lazy(() => import("@/pages/settings/SessionsPage"));
+const TwoFactorPage        = lazy(() => import("@/pages/settings/TwoFactorPage"));
+const ExportSchedulesPage  = lazy(() => import("@/pages/settings/ExportSchedulesPage"));
+// Platform sub-pages
+const InvestigationCaseLinksPage = lazy(() => import("@/pages/InvestigationCaseLinksPage"));
+const NotificationCentrePage     = lazy(() => import("@/pages/NotificationCentrePage"));
 
 // ─── Page loading skeleton ────────────────────────────────────────────────────
 
@@ -131,6 +138,13 @@ function Router() {
         <Route path="/lex/analytics" component={LexAnalyticsPage} />
         <Route path="/lex/supervisor" component={LexSupervisorPage} />
 
+        {/* Settings sub-pages */}
+        <Route path="/settings/sessions" component={SessionsPage} />
+        <Route path="/settings/2fa" component={TwoFactorPage} />
+        <Route path="/settings/export-schedules" component={ExportSchedulesPage} />
+        {/* Platform sub-pages */}
+        <Route path="/investigation-links" component={InvestigationCaseLinksPage} />
+        <Route path="/notifications" component={NotificationCentrePage} />
         {/* Fallback */}
         <Route path="/404" component={NotFound} />
         <Route component={NotFound} />

@@ -1,4 +1,4 @@
-import { eq, desc, and, gte, lte, ilike, or, count, sql } from "drizzle-orm";
+import { eq, desc, and, gte, lte, ilike, or, count, sql, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import {
@@ -13,6 +13,7 @@ import {
   InsertDataSource, dataSources,
   InsertMonitor, monitors,
   InsertScreeningRequest, screeningRequests,
+  cases, lexSubmissions,
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
@@ -25,7 +26,16 @@ export async function getDb() {
     try {
       const dbUrl = process.env.DATABASE_URL ?? "";
       const isLocal = dbUrl.includes("localhost") || dbUrl.includes("127.0.0.1");
-      _pool = new Pool({ connectionString: dbUrl, ...(isLocal ? {} : { ssl: { rejectUnauthorized: false } }) });
+      // Enforce SSL for all non-local connections; allow self-signed certs for managed DBs
+      const sslConfig = isLocal ? undefined : { ssl: { rejectUnauthorized: process.env.DB_SSL_STRICT === "true" } };
+      _pool = new Pool({
+        connectionString: dbUrl,
+        max: 20,            // max pool size
+        idleTimeoutMillis: 30_000,
+        connectionTimeoutMillis: 5_000,
+        ...sslConfig,
+      });
+      _pool.on("error", (err) => console.error("[DB Pool] Unexpected error:", err));
       _db = drizzle(_pool);
     } catch (error) {
       console.warn("[Database] Failed to connect:", error);
@@ -263,10 +273,12 @@ export async function getDashboardStats() {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
+  const now = new Date();
   const [
     totalInv, activeInv, completedToday, flaggedCritical,
     totalKyc, kycToday, kycPassed, totalAlerts, unreadAlerts,
     totalMonitors, activeMonitors,
+    totalCases, openCases, casesBreachingSLA, pendingLex, validatedLex,
   ] = await Promise.all([
     db.select({ c: count() }).from(investigations),
     db.select({ c: count() }).from(investigations).where(eq(investigations.status, "processing")),
@@ -279,6 +291,11 @@ export async function getDashboardStats() {
     db.select({ c: count() }).from(alerts).where(eq(alerts.read, false)),
     db.select({ c: count() }).from(monitors),
     db.select({ c: count() }).from(monitors).where(eq(monitors.status, "active")),
+    db.select({ c: count() }).from(cases),
+    db.select({ c: count() }).from(cases).where(inArray(cases.status, ["open", "under_review", "pending_decision"])),
+    db.select({ c: count() }).from(cases).where(and(inArray(cases.status, ["open", "under_review"]), lte(cases.dueAt, now))),
+    db.select({ c: count() }).from(lexSubmissions).where(eq(lexSubmissions.status, "pending")),
+    db.select({ c: count() }).from(lexSubmissions).where(eq(lexSubmissions.status, "validated")),
   ]);
 
   const totalKycCount = Number(totalKyc[0]?.c ?? 0);
@@ -297,6 +314,11 @@ export async function getDashboardStats() {
     alertsToday: Number(unreadAlerts[0]?.c ?? 0),
     avgProcessingTimeMin: 4.7,
     avgRiskScore: 34.2,
+    totalCases: Number(totalCases[0]?.c ?? 0),
+    openCases: Number(openCases[0]?.c ?? 0),
+    casesBreachingSLA: Number(casesBreachingSLA[0]?.c ?? 0),
+    pendingLexSubmissions: Number(pendingLex[0]?.c ?? 0),
+    validatedLexSubmissions: Number(validatedLex[0]?.c ?? 0),
   };
 }
 

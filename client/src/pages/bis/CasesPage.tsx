@@ -1,4 +1,5 @@
 import { useState, useCallback } from "react";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Link } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
@@ -84,6 +85,9 @@ export default function CasesPage() {
   const [page, setPage] = useState(1);
   const [createOpen, setCreateOpen] = useState(false);
   const [exportingCsv, setExportingCsv] = useState(false);
+  const [selectedRefs, setSelectedRefs] = useState<Set<string>>(new Set());
+  const [bulkStatusDialog, setBulkStatusDialog] = useState(false);
+  const [bulkStatus, setBulkStatus] = useState<string>("closed");
 
   // Form state
   const [form, setForm] = useState({
@@ -123,6 +127,44 @@ export default function CasesPage() {
     },
     onError: (e) => toast.error(e.message),
   });
+
+  const bulkUpdateStatus = trpc.cases.bulkUpdateStatus.useMutation({
+    onSuccess: (r) => {
+      utils.cases.list.invalidate();
+      utils.cases.stats.invalidate();
+      setSelectedRefs(new Set());
+      setBulkStatusDialog(false);
+      toast.success(`Updated ${r.updated} case(s) to ${bulkStatus}`);
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const bulkClose = trpc.cases.bulkClose.useMutation({
+    onSuccess: (r) => {
+      utils.cases.list.invalidate();
+      utils.cases.stats.invalidate();
+      setSelectedRefs(new Set());
+      toast.success(`Closed ${r.closed} case(s)`);
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const toggleSelect = (ref: string) => {
+    setSelectedRefs(prev => {
+      const next = new Set(prev);
+      if (next.has(ref)) next.delete(ref); else next.add(ref);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    const allRefs = (data?.cases ?? []).map((c: any) => c.ref);
+    if (selectedRefs.size === allRefs.length) {
+      setSelectedRefs(new Set());
+    } else {
+      setSelectedRefs(new Set(allRefs));
+    }
+  };
 
   const exportCsv = trpc.cases.exportCaseCsv.useMutation({
     onSuccess: (result) => {
@@ -192,7 +234,24 @@ export default function CasesPage() {
             Integrated compliance case lifecycle — from draft to closure
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
+          {selectedRefs.size > 0 && (
+            <>
+              <Button variant="outline" size="sm" className="border-amber-400 text-amber-700"
+                onClick={() => setBulkStatusDialog(true)}>
+                Update Status ({selectedRefs.size})
+              </Button>
+              <Button variant="outline" size="sm" className="border-red-400 text-red-700"
+                onClick={() => bulkClose.mutate({ refs: Array.from(selectedRefs) })}
+                disabled={bulkClose.isPending}>
+                {bulkClose.isPending ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : null}
+                Close Selected ({selectedRefs.size})
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setSelectedRefs(new Set())}>
+                <X className="w-4 h-4" />
+              </Button>
+            </>
+          )}
           <Button variant="outline" size="sm" onClick={handleExportCsv} disabled={exportingCsv}>
             {exportingCsv ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Download className="w-4 h-4 mr-1" />}
             Export CSV
@@ -368,8 +427,28 @@ export default function CasesPage() {
               {hasActiveFilters ? " (filtered)" : ""}
             </p>
           )}
+          {/* Select-all header */}
+          {(data?.cases ?? []).length > 0 && (
+            <div className="flex items-center gap-2 px-1 pb-1">
+              <Checkbox
+                checked={selectedRefs.size === (data?.cases ?? []).length && (data?.cases ?? []).length > 0}
+                onCheckedChange={toggleSelectAll}
+              />
+              <span className="text-xs text-muted-foreground">
+                {selectedRefs.size > 0 ? `${selectedRefs.size} selected` : "Select all"}
+              </span>
+            </div>
+          )}
           {(data?.cases ?? []).map((c: any) => (
-            <Link key={c.id} href={`/cases/${c.ref}`}>
+            <div key={c.id} className="flex items-start gap-3">
+              <div className="pt-5 pl-1">
+                <Checkbox
+                  checked={selectedRefs.has(c.ref)}
+                  onCheckedChange={() => toggleSelect(c.ref)}
+                  onClick={e => e.stopPropagation()}
+                />
+              </div>
+              <Link href={`/cases/${c.ref}`} className="flex-1">
               <Card className="cursor-pointer hover:border-primary/50 transition-colors">
                 <CardContent className="py-4">
                   <div className="flex items-start justify-between gap-4">
@@ -412,7 +491,8 @@ export default function CasesPage() {
                   </div>
                 </CardContent>
               </Card>
-            </Link>
+              </Link>
+            </div>
           ))}
           {(data?.cases ?? []).length === 0 && (
             <div className="text-center py-16 text-muted-foreground">
@@ -445,6 +525,34 @@ export default function CasesPage() {
           </Button>
         </div>
       )}
+
+      {/* Bulk Status Dialog */}
+      <Dialog open={bulkStatusDialog} onOpenChange={setBulkStatusDialog}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Update Status for {selectedRefs.size} Case(s)</DialogTitle>
+          </DialogHeader>
+          <div className="py-2">
+            <Label>New Status</Label>
+            <Select value={bulkStatus} onValueChange={setBulkStatus}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {['draft','open','under_review','pending_decision','closed','archived'].map(s => (
+                  <SelectItem key={s} value={s} className="capitalize">{s.replace('_',' ')}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBulkStatusDialog(false)}>Cancel</Button>
+            <Button
+              onClick={() => bulkUpdateStatus.mutate({ refs: Array.from(selectedRefs), status: bulkStatus as any })}
+              disabled={bulkUpdateStatus.isPending}>
+              {bulkUpdateStatus.isPending ? 'Updating...' : 'Apply'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Create Case Dialog */}
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>

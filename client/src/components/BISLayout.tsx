@@ -9,7 +9,7 @@ import {
   ChevronRight, LogOut, Menu, X, AlertTriangle, Car, Pill,
   Briefcase, Globe, MapPin, MessageSquare, Building2, Eye,
   UserCheck, BarChart3, Key, Zap, CheckCheck, ArrowRight, Sun, Moon, ClipboardList, Wallet, UserSearch, Shield, BarChart2,
-  BookOpen, Link2, Brain, Gavel, ClipboardCheck, SendToBack
+  BookOpen, Link2, Brain, Gavel, ClipboardCheck, SendToBack, Smartphone, Download, Link as LinkIcon, BellRing, ShieldAlert
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -99,10 +99,21 @@ const BASE_NAV_GROUPS: NavGroup[] = [
       { label: 'User Management', href: '/admin/users', icon: <UserCheck size={15} />, adminOnly: true },
       { label: 'Tenants & API Keys', href: '/tenants', icon: <Key size={15} /> },
       { label: 'Billing & Ledger', href: '/billing', icon: <Wallet size={15} /> },
+      { label: 'Notifications', href: '/notifications', icon: <BellRing size={15} /> },
       { label: 'Settings', href: '/settings', icon: <Settings size={15} /> },
       { label: 'Audit Log', href: '/audit-log', icon: <ClipboardList size={15} /> },
       { label: 'Developer Portal', href: '/developer', icon: <Key size={15} /> },
       { label: 'Ollama AI Engine', href: '/ollama', icon: <Brain size={15} /> },
+    ],
+  },
+  {
+    label: 'ACCOUNT',
+    defaultOpen: false,
+    items: [
+      { label: 'Active Sessions', href: '/settings/sessions', icon: <Smartphone size={15} /> },
+      { label: 'Two-Factor Auth', href: '/settings/2fa', icon: <ShieldAlert size={15} /> },
+      { label: 'Export Schedules', href: '/settings/export-schedules', icon: <Download size={15} /> },
+      { label: 'Investigation Links', href: '/investigation-links', icon: <LinkIcon size={15} /> },
     ],
   },
   {

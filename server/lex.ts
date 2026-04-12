@@ -842,4 +842,118 @@ ${sub.validationScore != null ? `
       const trend = Array.from(dayMap.entries()).sort(([a], [b]) => a.localeCompare(b)).map(([date, d]) => ({ date, ...d }));
       return { trend, days: input.days, state: input.state ?? "all" };
     }),
+
+  // ── Feature 1: SMS Confirmation ──────────────────────────────────────────
+  sendSmsConfirmation: writeProcedure
+    .input(z.object({ submissionId: z.number() }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const [sub] = await db
+        .select({ id: lexSubmissions.id, referenceNumber: lexSubmissions.submissionRef, status: lexSubmissions.status, submitterId: lexSubmissions.submitterId })
+        .from(lexSubmissions).where(eq(lexSubmissions.id, input.submissionId)).limit(1);
+      if (!sub) throw new TRPCError({ code: "NOT_FOUND" });
+      const [submitter] = await db
+        .select({ phone: lexSubmitters.phone, name: lexSubmitters.name })
+        .from(lexSubmitters).where(eq(lexSubmitters.id, sub.submitterId!)).limit(1);
+      if (!submitter?.phone) return { ok: false, reason: "no_phone" };
+      // Build SMS message
+      const statusLabel = sub.status === "validated" ? "VALIDATED" : sub.status === "rejected" ? "REJECTED" : "RECEIVED";
+      const message = `BIS LEX: Submission ${sub.referenceNumber} ${statusLabel}. Ref: ${sub.referenceNumber}. Contact your supervisor for details.`;
+      // Send via configured provider (Africa's Talking or Termii)
+      const provider = process.env.SMS_PROVIDER ?? "africas_talking";
+      try {
+        if (provider === "africas_talking") {
+          const AT_API_KEY = process.env.AT_API_KEY;
+          const AT_USERNAME = process.env.AT_USERNAME ?? "sandbox";
+          if (!AT_API_KEY) return { ok: false, reason: "no_at_api_key" };
+          const body = new URLSearchParams({ username: AT_USERNAME, to: submitter.phone, message, from: "BIS-LEX" });
+          const res = await fetch("https://api.africastalking.com/version1/messaging", {
+            method: "POST",
+            headers: { apiKey: AT_API_KEY, Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" },
+            body: body.toString(),
+          });
+          const data = await res.json() as { SMSMessageData?: { Recipients?: Array<{ status: string }> } };
+          const sent = data?.SMSMessageData?.Recipients?.[0]?.status === "Success";
+          return { ok: sent, provider: "africas_talking", phone: submitter.phone };
+        } else if (provider === "termii") {
+          const TERMII_API_KEY = process.env.TERMII_API_KEY;
+          if (!TERMII_API_KEY) return { ok: false, reason: "no_termii_api_key" };
+          const res = await fetch("https://api.ng.termii.com/api/sms/send", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ to: submitter.phone, from: "BIS-LEX", sms: message, type: "plain", channel: "generic", api_key: TERMII_API_KEY }),
+          });
+          const data = await res.json() as { message_id?: string };
+          return { ok: !!data.message_id, provider: "termii", phone: submitter.phone };
+        }
+        return { ok: false, reason: "unknown_provider" };
+      } catch (e) {
+        console.error("[LEX SMS]", e);
+        return { ok: false, reason: "send_failed" };
+      }
+    }),
+
+  // ── Feature 2: SLA Tracker — submissions pending > 72h ───────────────────
+  overdueSubmissions: protectedProcedure
+    .input(z.object({ state: z.string().optional(), hours: z.number().int().min(1).max(720).default(72) }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const cutoff = new Date(Date.now() - input.hours * 60 * 60 * 1000);
+      const agencyFilter = input.state
+        ? await db.select({ id: lexAgencies.id }).from(lexAgencies).where(eq(lexAgencies.state, input.state as any))
+        : null;
+      const agencyIds = agencyFilter ? agencyFilter.map(a => a.id) : null;
+      const rows = await db
+        .select({
+          id: lexSubmissions.id,
+          referenceNumber: lexSubmissions.submissionRef,
+          status: lexSubmissions.status,
+          incidentType: lexSubmissions.incidentType,
+          createdAt: lexSubmissions.createdAt,
+          agencyId: lexSubmissions.agencyId,
+        })
+        .from(lexSubmissions)
+        .where(
+          and(
+            inArray(lexSubmissions.status, ["pending", "under_review"]),
+            lte(lexSubmissions.createdAt, cutoff),
+            agencyIds && agencyIds.length > 0 ? inArray(lexSubmissions.agencyId, agencyIds) : undefined,
+          )
+        )
+        .orderBy(lexSubmissions.createdAt)
+        .limit(200);
+      return { overdue: rows, count: rows.length, cutoffHours: input.hours };
+    }),
+
+  // ── Feature 4: LEX-to-Case possible matches in review panel ──────────────
+  possibleCaseMatches: protectedProcedure
+    .input(z.object({ submissionId: z.number() }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const [sub] = await db.select().from(lexSubmissions).where(eq(lexSubmissions.id, input.submissionId)).limit(1);
+      if (!sub) throw new TRPCError({ code: "NOT_FOUND" });
+      // Already linked?
+      if (sub.linkedCaseId) return { matches: [], alreadyLinked: true, linkedCaseId: sub.linkedCaseId };
+      // Exact NIN match
+      const ninMatches = sub.subjectNin
+        ? await db.select({ caseId: caseParties.caseId, name: caseParties.name, nin: caseParties.nin })
+            .from(caseParties).where(eq(caseParties.nin, sub.subjectNin)).limit(5)
+        : [];
+      // Exact phone match
+      const phoneMatches = sub.subjectPhone
+        ? await db.select({ caseId: caseParties.caseId, name: caseParties.name, phone: caseParties.phone })
+            .from(caseParties).where(eq(caseParties.phone, sub.subjectPhone)).limit(5)
+        : [];
+      const allCaseIdsSet = new Set([...ninMatches.map(m => m.caseId), ...phoneMatches.map(m => m.caseId)]);
+      const allCaseIds = Array.from(allCaseIdsSet);
+      const matches = allCaseIds.map(caseId => ({
+        caseId,
+        matchType: ninMatches.some(m => m.caseId === caseId) ? "nin" : "phone",
+        confidence: ninMatches.some(m => m.caseId === caseId) ? 95 : 80,
+      }));
+      return { matches, alreadyLinked: false, linkedCaseId: null };
+    }),
 });

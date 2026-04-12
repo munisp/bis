@@ -7,7 +7,8 @@ import { useTheme } from "@/contexts/ThemeContext";
 import {
   Shield, Search, CheckCircle, AlertTriangle, TrendingUp, RefreshCw,
   FileDown, Eye, Clock, Flag, Activity, Fingerprint, Users, Database,
-  Zap, BarChart3, ArrowUpRight, ArrowDownRight, ChevronRight, Radio, MessageSquare
+  Zap, BarChart3, ArrowUpRight, ArrowDownRight, ChevronRight, Radio, MessageSquare,
+  Briefcase, Gavel, AlertOctagon, FileCheck
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -236,7 +237,7 @@ export default function Dashboard() {
       </div>
 
       {/* ── Top Stats ── */}
-      <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3 mb-3">
         <StatCard label="Total Investigations" value={(stats?.totalInvestigations ?? 0).toLocaleString()} icon={<Search size={14} />} trend={12} color="blue" />
         <StatCard label="Active Now" value={stats?.activeInvestigations ?? 0} sub="in progress" icon={<Activity size={14} />} color="amber" />
         <StatCard label="Completed Today" value={stats?.completedToday ?? 0} icon={<CheckCircle size={14} />} trend={8} color="green" />
@@ -245,6 +246,18 @@ export default function Dashboard() {
         <StatCard label="Duplicates Caught" value={stats?.duplicatesDetected ?? 0} icon={<Shield size={14} />} color="amber" />
         <StatCard label="KYC Today" value={stats?.kycVerificationsToday ?? 0} sub={`${stats?.kycPassRate ?? 0}% pass`} icon={<CheckCircle size={14} />} color="green" />
         <StatCard label="Active Monitors" value={(stats?.activeMonitors ?? 0).toLocaleString()} sub={`${stats?.alertsToday ?? 0} alerts`} icon={<Eye size={14} />} color="blue" />
+      </div>
+
+      {/* ── Case & LEX KPIs ── */}
+      <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3 mb-6">
+        <StatCard label="Total Cases" value={(stats?.totalCases ?? 0).toLocaleString()} icon={<Briefcase size={14} />} color="blue" />
+        <StatCard label="Open Cases" value={stats?.openCases ?? 0} sub="active" icon={<AlertOctagon size={14} />} color="amber" />
+        <StatCard label="SLA Breaches" value={stats?.casesBreachingSLA ?? 0} sub="overdue" icon={<Clock size={14} />} color="red" />
+        <StatCard label="Avg Risk Score" value={`${stats?.avgRiskScore ?? 0}`} sub="cases" icon={<Shield size={14} />} color="amber" />
+        <StatCard label="LEX Pending" value={stats?.pendingLexSubmissions ?? 0} sub="submissions" icon={<Gavel size={14} />} color="amber" />
+        <StatCard label="LEX Validated" value={stats?.validatedLexSubmissions ?? 0} icon={<FileCheck size={14} />} color="green" />
+        <StatCard label="Avg Process" value={`${stats?.avgProcessingTimeMin ?? 0}m`} sub="per investigation" icon={<Clock size={14} />} color="blue" />
+        <StatCard label="Unread Alerts" value={stats?.alertsToday ?? 0} icon={<AlertTriangle size={14} />} color="red" />
       </div>
 
       {/* ── Main Grid ── */}

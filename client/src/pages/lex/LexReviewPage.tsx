@@ -74,6 +74,7 @@ export default function LexReviewPage() {
   );
 
   const { data: stats } = trpc.lex.stateStats.useQuery();
+  const { data: overdueData } = trpc.lex.overdueSubmissions.useQuery({ hours: 72 });
 
   const reviewMutation = trpc.lex.reviewSubmission.useMutation({
     onSuccess: () => {
@@ -91,6 +92,25 @@ export default function LexReviewPage() {
 
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
+      {/* SLA 72h Alert Banner */}
+      {overdueData && overdueData.count > 0 && (
+        <div className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-lg px-4 py-3">
+          <AlertTriangle className="w-5 h-5 text-red-600 shrink-0" />
+          <div className="flex-1">
+            <p className="text-sm font-semibold text-red-800">
+              SLA Breach: {overdueData.count} submission{overdueData.count !== 1 ? 's' : ''} pending &gt; 72 hours
+            </p>
+            <p className="text-xs text-red-600 mt-0.5">
+              These submissions require immediate review to comply with the 72-hour SLA policy.
+            </p>
+          </div>
+          <Button size="sm" variant="outline" className="border-red-300 text-red-700 hover:bg-red-100"
+            onClick={() => { setStatusFilter('pending'); setActiveTab('queue'); }}>
+            View Overdue
+          </Button>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>

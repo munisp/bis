@@ -17,6 +17,7 @@ import { socialMonitoringRouter } from "./socialMonitoring";
 import { biometricRouter } from "./biometric";
 import { lakehouseRouter } from "./lakehouse";
 import { lexRouter } from "./lex";
+import { sessionsRouter, totpRouter, notificationsRouter, investigationLinksRouter, exportSchedulesRouter } from "./platform";
 import { getDb } from "./db";
 import { evaluateAlertRules } from "./alertRules";
 import {
@@ -51,6 +52,11 @@ import {
   nigerianStateEnum,
   lexAgencyTypeEnum,
   lexIncidentTypeEnum,
+  userSessions,
+  userTotpSecrets,
+  notifications,
+  investigationCaseLinks,
+  exportSchedules,
 } from "../drizzle/schema";
 import {
   getDashboardStats,
@@ -59,7 +65,7 @@ import {
   getMonitors, createMonitor, updateMonitor,
   getScreeningRequests, createScreeningRequest, updateScreeningRequest,
 } from "./db";
-import { eq, desc, asc, and, ilike, gte, lte, sql, count } from "drizzle-orm";
+import { eq, desc, asc, and, ilike, gte, lte, sql, count, inArray } from "drizzle-orm";
 import { z } from "zod";
 
 // ─── Service URLs ─────────────────────────────────────────────────────────────
@@ -3006,6 +3012,45 @@ ${timeline.map(e => `<tr><td>${new Date(e.createdAt).toLocaleDateString()}</td><
       await db.update(caseComments).set({ deletedAt: new Date(), updatedAt: new Date() }).where(eq(caseComments.id, input.commentId));
       return { success: true };
     }),
+
+  // ─── Bulk Actions ─────────────────────────────────────────────────────────
+  bulkUpdateStatus: writeProcedure
+    .input(z.object({
+      refs: z.array(z.string()).min(1).max(100),
+      status: z.enum(['draft', 'open', 'under_review', 'pending_decision', 'closed', 'archived']),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR' });
+      await db.update(cases).set({ status: input.status, updatedAt: new Date() }).where(inArray(cases.ref, input.refs));
+      await writeAuditLog(db, { userId: ctx.user.id, category: 'case' as any, action: `Bulk status → ${input.status}: ${input.refs.length} cases`, targetRef: input.refs.join(',') });
+      return { updated: input.refs.length };
+    }),
+
+  bulkAssign: writeProcedure
+    .input(z.object({
+      refs: z.array(z.string()).min(1).max(100),
+      leadAnalystId: z.number(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR' });
+      await db.update(cases).set({ leadAnalystId: input.leadAnalystId, updatedAt: new Date() }).where(inArray(cases.ref, input.refs));
+      await writeAuditLog(db, { userId: ctx.user.id, category: 'case' as any, action: `Bulk assign to analyst #${input.leadAnalystId}: ${input.refs.length} cases`, targetRef: input.refs.join(',') });
+      return { updated: input.refs.length };
+    }),
+
+  bulkClose: writeProcedure
+    .input(z.object({
+      refs: z.array(z.string()).min(1).max(100),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR' });
+      await db.update(cases).set({ status: 'closed', updatedAt: new Date() }).where(inArray(cases.ref, input.refs));
+      await writeAuditLog(db, { userId: ctx.user.id, category: 'case' as any, action: `Bulk close: ${input.refs.length} cases`, targetRef: input.refs.join(',') });
+      return { closed: input.refs.length };
+    }),
 });
 // ─── Ollama Router ────────────────────────────────────────────────────────────
 
@@ -3132,5 +3177,10 @@ export const appRouter = router({
   cases: casesRouter,
   ollama: ollamaRouter,
   lex: lexRouter,
+  sessions: sessionsRouter,
+  totp: totpRouter,
+  notifications: notificationsRouter,
+  investigationLinks: investigationLinksRouter,
+  exportSchedules: exportSchedulesRouter,
 });
 export type AppRouter = typeof appRouter;

@@ -8,7 +8,7 @@ if (!_dbUrl.startsWith("postgresql") && !_dbUrl.startsWith("postgres")) {
   console.log("[BIS] Overriding DATABASE_URL → local PostgreSQL (bis_db)");
 }
 
-import express from "express";
+import express, { type Request, type Response, type NextFunction } from "express";
 import { createServer } from "http";
 import net from "net";
 import helmet from "helmet";
@@ -24,6 +24,13 @@ import { creditTenantAccount } from "../billing";
 import crypto from "crypto";
 import { createOpenClawRouter } from "../openclawEndpoints";
 import { startSlaBreachScheduler } from "../slaBreachChecker";
+
+// ── Structured logger ─────────────────────────────────────────────────────────
+function log(level: "info" | "warn" | "error", msg: string, meta?: Record<string, unknown>) {
+  const entry = JSON.stringify({ ts: new Date().toISOString(), level, msg, ...meta });
+  if (level === "error") process.stderr.write(entry + "\n");
+  else process.stdout.write(entry + "\n");
+}
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -49,6 +56,30 @@ async function startServer() {
   const server = createServer(app);
   // Trust the first proxy hop (Manus reverse proxy) for correct IP detection
   app.set("trust proxy", 1);
+
+  // ── Request ID middleware ─────────────────────────────────────────────────────
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    const reqId = (req.headers["x-request-id"] as string) || crypto.randomUUID();
+    (req as Request & { id: string }).id = reqId;
+    res.setHeader("x-request-id", reqId);
+    next();
+  });
+
+  // ── Structured access log ────────────────────────────────────────────────────
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    const start = Date.now();
+    res.on("finish", () => {
+      const duration = Date.now() - start;
+      const reqId = (req as Request & { id?: string }).id;
+      if (!req.path.startsWith("/api/trpc") || res.statusCode >= 400) {
+        log(res.statusCode >= 500 ? "error" : res.statusCode >= 400 ? "warn" : "info",
+          `${req.method} ${req.path}`,
+          { status: res.statusCode, duration, reqId, ip: req.ip }
+        );
+      }
+    });
+    next();
+  });
 
   // ── Security headers (helmet) ──────────────────────────────────────────────
   // In dev we relax CSP so Vite HMR works; in production enforce strict policy.
@@ -95,6 +126,8 @@ async function startServer() {
   const allowedOrigins = [
     "http://localhost:3000",
     "http://localhost:5173",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:5173",
     ...(process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(",") : []),
   ];
   // Ensure cors middleware is applied correctly
@@ -217,9 +250,71 @@ async function startServer() {
   });
 
   // JSON body parser (after Paystack raw handler)
-  // Limit to 10mb for API calls; file uploads use base64 in JSON which is larger
-  app.use(express.json({ limit: "16mb" }));
-  app.use(express.urlencoded({ limit: "16mb", extended: true }));
+  // Limit to 4mb for normal API calls; file uploads use base64 in JSON which is larger
+  app.use(express.json({ limit: "4mb" }));
+  app.use(express.urlencoded({ limit: "4mb", extended: true }));
+
+  // ── CSRF token endpoint ────────────────────────────────────────────────────
+  // Provides a per-session CSRF token for state-changing requests from the frontend.
+  // tRPC mutations should include X-CSRF-Token header; validated in context.ts.
+  app.get("/api/csrf-token", (req, res) => {
+    const token = crypto.randomBytes(32).toString("hex");
+    // Store in a short-lived signed cookie
+    res.cookie("_csrf", token, {
+      httpOnly: true,
+      sameSite: "strict",
+      secure: !isDev,
+      maxAge: 3600_000, // 1 hour
+    });
+    res.json({ csrfToken: token });
+  });
+
+  // ── Health endpoint ────────────────────────────────────────────────────────────────
+  // Returns JSON with DB, S3, and LLM checks for load balancer / monitoring.
+  app.get("/api/health", async (_req, res) => {
+    const checks: Record<string, { status: "ok" | "degraded" | "down"; latencyMs?: number }> = {};
+
+    // DB check
+    const dbStart = Date.now();
+    try {
+      const { getDb } = await import("../db");
+      const db = await getDb();
+      if (db) {
+        await db.execute("SELECT 1" as any);
+        checks.db = { status: "ok", latencyMs: Date.now() - dbStart };
+      } else {
+        checks.db = { status: "down" };
+      }
+    } catch {
+      checks.db = { status: "down", latencyMs: Date.now() - dbStart };
+    }
+
+    // LLM check (built-in Forge API)
+    const llmStart = Date.now();
+    try {
+      const llmUrl = process.env.BUILT_IN_FORGE_API_URL;
+      if (llmUrl) {
+        const r = await fetch(`${llmUrl}/health`, { signal: AbortSignal.timeout(3000) });
+        checks.llm = { status: r.ok ? "ok" : "degraded", latencyMs: Date.now() - llmStart };
+      } else {
+        checks.llm = { status: "degraded" };
+      }
+    } catch {
+      checks.llm = { status: "degraded", latencyMs: Date.now() - llmStart };
+    }
+
+    const allOk = Object.values(checks).every(c => c.status === "ok");
+    const anyDown = Object.values(checks).some(c => c.status === "down");
+    const overall = allOk ? "ok" : anyDown ? "degraded" : "degraded";
+
+    res.status(anyDown ? 503 : 200).json({
+      status: overall,
+      version: process.env.npm_package_version ?? "1.0.0",
+      uptime: Math.floor(process.uptime()),
+      ts: new Date().toISOString(),
+      checks,
+    });
+  });
 
   // OAuth callback under /api/oauth/callback
   registerOAuthRoutes(app);
@@ -306,11 +401,42 @@ async function startServer() {
     console.log(`Port ${preferredPort} is busy, using port ${port} instead`);
   }
 
+  _httpServer = server;
   server.listen(port, () => {
-    console.log(`Server running on http://localhost:${port}/`);
+    log("info", `BIS server running`, { port, env: process.env.NODE_ENV ?? "production" });
   });
+  return server;
 }
 
 startServer()
-  .then(() => startSlaBreachScheduler())
-  .catch(console.error);
+  .then((srv) => {
+    startSlaBreachScheduler();
+    return srv;
+  })
+  .catch((err) => {
+    log("error", "Server startup failed", { error: String(err) });
+    process.exit(1);
+  });
+
+// ── Graceful shutdown ────────────────────────────────────────────────────────────────
+let _httpServer: ReturnType<typeof createServer> | null = null;
+
+function gracefulShutdown(signal: string) {
+  log("info", `Received ${signal} — starting graceful shutdown`);
+  if (_httpServer) {
+    _httpServer.close(() => {
+      log("info", "HTTP server closed");
+      process.exit(0);
+    });
+    // Force exit after 10s if connections don't drain
+    setTimeout(() => {
+      log("warn", "Forced shutdown after 10s timeout");
+      process.exit(1);
+    }, 10_000).unref();
+  } else {
+    process.exit(0);
+  }
+}
+
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));

@@ -984,3 +984,73 @@ export const lexSubmissions = pgTable("lex_submissions", {
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
 });
 export type LexSubmission = typeof lexSubmissions.$inferSelect;
+
+// ─── User Sessions ────────────────────────────────────────────────────────────
+export const userSessions = pgTable("user_sessions", {
+  id: serial("id").primaryKey(),
+  userId: integer("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+  sessionToken: varchar("sessionToken", { length: 255 }).notNull().unique(),
+  ipAddress: varchar("ipAddress", { length: 45 }),
+  userAgent: text("userAgent"),
+  deviceName: varchar("deviceName", { length: 255 }),
+  lastActiveAt: timestamp("lastActiveAt").defaultNow().notNull(),
+  expiresAt: timestamp("expiresAt").notNull(),
+  revokedAt: timestamp("revokedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type UserSession = typeof userSessions.$inferSelect;
+
+// ─── TOTP / 2FA ───────────────────────────────────────────────────────────────
+export const userTotpSecrets = pgTable("user_totp_secrets", {
+  id: serial("id").primaryKey(),
+  userId: integer("userId").notNull().references(() => users.id, { onDelete: "cascade" }).unique(),
+  secret: varchar("secret", { length: 64 }).notNull(),
+  verified: boolean("verified").notNull().default(false),
+  backupCodes: json("backupCodes").$type<string[]>().default([]),
+  enabledAt: timestamp("enabledAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+export type UserTotpSecret = typeof userTotpSecrets.$inferSelect;
+
+// ─── In-App Notifications ─────────────────────────────────────────────────────
+export const notifications = pgTable("notifications", {
+  id: serial("id").primaryKey(),
+  userId: integer("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+  type: varchar("type", { length: 64 }).notNull(),
+  title: varchar("title", { length: 255 }).notNull(),
+  body: text("body"),
+  link: varchar("link", { length: 512 }),
+  read: boolean("read").notNull().default(false),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type Notification = typeof notifications.$inferSelect;
+
+// ─── Investigation-Case Links ─────────────────────────────────────────────────
+export const investigationCaseLinks = pgTable("investigation_case_links", {
+  id: serial("id").primaryKey(),
+  investigationId: integer("investigationId").notNull().references(() => investigations.id, { onDelete: "cascade" }),
+  caseId: integer("caseId").notNull().references(() => cases.id, { onDelete: "cascade" }),
+  linkedBy: integer("linkedBy").references(() => users.id),
+  notes: text("notes"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type InvestigationCaseLink = typeof investigationCaseLinks.$inferSelect;
+
+// ─── Export Schedules ─────────────────────────────────────────────────────────
+export const exportSchedules = pgTable("export_schedules", {
+  id: serial("id").primaryKey(),
+  userId: integer("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+  name: varchar("name", { length: 255 }).notNull(),
+  exportType: varchar("exportType", { length: 64 }).notNull(),
+  format: varchar("format", { length: 16 }).notNull().default("csv"),
+  filters: json("filters"),
+  cronExpression: varchar("cronExpression", { length: 64 }).notNull().default("0 8 * * 1"),
+  enabled: boolean("enabled").notNull().default(true),
+  lastRunAt: timestamp("lastRunAt"),
+  nextRunAt: timestamp("nextRunAt"),
+  lastFileUrl: varchar("lastFileUrl", { length: 1024 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+export type ExportSchedule = typeof exportSchedules.$inferSelect;
