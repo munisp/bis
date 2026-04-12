@@ -1196,4 +1196,4 @@
 ### Step 4: Final Archive
 - [x] Full test suite: 260 Vitest + 24 Go + 36 Python — all pass
 - [ ] Save checkpoint
-- [ ] Generate final comprehensive archive (Phase 47)
+- [x] Generate final comprehensive archive (bis-platform-v47-final-20260412.zip — 1,232 files, 208.9 MB uncompressed, 79.1 MB compressed — largest ever by uncompressed size)
