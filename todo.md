@@ -1100,5 +1100,5 @@
 - [x] Body size limit tightened to 4MB
 
 ### Archive
-- [ ] Generate comprehensive zip archive of entire platform
-- [ ] Verify archive completeness
+- [x] Generate comprehensive zip archive of entire platform (bis-pwa-archive-v45-20260412.zip — 76MB, 1023 files)
+- [x] Verify archive completeness (all dirs present: client, server, services, drizzle, docs, shared, bis-mobile, infra, scripts)
