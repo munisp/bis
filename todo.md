@@ -1172,4 +1172,28 @@
 - [x] Production health endpoint at /api/health (DB latency, LLM check, uptime, version)
 - [x] docker-compose.yml updated with lex-intake + lex-validator (20 containers total)
 - [x] DB SSL enforcement for non-local connections (DB_SSL_STRICT env var)
-- [ ] Final comprehensive archive generation (from /home/ubuntu, all 5 dirs + dist)
+- [x] Final comprehensive archive generation (bis-platform-v46-complete-20260412.zip — 605 files, 38.7MB uncompressed, 18.4MB compressed — 26 new files vs v45 source, 0 missing)
+
+## Phase 47 — Next Steps Implementation
+
+### Step 1: Database Seed
+- [x] Run pnpm db:seed — seeded 3 tenants, 5 users, 10 investigations, 12 alerts, 6 KYC, 8 cases, 4 agents, 5 LEX agencies, 8 submissions, 5 notifications, 10 audit entries
+- [x] Seed script fixed for PostgreSQL (pg driver, JSON detail field, ON CONFLICT DO NOTHING)
+
+### Step 2: CSRF Token in tRPC Client
+- [x] fetchCsrfToken() added to main.tsx — fetches /api/csrf-token on app load
+- [x] X-CSRF-Token header injected in tRPC httpBatchLink headers() function
+- [x] Lazy re-fetch if token is null before any request
+- [x] TypeScript: 0 errors, 260/260 tests pass
+
+### Step 3: Penetration Test Readiness
+- [x] DB_SSL_STRICT env var documented in .env.example and README.md
+- [x] Comprehensive pen test scope document written (docs/pentest-readiness-phase47.md)
+- [x] security.txt file at /home/ubuntu/bis-pwa/client/public/.well-known/security.txt
+- [x] All security controls documented and verified
+- [x] Residual risks documented with mitigations
+
+### Step 4: Final Archive
+- [x] Full test suite: 260 Vitest + 24 Go + 36 Python — all pass
+- [ ] Save checkpoint
+- [ ] Generate final comprehensive archive (Phase 47)

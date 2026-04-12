@@ -39,11 +39,44 @@ queryClient.getMutationCache().subscribe(event => {
   }
 });
 
+// ── CSRF Token ────────────────────────────────────────────────────────────────
+// Fetch a CSRF token from the server on app load and inject it into all
+// state-changing tRPC requests via the X-CSRF-Token header.
+// The server validates this header on POST/PUT/PATCH/DELETE requests.
+let _csrfToken: string | null = null;
+
+async function fetchCsrfToken(): Promise<string | null> {
+  try {
+    const res = await fetch("/api/csrf-token", {
+      credentials: "include",
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    _csrfToken = data?.csrfToken ?? null;
+    return _csrfToken;
+  } catch {
+    // Non-fatal — CSRF validation is defence-in-depth; app still works
+    console.warn("[BIS] Failed to fetch CSRF token");
+    return null;
+  }
+}
+
+// Pre-fetch CSRF token before first mutation (non-blocking)
+fetchCsrfToken();
+
 const trpcClient = trpc.createClient({
   links: [
     httpBatchLink({
       url: "/api/trpc",
       transformer: superjson,
+      async headers() {
+        // Ensure we have a token before any request (lazy fetch if needed)
+        if (!_csrfToken) {
+          await fetchCsrfToken();
+        }
+        return _csrfToken ? { "X-CSRF-Token": _csrfToken } : {};
+      },
       fetch(input, init) {
         return globalThis.fetch(input, {
           ...(init ?? {}),
