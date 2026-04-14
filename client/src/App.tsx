@@ -66,6 +66,13 @@ const ExportSchedulesPage  = lazy(() => import("@/pages/settings/ExportSchedules
 // Platform sub-pages
 const InvestigationCaseLinksPage = lazy(() => import("@/pages/InvestigationCaseLinksPage"));
 const NotificationCentrePage     = lazy(() => import("@/pages/NotificationCentrePage"));
+// Banking & Compliance
+const AMLTransactionsPage        = lazy(() => import("@/pages/bis/AMLTransactionsPage"));
+const SARFilingPage              = lazy(() => import("@/pages/bis/SARFilingPage"));
+const TradeFinancePage           = lazy(() => import("@/pages/bis/TradeFinancePage"));
+const CorrespondentBankingPage   = lazy(() => import("@/pages/bis/CorrespondentBankingPage"));
+const EvidencePage               = lazy(() => import("@/pages/bis/EvidencePage"));
+const RegulatoryReportsPage      = lazy(() => import("@/pages/bis/RegulatoryReportsPage"));
 
 // ─── Page loading skeleton ────────────────────────────────────────────────────
 
@@ -147,6 +154,12 @@ function Router() {
         {/* Platform sub-pages */}
         <Route path="/investigation-links" component={InvestigationCaseLinksPage} />
         <Route path="/notifications" component={NotificationCentrePage} />
+        <Route path="/aml-transactions" component={AMLTransactionsPage} />
+        <Route path="/sar-filings" component={SARFilingPage} />
+        <Route path="/trade-finance" component={TradeFinancePage} />
+        <Route path="/correspondent-banking" component={CorrespondentBankingPage} />
+        <Route path="/evidence" component={EvidencePage} />
+        <Route path="/regulatory-reports" component={RegulatoryReportsPage} />
         {/* Fallback */}
         <Route path="/404" component={NotFound} />
         <Route component={NotFound} />

@@ -756,3 +756,92 @@ services:
       interval: 15s
       timeout: 5s
       retries: 3
+
+  # ─── Payment Rails Service (Go) ──────────────────────────────────────────────
+  payment-rails:
+    build:
+      context: ./services/payment-rails
+      dockerfile: Dockerfile
+    container_name: bis-payment-rails
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      PORT: "8094"
+      DATABASE_URL: ${DATABASE_URL:-postgresql://bis:bis_dev_password@postgres:5432/bis}
+      KAFKA_BROKERS: kafka:9092
+      REDIS_URL: redis://:${REDIS_PASSWORD:-bis_redis_dev}@redis:6379
+      JWT_SECRET: ${JWT_SECRET:-bis-jwt-secret-change-in-prod}
+      SWIFT_BIC: ${SWIFT_BIC:-BISBNGLA}
+      SEPA_CREDITOR_ID: ${SEPA_CREDITOR_ID:-DE98ZZZ09999999999}
+      TRAVEL_RULE_THRESHOLD_USD: "1000"
+      AML_ENGINE_URL: http://aml-engine:8095
+      LOG_LEVEL: INFO
+    ports:
+      - "8094:8094"
+    networks: [bis-net]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8094/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ─── AML Scoring Engine (Rust) ───────────────────────────────────────────────
+  aml-engine:
+    build:
+      context: ./services/aml-engine
+      dockerfile: Dockerfile
+    container_name: bis-aml-engine
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      PORT: "8095"
+      DATABASE_URL: ${DATABASE_URL:-postgresql://bis:bis_dev_password@postgres:5432/bis}
+      REDIS_URL: redis://:${REDIS_PASSWORD:-bis_redis_dev}@redis:6379
+      RISK_SCORING_URL: http://risk-scoring:8096
+      HIGH_RISK_THRESHOLD: "70"
+      MEDIUM_RISK_THRESHOLD: "40"
+      LOG_LEVEL: INFO
+    ports:
+      - "8095:8095"
+    networks: [bis-net]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8095/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ─── Risk Scoring Service (Python/ML) ────────────────────────────────────────
+  risk-scoring:
+    build:
+      context: ./services/risk-scoring
+      dockerfile: Dockerfile
+    container_name: bis-risk-scoring
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: "8096"
+      DATABASE_URL: ${DATABASE_URL:-postgresql://bis:bis_dev_password@postgres:5432/bis}
+      GOAML_REPORT_THRESHOLD: "50"
+      CTR_THRESHOLD_USD: "10000"
+      STR_THRESHOLD_USD: "5000"
+      LOG_LEVEL: INFO
+    ports:
+      - "8096:8096"
+    networks: [bis-net]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8096/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3

@@ -8,6 +8,7 @@ import {
 import type { MVRResult, MVRViolation, Country, RiskLevel } from "../../types/bis";
 import { SUPPORTED_COUNTRIES, getCountry } from "../../types/bis";
 import BISLayout from '@/components/BISLayout';
+import ScreeningResultsTable from '@/components/bis/ScreeningResultsTable';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MVR Check Page — Motor Vehicle Record Check
@@ -215,6 +216,7 @@ function MVRCheckPageInner() {
   };
 
   return (
+    <>
     <div className="min-h-screen bg-muted">
       {/* Header */}
       <div className="bg-card border-b border-border px-6 py-4">
@@ -407,6 +409,10 @@ function MVRCheckPageInner() {
         ) : null}
       </div>
     </div>
+      <div className="max-w-3xl mx-auto px-4 pb-8 mt-6">
+        <ScreeningResultsTable screeningType="mvr" title="MVR Check Records" />
+      </div>
+    </>
   );
 }
 

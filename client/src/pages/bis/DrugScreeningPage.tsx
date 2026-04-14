@@ -8,6 +8,7 @@ import {
 import type { DrugTestOrder, CollectionSite, SubstanceResult, DrugPanel, RiskLevel } from "../../types/bis";
 import { getCountry } from "../../types/bis";
 import BISLayout from '@/components/BISLayout';
+import ScreeningResultsTable from '@/components/bis/ScreeningResultsTable';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Drug Screening Page — Tailored for Nigeria / Africa
@@ -527,6 +528,9 @@ function DrugScreeningPageInner() {
             </div>
           </div>
         )}
+      </div>
+      <div className="max-w-3xl mx-auto px-4 pb-8 mt-6">
+        <ScreeningResultsTable screeningType="drug" title="Recent Drug Screening Records" />
       </div>
     </div>
   );

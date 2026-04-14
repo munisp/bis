@@ -1223,3 +1223,167 @@
 - [x] TypeScript: 0 errors
 - [x] Save checkpoint
 - [x] Generate final comprehensive archive
+
+## Phase 49 — Full Production-Readiness Sprint
+
+### Domain 1: AML Transaction Monitoring
+- [ ] Add transactions, aml_rules, aml_alerts, swift_messages, sepa_payments, travel_rule_records tables to schema
+- [ ] AML transaction monitoring router (create, list, flag, clear)
+- [ ] SWIFT/SEPA payment rails router with message parsing
+- [ ] FATF Travel Rule compliance router
+- [ ] AML Transaction Monitoring page (full CRUD + workflow)
+- [ ] SWIFT Messages page (MT103/MT202 parsing + status)
+- [ ] Seed 100 transactions, 20 AML alerts, 10 SWIFT messages
+
+### Domain 2: SAR Filing Lifecycle
+- [ ] SAR (Suspicious Activity Report) full lifecycle: draft→review→approved→filed→acknowledged
+- [ ] SAR router: create, update, submit, approve, reject, file, acknowledge
+- [ ] SAR management page with workflow modal and audit trail
+- [ ] goAML XML export enhancement: full FATF XML schema compliance
+- [ ] Seed 15 SARs across all lifecycle stages
+
+### Domain 3: Trade Finance & Correspondent Banking
+- [ ] Add trade_finance_instruments, letters_of_credit, correspondent_banks, nostro_accounts tables
+- [ ] Trade Finance router: LC issuance, amendment, presentation, settlement
+- [ ] Correspondent Banking router: bank directory, nostro reconciliation
+- [ ] Trade Finance page (LC lifecycle management)
+- [ ] Correspondent Banking page (bank directory + nostro accounts)
+- [ ] Seed 10 LCs, 8 correspondent banks, 5 nostro accounts
+
+### Domain 4: Core Banking Ledger Integration
+- [ ] TigerBeetle ledger entries for all financial transactions
+- [ ] Account balance queries via TigerBeetle HTTP proxy
+- [ ] Ledger reconciliation report
+- [ ] Ledger page showing account balances and transaction history
+- [ ] Seed 20 ledger accounts, 50 ledger entries
+
+### Domain 5: PEP/Sanctions Screening Workflow
+- [ ] Full PEP screening workflow: initial→enhanced_due_diligence→cleared/escalated
+- [ ] Sanctions hit management: confirm, dispute, whitelist
+- [ ] Screening workflow page with EDD modal
+- [ ] Batch screening: upload CSV of names, run against all lists
+- [ ] Seed 30 screening records with varied outcomes
+
+### Domain 6: Regulatory Reporting
+- [ ] CBN regulatory reports: CTR (Currency Transaction Report), STR (Suspicious Transaction Report)
+- [ ] NFIU reporting integration stubs
+- [ ] Regulatory reporting dashboard with submission status
+- [ ] Report templates: CTR, STR, goAML XML, FATF Travel Rule
+- [ ] Seed 10 regulatory reports
+
+### Domain 7: Case Escalation & SLA Enforcement
+- [ ] Case escalation workflow: auto-escalate on SLA breach
+- [ ] SLA breach checker: enhanced with case escalation triggers
+- [ ] Evidence chain-of-custody: hash verification, custody log
+- [ ] Case escalation page with timeline
+- [ ] Evidence management page (upload, verify, custody transfer)
+- [ ] Seed 20 case escalation events, 30 evidence items
+
+### Domain 8: Field Agent Dispatch & Biometric Pipeline
+- [ ] Field agent real-time status updates (GPS, availability)
+- [ ] Task assignment workflow with acceptance/rejection
+- [ ] Biometric verification pipeline: enroll→verify→match→report
+- [ ] Field agent mobile-optimized dispatch view
+- [ ] Biometric match report page
+- [ ] Seed 15 biometric enrollments, 20 field task assignments
+
+### Domain 9: Complete UI CRUD
+- [ ] DataSourcesPage: full CRUD (add, edit, delete, test connection, health check)
+- [ ] DrugScreeningPage: full CRUD with result upload and chain-of-custody
+- [ ] MVRCheckPage: full CRUD with DMV integration stub
+- [ ] WorkAuthorizationPage: full CRUD with I-9/work permit verification
+- [ ] ZeroFootprintPage: enhanced with batch processing and history
+- [ ] NigerianDataBundlePage: full CRUD with all 25 data sources wired
+- [ ] BillingPage: full invoice history, usage breakdown, payment methods
+- [ ] ContinuousMonitoringPage: full CRUD for monitor configs + alert history
+- [ ] FieldAgentPlaybooksPage: full CRUD with version history
+- [ ] LakehouseAnalyticsPage: real query builder with saved queries
+- [ ] OllamaManagementPage: model pull, delete, chat test, resource monitor
+- [ ] DuplicateIdentityCheckPage: batch check + history table
+- [ ] HostedVerificationLinksPage: full CRUD + QR code generation
+- [ ] StakeholderPortalPage: full case portal with document upload
+
+### Domain 10: Docker & Infrastructure
+- [ ] docker-compose.yml: add health checks to all 20 containers
+- [ ] docker-compose.yml: add depends_on with condition: service_healthy
+- [ ] .env.example: complete with all 50+ variables and default values
+- [ ] smoke-test.sh: comprehensive smoke test for all endpoints
+- [ ] Makefile: dev, build, test, seed, smoke-test, deploy targets
+- [ ] infra/nginx/nginx.conf: production reverse proxy config
+- [ ] infra/postgres/init.sql: database init script with extensions
+
+### Domain 11: Enhanced Seed Data
+- [ ] Seed 100 transactions with AML flags
+- [ ] Seed 50 cases with full timeline events
+- [ ] Seed 30 field agent tasks with GPS coordinates
+- [ ] Seed 20 goAML filings with XML
+- [ ] Seed 15 SARs
+- [ ] Seed 10 LCs and trade finance instruments
+- [ ] Seed 25 PEP/sanctions screening records
+
+### Domain 12: Production Smoke Tests
+- [ ] smoke-test.sh: test all 30+ API endpoints
+- [ ] Go service health check tests
+- [ ] Python service health check tests
+- [ ] Database connectivity test
+- [ ] Redis connectivity test
+- [ ] End-to-end workflow test: investigation→kyc→screening→case→sar
+
+### Archive
+- [ ] Run full test suite
+- [ ] Save checkpoint
+- [ ] Generate final comprehensive archive
+
+## Phase 49 — Full Production Readiness Sprint
+
+### New Services (Go, Rust, Python)
+- [x] Go: payment-rails service (SWIFT MT103/MT202, SEPA credit/debit, FATF travel rule) — 13 tests
+- [x] Rust: aml-engine service (risk scoring, evidence hash verification, structuring detection) — 17 tests
+- [x] Python: risk-scoring service (ML risk scoring, CTR/STR/goAML report generation) — 29 tests
+
+### Schema & Database
+- [x] 11 new tables: transactions, aml_rules, aml_alerts, swift_messages, sepa_payments, travel_rule_records, sar_filings, letters_of_credit, correspondent_banks, nostro_accounts, evidence_items, regulatory_reports
+- [x] db:push migration applied successfully
+- [x] Banking seed: 100 transactions, 10 AML rules, 40 alerts, 30 SWIFT, 20 SEPA, 15 travel rule, 15 SAR, 10 LC, 8 correspondent banks, 20 evidence, 8 regulatory reports
+
+### TypeScript Routers
+- [x] aml.ts: AML transaction monitoring + alert management router
+- [x] transactions.ts: Transaction CRUD + flagging router
+- [x] sar.ts: SAR filing lifecycle (draft/review/approve/file/acknowledge)
+- [x] banking.ts: Trade finance (LC), correspondent banking, evidence chain-of-custody, regulatory reports
+- [x] All 6 new routers registered in appRouter
+
+### UI Pages (7 new)
+- [x] AMLTransactionsPage.tsx: Full CRUD, search, risk filters, alert management
+- [x] SARFilingPage.tsx: SAR lifecycle with status workflow, narrative editor
+- [x] TradeFinancePage.tsx: Letters of Credit CRUD with status tracking
+- [x] CorrespondentBankingPage.tsx: Correspondent bank management + nostro accounts
+- [x] EvidencePage.tsx: Evidence chain-of-custody with integrity verification
+- [x] RegulatoryReportsPage.tsx: Regulatory report generation and submission tracking
+- [x] StakeholderPortalLandingPage.tsx: Public-facing landing page with Request Access CTA
+- [x] All pages registered in App.tsx routes
+- [x] Banking & Compliance section added to BISLayout sidebar navigation
+
+### Existing Page CRUD Gaps Fixed
+- [x] ScreeningResultsTable component: reusable results table with search + status filter
+- [x] DrugScreeningPage: injected ScreeningResultsTable for history/search
+- [x] MVRCheckPage: injected ScreeningResultsTable for history/search
+- [x] WorkAuthorizationPage: injected ScreeningResultsTable for history/search
+- [x] ZeroFootprintPage: injected ScreeningResultsTable for history/search
+- [x] screening.list router updated to return { records, total }
+
+### Infrastructure
+- [x] Docker Compose: payment-rails, aml-engine, risk-scoring services added
+- [x] Dockerfiles: payment-rails (Go multi-stage), aml-engine (Rust multi-stage), risk-scoring (Python)
+- [x] Makefile: build-all, test-all, seed, docker-up/down, clean targets
+- [x] scripts/smoke-test.sh: comprehensive health checks for all services
+- [x] infra/nginx/nginx.conf: production reverse proxy with rate limiting, SSL, security headers
+
+### Test Suite
+- [x] Vitest: 260/260 passing
+- [x] Go lex-intake: 34/34 passing (includes 10 PIN expiry/lockout tests)
+- [x] Go payment-rails: 13/13 passing
+- [x] Rust aml-engine: 17/17 passing
+- [x] Python risk-scoring: 29/29 passing
+- [x] Python lex-validator: 36/36 passing
+- [x] TypeScript: 0 errors

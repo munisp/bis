@@ -1057,3 +1057,369 @@ export const exportSchedules = pgTable("export_schedules", {
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
 });
 export type ExportSchedule = typeof exportSchedules.$inferSelect;
+
+// ─── AML Transaction Monitoring ───────────────────────────────────────────────
+export const transactionTypeEnum = pgEnum("transaction_type", [
+  "wire_transfer", "cash_deposit", "cash_withdrawal", "cheque", "rtgs", "nip",
+  "swift_mt103", "swift_mt202", "sepa_credit", "sepa_debit", "internal_transfer",
+  "trade_settlement", "fx_conversion", "card_payment", "mobile_money",
+]);
+export const transactionStatusEnum = pgEnum("transaction_status", [
+  "pending", "completed", "failed", "reversed", "flagged", "blocked", "under_review",
+]);
+export const amlRiskLevelEnum = pgEnum("aml_risk_level", ["low", "medium", "high", "critical"]);
+
+export const transactions = pgTable("transactions", {
+  id: serial("id").primaryKey(),
+  txRef: varchar("txRef", { length: 64 }).notNull().unique(),
+  type: transactionTypeEnum("type").notNull(),
+  status: transactionStatusEnum("status").notNull().default("pending"),
+  amount: real("amount").notNull(),
+  currency: varchar("currency", { length: 3 }).notNull().default("NGN"),
+  amountUsd: real("amountUsd"),
+  originatorName: varchar("originatorName", { length: 255 }).notNull(),
+  originatorAccount: varchar("originatorAccount", { length: 64 }),
+  originatorBank: varchar("originatorBank", { length: 128 }),
+  originatorCountry: varchar("originatorCountry", { length: 2 }).default("NG"),
+  beneficiaryName: varchar("beneficiaryName", { length: 255 }).notNull(),
+  beneficiaryAccount: varchar("beneficiaryAccount", { length: 64 }),
+  beneficiaryBank: varchar("beneficiaryBank", { length: 128 }),
+  beneficiaryCountry: varchar("beneficiaryCountry", { length: 2 }).default("NG"),
+  purposeCode: varchar("purposeCode", { length: 16 }),
+  narration: text("narration"),
+  amlRiskLevel: amlRiskLevelEnum("amlRiskLevel").default("low"),
+  amlScore: real("amlScore").default(0),
+  amlFlags: json("amlFlags"),
+  flaggedAt: timestamp("flaggedAt"),
+  flaggedBy: integer("flaggedBy").references(() => users.id),
+  investigationId: integer("investigationId").references(() => investigations.id),
+  goamlFilingId: integer("goamlFilingId").references(() => goamlFilings.id),
+  valueDate: timestamp("valueDate"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+export type Transaction = typeof transactions.$inferSelect;
+export type InsertTransaction = typeof transactions.$inferInsert;
+
+export const amlRuleTypeEnum = pgEnum("aml_rule_type", [
+  "threshold", "velocity", "structuring", "round_trip", "layering",
+  "high_risk_country", "pep_transaction", "sanctions_match", "unusual_pattern",
+]);
+
+export const amlRules = pgTable("aml_rules", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(),
+  description: text("description"),
+  ruleType: amlRuleTypeEnum("ruleType").notNull(),
+  threshold: real("threshold"),
+  currency: varchar("currency", { length: 3 }).default("NGN"),
+  windowHours: integer("windowHours").default(24),
+  enabled: boolean("enabled").notNull().default(true),
+  riskLevel: amlRiskLevelEnum("riskLevel").notNull().default("medium"),
+  createdBy: integer("createdBy").references(() => users.id),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+export type AmlRule = typeof amlRules.$inferSelect;
+
+export const amlAlertStatusEnum = pgEnum("aml_alert_status", [
+  "open", "under_review", "escalated", "cleared", "filed", "false_positive",
+]);
+
+export const amlAlerts = pgTable("aml_alerts", {
+  id: serial("id").primaryKey(),
+  alertRef: varchar("alertRef", { length: 32 }).notNull().unique(),
+  transactionId: integer("transactionId").references(() => transactions.id),
+  ruleId: integer("ruleId").references(() => amlRules.id),
+  status: amlAlertStatusEnum("status").notNull().default("open"),
+  riskLevel: amlRiskLevelEnum("riskLevel").notNull().default("medium"),
+  title: varchar("title", { length: 255 }).notNull(),
+  description: text("description"),
+  triggeredValue: real("triggeredValue"),
+  assignedTo: integer("assignedTo").references(() => users.id),
+  reviewedBy: integer("reviewedBy").references(() => users.id),
+  reviewedAt: timestamp("reviewedAt"),
+  reviewNotes: text("reviewNotes"),
+  investigationId: integer("investigationId").references(() => investigations.id),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+export type AmlAlert = typeof amlAlerts.$inferSelect;
+
+// ─── SWIFT Messages ───────────────────────────────────────────────────────────
+export const swiftMessageTypeEnum = pgEnum("swift_message_type", [
+  "MT103", "MT202", "MT202COV", "MT199", "MT299", "MT900", "MT910", "MT940", "MT950",
+]);
+export const swiftMessageStatusEnum = pgEnum("swift_message_status", [
+  "received", "processing", "completed", "failed", "rejected", "pending_compliance",
+]);
+
+export const swiftMessages = pgTable("swift_messages", {
+  id: serial("id").primaryKey(),
+  uetr: varchar("uetr", { length: 64 }).notNull().unique(),
+  messageType: swiftMessageTypeEnum("messageType").notNull(),
+  status: swiftMessageStatusEnum("status").notNull().default("received"),
+  senderBic: varchar("senderBic", { length: 11 }).notNull(),
+  receiverBic: varchar("receiverBic", { length: 11 }).notNull(),
+  amount: real("amount").notNull(),
+  currency: varchar("currency", { length: 3 }).notNull(),
+  valueDate: timestamp("valueDate"),
+  orderingCustomer: varchar("orderingCustomer", { length: 255 }),
+  beneficiaryCustomer: varchar("beneficiaryCustomer", { length: 255 }),
+  remittanceInfo: text("remittanceInfo"),
+  rawMessage: text("rawMessage"),
+  parsedFields: json("parsedFields"),
+  complianceStatus: varchar("complianceStatus", { length: 32 }).default("pending"),
+  complianceNotes: text("complianceNotes"),
+  transactionId: integer("transactionId").references(() => transactions.id),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+export type SwiftMessage = typeof swiftMessages.$inferSelect;
+
+// ─── SEPA Payments ────────────────────────────────────────────────────────────
+export const sepaPaymentTypeEnum = pgEnum("sepa_payment_type", ["credit_transfer", "direct_debit", "instant_credit"]);
+export const sepaPaymentStatusEnum = pgEnum("sepa_payment_status", [
+  "pending", "accepted", "rejected", "returned", "settled",
+]);
+
+export const sepaPayments = pgTable("sepa_payments", {
+  id: serial("id").primaryKey(),
+  endToEndId: varchar("endToEndId", { length: 64 }).notNull().unique(),
+  paymentType: sepaPaymentTypeEnum("paymentType").notNull(),
+  status: sepaPaymentStatusEnum("status").notNull().default("pending"),
+  amount: real("amount").notNull(),
+  currency: varchar("currency", { length: 3 }).notNull().default("EUR"),
+  debtorName: varchar("debtorName", { length: 255 }).notNull(),
+  debtorIban: varchar("debtorIban", { length: 34 }).notNull(),
+  debtorBic: varchar("debtorBic", { length: 11 }),
+  creditorName: varchar("creditorName", { length: 255 }).notNull(),
+  creditorIban: varchar("creditorIban", { length: 34 }).notNull(),
+  creditorBic: varchar("creditorBic", { length: 11 }),
+  remittanceInfo: text("remittanceInfo"),
+  executionDate: timestamp("executionDate"),
+  settlementDate: timestamp("settlementDate"),
+  rejectReason: varchar("rejectReason", { length: 255 }),
+  transactionId: integer("transactionId").references(() => transactions.id),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type SepaPayment = typeof sepaPayments.$inferSelect;
+
+// ─── FATF Travel Rule ─────────────────────────────────────────────────────────
+export const travelRuleStatusEnum = pgEnum("travel_rule_status", [
+  "pending", "sent", "acknowledged", "rejected", "exempted",
+]);
+
+export const travelRuleRecords = pgTable("travel_rule_records", {
+  id: serial("id").primaryKey(),
+  recordRef: varchar("recordRef", { length: 64 }).notNull().unique(),
+  transactionId: integer("transactionId").references(() => transactions.id),
+  status: travelRuleStatusEnum("status").notNull().default("pending"),
+  thresholdAmount: real("thresholdAmount").notNull().default(1000),
+  currency: varchar("currency", { length: 3 }).notNull().default("USD"),
+  originatorName: varchar("originatorName", { length: 255 }).notNull(),
+  originatorAccount: varchar("originatorAccount", { length: 64 }),
+  originatorAddress: text("originatorAddress"),
+  originatorCountry: varchar("originatorCountry", { length: 2 }),
+  originatorDob: varchar("originatorDob", { length: 10 }),
+  originatorId: varchar("originatorId", { length: 64 }),
+  beneficiaryName: varchar("beneficiaryName", { length: 255 }).notNull(),
+  beneficiaryAccount: varchar("beneficiaryAccount", { length: 64 }),
+  beneficiaryAddress: text("beneficiaryAddress"),
+  beneficiaryCountry: varchar("beneficiaryCountry", { length: 2 }),
+  vasp: varchar("vasp", { length: 128 }),
+  sentAt: timestamp("sentAt"),
+  acknowledgedAt: timestamp("acknowledgedAt"),
+  rejectionReason: text("rejectionReason"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type TravelRuleRecord = typeof travelRuleRecords.$inferSelect;
+
+// ─── SAR (Suspicious Activity Reports) ───────────────────────────────────────
+export const sarStatusEnum = pgEnum("sar_status", [
+  "draft", "under_review", "approved", "rejected", "filed", "acknowledged", "withdrawn",
+]);
+export const sarCategoryEnum = pgEnum("sar_category", [
+  "money_laundering", "terrorist_financing", "fraud", "corruption", "tax_evasion",
+  "sanctions_evasion", "human_trafficking", "drug_trafficking", "cybercrime", "other",
+]);
+
+export const sarFilings = pgTable("sar_filings", {
+  id: serial("id").primaryKey(),
+  sarRef: varchar("sarRef", { length: 32 }).notNull().unique(),
+  status: sarStatusEnum("status").notNull().default("draft"),
+  category: sarCategoryEnum("category").notNull(),
+  title: varchar("title", { length: 255 }).notNull(),
+  narrative: text("narrative").notNull(),
+  subjectName: varchar("subjectName", { length: 255 }).notNull(),
+  subjectNin: varchar("subjectNin", { length: 11 }),
+  subjectBvn: varchar("subjectBvn", { length: 11 }),
+  subjectDob: varchar("subjectDob", { length: 10 }),
+  subjectAddress: text("subjectAddress"),
+  subjectOccupation: varchar("subjectOccupation", { length: 128 }),
+  suspiciousAmount: real("suspiciousAmount"),
+  suspiciousCurrency: varchar("suspiciousCurrency", { length: 3 }).default("NGN"),
+  activityStartDate: timestamp("activityStartDate"),
+  activityEndDate: timestamp("activityEndDate"),
+  relatedTransactions: json("relatedTransactions"),
+  relatedInvestigationId: integer("relatedInvestigationId").references(() => investigations.id),
+  relatedGoamlFilingId: integer("relatedGoamlFilingId").references(() => goamlFilings.id),
+  createdBy: integer("createdBy").references(() => users.id),
+  reviewedBy: integer("reviewedBy").references(() => users.id),
+  reviewedAt: timestamp("reviewedAt"),
+  reviewNotes: text("reviewNotes"),
+  approvedBy: integer("approvedBy").references(() => users.id),
+  approvedAt: timestamp("approvedAt"),
+  filedAt: timestamp("filedAt"),
+  filedWith: varchar("filedWith", { length: 64 }).default("NFIU"),
+  filingReference: varchar("filingReference", { length: 64 }),
+  acknowledgedAt: timestamp("acknowledgedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+export type SarFiling = typeof sarFilings.$inferSelect;
+export type InsertSarFiling = typeof sarFilings.$inferInsert;
+
+// ─── Trade Finance ────────────────────────────────────────────────────────────
+export const lcTypeEnum = pgEnum("lc_type", ["sight", "usance", "deferred", "revolving", "standby"]);
+export const lcStatusEnum = pgEnum("lc_status", [
+  "draft", "issued", "advised", "confirmed", "amended", "presented",
+  "accepted", "paid", "discrepant", "rejected", "expired", "cancelled",
+]);
+
+export const lettersOfCredit = pgTable("letters_of_credit", {
+  id: serial("id").primaryKey(),
+  lcRef: varchar("lcRef", { length: 32 }).notNull().unique(),
+  type: lcTypeEnum("type").notNull().default("sight"),
+  status: lcStatusEnum("status").notNull().default("draft"),
+  amount: real("amount").notNull(),
+  currency: varchar("currency", { length: 3 }).notNull().default("USD"),
+  applicantName: varchar("applicantName", { length: 255 }).notNull(),
+  applicantBank: varchar("applicantBank", { length: 128 }).notNull(),
+  applicantCountry: varchar("applicantCountry", { length: 2 }).default("NG"),
+  beneficiaryName: varchar("beneficiaryName", { length: 255 }).notNull(),
+  beneficiaryBank: varchar("beneficiaryBank", { length: 128 }),
+  beneficiaryCountry: varchar("beneficiaryCountry", { length: 2 }),
+  issuingBank: varchar("issuingBank", { length: 128 }).notNull(),
+  advisingBank: varchar("advisingBank", { length: 128 }),
+  confirmingBank: varchar("confirmingBank", { length: 128 }),
+  goodsDescription: text("goodsDescription"),
+  portOfLoading: varchar("portOfLoading", { length: 128 }),
+  portOfDischarge: varchar("portOfDischarge", { length: 128 }),
+  latestShipmentDate: timestamp("latestShipmentDate"),
+  expiryDate: timestamp("expiryDate"),
+  presentationPeriod: integer("presentationPeriod").default(21),
+  documents: json("documents"),
+  amendments: json("amendments"),
+  discrepancies: json("discrepancies"),
+  investigationId: integer("investigationId").references(() => investigations.id),
+  createdBy: integer("createdBy").references(() => users.id),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+export type LetterOfCredit = typeof lettersOfCredit.$inferSelect;
+
+// ─── Correspondent Banks ──────────────────────────────────────────────────────
+export const correspondentBankStatusEnum = pgEnum("correspondent_bank_status", [
+  "active", "suspended", "terminated", "under_review",
+]);
+
+export const correspondentBanks = pgTable("correspondent_banks", {
+  id: serial("id").primaryKey(),
+  bankName: varchar("bankName", { length: 255 }).notNull(),
+  bic: varchar("bic", { length: 11 }).notNull().unique(),
+  country: varchar("country", { length: 2 }).notNull(),
+  city: varchar("city", { length: 128 }),
+  status: correspondentBankStatusEnum("status").notNull().default("active"),
+  riskRating: varchar("riskRating", { length: 16 }).default("medium"),
+  relationshipSince: timestamp("relationshipSince"),
+  lastReviewDate: timestamp("lastReviewDate"),
+  nextReviewDate: timestamp("nextReviewDate"),
+  services: json("services"),
+  currencies: json("currencies"),
+  nostroAccountCount: integer("nostroAccountCount").default(0),
+  annualVolume: real("annualVolume"),
+  amlPolicyUrl: text("amlPolicyUrl"),
+  notes: text("notes"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+export type CorrespondentBank = typeof correspondentBanks.$inferSelect;
+
+export const nostroAccounts = pgTable("nostro_accounts", {
+  id: serial("id").primaryKey(),
+  accountNumber: varchar("accountNumber", { length: 64 }).notNull(),
+  currency: varchar("currency", { length: 3 }).notNull(),
+  correspondentBankId: integer("correspondentBankId").references(() => correspondentBanks.id),
+  balance: real("balance").default(0),
+  lastReconciled: timestamp("lastReconciled"),
+  status: varchar("status", { length: 32 }).default("active"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type NostroAccount = typeof nostroAccounts.$inferSelect;
+
+// ─── Evidence Chain of Custody ────────────────────────────────────────────────
+export const evidenceTypeEnum = pgEnum("evidence_type", [
+  "document", "photo", "video", "audio", "digital_artifact", "physical",
+  "witness_statement", "financial_record", "communication_log", "other",
+]);
+export const evidenceStatusEnum = pgEnum("evidence_status", [
+  "collected", "in_transit", "secured", "analyzed", "submitted", "returned", "destroyed",
+]);
+
+export const evidenceItems = pgTable("evidence_items", {
+  id: serial("id").primaryKey(),
+  evidenceRef: varchar("evidenceRef", { length: 32 }).notNull().unique(),
+  caseId: integer("caseId").references(() => cases.id),
+  investigationId: integer("investigationId").references(() => investigations.id),
+  type: evidenceTypeEnum("type").notNull(),
+  status: evidenceStatusEnum("status").notNull().default("collected"),
+  title: varchar("title", { length: 255 }).notNull(),
+  description: text("description"),
+  fileUrl: text("fileUrl"),
+  fileHash: varchar("fileHash", { length: 64 }),
+  fileSize: integer("fileSize"),
+  mimeType: varchar("mimeType", { length: 64 }),
+  collectedBy: integer("collectedBy").references(() => users.id),
+  collectedAt: timestamp("collectedAt").defaultNow(),
+  collectionLocation: text("collectionLocation"),
+  chainOfCustody: json("chainOfCustody"),
+  integrityVerified: boolean("integrityVerified").default(false),
+  integrityVerifiedAt: timestamp("integrityVerifiedAt"),
+  integrityVerifiedBy: integer("integrityVerifiedBy").references(() => users.id),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+export type EvidenceItem = typeof evidenceItems.$inferSelect;
+export type InsertEvidenceItem = typeof evidenceItems.$inferInsert;
+
+// ─── Regulatory Reports ───────────────────────────────────────────────────────
+export const regulatoryReportTypeEnum = pgEnum("regulatory_report_type", [
+  "CTR", "STR", "goAML_XML", "NFIU_monthly", "CBN_quarterly", "FATF_travel_rule",
+  "PEP_disclosure", "sanctions_screening", "annual_AML_report",
+]);
+export const regulatoryReportStatusEnum = pgEnum("regulatory_report_status", [
+  "draft", "generated", "reviewed", "submitted", "acknowledged", "rejected",
+]);
+
+export const regulatoryReports = pgTable("regulatory_reports", {
+  id: serial("id").primaryKey(),
+  reportRef: varchar("reportRef", { length: 32 }).notNull().unique(),
+  type: regulatoryReportTypeEnum("type").notNull(),
+  status: regulatoryReportStatusEnum("status").notNull().default("draft"),
+  title: varchar("title", { length: 255 }).notNull(),
+  periodStart: timestamp("periodStart"),
+  periodEnd: timestamp("periodEnd"),
+  regulatorName: varchar("regulatorName", { length: 128 }).default("NFIU"),
+  submissionDeadline: timestamp("submissionDeadline"),
+  fileUrl: text("fileUrl"),
+  submittedAt: timestamp("submittedAt"),
+  submittedBy: integer("submittedBy").references(() => users.id),
+  acknowledgementRef: varchar("acknowledgementRef", { length: 64 }),
+  rejectionReason: text("rejectionReason"),
+  metadata: json("metadata"),
+  createdBy: integer("createdBy").references(() => users.id),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+export type RegulatoryReport = typeof regulatoryReports.$inferSelect;

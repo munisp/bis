@@ -7,6 +7,7 @@ import {
 import type { WorkAuthResult, WorkAuthType, WorkAuthStatus, RiskLevel } from "../../types/bis";
 import { getCountry } from "../../types/bis";
 import BISLayout from '@/components/BISLayout';
+import ScreeningResultsTable from '@/components/bis/ScreeningResultsTable';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Work Authorization Page — E-Verify / Nigeria Work Permit / Right to Work
@@ -191,6 +192,7 @@ function WorkAuthorizationPageInner() {
   };
 
   return (
+    <>
     <div className="min-h-screen bg-muted">
       {/* Header */}
       <div className="bg-card border-b border-border px-6 py-4">
@@ -401,6 +403,10 @@ function WorkAuthorizationPageInner() {
         )}
       </div>
     </div>
+      <div className="max-w-3xl mx-auto px-4 pb-8 mt-6">
+        <ScreeningResultsTable screeningType="work_authorization" title="Work Authorization Records" />
+      </div>
+    </>
   );
 }
 

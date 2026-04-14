@@ -6,6 +6,7 @@ import {
 } from "../../components/bis/shared";
 import type { ZeroFootprintInvestigation, ChecklistItem, RiskLevel } from "../../types/bis";
 import BISLayout from '@/components/BISLayout';
+import ScreeningResultsTable from '@/components/bis/ScreeningResultsTable';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Zero-Footprint Investigation Page
@@ -234,6 +235,7 @@ function ZeroFootprintPageInner() {
   };
 
   return (
+    <>
     <div className="min-h-screen bg-muted">
       {/* Header */}
       <div className="bg-card border-b border-border px-6 py-4">
@@ -529,6 +531,10 @@ function ZeroFootprintPageInner() {
         )}
       </div>
     </div>
+      <div className="max-w-3xl mx-auto px-4 pb-8 mt-6">
+        <ScreeningResultsTable screeningType="zero_footprint" title="Zero-Footprint OSINT Records" />
+      </div>
+    </>
   );
 }
 

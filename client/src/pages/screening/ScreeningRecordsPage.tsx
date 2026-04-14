@@ -61,8 +61,9 @@ export default function ScreeningRecordsPage() {
 
   useEffect(() => {
     if (data) {
-      if (offset === 0) setRecords(data as ScreeningRecord[]);
-      else setRecords(prev => [...prev, ...(data as ScreeningRecord[])]);
+      const rows = (data as any).records ?? (Array.isArray(data) ? data : []);
+      if (offset === 0) setRecords(rows as ScreeningRecord[]);
+      else setRecords(prev => [...prev, ...(rows as ScreeningRecord[])]);
     }
   }, [data, offset]);
 
@@ -221,7 +222,7 @@ export default function ScreeningRecordsPage() {
               </tbody>
             </table>
             {/* Load more */}
-            {data && data.length === LIMIT && (
+            {data && ((data as any).records ?? (Array.isArray(data) ? data : [])).length === LIMIT && (
               <div className="flex justify-center py-4">
                 <Button variant="outline" size="sm" onClick={() => setOffset(o => o + LIMIT)} disabled={isLoading}>
                   {isLoading ? "Loading..." : `Load more`}

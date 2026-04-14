@@ -9,7 +9,8 @@ import {
   ChevronRight, LogOut, Menu, X, AlertTriangle, Car, Pill,
   Briefcase, Globe, MapPin, MessageSquare, Building2, Eye,
   UserCheck, BarChart3, Key, Zap, CheckCheck, ArrowRight, Sun, Moon, ClipboardList, Wallet, UserSearch, Shield, BarChart2,
-  BookOpen, Link2, Brain, Gavel, ClipboardCheck, SendToBack, Smartphone, Download, Link as LinkIcon, BellRing, ShieldAlert
+  BookOpen, Link2, Brain, Gavel, ClipboardCheck, SendToBack, Smartphone, Download, Link as LinkIcon, BellRing, ShieldAlert,
+  FileBarChart, TrendingUp, Landmark, Scale, Lock
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -125,6 +126,18 @@ const BASE_NAV_GROUPS: NavGroup[] = [
       { label: 'Lakehouse Analytics', href: '/lakehouse', icon: <BarChart2 size={15} /> },
       { label: 'Duplicate ID Check', href: '/duplicate-check', icon: <UserSearch size={15} /> },
       { label: 'Hosted Verify Links', href: '/hosted-links', icon: <Link2 size={15} /> },
+    ],
+  },
+  {
+    label: 'BANKING & COMPLIANCE',
+    defaultOpen: true,
+    items: [
+      { label: 'AML Transactions', href: '/aml-transactions', icon: <TrendingUp size={15} /> },
+      { label: 'SAR Filings', href: '/sar-filings', icon: <Scale size={15} /> },
+      { label: 'Trade Finance (LC)', href: '/trade-finance', icon: <Landmark size={15} /> },
+      { label: 'Correspondent Banks', href: '/correspondent-banking', icon: <Building2 size={15} /> },
+      { label: 'Evidence Custody', href: '/evidence', icon: <Lock size={15} /> },
+      { label: 'Regulatory Reports', href: '/regulatory-reports', icon: <FileBarChart size={15} /> },
     ],
   },
   {

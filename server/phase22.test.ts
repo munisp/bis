@@ -410,10 +410,11 @@ describe("monitors", () => {
 // ─── 12. Screening ────────────────────────────────────────────────────────────
 
 describe("screening", () => {
-  it("list returns an array", async () => {
+  it("list returns { records, total }", async () => {
     const caller = appRouter.createCaller(analystCtx);
     const result = await caller.screening.list();
-    expect(Array.isArray(result)).toBe(true);
+    expect(Array.isArray(result.records)).toBe(true);
+    expect(typeof result.total).toBe("number");
   });
 });
 

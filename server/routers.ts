@@ -12,6 +12,10 @@ import { adminProcedure, protectedProcedure, publicProcedure, router, writeProce
 import { apiTokensRouter } from "./apiTokens";
 import { quickcheckRouter } from "./quickcheck";
 import { goamlRouter } from "./goaml";
+import { amlRouter } from "./aml";
+import { transactionsRouter } from "./transactions";
+import { tradeFinanceRouter, correspondentBankingRouter, evidenceRouter, regulatoryReportsRouter } from "./banking";
+import { sarRouter } from "./sar";
 import { messagingRouter } from "./messaging";
 import { socialMonitoringRouter } from "./socialMonitoring";
 import { biometricRouter } from "./biometric";
@@ -1488,7 +1492,15 @@ const screeningRouter = router({
       offset: z.number().min(0).default(0),
     }).optional())
     .query(async ({ input }) => {
-      return getScreeningRequests(input);
+      const db = await getDb();
+      if (!db) return { records: [], total: 0 };
+      const conditions: any[] = [];
+      if (input?.type) conditions.push(eq(screeningRequests.type, input.type as any));
+      if (input?.status) conditions.push(eq(screeningRequests.status, input.status as any));
+      const whereClause = conditions.length ? and(...conditions) : undefined;
+      const [countRow] = await db.select({ c: count() }).from(screeningRequests).where(whereClause);
+      const records = await getScreeningRequests(input);
+      return { records, total: Number(countRow?.c ?? 0) };
     }),
   create: writeProcedure
     .input(z.object({
@@ -3234,5 +3246,12 @@ export const appRouter = router({
   notifications: notificationsRouter,
   investigationLinks: investigationLinksRouter,
   exportSchedules: exportSchedulesRouter,
+  transactions: transactionsRouter,
+  tradeFinance: tradeFinanceRouter,
+  correspondentBanking: correspondentBankingRouter,
+  evidence: evidenceRouter,
+  regulatoryReports: regulatoryReportsRouter,
+  sar: sarRouter,
+  aml: amlRouter,
 });
 export type AppRouter = typeof appRouter;
