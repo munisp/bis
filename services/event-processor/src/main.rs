@@ -3,6 +3,8 @@
 // Port: 8083
 
 pub mod kafka;
+#[cfg(test)]
+mod tests;
 
 use axum::{
     extract::{Path, State},

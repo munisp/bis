@@ -16,6 +16,9 @@ import { amlRouter } from "./aml";
 import { transactionsRouter } from "./transactions";
 import { tradeFinanceRouter, correspondentBankingRouter, evidenceRouter, regulatoryReportsRouter } from "./banking";
 import { sarRouter } from "./sar";
+import { keycloakRouter } from "./keycloakRouter";
+import { temporalRouter } from "./temporalRouter";
+import { redisRouter } from "./redisRouter";
 import { messagingRouter } from "./messaging";
 import { socialMonitoringRouter } from "./socialMonitoring";
 import { biometricRouter } from "./biometric";
@@ -3253,5 +3256,8 @@ export const appRouter = router({
   regulatoryReports: regulatoryReportsRouter,
   sar: sarRouter,
   aml: amlRouter,
+  keycloak: keycloakRouter,
+  temporal: temporalRouter,
+  redis: redisRouter,
 });
 export type AppRouter = typeof appRouter;

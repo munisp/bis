@@ -222,3 +222,36 @@ func Close() {
 		temporalClient.Close()
 	}
 }
+
+// ─── Struct wrapper for dependency injection ──────────────────────────────────
+
+// Client is a thin wrapper around the package-level Temporal functions.
+type Client struct{}
+
+// NewClient initialises the Temporal connection and returns a Client.
+func NewClient(host, namespace string) (*Client, error) {
+	if host != "" {
+		os.Setenv("TEMPORAL_HOST", host)
+	}
+	if namespace != "" {
+		os.Setenv("TEMPORAL_NAMESPACE", namespace)
+	}
+	InitClient()
+	return &Client{}, nil
+}
+
+// StartWorkflow starts a named workflow and returns its run ID.
+func (c *Client) StartWorkflow(ctx context.Context, workflowType string, input interface{}) (string, error) {
+	if temporalClient == nil {
+		return "mock-run-id", nil // graceful degradation in dev
+	}
+	opts := client.StartWorkflowOptions{
+		ID:        fmt.Sprintf("%s-%d", workflowType, time.Now().UnixNano()),
+		TaskQueue: "bis-investigation",
+	}
+	run, err := temporalClient.ExecuteWorkflow(ctx, opts, workflowType, input)
+	if err != nil {
+		return "", err
+	}
+	return run.GetID(), nil
+}

@@ -124,3 +124,29 @@ func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(v)
 }
+
+// ─── Struct wrapper for dependency injection ──────────────────────────────────
+
+// OIDCClient is a thin wrapper around the package-level Keycloak functions.
+type OIDCClient struct{}
+
+// NewOIDCClient initialises the Keycloak OIDC provider and returns an OIDCClient.
+func NewOIDCClient(keycloakURL, realm, clientID string) (*OIDCClient, error) {
+	if keycloakURL != "" {
+		os.Setenv("KEYCLOAK_URL", keycloakURL)
+	}
+	if realm != "" {
+		os.Setenv("KEYCLOAK_REALM", realm)
+	}
+	if clientID != "" {
+		os.Setenv("KEYCLOAK_CLIENT_ID", clientID)
+	}
+	Init()
+	return &OIDCClient{}, nil
+}
+
+// ValidateToken validates a Bearer token.
+func (c *OIDCClient) ValidateToken(ctx context.Context, rawToken string) error {
+	_, err := VerifyToken(ctx, rawToken)
+	return err
+}

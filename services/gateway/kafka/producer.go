@@ -64,3 +64,29 @@ func Close() {
 		}
 	}
 }
+
+// ─── Struct wrapper for dependency injection ──────────────────────────────────
+
+// Producer is a thin wrapper around the package-level Kafka functions.
+type Producer struct{}
+
+// NewProducer initialises the Kafka writer and returns a Producer.
+func NewProducer(brokers string) (*Producer, error) {
+	if brokers != "" {
+		os.Setenv("KAFKA_BROKERS", brokers)
+	}
+	Init()
+	return &Producer{}, nil
+}
+
+// Publish sends an event to the bis.events topic.
+func (p *Producer) Publish(topic string, data interface{}) error {
+	event := BISEvent{
+		EventType:  topic,
+		SubjectRef: "gateway",
+		Severity:   "info",
+		Payload:    data,
+		Source:     "bis-gateway",
+	}
+	return Publish(context.Background(), event)
+}

@@ -182,29 +182,38 @@ def verify_key(x_bis_key: str = Header(...)):
 class IdentitySignals(BaseModel):
     nin_verified: bool = False
     bvn_verified: bool = False
-    nin_match_score: float = Field(default=0.0, ge=0.0, le=1.0)
-    bvn_match_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    passport_verified: bool = False
+    nin_match_score: float = Field(default=1.0, ge=0.0, le=1.0)
+    bvn_match_score: float = Field(default=1.0, ge=0.0, le=1.0)
+    face_match_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     biometric_match: bool = False
+    document_tampered: bool = False
+    liveness_passed: bool = False
     address_verified: bool = False
     phone_verified: bool = False
 
 class SanctionsSignals(BaseModel):
     ofac_hit: bool = False
     un_hit: bool = False
+    eu_hit: bool = False
     interpol_hit: bool = False
     efcc_watchlist: bool = False
     bvn_watchlisted: bool = False
+    fatf_country: bool = False
     hit_score: float = Field(default=0.0, ge=0.0, le=1.0)
 
 class PEPSignals(BaseModel):
     is_pep: bool = False
     is_family_of_pep: bool = False
+    is_family_member: bool = False  # alias for is_family_of_pep
     is_associate_of_pep: bool = False
     pep_tier: int = Field(default=0, ge=0, le=3)
 
 class CreditSignals(BaseModel):
     credit_score: int = Field(default=700, ge=300, le=850)
     defaults: int = Field(default=0, ge=0)
+    bankruptcy: bool = False
+    ccj_count: int = Field(default=0, ge=0)
     active_loans: int = Field(default=0, ge=0)
     total_loans: int = Field(default=0, ge=0)
 
@@ -212,13 +221,20 @@ class AdverseMediaSignals(BaseModel):
     fraud_mentions: int = Field(default=0, ge=0)
     corruption_mentions: int = Field(default=0, ge=0)
     criminal_mentions: int = Field(default=0, ge=0)
+    crime_mentions: int = Field(default=0, ge=0)  # alias for criminal_mentions
+    terrorism_mentions: int = Field(default=0, ge=0)
+    drug_mentions: int = Field(default=0, ge=0)
     negative_news_count: int = Field(default=0, ge=0)
-    sentiment_score: float = Field(default=0.5, ge=0.0, le=1.0)
+    sentiment_score: float = Field(default=1.0, ge=0.0, le=1.0)  # 1.0 = neutral/positive
 
 class BehaviouralSignals(BaseModel):
     velocity_flag: bool = False
     unusual_jurisdiction: bool = False
+    unusual_transactions: bool = False  # alias for velocity_flag
+    rapid_fund_movement: bool = False
     shell_company_indicators: int = Field(default=0, ge=0)
+    shell_company_links: bool = False  # alias: maps to shell_company_indicators
+    offshore_accounts: int = Field(default=0, ge=0)
     complex_ownership: bool = False
     cash_intensive: bool = False
 
@@ -245,7 +261,9 @@ class RiskFactor(BaseModel):
 class RiskScoreResponse(BaseModel):
     subject_id: str
     composite_score: int
+    score: int  # alias for composite_score
     risk_tier: str
+    tier: str  # alias for risk_tier
     confidence: float
     factors: list[RiskFactor]
     recommendation: str
@@ -282,29 +300,39 @@ class AnalyticsRequest(BaseModel):
 # ─── Risk Scoring Engine ──────────────────────────────────────────────────────
 
 WEIGHTS = {
-    "identity":       0.20,
-    "sanctions":      0.30,
-    "pep":            0.15,
-    "credit":         0.10,
+    "identity":       0.15,
+    "sanctions":      0.35,
+    "pep":            0.20,
+    "credit":         0.08,
     "adverse_media":  0.15,
-    "behavioural":    0.10,
+    "behavioural":    0.07,
 }
 
 def score_identity(sig: IdentitySignals) -> tuple[float, list[str]]:
     flags = []
     score = 0.0
     if not sig.nin_verified:
-        score += 30
-        flags.append("NIN not verified")
-    else:
-        score += (1 - sig.nin_match_score) * 20
-    if not sig.bvn_verified:
-        score += 25
-        flags.append("BVN not verified")
-    else:
-        score += (1 - sig.bvn_match_score) * 15
-    if not sig.biometric_match:
         score += 15
+        flags.append("NIN not verified")
+    elif sig.nin_match_score < 1.0:
+        score += (1 - sig.nin_match_score) * 10
+    if not sig.bvn_verified:
+        score += 10
+        flags.append("BVN not verified")
+    elif sig.bvn_match_score < 1.0:
+        score += (1 - sig.bvn_match_score) * 8
+    if sig.document_tampered:
+        score += 50
+        flags.append("Document tampered — identity fraud risk")
+    if sig.face_match_confidence > 0 and sig.face_match_confidence < 0.6:
+        score += 25
+        flags.append(f"Low face match confidence: {sig.face_match_confidence:.0%}")
+    if not sig.liveness_passed and sig.face_match_confidence > 0:
+        score += 15
+        flags.append("Liveness check failed")
+    # Only penalise biometric_match=False when face_match_confidence is not high
+    if not sig.biometric_match and sig.face_match_confidence < 0.9:
+        score += 10
         flags.append("Biometric match failed")
     if not sig.address_verified:
         score += 10
@@ -317,26 +345,33 @@ def score_sanctions(sig: SanctionsSignals) -> tuple[float, list[str]]:
         score += 90; flags.append("OFAC SDN list hit")
     if sig.un_hit:
         score += 85; flags.append("UN sanctions list hit")
+    if sig.eu_hit:
+        score += 80; flags.append("EU sanctions list hit")
     if sig.interpol_hit:
         score += 80; flags.append("INTERPOL red notice")
     if sig.efcc_watchlist:
         score += 70; flags.append("EFCC watchlist")
     if sig.bvn_watchlisted:
         score += 60; flags.append("BVN watchlisted by CBN")
+    if sig.fatf_country:
+        score += 35; flags.append("High-risk FATF jurisdiction")
     if sig.hit_score > 0:
         score = max(score, sig.hit_score * 100)
     return min(score, 100.0), flags
 
 def score_pep(sig: PEPSignals) -> tuple[float, list[str]]:
     flags = []
-    tier_scores = {0: 0, 1: 30, 2: 55, 3: 75}
+    tier_scores = {0: 0, 1: 65, 2: 55, 3: 75}  # tier 1 = direct PEP, highest risk
     score = float(tier_scores.get(sig.pep_tier, 0))
     if sig.is_pep:
-        flags.append("Politically Exposed Person")
-    if sig.is_family_of_pep:
-        score += 20; flags.append("Family member of PEP")
+        score = max(score, 65.0)
+        flags.append("PEP — Politically Exposed Person")
+    family = sig.is_family_of_pep or sig.is_family_member
+    if family:
+        score = max(score, 25.0)
+        score += 5; flags.append("PEP family member")
     if sig.is_associate_of_pep:
-        score += 15; flags.append("Close associate of PEP")
+        score += 15; flags.append("PEP close associate")
     return min(score, 100.0), flags
 
 def score_credit(sig: CreditSignals) -> tuple[float, list[str]]:
@@ -346,6 +381,13 @@ def score_credit(sig: CreditSignals) -> tuple[float, list[str]]:
     if sig.defaults > 0:
         flags.append(f"{sig.defaults} loan default(s) on record")
     score = (credit_risk * 0.6) + (defaults_risk * 0.4)
+    if sig.bankruptcy:
+        score = max(score, 70.0)
+        score += 15
+        flags.append("Bankruptcy on record")
+    if sig.ccj_count > 0:
+        score += min(sig.ccj_count * 10, 30)
+        flags.append(f"{sig.ccj_count} County Court Judgement(s)")
     return min(score, 100.0), flags
 
 def score_adverse_media(sig: AdverseMediaSignals) -> tuple[float, list[str]]:
@@ -357,23 +399,40 @@ def score_adverse_media(sig: AdverseMediaSignals) -> tuple[float, list[str]]:
     if sig.corruption_mentions > 0:
         score += min(sig.corruption_mentions * 12, 50)
         flags.append(f"{sig.corruption_mentions} corruption mention(s)")
-    if sig.criminal_mentions > 0:
-        score += min(sig.criminal_mentions * 20, 70)
-        flags.append(f"{sig.criminal_mentions} criminal mention(s)")
-    sentiment_risk = (1 - sig.sentiment_score) * 40
+    # criminal_mentions and crime_mentions are aliases
+    criminal = max(sig.criminal_mentions, sig.crime_mentions)
+    if criminal > 0:
+        score += min(criminal * 20, 70)
+        flags.append(f"{criminal} criminal mention(s)")
+    if sig.terrorism_mentions > 0:
+        score += min(sig.terrorism_mentions * 50, 80)
+        flags.append(f"{sig.terrorism_mentions} terrorism mention(s)")
+    if sig.drug_mentions > 0:
+        score += min(sig.drug_mentions * 15, 50)
+        flags.append(f"{sig.drug_mentions} drug-related mention(s)")
+    # sentiment_score: 1.0 = neutral/positive, 0.0 = very negative
+    sentiment_risk = (1 - sig.sentiment_score) * 20
     score += sentiment_risk
     return min(score, 100.0), flags
 
 def score_behavioural(sig: BehaviouralSignals) -> tuple[float, list[str]]:
     flags = []
     score = 0.0
-    if sig.velocity_flag:
+    # velocity_flag and unusual_transactions are aliases
+    if sig.velocity_flag or sig.unusual_transactions:
         score += 35; flags.append("Velocity flag triggered")
     if sig.unusual_jurisdiction:
         score += 25; flags.append("Unusual jurisdiction activity")
-    if sig.shell_company_indicators > 0:
-        score += min(sig.shell_company_indicators * 20, 60)
-        flags.append(f"{sig.shell_company_indicators} shell company indicator(s)")
+    if sig.rapid_fund_movement:
+        score += 20; flags.append("Rapid fund movement detected")
+    # shell_company_links maps to 2 indicators (more significant)
+    indicators = sig.shell_company_indicators + (2 if sig.shell_company_links else 0)
+    if indicators > 0:
+        score += min(indicators * 20, 70)
+        flags.append(f"{indicators} shell company indicator(s)")
+    if sig.offshore_accounts > 0:
+        score += min(sig.offshore_accounts * 10, 40)
+        flags.append(f"{sig.offshore_accounts} offshore account(s)")
     if sig.complex_ownership:
         score += 20; flags.append("Complex ownership structure")
     if sig.cash_intensive:
@@ -543,7 +602,9 @@ def score_subject(req: RiskScoreRequest, background_tasks: BackgroundTasks):
     result = RiskScoreResponse(
         subject_id=req.subject_id,
         composite_score=composite_int,
+        score=composite_int,  # alias
         risk_tier=tier,
+        tier=tier,  # alias
         confidence=round(confidence, 3),
         factors=factors,
         recommendation=recommendation,
@@ -646,6 +707,12 @@ async def analyse_adverse_media(req: AdverseMediaRequest, background_tasks: Back
     })
 
     return result
+
+
+@app.post("/score", response_model=RiskScoreResponse, dependencies=[Depends(verify_key)])
+def score_subject_alias(req: RiskScoreRequest, background_tasks: BackgroundTasks):
+    """Alias for /v1/score — accepts same payload, returns same response."""
+    return score_subject(req, background_tasks)
 
 
 @app.post("/v1/analytics", dependencies=[Depends(verify_key)])

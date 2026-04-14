@@ -114,3 +114,7 @@ client/public/__manus__/version.json
 e2e/auth.json
 playwright-report/
 test-results/
+services/*/target/
+services/event-emitter/target/
+services/aml-engine/target/
+services/event-processor/target/

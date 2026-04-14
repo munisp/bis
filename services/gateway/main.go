@@ -32,12 +32,12 @@ import (
 	"strings"
 	"time"
 
-	kafkapkg "bis-gateway/kafka"
-	keycloakpkg "bis-gateway/keycloak"
-	permifypkg "bis-gateway/permify"
-	redispkg "bis-gateway/redis"
-	temporalpkg "bis-gateway/temporal"
-	tigerbeetlepkg "bis-gateway/tigerbeetle"
+	kafkapkg "bis/gateway/kafka"
+	keycloakpkg "bis/gateway/keycloak"
+	permifypkg "bis/gateway/permify"
+	redispkg "bis/gateway/redis"
+	temporalpkg "bis/gateway/temporal"
+	tigerbeetlepkg "bis/gateway/tigerbeetle"
 )
 
 // ─── Config ──────────────────────────────────────────────────────────────────
@@ -126,13 +126,8 @@ func initMiddleware() {
 
 	// Permify
 	if permifyURL != "" {
-		c, err := permifypkg.NewClient(permifyURL, envOr("PERMIFY_TENANT_ID", "bis"))
-		if err != nil {
-			log.Printf("[WARN] Permify unavailable: %v — fine-grained authz disabled", err)
-		} else {
-			permifyClient = c
-			log.Printf("[INFO] Permify client initialized: %s", permifyURL)
-		}
+		permifyClient = permifypkg.New()
+		log.Printf("[INFO] Permify client initialized: %s", permifyURL)
 	}
 
 	// Temporal
@@ -148,13 +143,8 @@ func initMiddleware() {
 
 	// TigerBeetle
 	if tbAddr != "" {
-		c, err := tigerbeetlepkg.NewClient(tbAddr)
-		if err != nil {
-			log.Printf("[WARN] TigerBeetle unavailable: %v — ledger accounting disabled", err)
-		} else {
-			tbClient = c
-			log.Printf("[INFO] TigerBeetle client initialized: %s", tbAddr)
-		}
+		tbClient = tigerbeetlepkg.New()
+		log.Printf("[INFO] TigerBeetle client initialized: %s", tbAddr)
 	}
 }
 
@@ -331,7 +321,7 @@ func cacheGet(ctx context.Context, key string) []byte {
 	if err != nil {
 		return nil
 	}
-	return val
+	return []byte(val)
 }
 
 // cacheSet stores a value in Redis with a TTL. No-op if Redis is not configured.
@@ -339,7 +329,7 @@ func cacheSet(ctx context.Context, key string, val []byte, ttl time.Duration) {
 	if redisClient == nil {
 		return
 	}
-	if err := redisClient.Set(ctx, key, val, ttl); err != nil {
+	if err := redisClient.Set(ctx, key, string(val), ttl); err != nil {
 		log.Printf("[WARN] Redis SET failed for key %s: %v", key, err)
 	}
 }
@@ -364,7 +354,7 @@ func checkPermify(ctx context.Context, subject, action, resource string) bool {
 	if permifyClient == nil {
 		return true // permissive when not configured
 	}
-	allowed, err := permifyClient.Check(ctx, subject, action, resource)
+	allowed, err := permifyClient.Check(ctx, "user", subject, action, resource)
 	if err != nil {
 		log.Printf("[WARN] Permify check failed: %v — allowing by default", err)
 		return true

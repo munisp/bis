@@ -109,3 +109,42 @@ func Close() {
 		}
 	}
 }
+
+// ─── Struct wrapper for dependency injection ──────────────────────────────────
+
+// Client is a thin wrapper around the package-level Redis functions.
+// Use NewClient to create one; it also calls Init().
+type Client struct{}
+
+// NewClient initialises the Redis connection and returns a Client.
+func NewClient(addr, password string) (*Client, error) {
+	if addr != "" {
+		os.Setenv("REDIS_URL", addr)
+	}
+	if password != "" {
+		os.Setenv("REDIS_PASSWORD", password)
+	}
+	Init()
+	return &Client{}, nil
+}
+
+// Get retrieves a value by key.
+func (c *Client) Get(ctx context.Context, key string) (string, error) {
+	val, ok := CacheGet(ctx, key)
+	if !ok {
+		return "", fmt.Errorf("key not found: %s", key)
+	}
+	return val, nil
+}
+
+// Set stores a value with TTL.
+func (c *Client) Set(ctx context.Context, key, value string, ttl time.Duration) error {
+	CacheSet(ctx, key, value, ttl)
+	return nil
+}
+
+// Del removes a key.
+func (c *Client) Del(ctx context.Context, key string) error {
+	CacheDel(ctx, key)
+	return nil
+}
