@@ -98,12 +98,25 @@ export default function DataSourcesPage() {
     ? (sources.filter(s => s.status === 'active').reduce((sum, s) => sum + (s.uptimePct ?? 0), 0) / Math.max(liveCount, 1)).toFixed(1)
     : '0.0';
 
-  const handleTest = async (id: number) => {
+  const testConnectionMutation = trpc.dataSources.testConnection.useMutation({
+    onSuccess: (data) => {
+      if (data.ok) {
+        toast.success(`Connection test passed — ${data.latencyMs}ms`);
+      } else {
+        toast.warning(`Data source degraded — responded in ${data.latencyMs}ms`);
+      }
+      utils.dataSources.list.invalidate();
+      setTesting(null);
+    },
+    onError: (e) => {
+      toast.error(`Connection test failed: ${e.message}`);
+      setTesting(null);
+    },
+  });
+
+  const handleTest = (id: number) => {
     setTesting(id);
-    // Simulate a latency test — in production this would call the actual endpoint
-    await new Promise(r => setTimeout(r, 1200 + Math.random() * 800));
-    setTesting(null);
-    toast.success('Connection test passed');
+    testConnectionMutation.mutate({ id });
   };
 
   const handleToggle = (id: number, enabled: boolean) => {

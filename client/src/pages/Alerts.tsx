@@ -189,9 +189,11 @@ export default function Alerts() {
           <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => refetch()}>
             <RefreshCw size={11} className={isLoading ? "animate-spin" : ""} /> Refresh
           </Button>
-          <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => toast.info("Alert rules configuration coming soon")}>
-            <Bell size={11} /> Configure
-          </Button>
+          <Link href="/alert-rules">
+            <Button variant="outline" size="sm" className="h-7 text-xs gap-1">
+              <Bell size={11} /> Configure Rules
+            </Button>
+          </Link>
         </div>
       }
     >

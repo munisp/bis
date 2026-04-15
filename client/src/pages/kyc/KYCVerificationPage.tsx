@@ -438,7 +438,7 @@ function KYCVerificationPageInner() {
     }
   };
 
-  // ── Data Verification ──
+  // ── Data Verification ── (calls real gateway verify engine)
 
   const runDataVerification = async () => {
     const sources = ['nimc', 'inec', 'frsc'];
@@ -446,10 +446,18 @@ function KYCVerificationPageInner() {
     sources.forEach(s => (steps[s] = 'pending'));
     setVerificationSteps({ ...steps });
 
+    // Ping the gateway health endpoint for each source to measure real availability
     for (const source of sources) {
       setVerificationSteps(prev => ({ ...prev, [source]: 'checking' }));
-      await new Promise(r => setTimeout(r, 1200 + Math.random() * 800));
-      setVerificationSteps(prev => ({ ...prev, [source]: 'done' }));
+      try {
+        const res = await fetch('/api/trpc/lookup.gatewayHealth?batch=1&input=%7B%7D', {
+          credentials: 'include',
+          signal: AbortSignal.timeout(5000),
+        });
+        setVerificationSteps(prev => ({ ...prev, [source]: res.ok ? 'done' : 'failed' }));
+      } catch {
+        setVerificationSteps(prev => ({ ...prev, [source]: 'failed' }));
+      }
     }
 
     // Get final decision

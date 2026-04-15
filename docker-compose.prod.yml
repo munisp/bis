@@ -1,0 +1,365 @@
+# BIS Platform — Production Overrides
+# =====================================
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# This file:
+#   - Removes all host-port bindings (traffic enters via nginx only)
+#   - Adds CPU/memory resource limits for every service
+#   - Sets restart: always on all application containers
+#   - Pins image tags to the GHCR registry
+#   - Enables Docker secrets for sensitive credentials
+#   - Adds production logging drivers
+
+version: "3.9"
+
+x-restart: &restart
+  restart: always
+
+x-logging: &logging
+  logging:
+    driver: "json-file"
+    options:
+      max-size: "50m"
+      max-file: "5"
+
+# ── Infrastructure overrides ─────────────────────────────────────────────────
+services:
+  postgres:
+    <<: [*restart, *logging]
+    ports: []
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 4G
+        reservations:
+          cpus: "0.5"
+          memory: 1G
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}  # required in prod — no default
+
+  redis:
+    <<: [*restart, *logging]
+    ports: []
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1G
+
+  zookeeper:
+    <<: [*restart, *logging]
+    ports: []
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+
+  kafka:
+    <<: [*restart, *logging]
+    ports: []
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
+
+  keycloak:
+    <<: [*restart, *logging]
+    ports: []
+    environment:
+      KC_HOSTNAME: ${KEYCLOAK_HOSTNAME:-bis.example.com}
+      KC_HOSTNAME_STRICT: "true"
+      KC_HTTP_ENABLED: "false"
+      KC_HTTPS_CERTIFICATE_FILE: /etc/ssl/bis.crt
+      KC_HTTPS_CERTIFICATE_KEY_FILE: /etc/ssl/bis.key
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2G
+
+  temporal:
+    <<: [*restart, *logging]
+    ports: []
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2G
+
+  temporal-ui:
+    <<: [*restart, *logging]
+    ports: []
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 256M
+
+  permify:
+    <<: [*restart, *logging]
+    ports: []
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512M
+
+  apisix:
+    <<: [*restart, *logging]
+    ports:
+      - "443:9443"   # HTTPS only in production
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 1G
+
+  tigerbeetle-init:
+    <<: *logging
+
+  tigerbeetle:
+    <<: [*restart, *logging]
+    ports: []
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2G
+
+  tigerbeetle-http:
+    <<: [*restart, *logging]
+    ports: []
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+  # ── Application services ──────────────────────────────────────────────────
+
+  gateway:
+    <<: [*restart, *logging]
+    image: ghcr.io/${GITHUB_REPOSITORY:-bis-platform/bis}/gateway:${IMAGE_TAG:-latest}
+    ports: []
+    environment:
+      GATEWAY_SANDBOX: "false"
+      BIS_VERIFY_NIMC_URL: ${BIS_VERIFY_NIMC_URL:-https://api.nimc.gov.ng/v1}
+      BIS_VERIFY_NIMC_KEY: ${BIS_VERIFY_NIMC_KEY}
+      BIS_VERIFY_NIBSS_URL: ${BIS_VERIFY_NIBSS_URL:-https://api.nibss-plc.com.ng/v1}
+      BIS_VERIFY_NIBSS_KEY: ${BIS_VERIFY_NIBSS_KEY}
+      BIS_VERIFY_CAC_URL: ${BIS_VERIFY_CAC_URL:-https://search.cac.gov.ng/api/v1}
+      BIS_VERIFY_CAC_KEY: ${BIS_VERIFY_CAC_KEY}
+      BIS_VERIFY_OFAC_URL: ${BIS_VERIFY_OFAC_URL:-https://api.ofac.treasury.gov/v1}
+      YOUVERIFY_API_KEY: ${YOUVERIFY_API_KEY}
+      YOUVERIFY_BASE_URL: ${YOUVERIFY_BASE_URL:-https://api.youverify.co/v2}
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          cpus: "2"
+          memory: 1G
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+
+  risk-engine:
+    <<: [*restart, *logging]
+    image: ghcr.io/${GITHUB_REPOSITORY:-bis-platform/bis}/risk-engine:${IMAGE_TAG:-latest}
+    ports: []
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2G
+
+  event-processor:
+    <<: [*restart, *logging]
+    image: ghcr.io/${GITHUB_REPOSITORY:-bis-platform/bis}/event-processor:${IMAGE_TAG:-latest}
+    ports: []
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512M
+
+  biometric-engine:
+    <<: [*restart, *logging]
+    image: ghcr.io/${GITHUB_REPOSITORY:-bis-platform/bis}/biometric-engine:${IMAGE_TAG:-latest}
+    ports: []
+    deploy:
+      resources:
+        limits:
+          cpus: "4"
+          memory: 8G   # GPU-intensive workload
+
+  bff:
+    <<: [*restart, *logging]
+    image: ghcr.io/${GITHUB_REPOSITORY:-bis-platform/bis}/bff:${IMAGE_TAG:-latest}
+    ports: []
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          cpus: "2"
+          memory: 1G
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+
+  lakehouse-writer:
+    <<: [*restart, *logging]
+    image: ghcr.io/${GITHUB_REPOSITORY:-bis-platform/bis}/lakehouse-writer:${IMAGE_TAG:-latest}
+    ports: []
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 4G
+
+  ollama:
+    <<: [*restart, *logging]
+    ports: []
+    deploy:
+      resources:
+        limits:
+          cpus: "4"
+          memory: 16G
+
+  ollama-adapter:
+    <<: [*restart, *logging]
+    image: ghcr.io/${GITHUB_REPOSITORY:-bis-platform/bis}/ollama-adapter:${IMAGE_TAG:-latest}
+    ports: []
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512M
+
+  ml-enrichment:
+    <<: [*restart, *logging]
+    image: ghcr.io/${GITHUB_REPOSITORY:-bis-platform/bis}/ml-enrichment:${IMAGE_TAG:-latest}
+    ports: []
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 4G
+
+  case-manager:
+    <<: [*restart, *logging]
+    image: ghcr.io/${GITHUB_REPOSITORY:-bis-platform/bis}/case-manager:${IMAGE_TAG:-latest}
+    ports: []
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512M
+
+  event-emitter:
+    <<: [*restart, *logging]
+    image: ghcr.io/${GITHUB_REPOSITORY:-bis-platform/bis}/event-emitter:${IMAGE_TAG:-latest}
+    ports: []
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512M
+
+  lex-intake:
+    <<: [*restart, *logging]
+    image: ghcr.io/${GITHUB_REPOSITORY:-bis-platform/bis}/lex-intake:${IMAGE_TAG:-latest}
+    ports: []
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512M
+
+  lex-validator:
+    <<: [*restart, *logging]
+    image: ghcr.io/${GITHUB_REPOSITORY:-bis-platform/bis}/lex-validator:${IMAGE_TAG:-latest}
+    ports: []
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512M
+
+  payment-rails:
+    <<: [*restart, *logging]
+    image: ghcr.io/${GITHUB_REPOSITORY:-bis-platform/bis}/payment-rails:${IMAGE_TAG:-latest}
+    ports: []
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512M
+
+  aml-engine:
+    <<: [*restart, *logging]
+    image: ghcr.io/${GITHUB_REPOSITORY:-bis-platform/bis}/aml-engine:${IMAGE_TAG:-latest}
+    ports: []
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 1G
+
+  # ── Observability ─────────────────────────────────────────────────────────
+
+  prometheus:
+    <<: [*restart, *logging]
+    ports: []
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 2G
+
+  grafana:
+    <<: [*restart, *logging]
+    ports: []
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+
+  # ── Nginx reverse proxy (production entry point) ──────────────────────────
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: bis-nginx
+    restart: always
+    <<: *logging
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./infra/nginx/ssl:/etc/nginx/ssl:ro
+    networks: [bis-net]
+    depends_on:
+      - bff
+      - apisix
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 256M

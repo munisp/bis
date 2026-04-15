@@ -43,12 +43,20 @@ export default function Settings() {
 
   const handleTestConnection = async () => {
     setTestingConn(true);
+    const start = Date.now();
     try {
-      const res = await fetch(`/api/trpc/lookup.gatewayHealth`);
-      const latency = Math.round(80 + Math.random() * 200);
-      toast.success(`Connection test passed — ${configuring?.name} responded in ${latency}ms`);
+      const res = await fetch('/api/trpc/lookup.gatewayHealth?batch=1&input=%7B%7D', {
+        credentials: 'include',
+      });
+      const latencyMs = Date.now() - start;
+      if (res.ok) {
+        toast.success(`Connection test passed — ${configuring?.name} responded in ${latencyMs}ms`);
+      } else {
+        toast.warning(`${configuring?.name} returned HTTP ${res.status} in ${latencyMs}ms`);
+      }
     } catch {
-      toast.success(`Connection test passed — ${configuring?.name} responded in ${Math.round(80 + Math.random() * 400)}ms`);
+      const latencyMs = Date.now() - start;
+      toast.error(`Connection test failed — ${configuring?.name} unreachable (${latencyMs}ms)`);
     } finally {
       setTestingConn(false);
     }

@@ -100,6 +100,14 @@ function ContinuousMonitoringPageInner() {
     onError: (e) => toast.error('Failed to acknowledge', { description: e.message }),
   });
 
+  const escalateMutation = trpc.alerts.escalate.useMutation({
+    onSuccess: () => {
+      toast.success('Alert escalated to field agent');
+      utils.alerts.list.invalidate();
+    },
+    onError: (e) => toast.error(`Escalation failed: ${e.message}`),
+  });
+
   const activeMonitors = (monitors as any[]).filter((m: any) => m.status === 'active');
   const unacknowledgedAlerts = (alertList as any[]).filter((a: any) => !a.acknowledged);
   const criticalAlerts = unacknowledgedAlerts.filter((a: any) => a.severity === 'critical');
@@ -432,8 +440,15 @@ function ContinuousMonitoringPageInner() {
                               </button>
                             )}
                             {alert.severity === "critical" && (
-                              <button onClick={() => toast.info('Escalation workflow coming soon')}
-                                className="bg-red-50 hover:bg-red-100 text-red-700 text-xs font-medium px-3 py-1.5 rounded-lg transition-all">
+                              <button
+                                onClick={() => escalateMutation.mutate({
+                                  id: alert.id,
+                                  agentId: 'auto',
+                                  agentName: 'On-Call Agent',
+                                  instructions: `Critical alert escalation: ${alert.title ?? alert.body ?? ''}`,
+                                })}
+                                disabled={escalateMutation.isPending}
+                                className="bg-red-50 hover:bg-red-100 text-red-700 text-xs font-medium px-3 py-1.5 rounded-lg transition-all disabled:opacity-50">
                                 🚨 Escalate
                               </button>
                             )}

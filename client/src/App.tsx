@@ -68,6 +68,7 @@ const InvestigationCaseLinksPage = lazy(() => import("@/pages/InvestigationCaseL
 const NotificationCentrePage     = lazy(() => import("@/pages/NotificationCentrePage"));
 // Infrastructure
 const KeycloakPage     = lazy(() => import("@/pages/infra/KeycloakPage"));
+const GatewayHealthPage = lazy(() => import("@/pages/infra/GatewayHealthPage"));
 const TemporalPage     = lazy(() => import("@/pages/infra/TemporalPage"));
 const RedisPage        = lazy(() => import("@/pages/infra/RedisPage"));
 // Banking & Compliance
@@ -168,6 +169,7 @@ function Router() {
         <Route path="/infra/keycloak" component={KeycloakPage} />
         <Route path="/infra/temporal" component={TemporalPage} />
         <Route path="/infra/redis" component={RedisPage} />
+        <Route path="/infra/gateway" component={GatewayHealthPage} />
         {/* Fallback */}
         <Route path="/404" component={NotFound} />
         <Route component={NotFound} />

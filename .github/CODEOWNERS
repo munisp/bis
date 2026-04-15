@@ -1,0 +1,33 @@
+# BIS Platform — Code Owners
+# Each line is a file pattern followed by one or more owners.
+# Order matters: the last matching pattern takes precedence.
+
+# Global: core team reviews everything
+*                                   @bis-platform/core-team
+
+# Backend services
+server/                             @bis-platform/backend-team
+services/gateway/                   @bis-platform/backend-team @bis-platform/security-team
+services/gateway/verify/            @bis-platform/security-team
+services/aml-engine/                @bis-platform/compliance-team
+services/risk-engine/               @bis-platform/compliance-team
+services/risk-scoring/              @bis-platform/compliance-team
+services/biometric-engine/          @bis-platform/security-team
+services/payment-rails/             @bis-platform/finance-team
+
+# Frontend
+client/                             @bis-platform/frontend-team
+client/src/pages/kyc/               @bis-platform/frontend-team @bis-platform/compliance-team
+
+# Database schema
+drizzle/                            @bis-platform/backend-team @bis-platform/devops-team
+
+# Infrastructure & CI/CD
+docker-compose*.yml                 @bis-platform/devops-team
+.github/                            @bis-platform/devops-team
+infra/                              @bis-platform/devops-team
+services/*/Dockerfile               @bis-platform/devops-team
+
+# Security-sensitive files
+services/gateway/verify/            @bis-platform/security-team
+.github/workflows/security.yml      @bis-platform/security-team

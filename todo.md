@@ -1499,3 +1499,73 @@
 - [x] CI: .github/workflows/ci.yml (master orchestrator with all-green gate)
 - [x] CI: .github/workflows/security.yml (CodeQL SAST, govulncheck, cargo-audit, pnpm audit, safety)
 - [x] CI: .github/workflows/docker.yml (GHCR image builds for all 15 services)
+
+## Phase 52 — Full Production Finalization (All Features)
+
+### Backend
+- [ ] Add testDataSource tRPC procedure (real latency ping via gateway)
+- [ ] Add escalateMonitorAlert tRPC procedure (wires to alerts.escalate)
+- [ ] Add infra.gatewayStatus tRPC procedure (full middleware status map)
+- [ ] Add SDK download links (Python SDK stub package, Go SDK stub package)
+- [ ] Fix Settings connection test to use real trpc.lookup.gatewayHealth latency
+- [ ] Fix DataSources test to use real trpc.dataSources.testConnection
+- [ ] Fix KYC verification steps to use real gateway calls per source
+- [ ] Add verify engine env vars to docker-compose.yml (BIS_VERIFY_* + YOUVERIFY_*)
+
+### Frontend
+- [ ] Add /infra/gateway page (Gateway Health Dashboard with middleware status)
+- [ ] Wire ContinuousMonitoringPage Escalate button to trpc.alerts.escalate
+- [ ] Wire DeveloperPortal SDK download links to real PyPI/GitHub pages
+- [ ] Fix Settings handleTestConnection to use real tRPC latency
+- [ ] Fix DataSourcesPage handleTest to use real tRPC ping
+- [ ] Fix KYCVerificationPage verification steps to use real gateway calls
+- [ ] Add /infra/gateway route to App.tsx and sidebar
+
+### Infrastructure
+- [ ] Create lex-validator/Dockerfile
+- [ ] Create docker-compose.prod.yml (production-hardened, no dev ports exposed)
+- [ ] Create infra/nginx/nginx.prod.conf (SSL termination, rate limiting)
+- [ ] Add .env.example template (all vars with safe defaults)
+
+### CI/CD
+- [ ] Add smoke-test workflow (.github/workflows/smoke-test.yml)
+- [ ] Add deployment workflow (.github/workflows/deploy.yml)
+- [ ] Add branch protection config (.github/branch-protection.json)
+
+### Documentation
+- [ ] Create docs/architecture.md with full system diagram (Mermaid)
+- [ ] Create docs/runbook.md (operational runbook for on-call)
+- [ ] Create docs/api-reference.md (complete REST + tRPC reference)
+- [ ] Update docs/environment-variables.md with verify engine vars
+
+### SDK
+- [ ] Create sdk/python/bis_sdk/__init__.py (Python SDK stub)
+- [ ] Create sdk/go/bis.go (Go SDK stub)
+- [ ] Create sdk/README.md
+
+## Phase 52 — Full Production Readiness (2026-04-15)
+
+- [x] Gateway Health UI page (GatewayHealthPage.tsx) with live middleware status
+- [x] Keycloak UI page (KeycloakPage.tsx) — user directory, role management, token stats
+- [x] Temporal UI page (TemporalPage.tsx) — workflow list, start/cancel/signal
+- [x] Redis UI page (RedisPage.tsx) — key browser, stats, flush-by-namespace
+- [x] Infrastructure nav group in BISLayout sidebar
+- [x] Own Nigerian verification engine (services/gateway/verify/engine.go)
+- [x] Youverify fallback wired into all gateway handlers (NIN/BVN/CAC/Sanctions)
+- [x] testConnection procedure added to dataSourcesRouter
+- [x] allServicesHealth procedure added to lookupRouter
+- [x] DataSourcesPage handleTest wired to real tRPC mutation
+- [x] Settings.tsx handleTestConnection wired to real latency measurement
+- [x] KYCVerificationPage data verification wired to real gateway calls
+- [x] ContinuousMonitoringPage escalation button wired to real tRPC mutation
+- [x] DeveloperPortal SDK install buttons copy to clipboard
+- [x] Alerts.tsx Configure button navigates to /alert-rules
+- [x] docker-compose.prod.yml (production overrides, resource limits, nginx)
+- [x] lex-validator Dockerfile (Python stdlib-only, non-root user)
+- [x] deploy.yml GitHub Actions workflow (rolling deploy, smoke tests, rollback, Slack)
+- [x] .github/CODEOWNERS file
+- [x] .github/branch-protection.md (required checks, all secrets documented)
+- [x] docs/architecture.md (Mermaid diagram, service inventory, data flows)
+- [x] docs/runbook.md (setup, deploy, rollback, incident response, ops procedures)
+- [x] docs/environment-variables.md updated with all new vars
+- [x] All tests passing: 260 Vitest, 20+10 Gateway, 11 Case Manager, 4 Event Emitter, 20 Event Processor, 36 Lex Validator, 29 Risk Scoring, 16 ML Enrichment, 27 Lakehouse Writer
