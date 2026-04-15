@@ -1569,3 +1569,13 @@
 - [x] docs/runbook.md (setup, deploy, rollback, incident response, ops procedures)
 - [x] docs/environment-variables.md updated with all new vars
 - [x] All tests passing: 260 Vitest, 20+10 Gateway, 11 Case Manager, 4 Event Emitter, 20 Event Processor, 36 Lex Validator, 29 Risk Scoring, 16 ML Enrichment, 27 Lakehouse Writer
+
+## Phase 53 — Production Credentials & Deployment (2026-04-15)
+
+- [x] Wire NIMC, NIBSS, CAC, Youverify API keys as Manus secrets
+- [x] Wire Keycloak, Temporal, Redis, Slack, SMTP credentials as Manus secrets
+- [x] Add env validation on server startup (fail-fast with clear error messages)
+- [x] Update gateway verify engine to read credentials from env
+- [x] Update keycloakRouter, temporalRouter, redisRouter to use env credentials
+- [ ] Save v53 checkpoint
+- [ ] Guide domain setup and GitHub export
