@@ -10,7 +10,7 @@ import {
   Briefcase, Globe, MapPin, MessageSquare, Building2, Eye,
   UserCheck, BarChart3, Key, Zap, CheckCheck, ArrowRight, Sun, Moon, ClipboardList, Wallet, UserSearch, Shield, BarChart2,
   BookOpen, Link2, Brain, Gavel, ClipboardCheck, SendToBack, Smartphone, Download, Link as LinkIcon, BellRing, ShieldAlert,
-  FileBarChart, TrendingUp, Landmark, Scale, Lock
+  FileBarChart, TrendingUp, Landmark, Scale, Lock, Server, Workflow, Database as DbIcon
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -138,6 +138,15 @@ const BASE_NAV_GROUPS: NavGroup[] = [
       { label: 'Correspondent Banks', href: '/correspondent-banking', icon: <Building2 size={15} /> },
       { label: 'Evidence Custody', href: '/evidence', icon: <Lock size={15} /> },
       { label: 'Regulatory Reports', href: '/regulatory-reports', icon: <FileBarChart size={15} /> },
+    ],
+  },
+  {
+    label: 'INFRASTRUCTURE',
+    defaultOpen: false,
+    items: [
+      { label: 'Keycloak IDP', href: '/infra/keycloak', icon: <Server size={15} />, adminOnly: true },
+      { label: 'Temporal Workflows', href: '/infra/temporal', icon: <Workflow size={15} />, adminOnly: true },
+      { label: 'Redis Cache', href: '/infra/redis', icon: <DbIcon size={15} />, adminOnly: true },
     ],
   },
   {

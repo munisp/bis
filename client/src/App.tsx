@@ -66,6 +66,10 @@ const ExportSchedulesPage  = lazy(() => import("@/pages/settings/ExportSchedules
 // Platform sub-pages
 const InvestigationCaseLinksPage = lazy(() => import("@/pages/InvestigationCaseLinksPage"));
 const NotificationCentrePage     = lazy(() => import("@/pages/NotificationCentrePage"));
+// Infrastructure
+const KeycloakPage     = lazy(() => import("@/pages/infra/KeycloakPage"));
+const TemporalPage     = lazy(() => import("@/pages/infra/TemporalPage"));
+const RedisPage        = lazy(() => import("@/pages/infra/RedisPage"));
 // Banking & Compliance
 const AMLTransactionsPage        = lazy(() => import("@/pages/bis/AMLTransactionsPage"));
 const SARFilingPage              = lazy(() => import("@/pages/bis/SARFilingPage"));
@@ -160,6 +164,10 @@ function Router() {
         <Route path="/correspondent-banking" component={CorrespondentBankingPage} />
         <Route path="/evidence" component={EvidencePage} />
         <Route path="/regulatory-reports" component={RegulatoryReportsPage} />
+        {/* Infrastructure */}
+        <Route path="/infra/keycloak" component={KeycloakPage} />
+        <Route path="/infra/temporal" component={TemporalPage} />
+        <Route path="/infra/redis" component={RedisPage} />
         {/* Fallback */}
         <Route path="/404" component={NotFound} />
         <Route component={NotFound} />

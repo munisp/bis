@@ -38,6 +38,7 @@ import (
 	redispkg "bis/gateway/redis"
 	temporalpkg "bis/gateway/temporal"
 	tigerbeetlepkg "bis/gateway/tigerbeetle"
+	verifypkg "bis/gateway/verify"
 )
 
 // ─── Config ──────────────────────────────────────────────────────────────────
@@ -79,6 +80,8 @@ var (
 	permifyClient    *permifypkg.Client
 	temporalClient   *temporalpkg.Client
 	tbClient         *tigerbeetlepkg.Client
+	// BIS own verification engine (with Youverify fallback)
+	verifyEngine     *verifypkg.Engine
 )
 
 func envOr(key, fallback string) string {
@@ -146,6 +149,16 @@ func initMiddleware() {
 		tbClient = tigerbeetlepkg.New()
 		log.Printf("[INFO] TigerBeetle client initialized: %s", tbAddr)
 	}
+
+	// BIS Verification Engine (own engine + Youverify fallback)
+	verifyEngine = verifypkg.New(verifypkg.ConfigFromEnv())
+	log.Printf("[INFO] BIS Verification Engine initialized (own: NIMC=%v NIBSS=%v CAC=%v OFAC=%v, youverify=%v)",
+		os.Getenv("BIS_VERIFY_NIMC_URL") != "",
+		os.Getenv("BIS_VERIFY_NIBSS_URL") != "",
+		os.Getenv("BIS_VERIFY_CAC_URL") != "",
+		os.Getenv("BIS_VERIFY_OFAC_URL") != "",
+		os.Getenv("YOUVERIFY_API_KEY") != "",
+	)
 }
 
 // ─── Models ──────────────────────────────────────────────────────────────────
@@ -494,23 +507,24 @@ func handleNINLookup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var result NINResult
-
-	// Real NIMC API call if configured
-	if nimcAPIURL != "" && nimcAPIKey != "" {
-		body, err := proxyExternalAPI("POST", nimcAPIURL+"/verify", nimcAPIKey, map[string]string{"nin": nin})
-		if err != nil {
-			log.Printf("[WARN] NIMC API error for NIN %s: %v — falling back to sandbox", nin, err)
-			result = sandboxNIN(nin)
-		} else {
-			if err := json.Unmarshal(body, &result); err != nil {
-				log.Printf("[WARN] NIMC response parse error: %v — falling back to sandbox", err)
-				result = sandboxNIN(nin)
-			}
-		}
-	} else {
-		result = sandboxNIN(nin)
+	// BIS Verification Engine: own engine → Youverify → sandbox
+	vr := verifyEngine.LookupNIN(r.Context(), nin)
+	result := NINResult{
+		NIN:        vr.NIN,
+		FirstName:  vr.FirstName,
+		LastName:   vr.LastName,
+		MiddleName: vr.MiddleName,
+		DOB:        vr.DOB,
+		Gender:     vr.Gender,
+		Phone:      vr.Phone,
+		Address:    vr.Address,
+		State:      vr.State,
+		Photo:      vr.Photo,
+		Status:     vr.Status,
+		VerifiedAt: vr.CheckedAt,
+		Sandbox:    vr.Sandbox,
 	}
+	log.Printf("[INFO] NIN lookup %s: source=%s sandbox=%v", nin, vr.Source, vr.Sandbox)
 
 	// Cache the result
 	if data, err := json.Marshal(result); err == nil {
@@ -549,22 +563,21 @@ func handleBVNLookup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var result BVNResult
-
-	if nibssAPIURL != "" && nibssAPIKey != "" {
-		body, err := proxyExternalAPI("POST", nibssAPIURL+"/verify", nibssAPIKey, map[string]string{"bvn": bvn})
-		if err != nil {
-			log.Printf("[WARN] NIBSS API error for BVN %s: %v — falling back to sandbox", bvn, err)
-			result = sandboxBVN(bvn)
-		} else {
-			if err := json.Unmarshal(body, &result); err != nil {
-				log.Printf("[WARN] NIBSS response parse error: %v — falling back to sandbox", err)
-				result = sandboxBVN(bvn)
-			}
-		}
-	} else {
-		result = sandboxBVN(bvn)
+	// BIS Verification Engine: own engine → Youverify → sandbox
+	vr := verifyEngine.LookupBVN(r.Context(), bvn)
+	result := BVNResult{
+		BVN:        vr.BVN,
+		FirstName:  vr.FirstName,
+		LastName:   vr.LastName,
+		MiddleName: vr.MiddleName,
+		DOB:        vr.DOB,
+		Phone:      vr.Phone,
+		Bank:       vr.BankName,
+		AccountNo:  vr.AccountNumber,
+		VerifiedAt: vr.CheckedAt,
+		Sandbox:    vr.Sandbox,
 	}
+	log.Printf("[INFO] BVN lookup %s: source=%s sandbox=%v", bvn, vr.Source, vr.Sandbox)
 
 	if data, err := json.Marshal(result); err == nil {
 		cacheSet(r.Context(), cacheKey, data, 24*time.Hour)
@@ -596,22 +609,20 @@ func handleCACLookup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var result CACResult
-
-	if cacAPIURL != "" && cacAPIKey != "" {
-		body, err := proxyExternalAPI("GET", cacAPIURL+"/company/"+rc, cacAPIKey, nil)
-		if err != nil {
-			log.Printf("[WARN] CAC API error for RC %s: %v — falling back to sandbox", rc, err)
-			result = sandboxCAC(rc)
-		} else {
-			if err := json.Unmarshal(body, &result); err != nil {
-				log.Printf("[WARN] CAC response parse error: %v — falling back to sandbox", err)
-				result = sandboxCAC(rc)
-			}
-		}
-	} else {
-		result = sandboxCAC(rc)
+	// BIS Verification Engine: own engine → Youverify → sandbox
+	vr := verifyEngine.LookupCAC(r.Context(), rc)
+	result := CACResult{
+		RCNumber:    vr.RCNumber,
+		CompanyName: vr.CompanyName,
+		Status:      vr.Status,
+		Type:        vr.CompanyType,
+		DateReg:     vr.IncDate,
+		Address:     vr.Address,
+		Directors:   vr.Directors,
+		VerifiedAt:  vr.CheckedAt,
+		Sandbox:     vr.Sandbox,
 	}
+	log.Printf("[INFO] CAC lookup %s: source=%s sandbox=%v", rc, vr.Source, vr.Sandbox)
 
 	if data, err := json.Marshal(result); err == nil {
 		cacheSet(r.Context(), cacheKey, data, 12*time.Hour)
@@ -661,22 +672,28 @@ func handleSanctionsCheck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var result SanctionsResult
-
-	if ofacAPIURL != "" && ofacAPIKey != "" {
-		body, err := proxyExternalAPI("GET", fmt.Sprintf("%s/search?name=%s", ofacAPIURL, name), ofacAPIKey, nil)
-		if err != nil {
-			log.Printf("[WARN] OFAC API error for %s: %v — falling back to sandbox", name, err)
-			result = sandboxSanctions(name)
-		} else {
-			if err := json.Unmarshal(body, &result); err != nil {
-				log.Printf("[WARN] OFAC response parse error: %v — falling back to sandbox", err)
-				result = sandboxSanctions(name)
-			}
-		}
-	} else {
-		result = sandboxSanctions(name)
+	// BIS Verification Engine: own engine → Youverify → sandbox
+	vr := verifyEngine.CheckSanctions(r.Context(), name)
+	// Map verify.SanctionsResult → gateway SanctionsResult
+	hits := make([]SanctionHit, 0, len(vr.Hits))
+	for _, h := range vr.Hits {
+		hits = append(hits, SanctionHit{
+			List:       h.List,
+			Name:       h.Name,
+			Score:      h.Score,
+			EntityType: h.EntityType,
+			Programs:   h.Programs,
+			Reason:     h.Reason,
+		})
 	}
+	result := SanctionsResult{
+		Queried:   vr.Queried,
+		Hits:      hits,
+		Clear:     vr.Clear,
+		CheckedAt: vr.CheckedAt,
+		Sandbox:   vr.Sandbox,
+	}
+	log.Printf("[INFO] Sanctions check %s: source=%s clear=%v hits=%d", name, vr.Source, vr.Clear, len(hits))
 
 	if data, err := json.Marshal(result); err == nil {
 		cacheSet(r.Context(), cacheKey, data, 6*time.Hour)

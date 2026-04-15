@@ -1445,3 +1445,57 @@
 
 ### Archive
 - [x] bis-platform-v50-final-20260414.zip: 239 MB, 15,714 files
+
+## Phase 51 — Infrastructure UI, Own Verification Engine, CI Pipeline
+
+### Infrastructure UI Pages
+- [ ] KeycloakPage.tsx: User directory, role assignment, token stats, health badge
+- [ ] TemporalPage.tsx: Workflow list, start/terminate/signal, activity log
+- [ ] RedisPage.tsx: Key browser, get/set/delete, stats panel, flush-by-pattern
+- [ ] Register /infra/keycloak, /infra/temporal, /infra/redis routes in App.tsx
+- [ ] Add "Infrastructure" section to BISLayout sidebar (admin-only)
+
+### Own Nigerian Verification Engine (with Youverify fallback)
+- [ ] services/verifier/ — new Go service: own NIN/BVN/CAC/sanctions engine
+- [ ] verifier/internal/nin.go — NIN lookup (NIMC mock + real NIMC API)
+- [ ] verifier/internal/bvn.go — BVN lookup (NIBSS mock + real NIBSS API)
+- [ ] verifier/internal/cac.go — CAC RC lookup (CAC API + scraper fallback)
+- [ ] verifier/internal/sanctions.go — OFAC/UN/EU/EFCC sanctions check
+- [ ] verifier/internal/youverify.go — Youverify fallback client (all endpoints)
+- [ ] verifier/internal/router.go — strategy: own engine first, Youverify on error/miss
+- [ ] verifier/main.go — HTTP server (:8086)
+- [ ] verifier/main_test.go — unit tests for all verifier functions
+- [ ] gateway: route /v1/nin, /v1/bvn, /v1/cac, /v1/sanctions to verifier service
+- [ ] YOUVERIFY_API_KEY, YOUVERIFY_BASE_URL env vars (fallback config)
+
+### GitHub Actions CI Pipeline
+- [ ] .github/workflows/ci.yml — matrix: Go, Rust, Python, TypeScript
+- [ ] Go job: go build + go test for gateway, case-manager, lex-intake, ollama-adapter, payment-rails, verifier
+- [ ] Rust job: cargo build + cargo test for aml-engine, event-emitter, event-processor
+- [ ] Python job: pytest for lex-validator, ml-enrichment, risk-scoring, lakehouse-writer, biometric-engine
+- [ ] TypeScript job: pnpm install + pnpm test + tsc --noEmit
+- [ ] Cache: Go modules, Rust registry, pip, pnpm store
+- [ ] Trigger: push to main + pull_request
+
+### Tests
+- [ ] verifier service: unit tests for own engine + Youverify fallback
+- [ ] Infrastructure UI: tRPC procedure coverage in vitest
+
+## Phase 51 — Infrastructure UI + Own Verify Engine + CI Pipeline
+
+- [x] Infrastructure UI: KeycloakPage (user directory, role management, token stats)
+- [x] Infrastructure UI: TemporalPage (workflow list, start/cancel/signal workflows)
+- [x] Infrastructure UI: RedisPage (key browser, stats, set/get/delete/flush-by-ns)
+- [x] BISLayout sidebar: INFRASTRUCTURE nav group with Keycloak/Temporal/Redis links
+- [x] App.tsx routes: /infra/keycloak, /infra/temporal, /infra/redis
+- [x] BIS own verification engine: services/gateway/verify/engine.go
+- [x] Own engine (BIS_VERIFY_NIMC_URL/KEY etc.) -> Youverify fallback -> Sandbox
+- [x] LookupNIN, LookupBVN, LookupCAC, CheckSanctions - 10/10 unit tests passing
+- [x] Gateway handlers wired to verifyEngine (NIN, BVN, CAC, Sanctions)
+- [x] CI: .github/workflows/ci-go.yml (5 Go services)
+- [x] CI: .github/workflows/ci-rust.yml (3 Rust services)
+- [x] CI: .github/workflows/ci-python.yml (6 Python services)
+- [x] CI: .github/workflows/ci-node.yml (TypeScript check, Vitest, pnpm build)
+- [x] CI: .github/workflows/ci.yml (master orchestrator with all-green gate)
+- [x] CI: .github/workflows/security.yml (CodeQL SAST, govulncheck, cargo-audit, pnpm audit, safety)
+- [x] CI: .github/workflows/docker.yml (GHCR image builds for all 15 services)
