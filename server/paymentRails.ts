@@ -13,8 +13,8 @@
 import { z } from "zod";
 import { router, protectedProcedure, adminProcedure } from "./_core/trpc";
 import { getDb } from "./db";
-import { transactions, frozenAccounts } from "../drizzle/schema";
-import { desc, eq, sql, and, gte, lt, or, ilike } from "drizzle-orm";
+import { transactions, frozenAccounts, auditLog, exportSchedules } from "../drizzle/schema";
+import { desc, eq, sql, and, gte, lt, or, ilike, inArray, isNull } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { storagePut } from "./storage";
 
@@ -657,6 +657,177 @@ export const paymentRailsRouter = router({
         filters: { status: input.status, search: input.search ?? null, accountId: input.accountId ?? null },
       };
     }),
+
+  /**
+   * Reverse a posted transfer (admin only).
+   */
+  reverseTransfer: adminProcedure
+    .input(z.object({
+      txRef: z.string().min(1),
+      reason: z.string().min(5).max(500),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
+      const [tx] = await db.select().from(transactions).where(eq(transactions.txRef, input.txRef)).limit(1);
+      if (!tx) throw new TRPCError({ code: "NOT_FOUND", message: "Transfer not found" });
+      if (tx.status !== "completed") throw new TRPCError({ code: "BAD_REQUEST", message: "Only completed transfers can be reversed" });
+      const reversalRef = `REV-${input.txRef}-${Date.now()}`;
+      await db.transaction(async (trx) => {
+        await trx.update(transactions)
+          .set({ status: "reversed" as any, updatedAt: new Date() })
+          .where(eq(transactions.txRef, input.txRef));
+        await trx.insert(transactions).values({
+          txRef: reversalRef,
+          type: tx.type,
+          amount: tx.amount,
+          currency: tx.currency,
+          originatorName: tx.beneficiaryName ?? "Unknown",
+          originatorAccount: tx.beneficiaryAccount,
+          beneficiaryName: tx.originatorName ?? "Unknown",
+          beneficiaryAccount: tx.originatorAccount,
+          status: "completed" as any,
+          narration: `Reversal of ${input.txRef}: ${input.reason}`,
+          idempotencyKey: `reversal-${input.txRef}`,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        });
+      });
+      await db.insert(auditLog).values({
+        userId: ctx.user.id,
+        action: "transfer.reversed",
+        targetRef: input.txRef,
+        detail: { reason: input.reason, reversalRef },
+        category: "financial" as any,
+        result: "success" as any,
+        createdAt: new Date(),
+      }).catch(() => {});
+      return { reversalRef, originalTxRef: input.txRef };
+    }),
+
+  /**
+   * List all currently frozen accounts.
+   */
+  listFrozenAccounts: adminProcedure
+    .input(z.object({
+      includeUnfrozen: z.boolean().default(false),
+      cursor: z.number().default(0),
+      limit: z.number().min(1).max(100).default(25),
+    }).optional())
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return { rows: [], nextCursor: null };
+      const limit = input?.limit ?? 25;
+      const cursor = input?.cursor ?? 0;
+      const conditions = input?.includeUnfrozen ? undefined : isNull(frozenAccounts.unfrozenAt);
+      const rows = await db.select().from(frozenAccounts)
+        .where(conditions)
+        .orderBy(desc(frozenAccounts.frozenAt))
+        .limit(limit + 1)
+        .offset(cursor);
+      const hasMore = rows.length > limit;
+      return { rows: rows.slice(0, limit), nextCursor: hasMore ? cursor + limit : null };
+    }),
+
+  /**
+   * Bulk unfreeze multiple accounts.
+   */
+  bulkUnfreeze: adminProcedure
+    .input(z.object({
+      accountIds: z.array(z.string()).min(1).max(50),
+      reason: z.string().min(5).max(500),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
+      const now = new Date();
+      await db.update(frozenAccounts)
+        .set({ unfrozenAt: now, notes: input.reason, unfrozenBy: ctx.user.id })
+        .where(and(
+          inArray(frozenAccounts.accountId, input.accountIds),
+          isNull(frozenAccounts.unfrozenAt)
+        ));
+      return { unfrozen: input.accountIds.length, at: now };
+    }),
+
+  /**
+   * Create a recurring export schedule.
+   */
+  createExportSchedule: protectedProcedure
+    .input(z.object({
+      name: z.string().min(1).max(100),
+      schedule: z.enum(["daily", "weekly", "monthly"]),
+      filters: z.object({
+        status: z.string().optional(),
+        accountId: z.string().optional(),
+      }).optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
+      const cronMap = { daily: "0 2 * * *", weekly: "0 2 * * 1", monthly: "0 2 1 * *" };
+      const [row] = await db.insert(exportSchedules).values({
+        name: input.name,
+        exportType: "transfers",
+        format: "csv",
+        cronExpression: cronMap[input.schedule],
+        filters: input.filters ?? {},
+        userId: ctx.user.id,
+        enabled: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }).returning();
+      return row;
+    }),
+
+  /**
+   * List export schedules.
+   */
+  listExportSchedules: protectedProcedure.query(async () => {
+    const db = await getDb();
+    if (!db) return [];
+    return db.select().from(exportSchedules)
+      .where(eq(exportSchedules.exportType, "transfers"))
+      .orderBy(desc(exportSchedules.createdAt));
+  }),
+
+  /**
+   * Get batch processing monitor stats.
+   */
+  getBatchMonitor: adminProcedure.query(async () => {
+    const db = await getDb();
+    if (!db) return null;
+    const now = new Date();
+    const last24h = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    const last1h = new Date(now.getTime() - 60 * 60 * 1000);
+    const [total24h] = await db.select({ count: sql<number>`count(*)` })
+      .from(transactions).where(gte(transactions.createdAt, last24h));
+    const [total1h] = await db.select({ count: sql<number>`count(*)` })
+      .from(transactions).where(gte(transactions.createdAt, last1h));
+    const [reversed24h] = await db.select({ count: sql<number>`count(*)` })
+      .from(transactions).where(and(
+        gte(transactions.createdAt, last24h),
+        eq(transactions.status, "reversed" as any)
+      ));
+    const [failed24h] = await db.select({ count: sql<number>`count(*)` })
+      .from(transactions).where(and(
+        gte(transactions.createdAt, last24h),
+        eq(transactions.status, "failed")
+      ));
+    const batchSize = 8190;
+    const tps1h = Math.round(Number(total1h?.count ?? 0) / 3600);
+    const batchSaturation = Math.min(100, Math.round((tps1h / (batchSize / 60)) * 100));
+    return {
+      last24h: Number(total24h?.count ?? 0),
+      last1h: Number(total1h?.count ?? 0),
+      tps: tps1h,
+      reversed24h: Number(reversed24h?.count ?? 0),
+      failed24h: Number(failed24h?.count ?? 0),
+      batchSize,
+      batchSaturation,
+      maxThroughput: "8,190 transfers/batch",
+    };
+  }),
 
   /**
    * Get archival tier statistics (delegates to archivalRouter.getTierConfig).

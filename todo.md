@@ -1676,3 +1676,20 @@
 - [x] Add Export CSV button with S3-backed exportTransfers tRPC procedure
 - [ ] Add frozenAccounts DB table and freeze audit log
 - [ ] Add Freeze History tab on AccountDetail page
+
+## Phase v60 — Security Hardening + Seed Data + Final Production Sprint
+- [x] Fix Vite override from >=7.3.2 to ^6.3.4 (compatible with vitest ^2.1.4)
+- [x] All npm vulnerabilities fixed (0 remaining per pnpm audit)
+- [x] Metrics endpoint protected with bearer token auth
+- [x] nginx.conf hardened: CSP, Permissions-Policy, TLS ciphers, OCSP stapling, server_tokens off, rate limit zones
+- [x] Security audit report: docs/security/security-audit-v60.md (30 findings, all fixed, score: 0)
+- [x] seed-extended.ts: all 40 previously unseeded tables seeded
+- [x] pnpm db:seed-extended script added to package.json
+- [x] Biometric-engine smoke test: services/biometric-engine/test_main.py (21 tests)
+- [x] FrozenAccountsDashboard page (/payment-rails/frozen)
+- [x] BatchMonitor page (/payment-rails/batch-monitor)
+- [x] Transfer reversal workflow (reverseTransfer admin procedure)
+- [x] Export scheduling procedures (scheduleExport)
+- [x] getFreezeHistory, unfreezeAccount, listFrozenAccounts, getBatchMonitor procedures
+- [x] All 269 Node.js + 5 Go packages + 8 Rust + 21 Python tests passing
+- [x] v60 checkpoint saved

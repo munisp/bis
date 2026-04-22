@@ -32,6 +32,8 @@ const ZeroFootprintPage         = lazy(() => import("@/pages/bis/ZeroFootprintPa
 const BillingPage               = lazy(() => import("@/pages/bis/BillingPage"));
 const PaymentRailsPage          = lazy(() => import("@/pages/PaymentRails"));
 const AccountDetailPage          = lazy(() => import("@/pages/AccountDetail"));
+const FrozenAccountsDashboard    = lazy(() => import("@/pages/FrozenAccountsDashboard"));
+const BatchMonitorPage           = lazy(() => import("@/pages/BatchMonitor"));
 const KYCVerificationPage       = lazy(() => import("@/pages/kyc/KYCVerificationPage"));
 const KYCRecordsPage            = lazy(() => import("@/pages/kyc/KYCRecordsPage"));
 const MessagingChannelsPage     = lazy(() => import("@/pages/messaging/MessagingChannelsPage"));
@@ -125,6 +127,8 @@ function Router() {
         <Route path="/billing" component={BillingPage} />
         <Route path="/payment-rails" component={PaymentRailsPage} />
         <Route path="/payment-rails/accounts/:accountId" component={AccountDetailPage} />
+        <Route path="/payment-rails/frozen" component={FrozenAccountsDashboard} />
+        <Route path="/payment-rails/batch-monitor" component={BatchMonitorPage} />
 
         {/* KYC / Onboarding / Intelligence */}
         <Route path="/kyc-verification" component={KYCVerificationPage} />

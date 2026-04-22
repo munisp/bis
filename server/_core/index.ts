@@ -223,8 +223,21 @@ async function startServer() {
     });
     next();
   });
-  // Metrics endpoint — protected to internal/monitoring only
-  app.get('/metrics', async (_req: Request, res: Response) => {
+  // Metrics endpoint — protected by METRICS_TOKEN bearer auth or localhost-only
+  app.get('/metrics', async (req: Request, res: Response) => {
+    const metricsToken = process.env.METRICS_TOKEN;
+    const authHeader = req.headers['authorization'];
+    const clientIp = req.ip ?? '';
+    const isLocalhost = clientIp === '127.0.0.1' || clientIp === '::1' || clientIp === '::ffff:127.0.0.1';
+    if (metricsToken) {
+      if (!authHeader || authHeader !== `Bearer ${metricsToken}`) {
+        res.status(401).json({ error: 'Unauthorized: valid METRICS_TOKEN required' });
+        return;
+      }
+    } else if (!isLocalhost) {
+      res.status(403).json({ error: 'Forbidden: metrics only accessible from localhost or with METRICS_TOKEN' });
+      return;
+    }
     try {
       res.set('Content-Type', promRegister.contentType);
       res.end(await promRegister.metrics());
