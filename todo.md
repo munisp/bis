@@ -1664,3 +1664,9 @@
 - [x] Transfer Detail slide-over drawer on Payment Rails page (txRef, debit/credit accounts, ledger, code, idempotency key)
 - [x] Manual "Run Archival Now" button on Payment Rails page (trpc.archival.runNightlyArchival mutation, progress toast, result card)
 - [x] Grafana dashboard link button on Payment Rails page (VITE_GRAFANA_URL env variable, View Load Test Dashboard)
+
+## Phase v58 — Next Steps (Round 8)
+- [ ] Dry-run toggle on Run Archival Now button (dryRun: true input, preview result card)
+- [ ] Debounced transfer search bar (txRef, originator, beneficiary) via searchTransfers tRPC
+- [ ] TigerBeetle account detail page /payment-rails/accounts/:accountId with balance chart
+- [ ] Freeze Account admin action on account detail page

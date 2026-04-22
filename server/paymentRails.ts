@@ -14,7 +14,7 @@ import { z } from "zod";
 import { router, protectedProcedure, adminProcedure } from "./_core/trpc";
 import { getDb } from "./db";
 import { transactions } from "../drizzle/schema";
-import { desc, eq, sql, and, gte, lt } from "drizzle-orm";
+import { desc, eq, sql, and, gte, lt, or, ilike } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -304,6 +304,184 @@ export const paymentRailsRouter = router({
         .sort((a, b) => Math.abs(b.netBalance) - Math.abs(a.netBalance));
 
       return { balances, totalAccounts: balanceMap.size };
+    }),
+
+  /**
+   * Search transfers by txRef, originator name, beneficiary name, or account number.
+   * Debounced on the frontend; returns up to 30 matches.
+   */
+  searchTransfers: protectedProcedure
+    .input(z.object({
+      query: z.string().min(1).max(128),
+      limit: z.number().min(1).max(50).default(30),
+    }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
+      const q = `%${input.query}%`;
+      const rows = await db.select({
+        id: transactions.id,
+        txRef: transactions.txRef,
+        status: transactions.status,
+        amount: transactions.amount,
+        currency: transactions.currency,
+        originatorName: transactions.originatorName,
+        originatorAccount: transactions.originatorAccount,
+        beneficiaryName: transactions.beneficiaryName,
+        beneficiaryAccount: transactions.beneficiaryAccount,
+        idempotencyKey: transactions.idempotencyKey,
+        tigerBeetleId: transactions.tigerBeetleId,
+        createdAt: transactions.createdAt,
+        updatedAt: transactions.updatedAt,
+      })
+        .from(transactions)
+        .where(or(
+          ilike(transactions.txRef, q),
+          ilike(transactions.originatorName, q),
+          ilike(transactions.beneficiaryName, q),
+          ilike(transactions.originatorAccount, q),
+          ilike(transactions.beneficiaryAccount, q),
+        ))
+        .orderBy(desc(transactions.createdAt))
+        .limit(input.limit);
+      return {
+        items: rows.map(r => ({ ...r, status: mapStatus(r.status ?? "pending"), amount: r.amount ?? 0 })),
+        query: input.query,
+      };
+    }),
+
+  /**
+   * Get full account detail: balance summary + recent transfer history + daily chart series.
+   * Used by the /payment-rails/accounts/:accountId detail page.
+   */
+  getAccountDetail: protectedProcedure
+    .input(z.object({
+      accountId: z.string().min(1).max(64),
+      historyLimit: z.number().min(1).max(200).default(50),
+    }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
+
+      const [debitRow] = await db.select({
+        accountName: transactions.originatorName,
+        postedDebits: sql<number>`coalesce(sum(case when ${transactions.status} = 'completed' then ${transactions.amount} else 0 end), 0)`,
+        pendingDebits: sql<number>`coalesce(sum(case when ${transactions.status} in ('pending','under_review','flagged') then ${transactions.amount} else 0 end), 0)`,
+        currency: transactions.currency,
+      })
+        .from(transactions)
+        .where(eq(transactions.originatorAccount, input.accountId))
+        .groupBy(transactions.originatorName, transactions.currency)
+        .limit(1);
+
+      const [creditRow] = await db.select({
+        accountName: transactions.beneficiaryName,
+        postedCredits: sql<number>`coalesce(sum(case when ${transactions.status} = 'completed' then ${transactions.amount} else 0 end), 0)`,
+        pendingCredits: sql<number>`coalesce(sum(case when ${transactions.status} in ('pending','under_review','flagged') then ${transactions.amount} else 0 end), 0)`,
+        currency: transactions.currency,
+      })
+        .from(transactions)
+        .where(eq(transactions.beneficiaryAccount, input.accountId))
+        .groupBy(transactions.beneficiaryName, transactions.currency)
+        .limit(1);
+
+      if (!debitRow && !creditRow) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Account not found" });
+      }
+
+      const accountName = debitRow?.accountName ?? creditRow?.accountName ?? input.accountId;
+      const currency = debitRow?.currency ?? creditRow?.currency ?? "NGN";
+      const debitsPosted = Number(debitRow?.postedDebits ?? 0);
+      const creditsPosted = Number(creditRow?.postedCredits ?? 0);
+      const debitsPending = Number(debitRow?.pendingDebits ?? 0);
+      const creditsPending = Number(creditRow?.pendingCredits ?? 0);
+
+      const history = await db.select({
+        txRef: transactions.txRef,
+        status: transactions.status,
+        amount: transactions.amount,
+        currency: transactions.currency,
+        originatorName: transactions.originatorName,
+        originatorAccount: transactions.originatorAccount,
+        beneficiaryName: transactions.beneficiaryName,
+        beneficiaryAccount: transactions.beneficiaryAccount,
+        createdAt: transactions.createdAt,
+        idempotencyKey: transactions.idempotencyKey,
+      })
+        .from(transactions)
+        .where(or(
+          eq(transactions.originatorAccount, input.accountId),
+          eq(transactions.beneficiaryAccount, input.accountId),
+        ))
+        .orderBy(desc(transactions.createdAt))
+        .limit(input.historyLimit);
+
+      const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      const dailySeries = await db.select({
+        day: sql<string>`DATE(${transactions.createdAt})`,
+        credits: sql<number>`coalesce(sum(case when ${transactions.beneficiaryAccount} = ${input.accountId} and ${transactions.status} = 'completed' then ${transactions.amount} else 0 end), 0)`,
+        debits: sql<number>`coalesce(sum(case when ${transactions.originatorAccount} = ${input.accountId} and ${transactions.status} = 'completed' then ${transactions.amount} else 0 end), 0)`,
+      })
+        .from(transactions)
+        .where(and(
+          gte(transactions.createdAt, thirtyDaysAgo),
+          or(
+            eq(transactions.originatorAccount, input.accountId),
+            eq(transactions.beneficiaryAccount, input.accountId),
+          )
+        ))
+        .groupBy(sql`DATE(${transactions.createdAt})`)
+        .orderBy(sql`DATE(${transactions.createdAt})`);
+
+      return {
+        accountId: input.accountId,
+        accountName,
+        currency,
+        balance: {
+          debitsPosted,
+          creditsPosted,
+          debitsPending,
+          creditsPending,
+          net: creditsPosted - debitsPosted,
+        },
+        history: history.map(r => ({ ...r, status: mapStatus(r.status ?? "pending"), amount: r.amount ?? 0 })),
+        dailySeries: dailySeries.map(d => ({
+          day: d.day,
+          credits: Number(d.credits),
+          debits: Number(d.debits),
+          net: Number(d.credits) - Number(d.debits),
+        })),
+      };
+    }),
+
+  /**
+   * Freeze an account — blocks all pending transfers from/to this account.
+   * Admin-only. Flags all pending/under_review transactions as blocked.
+   */
+  freezeAccount: adminProcedure
+    .input(z.object({
+      accountId: z.string().min(1).max(64),
+      reason: z.string().min(1).max(512),
+    }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
+      const result = await db
+        .update(transactions)
+        .set({ status: "blocked", updatedAt: new Date() })
+        .where(and(
+          sql`${transactions.status} IN ('pending', 'under_review')`,
+          or(
+            eq(transactions.originatorAccount, input.accountId),
+            eq(transactions.beneficiaryAccount, input.accountId),
+          )
+        ));
+      return {
+        accountId: input.accountId,
+        frozenAt: new Date(),
+        reason: input.reason,
+        affectedTransactions: (result as any).rowsAffected ?? 0,
+      };
     }),
 
   /**

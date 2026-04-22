@@ -15,7 +15,7 @@
  *   - "Run Archival Now" button with progress toast and result card
  *   - "View Load Test Dashboard" Grafana link (VITE_GRAFANA_URL env var)
  */
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -34,10 +34,14 @@ import {
   SheetTitle,
   SheetDescription,
 } from "@/components/ui/sheet";
+import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
+import { useLocation } from "wouter";
 import {
   TrendingUp, Activity, AlertCircle, CheckCircle2, XCircle,
   Clock, RefreshCw, Database, Archive, Layers, Zap,
-  ArrowUpDown, ExternalLink, Play, Copy, Check,
+  ArrowUpDown, ExternalLink, Play, Copy, Check, Search, X,
 } from "lucide-react";
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -534,11 +538,31 @@ function ArchivalResultCard({ result, onDismiss }: { result: ArchivalResultData;
 function TransferList() {
   const [statusFilter, setStatusFilter] = useState<"all" | TransferStatus>("all");
   const [drawerTxRef, setDrawerTxRef] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [, navigate] = useLocation();
 
-  const { data, isLoading, refetch } = trpc.paymentRails.listTransfers.useQuery(
+  // Debounce search input — 350 ms
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => setDebouncedQuery(searchQuery.trim()), 350);
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+  }, [searchQuery]);
+
+  const isSearching = debouncedQuery.length >= 2;
+
+  const { data: listData, isLoading: listLoading, refetch } = trpc.paymentRails.listTransfers.useQuery(
     { status: statusFilter, limit: 50 },
-    { refetchInterval: 15_000 }
+    { refetchInterval: isSearching ? false : 15_000, enabled: !isSearching }
   );
+  const { data: searchData, isLoading: searchLoading } = trpc.paymentRails.searchTransfers.useQuery(
+    { query: debouncedQuery },
+    { enabled: isSearching }
+  );
+
+  const data = isSearching ? (searchData ? { items: searchData.items, hasMore: false } : null) : listData;
+  const isLoading = isSearching ? searchLoading : listLoading;
 
   return (
     <>
@@ -548,25 +572,52 @@ function TransferList() {
             <CardTitle className="text-sm font-semibold text-slate-200 flex items-center gap-2">
               <TrendingUp size={14} className="text-indigo-400" />
               Transfer Ledger
+              {isSearching && (
+                <Badge variant="outline" className="text-[10px] font-mono bg-indigo-500/10 text-indigo-400 border-indigo-500/30 ml-1">
+                  {searchData?.items.length ?? 0} result{(searchData?.items.length ?? 0) !== 1 ? "s" : ""}
+                </Badge>
+              )}
             </CardTitle>
             <div className="flex items-center gap-2">
-              <Select value={statusFilter} onValueChange={(v: any) => setStatusFilter(v)}>
-                <SelectTrigger className="h-7 w-32 text-xs bg-slate-800 border-slate-700">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="bg-slate-800 border-slate-700">
-                  {(["all", "pending", "posted", "voided", "failed", "reversed"] as const).map(s => (
-                    <SelectItem key={s} value={s} className="text-xs capitalize">{s}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => refetch()}>
+              {/* Debounced search input */}
+              <div className="relative">
+                <Search size={11} className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-500" />
+                <Input
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  placeholder="Search txRef, name, account…"
+                  className="h-7 w-52 pl-6 pr-6 text-xs bg-slate-800 border-slate-700 text-slate-200 placeholder:text-slate-600 focus-visible:ring-indigo-500/50"
+                />
+                {searchQuery && (
+                  <button
+                    onClick={() => { setSearchQuery(""); setDebouncedQuery(""); }}
+                    className="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                  >
+                    <X size={10} />
+                  </button>
+                )}
+              </div>
+              {!isSearching && (
+                <Select value={statusFilter} onValueChange={(v: any) => setStatusFilter(v)}>
+                  <SelectTrigger className="h-7 w-32 text-xs bg-slate-800 border-slate-700">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-slate-800 border-slate-700">
+                    {(["all", "pending", "posted", "voided", "failed", "reversed"] as const).map(s => (
+                      <SelectItem key={s} value={s} className="text-xs capitalize">{s}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => refetch()} disabled={isSearching}>
                 <RefreshCw size={12} className="text-slate-400" />
               </Button>
             </div>
           </div>
           <CardDescription className="text-xs text-slate-500">
-            Click any row to open the Transfer Detail drawer · idempotency-keyed · batched at 8,190
+            {isSearching
+              ? `Searching for "${debouncedQuery}" across txRef, originator, beneficiary, and account numbers`
+              : "Click any row to open the Transfer Detail drawer · idempotency-keyed · batched at 8,190"}
           </CardDescription>
         </CardHeader>
         <CardContent className="p-0">
@@ -610,7 +661,17 @@ function TransferList() {
                         {formatRelativeTime(tx.createdAt)}
                       </TableCell>
                       <TableCell>
-                        <ExternalLink size={11} className="text-slate-600" />
+                        <button
+                          onClick={e => {
+                            e.stopPropagation();
+                            const acct = (tx as any).originatorAccount ?? (tx as any).beneficiaryAccount;
+                            if (acct) navigate(`/payment-rails/accounts/${encodeURIComponent(acct)}`);
+                          }}
+                          title="View account detail"
+                          className="text-slate-600 hover:text-indigo-400 transition-colors"
+                        >
+                          <ExternalLink size={11} />
+                        </button>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -646,7 +707,7 @@ function TransferList() {
 
 export default function PaymentRailsPage() {
   const [archivalResult, setArchivalResult] = useState<ArchivalResultData | null>(null);
-
+  const [isDryRun, setIsDryRun] = useState(false);
   const runArchival = trpc.archival.runArchival.useMutation({
     onMutate: () => {
       toast.loading("Running archival job…", { id: "archival-job" });
@@ -701,18 +762,34 @@ export default function PaymentRailsPage() {
             View Load Test Dashboard
           </Button>
 
+          {/* Dry-run toggle */}
+          <div className="flex items-center gap-1.5 bg-slate-800/60 border border-slate-700 rounded-md px-2.5 h-8">
+            <Switch
+              id="dry-run-toggle"
+              checked={isDryRun}
+              onCheckedChange={setIsDryRun}
+              className="scale-75"
+            />
+            <Label htmlFor="dry-run-toggle" className="text-[10px] text-slate-400 cursor-pointer select-none">
+              Dry Run
+            </Label>
+          </div>
           {/* Run Archival Now */}
           <Button
             variant="outline"
             size="sm"
-            className="h-8 text-xs gap-1.5 border-orange-700/50 bg-orange-900/10 text-orange-300 hover:bg-orange-900/20 hover:text-orange-200"
+            className={`h-8 text-xs gap-1.5 ${
+              isDryRun
+                ? "border-slate-600 bg-slate-800/60 text-slate-300 hover:bg-slate-700"
+                : "border-orange-700/50 bg-orange-900/10 text-orange-300 hover:bg-orange-900/20 hover:text-orange-200"
+            }`}
             disabled={runArchival.isPending}
-            onClick={() => runArchival.mutate({ tier: "all", dryRun: false })}
+            onClick={() => runArchival.mutate({ tier: "all", dryRun: isDryRun })}
           >
             {runArchival.isPending
               ? <RefreshCw size={11} className="animate-spin" />
               : <Play size={11} />}
-            {runArchival.isPending ? "Running…" : "Run Archival Now"}
+            {runArchival.isPending ? "Running…" : isDryRun ? "Preview Archival" : "Run Archival Now"}
           </Button>
 
           <Badge variant="outline" className="text-[10px] font-mono bg-indigo-500/10 text-indigo-400 border-indigo-500/30">

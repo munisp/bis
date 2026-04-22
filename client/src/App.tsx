@@ -31,6 +31,7 @@ const ZeroFootprintPage         = lazy(() => import("@/pages/bis/ZeroFootprintPa
 
 const BillingPage               = lazy(() => import("@/pages/bis/BillingPage"));
 const PaymentRailsPage          = lazy(() => import("@/pages/PaymentRails"));
+const AccountDetailPage          = lazy(() => import("@/pages/AccountDetail"));
 const KYCVerificationPage       = lazy(() => import("@/pages/kyc/KYCVerificationPage"));
 const KYCRecordsPage            = lazy(() => import("@/pages/kyc/KYCRecordsPage"));
 const MessagingChannelsPage     = lazy(() => import("@/pages/messaging/MessagingChannelsPage"));
@@ -123,6 +124,7 @@ function Router() {
         <Route path="/data-sources" component={DataSourcesPage} />
         <Route path="/billing" component={BillingPage} />
         <Route path="/payment-rails" component={PaymentRailsPage} />
+        <Route path="/payment-rails/accounts/:accountId" component={AccountDetailPage} />
 
         {/* KYC / Onboarding / Intelligence */}
         <Route path="/kyc-verification" component={KYCVerificationPage} />
