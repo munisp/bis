@@ -1648,3 +1648,14 @@
 - [x] k6 verification load test (cache hit measurement)
 - [x] GitHub Actions load-test.yml (smoke + nightly + stress)
 - [x] Architecture lessons document (docs/architecture/1b-payments-lessons.md)
+
+## Phase v56 — Next Steps (Round 6)
+- [x] Nightly archival cron job wired in server/_core/index.ts (node-cron, 02:00 UTC)
+- [x] archival.ts exports runArchivalJob() callable directly (no tRPC overhead)
+- [x] Payment Rails UI page (/payment-rails) with live transfer status
+- [x] tRPC paymentRails router: transfers.list, transfers.get, queue.stats, accounts.balances
+- [x] Payment Rails sidebar nav item + App.tsx route
+- [x] InfluxDB v2 container in docker-compose.yml
+- [x] k6 GitHub Actions workflow updated to push results to InfluxDB
+- [x] Grafana provisioning: InfluxDB datasource + k6 performance dashboard
+- [x] Grafana k6 dashboard panels: p50/p95/p99 latency, throughput, error rate, backpressure 503s

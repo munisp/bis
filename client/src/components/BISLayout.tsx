@@ -100,6 +100,7 @@ const BASE_NAV_GROUPS: NavGroup[] = [
       { label: 'User Management', href: '/admin/users', icon: <UserCheck size={15} />, adminOnly: true },
       { label: 'Tenants & API Keys', href: '/tenants', icon: <Key size={15} /> },
       { label: 'Billing & Ledger', href: '/billing', icon: <Wallet size={15} /> },
+      { label: 'Payment Rails', href: '/payment-rails', icon: <TrendingUp size={15} /> },
       { label: 'Notifications', href: '/notifications', icon: <BellRing size={15} /> },
       { label: 'Settings', href: '/settings', icon: <Settings size={15} /> },
       { label: 'Audit Log', href: '/audit-log', icon: <ClipboardList size={15} /> },

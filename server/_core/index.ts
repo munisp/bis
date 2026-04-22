@@ -26,6 +26,7 @@ import { creditTenantAccount } from "../billing";
 import crypto from "crypto";
 import { createOpenClawRouter } from "../openclawEndpoints";
 import { startSlaBreachScheduler } from "../slaBreachChecker";
+import { startArchivalScheduler } from "../archivalScheduler";
 import { validateEnv } from "../envValidation";
 
 // ── Structured logger ─────────────────────────────────────────────────────────
@@ -531,6 +532,7 @@ async function startServer() {
 startServer()
   .then((srv) => {
     startSlaBreachScheduler();
+    startArchivalScheduler(); // Nightly hot→warm→cold archival at 02:00 UTC
     return srv;
   })
   .catch((err) => {

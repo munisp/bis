@@ -1,0 +1,17 @@
+apiVersion: 1
+
+# ─── InfluxDB 1.8 datasource for k6 load test results ────────────────────────
+# k6 writes to this database via: k6 run --out influxdb=http://influxdb:8086/k6
+# This datasource is used by the k6-payment-rails dashboard.
+
+datasources:
+  - name: InfluxDB-k6
+    type: influxdb
+    access: proxy
+    url: http://influxdb:8086
+    database: k6
+    isDefault: false
+    editable: false
+    jsonData:
+      httpMode: GET
+      timeInterval: "5s"

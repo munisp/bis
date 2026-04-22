@@ -30,6 +30,10 @@ on:
 env:
   K6_VERSION: "0.50.0"
   DEFAULT_BASE_URL: ${{ secrets.STAGING_URL || 'http://localhost:8080' }}
+  # InfluxDB endpoint for k6 metrics persistence
+  # Set INFLUXDB_URL secret to point at your Grafana Cloud or self-hosted InfluxDB instance.
+  # Format: http://<host>:8086/k6  (InfluxDB 1.x) or https://<host>/api/v2 (InfluxDB 2.x)
+  INFLUXDB_URL: ${{ secrets.INFLUXDB_URL || '' }}
 
 jobs:
   # ── Smoke test (fast, runs on every push) ─────────────────────────────────
@@ -56,9 +60,11 @@ jobs:
           BASE_URL: ${{ github.event.inputs.base_url || env.DEFAULT_BASE_URL }}
           API_TOKEN: ${{ secrets.LOAD_TEST_API_TOKEN }}
         run: |
+          mkdir -p k6-results
           k6 run \
             --vus 10 \
             --duration 30s \
+            --out json=k6-results/smoke-results.json \
             --env BASE_URL=$BASE_URL \
             --env API_TOKEN=$API_TOKEN \
             k6/payment-load-test.js
@@ -77,6 +83,22 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.test_type == 'load')
 
+    # Spin up InfluxDB 1.8 as a service container so k6 can write metrics to it.
+    # Grafana (running separately) reads from this InfluxDB instance.
+    services:
+      influxdb:
+        image: influxdb:1.8-alpine
+        env:
+          INFLUXDB_DB: k6
+          INFLUXDB_HTTP_AUTH_ENABLED: "false"
+        ports:
+          - 8086:8086
+        options: >-
+          --health-cmd "curl -f http://localhost:8086/ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - uses: actions/checkout@v4
 
@@ -94,24 +116,51 @@ jobs:
         env:
           BASE_URL: ${{ secrets.STAGING_URL }}
           API_TOKEN: ${{ secrets.LOAD_TEST_API_TOKEN }}
+          # Write to local InfluxDB service container; also write to remote if configured
+          K6_INFLUXDB_URL: ${{ env.INFLUXDB_URL || 'http://localhost:8086/k6' }}
         run: |
           mkdir -p k6-results
+          # Build --out flags: always write JSON; also write to InfluxDB
+          OUT_FLAGS="--out json=k6-results/payment-results.json"
+          if [ -n "$K6_INFLUXDB_URL" ]; then
+            OUT_FLAGS="$OUT_FLAGS --out influxdb=$K6_INFLUXDB_URL"
+          fi
           k6 run \
-            --out json=k6-results/payment-results.json \
+            $OUT_FLAGS \
             --env BASE_URL=$BASE_URL \
             --env API_TOKEN=$API_TOKEN \
+            --tag testrun=payment-nightly-${{ github.run_id }} \
             k6/payment-load-test.js
 
       - name: Run verification load test
         env:
           BASE_URL: ${{ secrets.STAGING_URL }}
           API_TOKEN: ${{ secrets.LOAD_TEST_API_TOKEN }}
+          K6_INFLUXDB_URL: ${{ env.INFLUXDB_URL || 'http://localhost:8086/k6' }}
         run: |
+          OUT_FLAGS="--out json=k6-results/verification-results.json"
+          if [ -n "$K6_INFLUXDB_URL" ]; then
+            OUT_FLAGS="$OUT_FLAGS --out influxdb=$K6_INFLUXDB_URL"
+          fi
           k6 run \
-            --out json=k6-results/verification-results.json \
+            $OUT_FLAGS \
             --env BASE_URL=$BASE_URL \
             --env API_TOKEN=$API_TOKEN \
+            --tag testrun=verification-nightly-${{ github.run_id }} \
             k6/verification-load-test.js
+
+      - name: Export InfluxDB snapshot (for Grafana)
+        # Dump the k6 database from the service container so it can be archived
+        # and imported into a persistent Grafana/InfluxDB instance for trend analysis.
+        run: |
+          mkdir -p k6-results/influxdb-snapshot
+          curl -s "http://localhost:8086/query?db=k6&q=SELECT+*+FROM+http_req_duration+LIMIT+1000" \
+            -o k6-results/influxdb-snapshot/http_req_duration.json || true
+          curl -s "http://localhost:8086/query?db=k6&q=SELECT+*+FROM+http_req_failed+LIMIT+1000" \
+            -o k6-results/influxdb-snapshot/http_req_failed.json || true
+          curl -s "http://localhost:8086/query?db=k6&q=SELECT+*+FROM+http_reqs+LIMIT+1000" \
+            -o k6-results/influxdb-snapshot/http_reqs.json || true
+          echo "InfluxDB snapshot saved to k6-results/influxdb-snapshot/"
 
       - name: Parse and report SLO results
         run: |
@@ -204,6 +253,20 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.test_type == 'stress'
 
+    services:
+      influxdb:
+        image: influxdb:1.8-alpine
+        env:
+          INFLUXDB_DB: k6
+          INFLUXDB_HTTP_AUTH_ENABLED: "false"
+        ports:
+          - 8086:8086
+        options: >-
+          --health-cmd "curl -f http://localhost:8086/ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - uses: actions/checkout@v4
 
@@ -221,12 +284,20 @@ jobs:
         env:
           BASE_URL: ${{ github.event.inputs.base_url || secrets.STAGING_URL }}
           API_TOKEN: ${{ secrets.LOAD_TEST_API_TOKEN }}
+          K6_INFLUXDB_URL: ${{ env.INFLUXDB_URL || 'http://localhost:8086/k6' }}
         run: |
+          mkdir -p k6-results
+          OUT_FLAGS="--out json=k6-results/stress-results.json"
+          if [ -n "$K6_INFLUXDB_URL" ]; then
+            OUT_FLAGS="$OUT_FLAGS --out influxdb=$K6_INFLUXDB_URL"
+          fi
           k6 run \
+            $OUT_FLAGS \
             --vus 5000 \
             --duration 10m \
             --env BASE_URL=$BASE_URL \
             --env API_TOKEN=$API_TOKEN \
+            --tag testrun=stress-${{ github.run_id }} \
             k6/payment-load-test.js || true  # Don't fail CI on stress test
 
       - name: Upload stress results

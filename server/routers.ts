@@ -28,6 +28,7 @@ import { lakehouseRouter } from "./lakehouse";
 import { lexRouter } from "./lex";
 import { sessionsRouter, totpRouter, notificationsRouter, investigationLinksRouter, exportSchedulesRouter } from "./platform";
 import { archivalRouter } from "./archival";
+import { paymentRailsRouter } from "./paymentRails";
 import { getDb } from "./db";
 import { evaluateAlertRules } from "./alertRules";
 import {
@@ -3336,5 +3337,6 @@ export const appRouter = router({
   temporal: temporalRouter,
   redis: redisRouter,
   archival: archivalRouter,
+  paymentRails: paymentRailsRouter,
 });
 export type AppRouter = typeof appRouter;

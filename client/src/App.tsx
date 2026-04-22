@@ -30,6 +30,7 @@ const WorkAuthorizationPage     = lazy(() => import("@/pages/bis/WorkAuthorizati
 const ZeroFootprintPage         = lazy(() => import("@/pages/bis/ZeroFootprintPage"));
 
 const BillingPage               = lazy(() => import("@/pages/bis/BillingPage"));
+const PaymentRailsPage          = lazy(() => import("@/pages/PaymentRails"));
 const KYCVerificationPage       = lazy(() => import("@/pages/kyc/KYCVerificationPage"));
 const KYCRecordsPage            = lazy(() => import("@/pages/kyc/KYCRecordsPage"));
 const MessagingChannelsPage     = lazy(() => import("@/pages/messaging/MessagingChannelsPage"));
@@ -121,6 +122,7 @@ function Router() {
         <Route path="/field-agents" component={FieldAgentsPage} />
         <Route path="/data-sources" component={DataSourcesPage} />
         <Route path="/billing" component={BillingPage} />
+        <Route path="/payment-rails" component={PaymentRailsPage} />
 
         {/* KYC / Onboarding / Intelligence */}
         <Route path="/kyc-verification" component={KYCVerificationPage} />

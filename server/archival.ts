@@ -203,6 +203,38 @@ export async function archiveToCold(dryRun = false): Promise<ArchivalResult> {
   };
 }
 
+// ─── Standalone job (called by cron scheduler) ──────────────────────────────
+
+/**
+ * runArchivalJob — callable directly from the cron scheduler (no tRPC overhead).
+ * Runs both warm and cold archival passes sequentially and logs results.
+ */
+export async function runArchivalJob(): Promise<void> {
+  const label = "[ArchivalJob]";
+  console.log(`${label} Starting nightly archival run — ${new Date().toISOString()}`);
+  try {
+    const warm = await archiveToWarm(false);
+    console.log(
+      `${label} Warm tier: ${warm.rowsArchived} rows archived, ` +
+      `${warm.bytesWritten} bytes written, ${warm.durationMs}ms` +
+      (warm.errors.length ? ` | errors: ${warm.errors.join("; ")}` : "")
+    );
+  } catch (err) {
+    console.error(`${label} Warm archival failed:`, err);
+  }
+  try {
+    const cold = await archiveToCold(false);
+    console.log(
+      `${label} Cold tier: ${cold.rowsArchived} rows archived, ` +
+      `${cold.bytesWritten} bytes written, ${cold.durationMs}ms` +
+      (cold.errors.length ? ` | errors: ${cold.errors.join("; ")}` : "")
+    );
+  } catch (err) {
+    console.error(`${label} Cold archival failed:`, err);
+  }
+  console.log(`${label} Nightly archival run complete — ${new Date().toISOString()}`);
+}
+
 // ─── tRPC router ──────────────────────────────────────────────────────────────
 
 export const archivalRouter = router({
