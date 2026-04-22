@@ -1659,3 +1659,8 @@
 - [x] k6 GitHub Actions workflow updated to push results to InfluxDB
 - [x] Grafana provisioning: InfluxDB datasource + k6 performance dashboard
 - [x] Grafana k6 dashboard panels: p50/p95/p99 latency, throughput, error rate, backpressure 503s
+
+## Phase v57 — Next Steps (Round 7)
+- [x] Transfer Detail slide-over drawer on Payment Rails page (txRef, debit/credit accounts, ledger, code, idempotency key)
+- [x] Manual "Run Archival Now" button on Payment Rails page (trpc.archival.runNightlyArchival mutation, progress toast, result card)
+- [x] Grafana dashboard link button on Payment Rails page (VITE_GRAFANA_URL env variable, View Load Test Dashboard)
