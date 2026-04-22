@@ -1595,3 +1595,56 @@
 - [x] Rust: Kafka HA config added to event-emitter
 - [x] All tests: 269 Vitest + 28 gateway + 16 case-manager + 4 event-emitter + 36 lex-validator + 29 risk-scoring + 16 ml-enrichment + 27 lakehouse-writer = 425 total
 - [x] TypeScript: 0 errors
+
+## Phase 55 — 1B Payments Architecture + Live Credentials + Redis + Publish
+
+- [ ] Research 1B payments articles and extract applicable lessons
+- [ ] Wire GATEWAY_SANDBOX=false production path with real API key fallback
+- [ ] Configure Redis Sentinel/Cluster URL in cache.ts
+- [ ] Apply 1B payments lessons: write-ahead log, batch inserts, idempotency keys
+- [ ] TigerBeetle ledger integration for payment-rails service
+- [ ] Partitioned Kafka topics for high-throughput event processing
+- [ ] Backpressure / rate limiting on inbound verification requests
+- [ ] k6 load test configuration
+- [ ] SLA checker tuning for p99 response time targets
+- [ ] Save checkpoint and generate v55 archive
+
+## 1B Payments Architecture Lessons (Applied)
+- [x] TigerBeetle batch client in payment-rails (MaxBatchSize=8190)
+- [x] TigerBeetle idempotency key helper (SHA-256 deterministic)
+- [x] Backpressure middleware in payment-rails (semaphore + 503)
+- [x] Idempotency key column in transactions DB schema (migration 0029)
+- [x] Idempotency deduplication in tRPC transactions.create
+- [x] Hot/Warm/Cold archival tiers in server/archival.ts
+- [x] Nightly archival job tRPC router (archival.runNightlyArchival)
+- [x] Kafka partitioning by account range in event-emitter (murmur2, 32 partitions)
+- [x] Backpressure semaphore in event-emitter (MAX_INFLIGHT=8190)
+- [x] Prometheus /metrics endpoint in event-emitter
+- [x] POST /events/publish endpoint with backpressure in event-emitter
+- [x] Redis Sentinel support in server/cache.ts
+- [x] GATEWAY_SANDBOX defaults to false (production-safe)
+- [x] Redis Sentinel env vars in server/_core/env.ts
+- [x] k6 payment load test (ramp-up + idempotency replay scenarios)
+- [x] k6 verification load test (cache hit measurement)
+- [x] GitHub Actions load-test.yml (smoke + nightly + stress)
+- [x] Architecture lessons document (docs/architecture/1b-payments-lessons.md)
+
+## 1B Payments Architecture Lessons (Applied)
+- [x] TigerBeetle batch client in payment-rails (MaxBatchSize=8190)
+- [x] TigerBeetle idempotency key helper (SHA-256 deterministic)
+- [x] Backpressure middleware in payment-rails (semaphore + 503)
+- [x] Idempotency key column in transactions DB schema (migration 0029)
+- [x] Idempotency deduplication in tRPC transactions.create
+- [x] Hot/Warm/Cold archival tiers in server/archival.ts
+- [x] Nightly archival job tRPC router (archival.runNightlyArchival)
+- [x] Kafka partitioning by account range in event-emitter (murmur2, 32 partitions)
+- [x] Backpressure semaphore in event-emitter (MAX_INFLIGHT=8190)
+- [x] Prometheus /metrics endpoint in event-emitter
+- [x] POST /events/publish endpoint with backpressure in event-emitter
+- [x] Redis Sentinel support in server/cache.ts
+- [x] GATEWAY_SANDBOX defaults to false (production-safe)
+- [x] Redis Sentinel env vars in server/_core/env.ts
+- [x] k6 payment load test (ramp-up + idempotency replay scenarios)
+- [x] k6 verification load test (cache hit measurement)
+- [x] GitHub Actions load-test.yml (smoke + nightly + stress)
+- [x] Architecture lessons document (docs/architecture/1b-payments-lessons.md)

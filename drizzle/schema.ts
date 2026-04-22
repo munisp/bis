@@ -1181,6 +1181,11 @@ export const amlRiskLevelEnum = pgEnum("aml_risk_level", ["low", "medium", "high
 export const transactions = pgTable("transactions", {
   id: serial("id").primaryKey(),
   txRef: varchar("txRef", { length: 64 }).notNull().unique(),
+  // Idempotency key (1B payments lesson): prevents double-posting on retries.
+  // Clients MUST send X-Idempotency-Key header; server stores it here for deduplication.
+  idempotencyKey: varchar("idempotencyKey", { length: 256 }).unique(),
+  // TigerBeetle transfer ID (hot-tier ledger). Derived deterministically from idempotencyKey.
+  tigerBeetleId: varchar("tigerBeetleId", { length: 32 }),
   type: transactionTypeEnum("type").notNull(),
   status: transactionStatusEnum("status").notNull().default("pending"),
   amount: real("amount").notNull(),
@@ -1212,6 +1217,8 @@ export const transactions = pgTable("transactions", {
     transactions_status_idx: index("transactions_status_idx").on(table.status),
     transactions_originator_account_idx: index("transactions_originator_account_idx").on(table.originatorAccount),
     transactions_amount_idx: index("transactions_amount_idx").on(table.amount),
+    transactions_idempotency_idx: index("transactions_idempotency_idx").on(table.idempotencyKey),
+    transactions_tb_id_idx: index("transactions_tb_id_idx").on(table.tigerBeetleId),
   }));
 export type Transaction = typeof transactions.$inferSelect;
 export type InsertTransaction = typeof transactions.$inferInsert;

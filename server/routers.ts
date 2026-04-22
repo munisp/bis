@@ -27,6 +27,7 @@ import { biometricRouter } from "./biometric";
 import { lakehouseRouter } from "./lakehouse";
 import { lexRouter } from "./lex";
 import { sessionsRouter, totpRouter, notificationsRouter, investigationLinksRouter, exportSchedulesRouter } from "./platform";
+import { archivalRouter } from "./archival";
 import { getDb } from "./db";
 import { evaluateAlertRules } from "./alertRules";
 import {
@@ -3334,5 +3335,6 @@ export const appRouter = router({
   keycloak: keycloakRouter,
   temporal: temporalRouter,
   redis: redisRouter,
+  archival: archivalRouter,
 });
 export type AppRouter = typeof appRouter;

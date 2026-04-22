@@ -10,7 +10,9 @@ export const ENV = {
   forgeApiKey: process.env.BUILT_IN_FORGE_API_KEY ?? "",
 
   // Gateway / verification engine
-  gatewaySandbox: (process.env.GATEWAY_SANDBOX ?? "true") === "true",
+  // Default false in production — set GATEWAY_SANDBOX=true explicitly for sandbox/dev mode.
+  // Lesson (1B payments): Never default to sandbox in production; fail loudly if real APIs are unreachable.
+  gatewaySandbox: (process.env.GATEWAY_SANDBOX ?? "false") === "true",
 
   // Own Nigerian verification engine
   bisVerifyNimcUrl: process.env.BIS_VERIFY_NIMC_URL ?? "https://api.nimc.gov.ng/v1",
@@ -35,7 +37,11 @@ export const ENV = {
   temporalNamespace: process.env.TEMPORAL_NAMESPACE ?? "default",
 
   // Redis cache / session store
+  // Single-node: REDIS_URL=redis://host:6379
+  // Sentinel HA: REDIS_SENTINELS=host1:26379,host2:26379 + REDIS_SENTINEL_NAME=mymaster
   redisUrl: process.env.REDIS_URL ?? "redis://redis:6379",
+  redisSentinels: process.env.REDIS_SENTINELS ?? "",
+  redisSentinelName: process.env.REDIS_SENTINEL_NAME ?? "mymaster",
 
   // Notifications
   slackWebhookUrl: process.env.SLACK_WEBHOOK_URL ?? "",

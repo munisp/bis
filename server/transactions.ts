@@ -127,10 +127,20 @@ export const transactionsRouter = router({
       narration: z.string().optional(),
       purposeCode: z.string().optional(),
       valueDate: z.string().optional(),
+      // Idempotency key (1B payments lesson): prevents double-posting on retries.
+      // If provided and a transaction with this key already exists, return the existing record.
+      idempotencyKey: z.string().min(8).max(256).optional(),
     }))
     .mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
+
+      // Idempotency deduplication: if key provided, return existing transaction if found
+      if (input.idempotencyKey) {
+        const [existing] = await db.select().from(transactions)
+          .where(eq(transactions.idempotencyKey, input.idempotencyKey));
+        if (existing) return existing; // deduplicated — return existing record
+      }
 
       const { score, flags, riskLevel } = quickScore({
         amount: input.amount,
@@ -142,6 +152,7 @@ export const transactionsRouter = router({
 
       const [tx] = await db.insert(transactions).values({
         txRef: txRef(),
+        idempotencyKey: input.idempotencyKey,
         type: input.txType as any,
         amount: input.amount,
         currency: input.currency,
