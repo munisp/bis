@@ -128,6 +128,18 @@ async fn run_kafka_consumer(
         .set("group.id", "bis-event-emitter")
         .set("auto.offset.reset", "latest")
         .set("enable.auto.commit", "true")
+        .set("auto.commit.interval.ms", "5000")
+        // ── HA tuning ─────────────────────────────────────────────────────────
+        .set("session.timeout.ms", "30000")
+        .set("heartbeat.interval.ms", "10000")
+        .set("max.poll.interval.ms", "300000")
+        .set("reconnect.backoff.ms", "100")
+        .set("reconnect.backoff.max.ms", "10000")
+        .set("socket.keepalive.enable", "true")
+        .set("fetch.min.bytes", "1")
+        .set("fetch.wait.max.ms", "500")
+        .set("enable.partition.eof", "false")
+        .set("metadata.max.age.ms", "60000")
         .create()
         .expect("Failed to create Kafka consumer");
 

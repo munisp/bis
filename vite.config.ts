@@ -210,6 +210,45 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
+    chunkSizeWarningLimit: 600,
+    rollupOptions: {
+      output: {
+        manualChunks: (id) => {
+          // Vendor: React core
+          if (id.includes('node_modules/react/') || id.includes('node_modules/react-dom/')) {
+            return 'vendor-react';
+          }
+          // Vendor: tRPC + React Query
+          if (id.includes('@trpc') || id.includes('@tanstack/react-query')) {
+            return 'vendor-trpc';
+          }
+          // Vendor: Radix UI + shadcn components
+          if (id.includes('@radix-ui') || id.includes('/cmdk/') || id.includes('/vaul/')) {
+            return 'vendor-ui';
+          }
+          // Vendor: Charts (recharts is large)
+          if (id.includes('/recharts/') || id.includes('/d3-') || id.includes('/victory/')) {
+            return 'vendor-charts';
+          }
+          // Vendor: Date utilities
+          if (id.includes('/date-fns/') || id.includes('/dayjs/') || id.includes('/luxon/')) {
+            return 'vendor-date';
+          }
+          // Vendor: Markdown / streaming
+          if (id.includes('/streamdown/') || id.includes('/marked/') || id.includes('/remark/')) {
+            return 'vendor-markdown';
+          }
+          // Vendor: Lucide icons (large)
+          if (id.includes('/lucide-react/')) {
+            return 'vendor-icons';
+          }
+          // Vendor: everything else in node_modules
+          if (id.includes('node_modules')) {
+            return 'vendor-misc';
+          }
+        },
+      },
+    },
   },
   server: {
     host: true,

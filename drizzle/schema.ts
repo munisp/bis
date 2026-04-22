@@ -9,6 +9,7 @@ import {
   boolean,
   json,
   serial,
+  index,
 } from "drizzle-orm/pg-core";
 
 // ─── Enums ────────────────────────────────────────────────────────────────────
@@ -76,7 +77,18 @@ export const investigations = pgTable("investigations", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
   completedAt: timestamp("completedAt"),
-});
+},
+  (table) => ({
+    investigations_status_idx: index("investigations_status_idx").on(table.status),
+    investigations_created_at_idx: index("investigations_created_at_idx").on(table.createdAt),
+    investigations_updated_at_idx: index("investigations_updated_at_idx").on(table.updatedAt),
+    investigations_assigned_to_idx: index("investigations_assigned_to_idx").on(table.assignedTo),
+    investigations_created_by_idx: index("investigations_created_by_idx").on(table.createdBy),
+    investigations_risk_score_idx: index("investigations_risk_score_idx").on(table.riskScore),
+    investigations_subject_name_idx: index("investigations_subject_name_idx").on(table.subjectName),
+    investigations_nin_idx: index("investigations_nin_idx").on(table.nin),
+    investigations_bvn_idx: index("investigations_bvn_idx").on(table.bvn),
+  }));
 
 export type Investigation = typeof investigations.$inferSelect;
 export type InsertInvestigation = typeof investigations.$inferInsert;
@@ -101,7 +113,15 @@ export const alerts = pgTable("alerts", {
   resolvedAt: timestamp("resolvedAt"),
   dismissed: boolean("dismissed").notNull().default(false),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
+},
+  (table) => ({
+    alerts_created_at_idx: index("alerts_created_at_idx").on(table.createdAt),
+    alerts_read_idx: index("alerts_read_idx").on(table.read),
+    alerts_acknowledged_idx: index("alerts_acknowledged_idx").on(table.acknowledged),
+    alerts_severity_idx: index("alerts_severity_idx").on(table.severity),
+    alerts_investigation_id_idx: index("alerts_investigation_id_idx").on(table.investigationId),
+    alerts_subject_ref_idx: index("alerts_subject_ref_idx").on(table.subjectRef),
+  }));
 
 export type Alert = typeof alerts.$inferSelect;
 export type InsertAlert = typeof alerts.$inferInsert;
@@ -130,7 +150,15 @@ export const kycRecords = pgTable("kyc_records", {
   createdBy: integer("createdBy").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
-});
+},
+  (table) => ({
+    kyc_records_status_idx: index("kyc_records_status_idx").on(table.status),
+    kyc_records_created_at_idx: index("kyc_records_created_at_idx").on(table.createdAt),
+    kyc_records_created_by_idx: index("kyc_records_created_by_idx").on(table.createdBy),
+    kyc_records_investigation_id_idx: index("kyc_records_investigation_id_idx").on(table.investigationId),
+    kyc_records_nin_idx: index("kyc_records_nin_idx").on(table.nin),
+    kyc_records_bvn_idx: index("kyc_records_bvn_idx").on(table.bvn),
+  }));
 export type KycRecord = typeof kycRecords.$inferSelect;
 export type InsertKycRecord = typeof kycRecords.$inferInsert;
 
@@ -150,7 +178,13 @@ export const auditLog = pgTable("audit_log", {
   // Computed as: HMAC-SHA256(AUDIT_HMAC_SECRET, userId|category|action|targetRef|result|createdAt)
   integrityHash: varchar("integrityHash", { length: 64 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
+},
+  (table) => ({
+    audit_log_created_at_idx: index("audit_log_created_at_idx").on(table.createdAt),
+    audit_log_user_id_idx: index("audit_log_user_id_idx").on(table.userId),
+    audit_log_category_idx: index("audit_log_category_idx").on(table.category),
+    audit_log_target_ref_idx: index("audit_log_target_ref_idx").on(table.targetRef),
+  }));
 
 export type AuditLog = typeof auditLog.$inferSelect;
 export type InsertAuditLog = typeof auditLog.$inferInsert;
@@ -179,7 +213,14 @@ export const fieldTasks = pgTable("field_tasks", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
   completedAt: timestamp("completedAt"),
-});
+},
+  (table) => ({
+    field_tasks_status_idx: index("field_tasks_status_idx").on(table.status),
+    field_tasks_created_at_idx: index("field_tasks_created_at_idx").on(table.createdAt),
+    field_tasks_investigation_id_idx: index("field_tasks_investigation_id_idx").on(table.investigationId),
+    field_tasks_agent_id_idx: index("field_tasks_agent_id_idx").on(table.agentId),
+    field_tasks_priority_idx: index("field_tasks_priority_idx").on(table.priority),
+  }));
 
 export type FieldTask = typeof fieldTasks.$inferSelect;
 export type InsertFieldTask = typeof fieldTasks.$inferInsert;
@@ -199,7 +240,13 @@ export const reports = pgTable("reports", {
   generatedBy: integer("generatedBy").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
-});
+},
+  (table) => ({
+    reports_status_idx: index("reports_status_idx").on(table.status),
+    reports_created_at_idx: index("reports_created_at_idx").on(table.createdAt),
+    reports_generated_by_idx: index("reports_generated_by_idx").on(table.generatedBy),
+    reports_investigation_id_idx: index("reports_investigation_id_idx").on(table.investigationId),
+  }));
 
 export type Report = typeof reports.$inferSelect;
 export type InsertReport = typeof reports.$inferInsert;
@@ -238,7 +285,12 @@ export const fieldAgents = pgTable("field_agents", {
   createdBy: integer("createdBy").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
-});
+},
+  (table) => ({
+    field_agents_status_idx: index("field_agents_status_idx").on(table.status),
+    field_agents_state_idx: index("field_agents_state_idx").on(table.state),
+    field_agents_created_at_idx: index("field_agents_created_at_idx").on(table.createdAt),
+  }));
 export type FieldAgent = typeof fieldAgents.$inferSelect;
 export type InsertFieldAgent = typeof fieldAgents.$inferInsert;
 
@@ -288,7 +340,12 @@ export const monitors = pgTable("monitors", {
   createdBy: integer("createdBy").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
-});
+},
+  (table) => ({
+    monitors_status_idx: index("monitors_status_idx").on(table.status),
+    monitors_created_at_idx: index("monitors_created_at_idx").on(table.createdAt),
+    monitors_created_by_idx: index("monitors_created_by_idx").on(table.createdBy),
+  }));
 export type Monitor = typeof monitors.$inferSelect;
 export type InsertMonitor = typeof monitors.$inferInsert;
 
@@ -312,7 +369,12 @@ export const screeningRequests = pgTable("screening_requests", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
   completedAt: timestamp("completedAt"),
-});
+},
+  (table) => ({
+    screening_requests_status_idx: index("screening_requests_status_idx").on(table.status),
+    screening_requests_created_at_idx: index("screening_requests_created_at_idx").on(table.createdAt),
+    screening_requests_created_by_idx: index("screening_requests_created_by_idx").on(table.createdBy),
+  }));
 export type ScreeningRequest = typeof screeningRequests.$inferSelect;
 export type InsertScreeningRequest = typeof screeningRequests.$inferInsert;
 
@@ -415,7 +477,12 @@ export const onboardingApplications = pgTable("onboarding_applications", {
   createdBy: varchar("createdBy", { length: 255 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
-});
+},
+  (table) => ({
+    onboarding_apps_status_idx: index("onboarding_apps_status_idx").on(table.status),
+    onboarding_apps_created_at_idx: index("onboarding_apps_created_at_idx").on(table.createdAt),
+    onboarding_apps_created_by_idx: index("onboarding_apps_created_by_idx").on(table.createdBy),
+  }));
 export type OnboardingApplication = typeof onboardingApplications.$inferSelect;
 export type InsertOnboardingApplication = typeof onboardingApplications.$inferInsert;
 
@@ -472,7 +539,12 @@ export const ruleEvaluations = pgTable("rule_evaluations", {
   alertCreated: boolean("alertCreated").notNull().default(false),
   context: text("context"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
+},
+  (table) => ({
+    rule_evaluations_created_at_idx: index("rule_evaluations_created_at_idx").on(table.createdAt),
+    rule_evaluations_rule_id_idx: index("rule_evaluations_rule_id_idx").on(table.ruleId),
+    rule_evaluations_triggered_idx: index("rule_evaluations_triggered_idx").on(table.triggered),
+  }));
 export type RuleEvaluation = typeof ruleEvaluations.$inferSelect;
 export type InsertRuleEvaluation = typeof ruleEvaluations.$inferInsert;
 
@@ -565,7 +637,11 @@ export const goamlFilings = pgTable("goaml_filings", {
   createdBy: integer("createdBy").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
-});
+},
+  (table) => ({
+    goaml_filings_status_idx: index("goaml_filings_status_idx").on(table.status),
+    goaml_filings_created_at_idx: index("goaml_filings_created_at_idx").on(table.createdAt),
+  }));
 
 export type GoamlFiling = typeof goamlFilings.$inferSelect;
 export type InsertGoamlFiling = typeof goamlFilings.$inferInsert;
@@ -659,7 +735,12 @@ export const socialMentions = pgTable("social_mentions", {
   acknowledgedBy: integer("acknowledgedBy"),
   publishedAt: timestamp("publishedAt").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
+},
+  (table) => ({
+    social_mentions_created_at_idx: index("social_mentions_created_at_idx").on(table.createdAt),
+    social_mentions_monitor_id_idx: index("social_mentions_monitor_id_idx").on(table.monitorId),
+    social_mentions_sentiment_idx: index("social_mentions_sentiment_idx").on(table.sentiment),
+  }));
 
 export type SocialMonitorConfig = typeof socialMonitorConfigs.$inferSelect;
 export type InsertSocialMonitorConfig = typeof socialMonitorConfigs.$inferInsert;
@@ -710,7 +791,11 @@ export const duplicateIdentityChecks = pgTable("duplicate_identity_checks", {
   requestedBy: integer("requestedBy"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   completedAt: timestamp("completedAt"),
-});
+},
+  (table) => ({
+    duplicate_checks_status_idx: index("duplicate_checks_status_idx").on(table.status),
+    duplicate_checks_created_at_idx: index("duplicate_checks_created_at_idx").on(table.createdAt),
+  }));
 export type DuplicateIdentityCheck = typeof duplicateIdentityChecks.$inferSelect;
 
 // ── Hosted Verification Links ─────────────────────────────────────────────────
@@ -729,7 +814,11 @@ export const hostedVerificationLinks = pgTable("hosted_verification_links", {
   resultRef: varchar("resultRef", { length: 50 }),
   createdBy: integer("createdBy"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
+},
+  (table) => ({
+    hosted_links_status_idx: index("hosted_links_status_idx").on(table.status),
+    hosted_links_expires_at_idx: index("hosted_links_expires_at_idx").on(table.expiresAt),
+  }));
 export type HostedVerificationLink = typeof hostedVerificationLinks.$inferSelect;
 
 // ─── Case Management ──────────────────────────────────────────────────────────
@@ -770,7 +859,13 @@ export const cases = pgTable("cases", {
   createdBy: integer("createdBy"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
-});
+},
+  (table) => ({
+    cases_status_idx: index("cases_status_idx").on(table.status),
+    cases_created_at_idx: index("cases_created_at_idx").on(table.createdAt),
+    cases_lead_analyst_id_idx: index("cases_lead_analyst_id_idx").on(table.leadAnalystId),
+    cases_priority_idx: index("cases_priority_idx").on(table.priority),
+  }));
 export type Case = typeof cases.$inferSelect;
 export type InsertCase = typeof cases.$inferInsert;
 
@@ -985,7 +1080,12 @@ export const lexSubmissions = pgTable("lex_submissions", {
   rejectionReason: text("rejectionReason"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
-});
+},
+  (table) => ({
+    lex_submissions_status_idx: index("lex_submissions_status_idx").on(table.status),
+    lex_submissions_created_at_idx: index("lex_submissions_created_at_idx").on(table.createdAt),
+    lex_submissions_agency_id_idx: index("lex_submissions_agency_id_idx").on(table.agencyId),
+  }));
 export type LexSubmission = typeof lexSubmissions.$inferSelect;
 
 // ─── User Sessions ────────────────────────────────────────────────────────────
@@ -1000,7 +1100,11 @@ export const userSessions = pgTable("user_sessions", {
   expiresAt: timestamp("expiresAt").notNull(),
   revokedAt: timestamp("revokedAt"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
+},
+  (table) => ({
+    user_sessions_user_id_idx: index("user_sessions_user_id_idx").on(table.userId),
+    user_sessions_expires_at_idx: index("user_sessions_expires_at_idx").on(table.expiresAt),
+  }));
 export type UserSession = typeof userSessions.$inferSelect;
 
 // ─── TOTP / 2FA ───────────────────────────────────────────────────────────────
@@ -1026,7 +1130,12 @@ export const notifications = pgTable("notifications", {
   link: varchar("link", { length: 512 }),
   read: boolean("read").notNull().default(false),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
+},
+  (table) => ({
+    notifications_user_id_idx: index("notifications_user_id_idx").on(table.userId),
+    notifications_read_idx: index("notifications_read_idx").on(table.read),
+    notifications_created_at_idx: index("notifications_created_at_idx").on(table.createdAt),
+  }));
 export type Notification = typeof notifications.$inferSelect;
 
 // ─── Investigation-Case Links ─────────────────────────────────────────────────
@@ -1097,7 +1206,13 @@ export const transactions = pgTable("transactions", {
   valueDate: timestamp("valueDate"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
-});
+},
+  (table) => ({
+    transactions_created_at_idx: index("transactions_created_at_idx").on(table.createdAt),
+    transactions_status_idx: index("transactions_status_idx").on(table.status),
+    transactions_originator_account_idx: index("transactions_originator_account_idx").on(table.originatorAccount),
+    transactions_amount_idx: index("transactions_amount_idx").on(table.amount),
+  }));
 export type Transaction = typeof transactions.$inferSelect;
 export type InsertTransaction = typeof transactions.$inferInsert;
 
@@ -1143,7 +1258,12 @@ export const amlAlerts = pgTable("aml_alerts", {
   investigationId: integer("investigationId").references(() => investigations.id),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
-});
+},
+  (table) => ({
+    aml_alerts_created_at_idx: index("aml_alerts_created_at_idx").on(table.createdAt),
+    aml_alerts_status_idx: index("aml_alerts_status_idx").on(table.status),
+    aml_alerts_rule_id_idx: index("aml_alerts_rule_id_idx").on(table.ruleId),
+  }));
 export type AmlAlert = typeof amlAlerts.$inferSelect;
 
 // ─── SWIFT Messages ───────────────────────────────────────────────────────────
@@ -1276,7 +1396,12 @@ export const sarFilings = pgTable("sar_filings", {
   acknowledgedAt: timestamp("acknowledgedAt"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
-});
+},
+  (table) => ({
+    sar_filings_status_idx: index("sar_filings_status_idx").on(table.status),
+    sar_filings_created_at_idx: index("sar_filings_created_at_idx").on(table.createdAt),
+    sar_filings_created_by_idx: index("sar_filings_created_by_idx").on(table.createdBy),
+  }));
 export type SarFiling = typeof sarFilings.$inferSelect;
 export type InsertSarFiling = typeof sarFilings.$inferInsert;
 
@@ -1421,5 +1546,10 @@ export const regulatoryReports = pgTable("regulatory_reports", {
   createdBy: integer("createdBy").references(() => users.id),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
-});
+},
+  (table) => ({
+    regulatory_reports_status_idx: index("regulatory_reports_status_idx").on(table.status),
+    regulatory_reports_created_at_idx: index("regulatory_reports_created_at_idx").on(table.createdAt),
+    regulatory_reports_type_idx: index("regulatory_reports_type_idx").on(table.type),
+  }));
 export type RegulatoryReport = typeof regulatoryReports.$inferSelect;

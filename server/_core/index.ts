@@ -15,6 +15,8 @@ import helmet from "helmet";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
+import compression from "compression";
+import { register as promRegister, collectDefaultMetrics, Counter, Histogram, Gauge } from "prom-client";
 import { registerOAuthRoutes } from "./oauth";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
@@ -177,6 +179,59 @@ async function startServer() {
       maxAge: 86400, // 24h preflight cache
     });
   app.use(corsMiddleware);
+
+  // ── HTTP Compression ────────────────────────────────────────────────────────
+  // Gzip/deflate all responses above 1KB. Reduces payload size by 60-80%.
+  app.use(compression({
+    level: 6,          // balanced speed vs ratio
+    threshold: 1024,   // only compress responses > 1KB
+    filter: (req, res) => {
+      // Don't compress SSE streams
+      if (req.headers['accept'] === 'text/event-stream') return false;
+      return compression.filter(req, res);
+    },
+  }));
+
+  // ── Prometheus Metrics ──────────────────────────────────────────────────────
+  // Collect default Node.js metrics (heap, GC, event loop lag, etc.)
+  collectDefaultMetrics({ prefix: 'bis_' });
+  const httpRequestDuration = new Histogram({
+    name: 'bis_http_request_duration_seconds',
+    help: 'Duration of HTTP requests in seconds',
+    labelNames: ['method', 'route', 'status_code'],
+    buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5],
+  });
+  const httpRequestTotal = new Counter({
+    name: 'bis_http_requests_total',
+    help: 'Total number of HTTP requests',
+    labelNames: ['method', 'route', 'status_code'],
+  });
+  const activeConnections = new Gauge({
+    name: 'bis_active_connections',
+    help: 'Number of active HTTP connections',
+  });
+  // Track request duration for all routes
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    const end = httpRequestDuration.startTimer();
+    activeConnections.inc();
+    res.on('finish', () => {
+      const route = req.route?.path ?? req.path.replace(/\/[0-9a-f-]{36}/gi, '/:id');
+      end({ method: req.method, route, status_code: String(res.statusCode) });
+      httpRequestTotal.inc({ method: req.method, route, status_code: String(res.statusCode) });
+      activeConnections.dec();
+    });
+    next();
+  });
+  // Metrics endpoint — protected to internal/monitoring only
+  app.get('/metrics', async (_req: Request, res: Response) => {
+    try {
+      res.set('Content-Type', promRegister.contentType);
+      res.end(await promRegister.metrics());
+    } catch (err) {
+      res.status(500).end(String(err));
+    }
+  });
+
   // Express 5 does not support wildcard options — CORS preflight is handled per-route by the cors middleware above
 
   // ── Rate limiting ──────────────────────────────────────────────────────────

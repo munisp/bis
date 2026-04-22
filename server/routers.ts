@@ -1,4 +1,6 @@
 import { COOKIE_NAME } from "@shared/const";
+import { withCache, invalidateCache, TTL } from "./cache";
+import { withCircuitBreaker } from "./circuitBreaker";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { billingRouter } from "./billing";
 import { tenantsRouter } from "./tenants";
@@ -86,21 +88,25 @@ const GATEWAY_KEY = process.env.BIS_GATEWAY_KEY || "dev-gateway-key-change-in-pr
 // ─── Service Client Helpers ───────────────────────────────────────────────────
 
 async function gatewayFetch(path: string) {
-  const res = await fetch(`${GATEWAY_URL}${path}`, {
-    headers: { "X-BIS-Key": GATEWAY_KEY },
+  return withCircuitBreaker("gateway", async () => {
+    const res = await fetch(`${GATEWAY_URL}${path}`, {
+      headers: { "X-BIS-Key": GATEWAY_KEY },
+    });
+    if (!res.ok) throw new Error(`Gateway error ${res.status}: ${await res.text()}`);
+    return res.json();
   });
-  if (!res.ok) throw new Error(`Gateway error ${res.status}: ${await res.text()}`);
-  return res.json();
 }
 
 async function riskEngineFetch(path: string, body: unknown) {
-  const res = await fetch(`${RISK_ENGINE_URL}${path}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-BIS-Key": GATEWAY_KEY },
-    body: JSON.stringify(body),
+  return withCircuitBreaker("risk-engine", async () => {
+    const res = await fetch(`${RISK_ENGINE_URL}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-BIS-Key": GATEWAY_KEY },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(`Risk engine error ${res.status}: ${await res.text()}`);
+    return res.json();
   });
-  if (!res.ok) throw new Error(`Risk engine error ${res.status}: ${await res.text()}`);
-  return res.json();
 }
 
 async function publishEvent(eventType: string, subjectRef: string, severity: string, payload: unknown, source = "bis-bff") {
@@ -157,7 +163,9 @@ async function writeAuditLog(db: NonNullable<Awaited<ReturnType<typeof getDb>>>,
 
 function generateRef(prefix: string): string {
   const year = new Date().getFullYear();
-  const rand = Math.floor(Math.random() * 9000) + 1000;
+  // Use crypto.randomBytes for cryptographically secure unique IDs
+  const { randomBytes } = require("crypto");
+  const rand = randomBytes(3).toString("hex").toUpperCase(); // 6 hex chars = 16M combinations
   return `${prefix}-${year}-${rand}`;
 }
 
@@ -1272,14 +1280,36 @@ const reportsRouter = router({
         sections: input.sections as any,
         generatedBy: ctx.user!.id,
       });
-      // Simulate async generation — mark ready after 2s
-      setTimeout(async () => {
-        const db2 = await getDb();
-        if (db2) {
-          await db2.update(reports).set({ status: "ready", fileUrl: `https://storage.bis.ng/reports/${reportRef}.${input.format}` }).where(eq(reports.reportRef, reportRef));
-          await publishEvent("REPORT_GENERATED", reportRef, "info", { template: input.template, format: input.format });
+      // Real async report generation — non-blocking, runs immediately after response
+      setImmediate(async () => {
+        try {
+          const db2 = await getDb();
+          if (!db2) return;
+          // Generate executive summary via LLM
+          let summary = "";
+          try {
+            const llmRes = await invokeLLM({
+              messages: [
+                { role: "system", content: "You are a professional intelligence analyst. Write a concise executive summary for this report." },
+                { role: "user", content: `Report: ${input.title}\nTemplate: ${input.template}\nSections: ${(input.sections ?? []).join(", ")}` },
+              ],
+            });
+            summary = (llmRes as any)?.choices?.[0]?.message?.content ?? "";
+          } catch (llmErr) {
+            console.warn("[Report LLM] Summary generation failed:", llmErr);
+          }
+          // Persist report to S3
+          const reportPayload = JSON.stringify({ reportRef, title: input.title, template: input.template, format: input.format, summary, generatedAt: new Date().toISOString() });
+          const fileKey = `reports/${reportRef}.json`;
+          const { url: fileUrl } = await storagePut(fileKey, Buffer.from(reportPayload), "application/json");
+          await db2.update(reports).set({ status: "ready", fileUrl }).where(eq(reports.reportRef, reportRef));
+          await publishEvent("REPORT_GENERATED", reportRef, "info", { template: input.template, format: input.format, fileUrl });
+        } catch (err) {
+          console.error("[Report Generation] Failed:", err);
+          const db2 = await getDb();
+          if (db2) await db2.update(reports).set({ status: "failed" }).where(eq(reports.reportRef, reportRef));
         }
-      }, 2000);
+      });
       await writeAuditLog(db, { userId: ctx.user!.id, category: "report", action: `Report generated: ${input.title}`, targetRef: reportRef });
       return { reportRef };
     }),
@@ -1347,7 +1377,7 @@ const usersRouter = router({
 
 const dashboardRouter = router({
   stats: protectedProcedure.query(async () => {
-    return getDashboardStats();
+    return withCache("dashboard:stats", TTL.DASHBOARD_STATS, () => getDashboardStats());
   }),
 });
 
