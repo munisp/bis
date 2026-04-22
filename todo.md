@@ -1670,3 +1670,9 @@
 - [ ] Debounced transfer search bar (txRef, originator, beneficiary) via searchTransfers tRPC
 - [ ] TigerBeetle account detail page /payment-rails/accounts/:accountId with balance chart
 - [ ] Freeze Account admin action on account detail page
+
+## Phase v59 — Next Steps (Round 9)
+- [ ] Add click-to-navigate on AccountBalancesCard rows to /payment-rails/accounts/:accountId
+- [x] Add Export CSV button with S3-backed exportTransfers tRPC procedure
+- [ ] Add frozenAccounts DB table and freeze audit log
+- [ ] Add Freeze History tab on AccountDetail page

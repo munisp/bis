@@ -211,6 +211,13 @@
       "when": 1776883447319,
       "tag": "0029_shiny_hiroim",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1776897118626,
+      "tag": "0030_graceful_dreadnoughts",
+      "breakpoints": true
     }
   ]
 }

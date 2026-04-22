@@ -1560,3 +1560,25 @@ export const regulatoryReports = pgTable("regulatory_reports", {
     regulatory_reports_type_idx: index("regulatory_reports_type_idx").on(table.type),
   }));
 export type RegulatoryReport = typeof regulatoryReports.$inferSelect;
+
+// ── Frozen Accounts (Payment Rails — Freeze Audit Log) ─────────────────────────
+export const frozenAccounts = pgTable("frozen_accounts", {
+  id: serial("id").primaryKey(),
+  accountId: varchar("accountId", { length: 64 }).notNull(),
+  accountName: varchar("accountName", { length: 255 }),
+  reason: text("reason").notNull(),
+  frozenBy: integer("frozenBy").references(() => users.id),
+  frozenByName: varchar("frozenByName", { length: 255 }),
+  affectedTransactions: integer("affectedTransactions").notNull().default(0),
+  frozenAt: timestamp("frozenAt").defaultNow().notNull(),
+  unfrozenAt: timestamp("unfrozenAt"),
+  unfrozenBy: integer("unfrozenBy").references(() => users.id),
+  unfrozenByName: varchar("unfrozenByName", { length: 255 }),
+  notes: text("notes"),
+},
+  (table) => ({
+    frozen_accounts_account_idx: index("frozen_accounts_account_idx").on(table.accountId),
+    frozen_accounts_frozen_at_idx: index("frozen_accounts_frozen_at_idx").on(table.frozenAt),
+  }));
+export type FrozenAccount = typeof frozenAccounts.$inferSelect;
+export type InsertFrozenAccount = typeof frozenAccounts.$inferInsert;

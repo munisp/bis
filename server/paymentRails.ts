@@ -13,9 +13,10 @@
 import { z } from "zod";
 import { router, protectedProcedure, adminProcedure } from "./_core/trpc";
 import { getDb } from "./db";
-import { transactions } from "../drizzle/schema";
+import { transactions, frozenAccounts } from "../drizzle/schema";
 import { desc, eq, sql, and, gte, lt, or, ilike } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
+import { storagePut } from "./storage";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -461,9 +462,10 @@ export const paymentRailsRouter = router({
   freezeAccount: adminProcedure
     .input(z.object({
       accountId: z.string().min(1).max(64),
+      accountName: z.string().max(255).optional(),
       reason: z.string().min(1).max(512),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
       const result = await db
@@ -476,11 +478,183 @@ export const paymentRailsRouter = router({
             eq(transactions.beneficiaryAccount, input.accountId),
           )
         ));
+      const affected = (result as any).rowsAffected ?? 0;
+      // Write audit log entry
+      await db.insert(frozenAccounts).values({
+        accountId: input.accountId,
+        accountName: input.accountName ?? null,
+        reason: input.reason,
+        frozenBy: ctx.user.id,
+        frozenByName: ctx.user.name ?? ctx.user.email ?? "Admin",
+        affectedTransactions: affected,
+        frozenAt: new Date(),
+      });
       return {
         accountId: input.accountId,
         frozenAt: new Date(),
         reason: input.reason,
-        affectedTransactions: (result as any).rowsAffected ?? 0,
+        affectedTransactions: affected,
+      };
+    }),
+
+  /**
+   * Get freeze history for an account.
+   */
+  getFreezeHistory: protectedProcedure
+    .input(z.object({
+      accountId: z.string().min(1).max(64),
+      limit: z.number().min(1).max(100).default(20),
+    }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
+      const rows = await db
+        .select()
+        .from(frozenAccounts)
+        .where(eq(frozenAccounts.accountId, input.accountId))
+        .orderBy(desc(frozenAccounts.frozenAt))
+        .limit(input.limit);
+      return { events: rows, accountId: input.accountId };
+    }),
+
+  /**
+   * Unfreeze an account — admin only.
+   * Records the unfreeze event on the existing freeze log entry.
+   */
+  unfreezeAccount: adminProcedure
+    .input(z.object({
+      accountId: z.string().min(1).max(64),
+      notes: z.string().max(512).optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
+      // Mark the most recent freeze event as unfrozen
+      const [latest] = await db
+        .select({ id: frozenAccounts.id })
+        .from(frozenAccounts)
+        .where(and(eq(frozenAccounts.accountId, input.accountId), sql`${frozenAccounts.unfrozenAt} IS NULL`))
+        .orderBy(desc(frozenAccounts.frozenAt))
+        .limit(1);
+      if (latest) {
+        await db
+          .update(frozenAccounts)
+          .set({
+            unfrozenAt: new Date(),
+            unfrozenBy: ctx.user.id,
+            unfrozenByName: ctx.user.name ?? ctx.user.email ?? "Admin",
+            notes: input.notes ?? null,
+          })
+          .where(eq(frozenAccounts.id, latest.id));
+      }
+      return { accountId: input.accountId, unfrozenAt: new Date() };
+    }),
+
+  /**
+   * Export transfers to CSV and return a signed S3 URL.
+   * Applies the same status/search filters as listTransfers.
+   * Limited to 10,000 rows per export to avoid memory pressure.
+   */
+  exportTransfers: adminProcedure
+    .input(z.object({
+      status: z.enum(["all", "pending", "posted", "voided", "failed", "reversed"]).default("all"),
+      search: z.string().max(100).optional(),
+      accountId: z.string().max(64).optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
+
+      const conditions: ReturnType<typeof and>[] = [];
+      if (input.status !== "all") {
+        const statusMap: Record<string, string[]> = {
+          pending: ["pending", "under_review", "flagged"],
+          posted: ["completed"],
+          voided: ["blocked"],
+          failed: ["failed"],
+          reversed: ["reversed"],
+        };
+        const dbStatuses = statusMap[input.status] ?? [];
+        if (dbStatuses.length > 0) {
+          conditions.push(sql`${transactions.status} IN (${sql.join(dbStatuses.map(s => sql`${s}`), sql`, `)})`);
+        }
+      }
+      if (input.search && input.search.length >= 2) {
+        const q = `%${input.search}%`;
+        conditions.push(or(
+          ilike(transactions.txRef, q),
+          ilike(transactions.originatorName, q),
+          ilike(transactions.beneficiaryName, q),
+          ilike(transactions.originatorAccount, q),
+          ilike(transactions.beneficiaryAccount, q),
+        ));
+      }
+      if (input.accountId) {
+        conditions.push(or(
+          eq(transactions.originatorAccount, input.accountId),
+          eq(transactions.beneficiaryAccount, input.accountId),
+        ));
+      }
+
+      const rows = await db
+        .select({
+          txRef: transactions.txRef,
+          type: transactions.type,
+          status: transactions.status,
+          amount: transactions.amount,
+          currency: transactions.currency,
+          originatorName: transactions.originatorName,
+          originatorAccount: transactions.originatorAccount,
+          originatorBank: transactions.originatorBank,
+          beneficiaryName: transactions.beneficiaryName,
+          beneficiaryAccount: transactions.beneficiaryAccount,
+          beneficiaryBank: transactions.beneficiaryBank,
+          purposeCode: transactions.purposeCode,
+          amlRiskLevel: transactions.amlRiskLevel,
+          amlScore: transactions.amlScore,
+          idempotencyKey: transactions.idempotencyKey,
+          tigerBeetleId: transactions.tigerBeetleId,
+          createdAt: transactions.createdAt,
+          updatedAt: transactions.updatedAt,
+        })
+        .from(transactions)
+        .where(conditions.length > 0 ? and(...conditions) : undefined)
+        .orderBy(desc(transactions.createdAt))
+        .limit(10_000);
+
+      // Build CSV
+      const headers = [
+        "txRef", "type", "status", "amount", "currency",
+        "originatorName", "originatorAccount", "originatorBank",
+        "beneficiaryName", "beneficiaryAccount", "beneficiaryBank",
+        "purposeCode", "amlRiskLevel", "amlScore",
+        "idempotencyKey", "tigerBeetleId", "createdAt", "updatedAt",
+      ] as const;
+      const escape = (v: unknown): string => {
+        if (v === null || v === undefined) return "";
+        const s = String(v instanceof Date ? v.toISOString() : v);
+        return s.includes(",") || s.includes('"') || s.includes("\n")
+          ? `"${s.replace(/"/g, '""')}"`
+          : s;
+      };
+      const csvLines = [
+        headers.join(","),
+        ...rows.map(r => headers.map(h => escape(r[h as keyof typeof r])).join(",")),
+      ];
+      const csvContent = csvLines.join("\n");
+
+      // Upload to S3
+      const ts = new Date().toISOString().replace(/[:.]/g, "-");
+      const suffix = Math.random().toString(36).slice(2, 8);
+      const fileKey = `exports/transfers-${ts}-${suffix}.csv`;
+      const { url } = await storagePut(fileKey, csvContent, "text/csv");
+
+      return {
+        url,
+        fileKey,
+        rowCount: rows.length,
+        exportedAt: new Date(),
+        filters: { status: input.status, search: input.search ?? null, accountId: input.accountId ?? null },
       };
     }),
 

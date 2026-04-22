@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
   DialogDescription, DialogFooter,
@@ -31,7 +32,7 @@ import {
 } from "recharts";
 import {
   ArrowLeft, TrendingUp, TrendingDown, AlertTriangle, Snowflake,
-  ArrowUpDown, CheckCircle2, XCircle, Clock, AlertCircle, RefreshCw,
+  ArrowUpDown, CheckCircle2, XCircle, Clock, AlertCircle, RefreshCw, History, Unlock,
 } from "lucide-react";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -162,6 +163,7 @@ function FreezeAccountDialog({
         duration: 6000,
       });
       utils.paymentRails.getAccountDetail.invalidate({ accountId });
+      utils.paymentRails.getFreezeHistory.invalidate({ accountId });
       onClose();
       setReason("");
     },
@@ -223,6 +225,93 @@ function FreezeAccountDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// ── Freeze History Tab ─────────────────────────────────────────────────────────
+
+function FreezeHistoryTab({ accountId, isAdmin }: { accountId: string; isAdmin: boolean }) {
+  const utils = trpc.useUtils();
+  const { data, isLoading } = trpc.paymentRails.getFreezeHistory.useQuery({ accountId });
+
+  const unfreeze = trpc.paymentRails.unfreezeAccount.useMutation({
+    onSuccess: () => {
+      toast.success("Account unfrozen");
+      utils.paymentRails.getFreezeHistory.invalidate({ accountId });
+      utils.paymentRails.getAccountDetail.invalidate({ accountId });
+    },
+    onError: (err) => toast.error("Unfreeze failed", { description: err.message }),
+  });
+
+  if (isLoading) {
+    return (
+      <div className="space-y-2 p-4">
+        {[1, 2, 3].map(i => <Skeleton key={i} className="h-16 w-full bg-slate-800" />)}
+      </div>
+    );
+  }
+
+  if (!data || data.events.length === 0) {
+    return (
+      <div className="p-8 text-center">
+        <History size={32} className="text-slate-700 mx-auto mb-2" />
+        <p className="text-sm text-slate-500">No freeze events recorded for this account</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3 p-4">
+      {data.events.map(ev => (
+        <div key={ev.id} className="rounded-lg border border-slate-800 bg-slate-900/60 p-4 space-y-2">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Snowflake size={13} className="text-red-400 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-xs font-semibold text-slate-200">
+                  Frozen by {ev.frozenByName ?? "Admin"}
+                </p>
+                <p className="text-[10px] text-slate-500">
+                  {new Date(ev.frozenAt).toLocaleString()} · {ev.affectedTransactions} transfer(s) blocked
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              {ev.unfrozenAt ? (
+                <Badge variant="outline" className="text-[10px] bg-green-500/10 text-green-400 border-green-500/30 gap-1">
+                  <Unlock size={9} /> Unfrozen
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="text-[10px] bg-red-500/10 text-red-400 border-red-500/30 gap-1">
+                  <Snowflake size={9} /> Active
+                </Badge>
+              )}
+              {isAdmin && !ev.unfrozenAt && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-6 text-[10px] gap-1 border-green-700/50 bg-green-900/10 text-green-400 hover:bg-green-900/20 px-2"
+                  disabled={unfreeze.isPending}
+                  onClick={() => unfreeze.mutate({ accountId })}
+                >
+                  {unfreeze.isPending ? <RefreshCw size={9} className="animate-spin" /> : <Unlock size={9} />}
+                  Unfreeze
+                </Button>
+              )}
+            </div>
+          </div>
+          <p className="text-xs text-slate-400 pl-5">
+            <span className="font-medium text-slate-500">Reason: </span>{ev.reason}
+          </p>
+          {ev.unfrozenAt && (
+            <p className="text-[10px] text-slate-500 pl-5">
+              Unfrozen by {ev.unfrozenByName ?? "Admin"} · {new Date(ev.unfrozenAt).toLocaleString()}
+              {ev.notes ? ` · ${ev.notes}` : ""}
+            </p>
+          )}
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -379,18 +468,25 @@ export default function AccountDetailPage() {
         </CardContent>
       </Card>
 
-      {/* Recent transfer history */}
-      <Card className="bg-slate-900 border-slate-700">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-semibold text-slate-200 flex items-center gap-2">
-            <ArrowUpDown size={14} className="text-indigo-400" />
-            Transfer History
+      {/* Tabbed section: Transfer History + Freeze History */}
+      <Tabs defaultValue="transfers" className="space-y-0">
+        <TabsList className="bg-slate-800/60 border border-slate-700 h-9 p-1 rounded-lg">
+          <TabsTrigger value="transfers" className="text-xs gap-1.5 data-[state=active]:bg-slate-700 data-[state=active]:text-slate-100">
+            <ArrowUpDown size={11} /> Transfer History
             {data && (
-              <Badge variant="outline" className="text-[10px] font-mono bg-slate-800 text-slate-400 border-slate-700 ml-1">
-                {data.history.length} records
+              <Badge variant="outline" className="text-[10px] font-mono bg-slate-700 text-slate-400 border-slate-600 ml-0.5 h-4 px-1">
+                {data.history.length}
               </Badge>
             )}
-          </CardTitle>
+          </TabsTrigger>
+          <TabsTrigger value="freezes" className="text-xs gap-1.5 data-[state=active]:bg-slate-700 data-[state=active]:text-slate-100">
+            <History size={11} /> Freeze History
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="transfers" className="mt-0">
+      <Card className="bg-slate-900 border-slate-700 rounded-tl-none">
+        <CardHeader className="pb-3">
           <CardDescription className="text-xs text-slate-500">
             Most recent 50 transfers involving this account
           </CardDescription>
@@ -450,6 +546,21 @@ export default function AccountDetailPage() {
           )}
         </CardContent>
       </Card>
+        </TabsContent>
+
+        <TabsContent value="freezes" className="mt-0">
+          <Card className="bg-slate-900 border-slate-700 rounded-tl-none">
+            <CardHeader className="pb-3">
+              <CardDescription className="text-xs text-slate-500">
+                All freeze and unfreeze events for this account, ordered by most recent
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="p-0">
+              <FreezeHistoryTab accountId={accountId} isAdmin={isAdmin} />
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
 
       {/* Freeze dialog */}
       {isAdmin && (

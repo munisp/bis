@@ -41,7 +41,7 @@ import { useLocation } from "wouter";
 import {
   TrendingUp, Activity, AlertCircle, CheckCircle2, XCircle,
   Clock, RefreshCw, Database, Archive, Layers, Zap,
-  ArrowUpDown, ExternalLink, Play, Copy, Check, Search, X,
+  ArrowUpDown, ExternalLink, Play, Copy, Check, Search, X, Download,
 } from "lucide-react";
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -404,6 +404,7 @@ function ArchivalTiersCard() {
 
 function AccountBalancesCard() {
   const { data, isLoading } = trpc.paymentRails.getAccountBalances.useQuery({ limit: 10 });
+  const [, navigate] = useLocation();
 
   return (
     <Card className="bg-slate-900 border-slate-700">
@@ -424,16 +425,24 @@ function AccountBalancesCard() {
         ) : data && data.balances.length > 0 ? (
           <div className="space-y-1">
             {data.balances.map(acc => (
-              <div key={acc.accountId} className="flex items-center justify-between py-1.5 border-b border-slate-800 last:border-0">
+              <div
+                key={acc.accountId}
+                className="flex items-center justify-between py-1.5 border-b border-slate-800 last:border-0 cursor-pointer rounded-sm hover:bg-indigo-500/5 px-1 -mx-1 transition-colors group"
+                onClick={() => navigate(`/payment-rails/accounts/${encodeURIComponent(acc.accountId)}`)}
+                title={`View account detail for ${acc.accountId}`}
+              >
                 <div className="min-w-0 flex-1">
-                  <p className="text-xs font-medium text-slate-200 truncate">{acc.accountName}</p>
+                  <p className="text-xs font-medium text-slate-200 truncate group-hover:text-indigo-300 transition-colors">{acc.accountName}</p>
                   <p className="text-[10px] font-mono text-slate-500">{acc.accountId}</p>
                 </div>
-                <div className="text-right ml-4">
-                  <p className={`text-xs font-mono font-bold ${acc.netBalance >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                    {acc.netBalance >= 0 ? "+" : ""}{formatNGN(acc.netBalance)}
-                  </p>
-                  <p className="text-[10px] text-slate-500">{acc.currency}</p>
+                <div className="flex items-center gap-2 ml-4">
+                  <div className="text-right">
+                    <p className={`text-xs font-mono font-bold ${acc.netBalance >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                      {acc.netBalance >= 0 ? "+" : ""}{formatNGN(acc.netBalance)}
+                    </p>
+                    <p className="text-[10px] text-slate-500">{acc.currency}</p>
+                  </div>
+                  <ExternalLink size={10} className="text-slate-600 group-hover:text-indigo-400 transition-colors flex-shrink-0" />
                 </div>
               </div>
             ))}
@@ -543,6 +552,24 @@ function TransferList() {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [, navigate] = useLocation();
 
+  const exportTransfers = trpc.paymentRails.exportTransfers.useMutation({
+    onMutate: () => {
+      toast.loading("Preparing CSV export…", { id: "csv-export" });
+    },
+    onSuccess: (data) => {
+      toast.dismiss("csv-export");
+      toast.success(`CSV ready — ${data.rowCount.toLocaleString()} rows`, {
+        description: "Click to download",
+        action: { label: "Download", onClick: () => window.open(data.url, "_blank", "noopener,noreferrer") },
+        duration: 15_000,
+      });
+    },
+    onError: (err) => {
+      toast.dismiss("csv-export");
+      toast.error("Export failed", { description: err.message });
+    },
+  });
+
   // Debounce search input — 350 ms
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -609,6 +636,22 @@ function TransferList() {
                   </SelectContent>
                 </Select>
               )}
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 text-[10px] gap-1 border-slate-700 bg-slate-800/60 text-slate-400 hover:text-slate-200 hover:bg-slate-700 px-2"
+                disabled={exportTransfers.isPending}
+                onClick={() => exportTransfers.mutate({
+                  status: statusFilter,
+                  search: debouncedQuery.length >= 2 ? debouncedQuery : undefined,
+                })}
+                title="Export current view to CSV (max 10,000 rows)"
+              >
+                {exportTransfers.isPending
+                  ? <RefreshCw size={10} className="animate-spin" />
+                  : <Download size={10} />}
+                CSV
+              </Button>
               <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => refetch()} disabled={isSearching}>
                 <RefreshCw size={12} className="text-slate-400" />
               </Button>
