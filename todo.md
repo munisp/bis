@@ -1772,3 +1772,20 @@
 - [x] Security — Keycloak loginUrl open redirect fix (origin allowlist validation)
 - [x] Security — 0 npm vulnerabilities confirmed
 - [x] All tests passing: 269 Node.js, 5 Go packages, 8 Rust, 21 Python
+
+## Phase v63 — Production Sprint (Apr 23 2026)
+
+- [x] OpenAPI 3.0 spec (openapi.yaml) — 800+ lines covering all BIS v1 endpoints
+- [x] Swagger UI wired at /api/docs via swagger-ui-express
+- [x] SDK: Python (bis_sdk/) with BISClient, exceptions, setup.py, README
+- [x] SDK: Node.js (@bis/sdk) with TypeScript types, errors, client, README
+- [x] SDK: Go (bis-go-sdk) with client.go, services.go, go.mod, README
+- [x] React Native mobile scaffold (mobile/) with Redux, navigation, 5 screens, API service
+- [x] Playwright E2E tests for new features (e2e/new-features.spec.ts)
+- [x] GitHub Actions smoke-test workflow (.github/workflows/smoke-test.yml)
+- [x] Branch protection rules (.github/branch-protection.json)
+- [x] Architecture docs updated with v62/v63 new pages, routers, SDK, mobile
+- [x] CSS injection fix in chart.tsx (sanitizeCSSValue + sanitizeCSSId)
+- [x] Keycloak open redirect protection (origin allowlist in keycloakRouter.ts)
+- [x] Security audit v63: 0 npm vulnerabilities, 0 TypeScript errors
+- [x] All tests passing: 269 Node.js, 5 Go packages, 8 Rust, 21 Python

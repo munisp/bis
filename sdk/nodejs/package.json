@@ -1,0 +1,27 @@
+{
+  "name": "bis-sdk",
+  "version": "1.0.0",
+  "description": "Official Node.js SDK for the BIS (Background Intelligence System) API",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "keywords": ["bis", "background-intelligence", "kyc", "aml", "nigeria", "fintech"],
+  "author": "BIS Engineering <api@bis.example.ng>",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

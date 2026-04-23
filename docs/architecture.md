@@ -261,3 +261,27 @@ Gateway → Temporal (workflow engine)
 ```
 
 All services communicate on the `bis-net` Docker bridge network. No service ports are exposed to the host in production — all traffic enters through Nginx.
+
+
+---
+
+## SDKs
+
+| Language | Package | Install |
+|----------|---------|---------|
+| Python | `bis-sdk` | `pip install bis-sdk` |
+| Node.js | `@bis/sdk` | `npm install @bis/sdk` |
+| Go | `github.com/bis-platform/bis-go-sdk` | `go get github.com/bis-platform/bis-go-sdk` |
+
+See `sdk/` directory for source code and usage examples.
+
+---
+
+## v62/v63 New Pages and Features
+
+| Page | Route | Description |
+|------|-------|-------------|
+| Transfer Analytics | `/payment-rails/analytics` | Daily/weekly/monthly NGN volume charts, top corridors, channel mix |
+| Document Vault | `/document-vault` | S3-backed upload/download, version history, chain-of-custody log |
+| Risk Dashboard | `/risk-dashboard` | Entity risk bubble chart, sector heatmap, top-risk entities table |
+| Reconciliation Report | `/payment-rails/reconciliation` | Matched/unmatched/exception counts, CSV export |

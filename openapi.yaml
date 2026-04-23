@@ -1,0 +1,893 @@
+openapi: "3.0.3"
+info:
+  title: BIS — Background Intelligence System API
+  version: "1.0.0"
+  description: |
+    The BIS (Background Intelligence System) API provides programmatic access to Nigeria's
+    premier intelligence-led compliance and investigation platform. Built for financial
+    institutions, law enforcement agencies, and regulatory bodies operating under CBN, NFIU,
+    EFCC, and NCC frameworks.
+
+    ## Authentication
+    All endpoints require a Bearer API token obtained from the Developer Portal.
+    ```
+    Authorization: Bearer bis_live_<token>
+    ```
+
+    ## Rate Limiting
+    - Standard tier: 100 req/min
+    - Professional tier: 1,000 req/min
+    - Enterprise tier: 10,000 req/min
+
+    ## Base URL
+    ```
+    https://bis.example.ng/api/v1
+    ```
+  contact:
+    name: BIS API Support
+    email: api@bis.example.ng
+    url: https://bis.example.ng/developer
+  license:
+    name: Proprietary
+    url: https://bis.example.ng/terms
+servers:
+  - url: /api/v1
+    description: Current server
+  - url: https://bis.example.ng/api/v1
+    description: Production
+  - url: https://sandbox.bis.example.ng/api/v1
+    description: Sandbox
+
+security:
+  - BearerAuth: []
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: "API token from the BIS Developer Portal. Format: bis_live_<token>"
+
+  schemas:
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          example: UNAUTHORIZED
+        message:
+          type: string
+          example: Invalid or expired API token
+        requestId:
+          type: string
+          format: uuid
+
+    Pagination:
+      type: object
+      properties:
+        page:
+          type: integer
+          minimum: 1
+          default: 1
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+        total:
+          type: integer
+        totalPages:
+          type: integer
+
+    Investigation:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        refNumber:
+          type: string
+          example: INV-2026-001234
+        subject:
+          type: object
+          properties:
+            name:
+              type: string
+            nin:
+              type: string
+              pattern: "^[0-9]{11}$"
+            bvn:
+              type: string
+              pattern: "^[0-9]{11}$"
+            phone:
+              type: string
+        status:
+          type: string
+          enum: [open, in_progress, pending_review, closed, escalated]
+        priority:
+          type: string
+          enum: [low, medium, high, critical]
+        riskScore:
+          type: number
+          minimum: 0
+          maximum: 100
+        assignedTo:
+          type: string
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    KYCRecord:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        subjectId:
+          type: string
+        nin:
+          type: string
+        bvn:
+          type: string
+        status:
+          type: string
+          enum: [pending, verified, failed, expired]
+        riskLevel:
+          type: string
+          enum: [low, medium, high, critical]
+        verifiedAt:
+          type: string
+          format: date-time
+
+    Alert:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [aml, sanctions, fraud, kyc, system]
+        severity:
+          type: string
+          enum: [info, warning, critical]
+        title:
+          type: string
+        message:
+          type: string
+        isRead:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+
+    Transaction:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        reference:
+          type: string
+        amount:
+          type: number
+        currency:
+          type: string
+          default: NGN
+        senderAccount:
+          type: string
+        receiverAccount:
+          type: string
+        channel:
+          type: string
+          enum: [nip, rtgs, mobile, ussd, pos, web]
+        status:
+          type: string
+          enum: [pending, completed, failed, reversed, flagged, blocked]
+        amlScore:
+          type: number
+          minimum: 0
+          maximum: 100
+        createdAt:
+          type: string
+          format: date-time
+
+    SARFiling:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        filingRef:
+          type: string
+          example: SAR-2026-001234
+        reportType:
+          type: string
+          enum: [STR, CTR, SAR]
+        status:
+          type: string
+          enum: [draft, under_review, approved, filed, acknowledged, rejected]
+        subjectName:
+          type: string
+        amountInvolved:
+          type: number
+        currency:
+          type: string
+          default: NGN
+        filedAt:
+          type: string
+          format: date-time
+
+    QuickCheckResult:
+      type: object
+      properties:
+        requestId:
+          type: string
+          format: uuid
+        subject:
+          type: object
+          properties:
+            name:
+              type: string
+            phone:
+              type: string
+            nin:
+              type: string
+        verdict:
+          type: string
+          enum: [pass, flag, fail]
+        riskScore:
+          type: number
+          minimum: 0
+          maximum: 100
+        checks:
+          type: object
+          properties:
+            identity:
+              type: string
+              enum: [pass, fail, not_found]
+            criminalRecord:
+              type: string
+              enum: [clear, flagged, not_found]
+            adverseMedia:
+              type: string
+              enum: [clear, flagged, not_found]
+            sanctions:
+              type: string
+              enum: [clear, flagged, not_found]
+        reportUrl:
+          type: string
+          format: uri
+          description: Presigned URL to download the PDF report (valid 24h)
+        completedAt:
+          type: string
+          format: date-time
+
+    LexSubmission:
+      type: object
+      properties:
+        submissionRef:
+          type: string
+          example: LEX-2026-KD-001234
+        agencyCode:
+          type: string
+        state:
+          type: string
+          enum: [Abia, Adamawa, Akwa Ibom, Anambra, Bauchi, Bayelsa, Benue, Borno, Cross River, Delta, Ebonyi, Edo, Ekiti, Enugu, FCT, Gombe, Imo, Jigawa, Kaduna, Kano, Katsina, Kebbi, Kogi, Kwara, Lagos, Nasarawa, Niger, Ogun, Ondo, Osun, Oyo, Plateau, Rivers, Sokoto, Taraba, Yobe, Zamfara]
+        incidentType:
+          type: string
+        status:
+          type: string
+          enum: [pending, validated, rejected, linked]
+        validationScore:
+          type: number
+          minimum: 0
+          maximum: 100
+        createdAt:
+          type: string
+          format: date-time
+
+  responses:
+    Unauthorized:
+      description: Authentication required or token invalid
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Forbidden:
+      description: Insufficient permissions
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    RateLimited:
+      description: Rate limit exceeded
+      headers:
+        X-RateLimit-Limit:
+          schema:
+            type: integer
+        X-RateLimit-Remaining:
+          schema:
+            type: integer
+        X-RateLimit-Reset:
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      description: Returns platform health status. No authentication required.
+      security: []
+      tags: [System]
+      responses:
+        "200":
+          description: Platform is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  version:
+                    type: string
+                    example: "1.0.0"
+                  timestamp:
+                    type: string
+                    format: date-time
+
+  /investigations:
+    get:
+      summary: List investigations
+      description: Returns a paginated list of investigations with optional filters.
+      tags: [Investigations]
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [open, in_progress, pending_review, closed, escalated]
+        - name: priority
+          in: query
+          schema:
+            type: string
+            enum: [low, medium, high, critical]
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+      responses:
+        "200":
+          description: List of investigations
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Pagination"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/Investigation"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+    post:
+      summary: Create investigation
+      description: Opens a new investigation for a subject.
+      tags: [Investigations]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [subject, priority]
+              properties:
+                subject:
+                  type: object
+                  required: [name]
+                  properties:
+                    name:
+                      type: string
+                    nin:
+                      type: string
+                    bvn:
+                      type: string
+                    phone:
+                      type: string
+                priority:
+                  type: string
+                  enum: [low, medium, high, critical]
+                notes:
+                  type: string
+      responses:
+        "201":
+          description: Investigation created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Investigation"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /investigations/{id}:
+    get:
+      summary: Get investigation
+      tags: [Investigations]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Investigation details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Investigation"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /kyc:
+    get:
+      summary: List KYC records
+      tags: [KYC]
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, verified, failed, expired]
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+      responses:
+        "200":
+          description: KYC records
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/KYCRecord"
+
+    post:
+      summary: Submit KYC verification
+      tags: [KYC]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [nin]
+              properties:
+                nin:
+                  type: string
+                  pattern: "^[0-9]{11}$"
+                bvn:
+                  type: string
+                  pattern: "^[0-9]{11}$"
+                documentType:
+                  type: string
+                  enum: [national_id, passport, drivers_license, voters_card]
+      responses:
+        "201":
+          description: KYC record created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KYCRecord"
+
+  /alerts:
+    get:
+      summary: List alerts
+      tags: [Alerts]
+      parameters:
+        - name: severity
+          in: query
+          schema:
+            type: string
+            enum: [info, warning, critical]
+        - name: isRead
+          in: query
+          schema:
+            type: boolean
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [aml, sanctions, fraud, kyc, system]
+      responses:
+        "200":
+          description: Alerts list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Alert"
+
+  /alerts/{id}/read:
+    post:
+      summary: Mark alert as read
+      tags: [Alerts]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Alert marked as read
+
+  /transactions:
+    get:
+      summary: List transactions
+      description: Returns AML-monitored transactions with risk scores.
+      tags: [Transactions]
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, completed, failed, reversed, flagged, blocked]
+        - name: minAmlScore
+          in: query
+          schema:
+            type: number
+        - name: channel
+          in: query
+          schema:
+            type: string
+        - name: dateFrom
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: dateTo
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: Transactions list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Transaction"
+
+  /transactions/{id}/flag:
+    post:
+      summary: Flag transaction for AML review
+      tags: [Transactions]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+      responses:
+        "200":
+          description: Transaction flagged
+
+  /transactions/{id}/block:
+    post:
+      summary: Block transaction
+      tags: [Transactions]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Transaction blocked
+
+  /sar:
+    get:
+      summary: List SAR filings
+      tags: [Compliance]
+      responses:
+        "200":
+          description: SAR filings
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/SARFiling"
+
+    post:
+      summary: Submit SAR filing
+      tags: [Compliance]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reportType, subjectName, amountInvolved, narrative]
+              properties:
+                reportType:
+                  type: string
+                  enum: [STR, CTR, SAR]
+                subjectName:
+                  type: string
+                amountInvolved:
+                  type: number
+                currency:
+                  type: string
+                  default: NGN
+                narrative:
+                  type: string
+                  minLength: 100
+      responses:
+        "201":
+          description: SAR filing created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SARFiling"
+
+  /quickcheck:
+    post:
+      summary: Run QuickCheck vetting
+      description: |
+        Instant background check for individuals. Returns a pass/flag/fail verdict with
+        identity verification, criminal record check, adverse media scan, and sanctions screening.
+        Generates a shareable PDF report.
+      tags: [QuickCheck]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  example: John Doe
+                phone:
+                  type: string
+                  example: "08012345678"
+                nin:
+                  type: string
+                  pattern: "^[0-9]{11}$"
+                bvn:
+                  type: string
+                  pattern: "^[0-9]{11}$"
+                category:
+                  type: string
+                  enum: [house_help, driver, nanny, security_guard, artisan, restaurant_staff, contractor, general]
+                  default: general
+                tier:
+                  type: string
+                  enum: [basic, standard, premium]
+                  default: basic
+                  description: "basic=₦500, standard=₦1,500, premium=₦3,000"
+      responses:
+        "200":
+          description: QuickCheck result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuickCheckResult"
+        "402":
+          description: Insufficient balance
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /lex/submissions:
+    get:
+      summary: List LEX submissions
+      description: Law Enforcement Extension — incident submissions from registered agencies.
+      tags: [LEX]
+      parameters:
+        - name: state
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, validated, rejected, linked]
+        - name: incidentType
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: LEX submissions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/LexSubmission"
+
+    post:
+      summary: Submit LEX incident report
+      tags: [LEX]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [agencyCode, state, incidentType, narrative]
+              properties:
+                agencyCode:
+                  type: string
+                state:
+                  type: string
+                incidentType:
+                  type: string
+                narrative:
+                  type: string
+                  minLength: 50
+                subjectName:
+                  type: string
+                subjectNin:
+                  type: string
+                subjectPhone:
+                  type: string
+                gpsLat:
+                  type: number
+                gpsLng:
+                  type: number
+      responses:
+        "201":
+          description: Submission created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LexSubmission"
+
+  /analytics/transfers:
+    get:
+      summary: Transfer volume analytics
+      description: Daily/weekly/monthly NGN transfer volume with corridor and channel breakdown.
+      tags: [Analytics]
+      parameters:
+        - name: period
+          in: query
+          schema:
+            type: string
+            enum: [daily, weekly, monthly]
+            default: daily
+        - name: dateFrom
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: dateTo
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: Transfer analytics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  totalVolume:
+                    type: number
+                  totalCount:
+                    type: integer
+                  buckets:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        date:
+                          type: string
+                        volume:
+                          type: number
+                        count:
+                          type: integer
+
+  /analytics/risk:
+    get:
+      summary: Risk score distribution
+      description: Entity risk scores grouped by sector and score band.
+      tags: [Analytics]
+      responses:
+        "200":
+          description: Risk analytics
+
+tags:
+  - name: System
+    description: Health and system status endpoints
+  - name: Investigations
+    description: Investigation lifecycle management
+  - name: KYC
+    description: Know Your Customer verification
+  - name: Alerts
+    description: AML and compliance alerts
+  - name: Transactions
+    description: Payment transaction monitoring
+  - name: Compliance
+    description: SAR/STR/CTR regulatory filings
+  - name: QuickCheck
+    description: Consumer background vetting service
+  - name: LEX
+    description: Law Enforcement Extension — incident reporting
+  - name: Analytics
+    description: Platform analytics and reporting

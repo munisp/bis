@@ -617,11 +617,20 @@ function APIPlayground() {
                 <ChevronRight className="h-3.5 w-3.5 text-muted-foreground ml-auto group-hover:translate-x-0.5 transition-transform" />
               </div>
               <div className="flex items-center gap-2 p-3 rounded-lg border border-border hover:bg-muted/50 transition-colors text-sm cursor-pointer group"
+                onClick={() => { navigator.clipboard.writeText('npm install @bis/sdk'); toast.success('Copied: npm install @bis/sdk'); }}>
+                <Download className="h-4 w-4 text-yellow-500 shrink-0" />
+                <div className="min-w-0">
+                  <div className="font-medium">Node.js SDK</div>
+                  <div className="text-xs text-muted-foreground font-mono">npm install @bis/sdk</div>
+                </div>
+                <ChevronRight className="h-3.5 w-3.5 text-muted-foreground ml-auto group-hover:translate-x-0.5 transition-transform" />
+              </div>
+              <div className="flex items-center gap-2 p-3 rounded-lg border border-border hover:bg-muted/50 transition-colors text-sm cursor-pointer group"
                 onClick={() => { navigator.clipboard.writeText('go get github.com/bis-platform/bis-go'); toast.success('Copied: go get github.com/bis-platform/bis-go'); }}>
                 <Download className="h-4 w-4 text-cyan-500 shrink-0" />
                 <div className="min-w-0">
                   <div className="font-medium">Go SDK</div>
-                  <div className="text-xs text-muted-foreground font-mono">go get bis-platform/bis-go</div>
+                  <div className="text-xs text-muted-foreground font-mono">go get github.com/bis-platform/bis-go</div>
                 </div>
                 <ChevronRight className="h-3.5 w-3.5 text-muted-foreground ml-auto group-hover:translate-x-0.5 transition-transform" />
               </div>

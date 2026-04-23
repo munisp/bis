@@ -25,6 +25,9 @@ import { notifyOwner } from "./notification";
 import { creditTenantAccount } from "../billing";
 import crypto from "crypto";
 import { createOpenClawRouter } from "../openclawEndpoints";
+import swaggerUi from "swagger-ui-express";
+import { readFileSync } from "fs";
+import { load as yamlLoad } from "js-yaml";
 import { startSlaBreachScheduler } from "../slaBreachChecker";
 import { startArchivalScheduler } from "../archivalScheduler";
 import { validateEnv } from "../envValidation";
@@ -510,6 +513,33 @@ async function startServer() {
       }
       next();
     });
+  }
+
+  // ── OpenAPI / Swagger UI ────────────────────────────────────────────────────
+  // Serve the OpenAPI spec at /api/openapi.yaml and Swagger UI at /api/docs
+  try {
+    const openapiPath = new URL("../../openapi.yaml", import.meta.url).pathname;
+    const openapiSpec = yamlLoad(readFileSync(openapiPath, "utf8")) as Record<string, unknown>;
+    app.get("/api/openapi.yaml", (_req, res) => {
+      res.setHeader("Content-Type", "application/yaml");
+      res.send(readFileSync(openapiPath, "utf8"));
+    });
+    app.get("/api/openapi.json", (_req, res) => {
+      res.json(openapiSpec);
+    });
+    app.use("/api/docs", swaggerUi.serve, swaggerUi.setup(openapiSpec, {
+      customSiteTitle: "BIS API Documentation",
+      customCss: `.swagger-ui .topbar { background-color: #0f172a; } .swagger-ui .topbar-wrapper img { content: url('/favicon.ico'); }`,
+      swaggerOptions: {
+        persistAuthorization: true,
+        displayRequestDuration: true,
+        filter: true,
+        tryItOutEnabled: true,
+      },
+    }));
+    log("info", "Swagger UI mounted at /api/docs");
+  } catch (err) {
+    log("warn", "Could not mount Swagger UI", { error: String(err) });
   }
 
   // tRPC API

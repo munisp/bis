@@ -67,6 +67,12 @@ function ChartContainer({
   );
 }
 
+// Security: sanitize CSS values to prevent CSS injection via dangerouslySetInnerHTML
+const sanitizeCSSValue = (value: string): string =>
+  value.replace(/[^a-zA-Z0-9#(),. %/-]/g, "");
+const sanitizeCSSId = (value: string): string =>
+  value.replace(/[^a-zA-Z0-9_-]/g, "");
+
 const ChartStyle = ({ id, config }: { id: string; config: ChartConfig }) => {
   const colorConfig = Object.entries(config).filter(
     ([, config]) => config.theme || config.color
@@ -76,19 +82,21 @@ const ChartStyle = ({ id, config }: { id: string; config: ChartConfig }) => {
     return null;
   }
 
+  const safeId = sanitizeCSSId(id);
+
   return (
     <style
       dangerouslySetInnerHTML={{
         __html: Object.entries(THEMES)
           .map(
             ([theme, prefix]) => `
-${prefix} [data-chart=${id}] {
+${prefix} [data-chart=${safeId}] {
 ${colorConfig
   .map(([key, itemConfig]) => {
     const color =
       itemConfig.theme?.[theme as keyof typeof itemConfig.theme] ||
       itemConfig.color;
-    return color ? `  --color-${key}: ${color};` : null;
+    return color ? `  --color-${sanitizeCSSId(key)}: ${sanitizeCSSValue(color)};` : null;
   })
   .join("\n")}
 }
