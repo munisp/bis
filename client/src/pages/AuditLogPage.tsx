@@ -60,6 +60,24 @@ export default function AuditLogPage() {
 
   const utils = trpc.useUtils();
 
+  const exportMutation = trpc.audit.export.useMutation({
+    onSuccess: (data) => {
+      toast.success(`Exported ${data.count} entries`, {
+        description: "Click to download",
+        action: { label: "Download", onClick: () => window.open(data.url, "_blank") },
+      });
+    },
+    onError: (err) => toast.error(`Export failed: ${err.message}`),
+  });
+
+  const handleServerExport = (format: "csv" | "json") => {
+    exportMutation.mutate({
+      format,
+      category: categoryFilter !== "all" ? categoryFilter : undefined,
+      limit: 10000,
+    });
+  };
+
   const { data, isLoading, refetch } = trpc.audit.list.useQuery({
     category: categoryFilter !== "all" ? categoryFilter : undefined,
     result: resultFilter !== "all" ? resultFilter : undefined,
@@ -121,8 +139,11 @@ export default function AuditLogPage() {
           <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => refetch()}>
             <RefreshCw size={11} className={isLoading ? "animate-spin" : ""} /> Refresh
           </Button>
-          <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={handleExportCSV}>
-            <Download size={11} /> Export CSV
+          <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => handleServerExport("csv")} disabled={exportMutation.isPending}>
+            <Download size={11} /> {exportMutation.isPending ? "Exporting..." : "Export CSV"}
+          </Button>
+          <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => handleServerExport("json")} disabled={exportMutation.isPending}>
+            <Download size={11} /> JSON
           </Button>
         </div>
       }

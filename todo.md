@@ -988,15 +988,15 @@
 
 ### Security Audit & Fixes
 - [ ] Run npm audit and identify vulnerable dependencies
-- [ ] Static analysis: scan for SQL injection, XSS, CSRF, IDOR patterns
+- [x] Static analysis: scan for SQL injection, XSS, CSRF, IDOR patterns
 - [ ] Audit authentication flows (JWT, session, OAuth)
 - [ ] Audit authorization (missing protectedProcedure, IDOR on IDs)
 - [ ] Audit input validation (missing z.string() constraints, unbounded inputs)
 - [ ] Audit rate limiting (missing on public endpoints)
-- [ ] Audit security headers (CSP, HSTS, X-Frame-Options)
+- [x] Audit security headers (CSP, HSTS, X-Frame-Options)
 - [ ] Audit CORS configuration
 - [ ] Audit secrets handling (env vars, no hardcoded secrets)
-- [ ] Audit file upload security (MIME type, size limits)
+- [x] Audit file upload security (MIME type, size limits)
 - [ ] Audit Go microservice security
 - [ ] Audit Python microservice security
 - [ ] Fix all critical/high vulnerabilities

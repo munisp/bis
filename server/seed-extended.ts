@@ -1139,7 +1139,7 @@ async function seedCaseDocuments(userIds: number[], caseIds: number[]) {
 // ─── Incoming Reports ─────────────────────────────────────────────────────────
 async function seedIncomingReports() {
   console.log("  → incomingReports (25 records)");
-  const statuses = ["new", "in_review", "escalated", "resolved", "dismissed"] as const;
+  const statuses = ["new", "processing", "escalated", "verified", "dismissed"] as const;
   const languages = ["en", "yo", "ha", "ig"];
   const senders = [
     "+2348012345678", "+2347098765432", "+2349011223344",

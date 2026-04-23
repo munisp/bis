@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { CheckCircle2, XCircle, AlertTriangle, MapPin, FileText, User, Calendar, Building2, BarChart3 } from "lucide-react";
+import { CheckCircle2, XCircle, AlertTriangle, MapPin, FileText, User, Calendar, Building2, BarChart3, Link2, Sparkles, ExternalLink, Download } from "lucide-react";
 
 const NIGERIAN_STATES = [
   { code: "AB", name: "Abia" }, { code: "AD", name: "Adamawa" }, { code: "AK", name: "Akwa Ibom" },
@@ -60,6 +60,8 @@ export default function LexReviewPage() {
   const [reviewDialog, setReviewDialog] = useState<{ id: number; action: "validate" | "reject" | "escalate" } | null>(null);
   const [rejectionReason, setRejectionReason] = useState("");
   const [activeTab, setActiveTab] = useState<"queue" | "stats">("queue");
+  const [showCaseLinkDialog, setShowCaseLinkDialog] = useState(false);
+  const [caseLinkTarget, setCaseLinkTarget] = useState<number | null>(null);
 
   const { data: listData, isLoading } = trpc.lex.listSubmissions.useQuery({
     state: stateFilter || undefined,
@@ -75,6 +77,23 @@ export default function LexReviewPage() {
 
   const { data: stats } = trpc.lex.stateStats.useQuery();
   const { data: overdueData } = trpc.lex.overdueSubmissions.useQuery({ hours: 72 });
+
+  // LEX-to-Case auto-linking
+  const { data: caseMatches, isLoading: matchesLoading } = trpc.lex.possibleCaseMatches.useQuery(
+    { submissionId: selectedId! },
+    { enabled: !!selectedId }
+  );
+
+  const linkToCaseMutation = trpc.lex.linkToCase.useMutation({
+    onSuccess: (result) => {
+      utils.lex.listSubmissions.invalidate();
+      utils.lex.getSubmission.invalidate({ id: selectedId! });
+      setShowCaseLinkDialog(false);
+      setCaseLinkTarget(null);
+      toast.success(`Submission linked to case ${result.caseRef}`);
+    },
+    onError: (e) => toast.error(e.message),
+  });
 
   const reviewMutation = trpc.lex.reviewSubmission.useMutation({
     onSuccess: () => {
@@ -303,6 +322,56 @@ export default function LexReviewPage() {
                     </div>
                   )}
 
+                  {/* LEX-to-Case Auto-Linking */}
+                  {caseMatches && caseMatches.matches.length > 0 && (
+                    <div className="space-y-2 pt-2 border-t">
+                      <div className="flex items-center gap-2">
+                        <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                        <p className="text-xs font-semibold text-amber-700">Possible Case Matches</p>
+                        <Badge variant="outline" className="text-xs border-amber-300 text-amber-700">{caseMatches.matches.length}</Badge>
+                      </div>
+                      <div className="space-y-1.5">
+                        {caseMatches.matches.map((m) => (
+                          <div key={m.caseId} className="flex items-start justify-between gap-2 bg-amber-50 border border-amber-200 rounded p-2">
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-mono font-semibold text-amber-800">{m.caseRef}</p>
+                              <p className="text-xs text-amber-700 truncate">{m.caseTitle}</p>
+                              <div className="flex items-center gap-1 mt-0.5">
+                                <span className="text-xs text-muted-foreground">{m.matchType === 'nin_exact' ? 'NIN match' : m.matchType === 'phone_exact' ? 'Phone match' : 'Name similarity'}</span>
+                                <span className="text-xs font-semibold text-amber-700">{m.confidence}%</span>
+                              </div>
+                            </div>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-6 px-2 text-xs border-amber-400 text-amber-800 hover:bg-amber-100 shrink-0"
+                              onClick={() => { setCaseLinkTarget(m.caseId); setShowCaseLinkDialog(true); }}
+                            >
+                              <Link2 className="w-3 h-3 mr-1" /> Link
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {matchesLoading && selectedId && (
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground pt-2 border-t">
+                      <Sparkles className="w-3.5 h-3.5 animate-pulse" /> Checking for case matches...
+                    </div>
+                  )}
+                  {/* LEX-01 PDF Download */}
+                  {detail.submission.status === "validated" && (
+                    <div className="pt-2 border-t">
+                      <a
+                        href={`/api/trpc/lex.generateLex01Pdf?input=${encodeURIComponent(JSON.stringify({ id: detail.submission.id }))}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-2 text-xs text-blue-600 hover:text-blue-700 font-medium"
+                      >
+                        <Download className="w-3.5 h-3.5" /> Download LEX-01 PDF
+                      </a>
+                    </div>
+                  )}
                   {/* Review Actions */}
                   {(detail.submission.status === "pending" || detail.submission.status === "under_review") && (
                     <div className="flex flex-col gap-2 pt-2 border-t">
@@ -330,6 +399,42 @@ export default function LexReviewPage() {
           </div>
         </div>
       )}
+
+      {/* Case Link Confirmation Dialog */}
+      <Dialog open={showCaseLinkDialog} onOpenChange={(open) => { if (!open) { setShowCaseLinkDialog(false); setCaseLinkTarget(null); } }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Link2 className="w-4 h-4 text-amber-600" /> Link to Case
+            </DialogTitle>
+          </DialogHeader>
+          <div className="py-2 space-y-3">
+            <p className="text-sm text-muted-foreground">
+              This will link submission <span className="font-mono font-semibold">{detail?.submission.submissionRef}</span> to the selected case.
+              A timeline entry will be added to the case record.
+            </p>
+            {caseLinkTarget && caseMatches?.matches.find(m => m.caseId === caseLinkTarget) && (
+              <div className="bg-amber-50 border border-amber-200 rounded p-3 text-sm">
+                <p className="font-mono font-semibold text-amber-800">{caseMatches.matches.find(m => m.caseId === caseLinkTarget)?.caseRef}</p>
+                <p className="text-amber-700">{caseMatches.matches.find(m => m.caseId === caseLinkTarget)?.caseTitle}</p>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setShowCaseLinkDialog(false); setCaseLinkTarget(null); }}>Cancel</Button>
+            <Button
+              className="bg-amber-600 hover:bg-amber-700"
+              disabled={linkToCaseMutation.isPending || !caseLinkTarget}
+              onClick={() => {
+                if (!selectedId || !caseLinkTarget) return;
+                linkToCaseMutation.mutate({ submissionId: selectedId, caseId: caseLinkTarget });
+              }}
+            >
+              {linkToCaseMutation.isPending ? "Linking..." : "Confirm Link"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Review Confirmation Dialog */}
       <Dialog open={!!reviewDialog} onOpenChange={() => { setReviewDialog(null); setRejectionReason(""); }}>

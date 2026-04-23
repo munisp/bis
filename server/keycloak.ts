@@ -119,7 +119,8 @@ export async function exchangeCode(
   });
 
   if (!resp.ok) {
-    console.error("[Keycloak] Token exchange failed:", await resp.text());
+    // SECURITY: do not log the full response body as it may contain tokens/error details
+    console.error(`[Keycloak] Token exchange failed: HTTP ${resp.status}`);
     return null;
   }
   return resp.json() as Promise<{ access_token: string; id_token: string; refresh_token: string }>;

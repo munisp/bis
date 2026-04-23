@@ -33,7 +33,7 @@ function reportRef(): string {
 export const tradeFinanceRouter = router({
   list: protectedProcedure
     .input(z.object({
-      limit: z.number().default(50),
+      limit: z.number().min(1).max(250).default(50),
       offset: z.number().default(0),
       status: z.string().optional(),
       lcType: z.string().optional(),
@@ -160,7 +160,7 @@ export const tradeFinanceRouter = router({
 export const correspondentBankingRouter = router({
   list: protectedProcedure
     .input(z.object({
-      limit: z.number().default(50),
+      limit: z.number().min(1).max(250).default(50),
       offset: z.number().default(0),
       status: z.string().optional(),
       country: z.string().optional(),
@@ -300,7 +300,7 @@ export const correspondentBankingRouter = router({
 export const evidenceRouter = router({
   list: protectedProcedure
     .input(z.object({
-      limit: z.number().default(50),
+      limit: z.number().min(1).max(250).default(50),
       offset: z.number().default(0),
       caseId: z.number().optional(),
       investigationId: z.number().optional(),
@@ -475,7 +475,7 @@ export const evidenceRouter = router({
 export const regulatoryReportsRouter = router({
   list: protectedProcedure
     .input(z.object({
-      limit: z.number().default(50),
+      limit: z.number().min(1).max(250).default(50),
       offset: z.number().default(0),
       type: z.string().optional(),
       status: z.string().optional(),

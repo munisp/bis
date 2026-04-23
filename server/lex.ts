@@ -11,6 +11,17 @@ import { invokeLLM } from "./_core/llm";
 import { getDb } from "./db";
 import { protectedProcedure, publicProcedure, router, writeProcedure } from "./_core/trpc";
 
+// SECURITY: HTML escape function to prevent XSS in PDF template generation
+function escHtml(str: string | null | undefined): string {
+  if (!str) return '';
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#x27;');
+}
+
 export const NIGERIAN_STATES: Record<string, string> = {
   AB: "Abia", AD: "Adamawa", AK: "Akwa Ibom", AN: "Anambra", BA: "Bauchi",
   BY: "Bayelsa", BE: "Benue", BO: "Borno", CR: "Cross River", DE: "Delta",
@@ -31,7 +42,7 @@ export const lexRouter = router({
       type: z.string().optional(),
       status: z.string().optional(),
       search: z.string().optional(),
-      limit: z.number().default(50),
+      limit: z.number().min(1).max(250).default(50),
       offset: z.number().default(0),
     }).optional())
     .query(async ({ input }) => {
@@ -164,7 +175,7 @@ export const lexRouter = router({
       incidentType: z.string().optional(),
       agencyId: z.number().optional(),
       search: z.string().optional(),
-      limit: z.number().default(50),
+      limit: z.number().min(1).max(250).default(50),
       offset: z.number().default(0),
     }).optional())
     .query(async ({ input }) => {
@@ -522,17 +533,16 @@ export const lexRouter = router({
 <div class="section">
   <div class="section-title">3. Subject Information</div>
   <div class="grid">
-    <div class="field"><label>Full Name</label><span>${sub.subjectName ?? "Not provided"}</span></div>
-    <div class="field"><label>NIN</label><span>${sub.subjectNin ?? "Not provided"}</span></div>
-    <div class="field"><label>Phone</label><span>${sub.subjectPhone ?? "Not provided"}</span></div>
-    <div class="field" style="grid-column:span 2"><label>Address</label><span>${sub.subjectAddress ?? "—"}</span></div>
+    <div class="field"><label>Full Name</label><span>${escHtml(sub.subjectName) || "Not provided"}</span></div>
+    <div class="field"><label>NIN</label><span>${escHtml(sub.subjectNin) || "Not provided"}</span></div>
+    <div class="field"><label>Phone</label><span>${escHtml(sub.subjectPhone) || "Not provided"}</span></div>
+    <div class="field" style="grid-column:span 2"><label>Address</label><span>${escHtml(sub.subjectAddress) || "—"}</span></div>
   </div>
 </div>
-
 <div class="section">
   <div class="section-title">4. Incident Narrative</div>
-  <div class="narrative">${sub.narrative}</div>
-</div>
+  <div class="narrative">${escHtml(sub.narrative)}</div>
+
 
 ${sub.validationScore != null ? `
 <div class="section">
@@ -560,19 +570,27 @@ ${sub.validationScore != null ? `
 </body></html>`;
 
       // Convert HTML to PDF using weasyprint
-      const { execSync } = await import("child_process");
+      // SECURITY: sanitize submissionRef to prevent path traversal / command injection
+      // submissionRef format: LEX-YYYY-STATE-NNNN — only allow alphanumeric + hyphens
+      const safeRef = sub.submissionRef.replace(/[^a-zA-Z0-9-]/g, "_");
+      const { spawnSync } = await import("child_process");
       const { writeFileSync, readFileSync, unlinkSync } = await import("fs");
       const { storagePut } = await import("./storage");
-      const tmpHtml = `/tmp/lex01_${sub.submissionRef}.html`;
-      const tmpPdf = `/tmp/lex01_${sub.submissionRef}.pdf`;
+      const tmpHtml = `/tmp/lex01_${safeRef}.html`;
+      const tmpPdf = `/tmp/lex01_${safeRef}.pdf`;
       writeFileSync(tmpHtml, html);
-      execSync(`weasyprint "${tmpHtml}" "${tmpPdf}"`, { timeout: 30000 });
+      // Use spawnSync with array args to prevent shell injection
+      const result = spawnSync("weasyprint", [tmpHtml, tmpPdf], { timeout: 30000 });
+      if (result.status !== 0) {
+        try { unlinkSync(tmpHtml); } catch {}
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "PDF generation failed" });
+      }
       const pdfBuffer = readFileSync(tmpPdf);
       unlinkSync(tmpHtml);
       unlinkSync(tmpPdf);
 
-      const { url } = await storagePut(`lex/forms/${sub.submissionRef}-LEX01.pdf`, pdfBuffer, "application/pdf");
-      return { url, filename: `LEX-01_${sub.submissionRef}.pdf` };
+      const { url } = await storagePut(`lex/forms/${safeRef}-LEX01.pdf`, pdfBuffer, "application/pdf");
+      return { url, filename: `LEX-01_${safeRef}.pdf` };
     }),
 
   // ── Auto-linking: find matching cases by NIN, phone, or LLM name similarity ──
@@ -949,11 +967,23 @@ ${sub.validationScore != null ? `
         : [];
       const allCaseIdsSet = new Set([...ninMatches.map(m => m.caseId), ...phoneMatches.map(m => m.caseId)]);
       const allCaseIds = Array.from(allCaseIdsSet);
-      const matches = allCaseIds.map(caseId => ({
-        caseId,
-        matchType: ninMatches.some(m => m.caseId === caseId) ? "nin" : "phone",
-        confidence: ninMatches.some(m => m.caseId === caseId) ? 95 : 80,
-      }));
+      // Fetch case details for matched case IDs
+      const caseDetails = allCaseIds.length > 0
+        ? await db.select({ id: cases.id, ref: cases.ref, title: cases.title })
+            .from(cases)
+            .where(inArray(cases.id, allCaseIds))
+            .limit(20)
+        : [];
+      const matches = allCaseIds.map(caseId => {
+        const caseDetail = caseDetails.find(c => c.id === caseId);
+        return {
+          caseId,
+          caseRef: caseDetail?.ref ?? `CASE-${caseId}`,
+          caseTitle: caseDetail?.title ?? 'Unknown Case',
+          matchType: ninMatches.some(m => m.caseId === caseId) ? "nin_exact" : "phone_exact",
+          confidence: ninMatches.some(m => m.caseId === caseId) ? 95 : 80,
+        };
+      });
       return { matches, alreadyLinked: false, linkedCaseId: null };
     }),
 });

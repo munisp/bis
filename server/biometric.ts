@@ -121,9 +121,10 @@ export const biometricRouter = router({
   checkLiveness: writeProcedure
     .input(
       z.object({
-        imageBase64: z.string().describe("Base64-encoded JPEG/PNG frame from webcam"),
+        // SECURITY: max 4MB base64 image (~3MB binary) to prevent DoS
+        imageBase64: z.string().max(5_500_000).describe("Base64-encoded JPEG/PNG frame from webcam"),
         challenge: z.enum(["blink", "turn_left", "turn_right", "smile", "nod"]).default("blink"),
-        subjectRef: z.string().optional(),
+        subjectRef: z.string().max(128).optional(),
       })
     )
     .mutation(async ({ input }) => {
@@ -142,8 +143,9 @@ export const biometricRouter = router({
   enroll: writeProcedure
     .input(
       z.object({
-        imageBase64: z.string(),
-        subjectRef: z.string(),
+        // SECURITY: max 4MB base64 image (~3MB binary) to prevent DoS
+        imageBase64: z.string().max(5_500_000),
+        subjectRef: z.string().max(128),
         kycRecordId: z.number().optional(),
       })
     )
@@ -182,9 +184,10 @@ export const biometricRouter = router({
   verify: writeProcedure
     .input(
       z.object({
-        imageBase64: z.string(),
-        faceId: z.string(),
-        subjectRef: z.string().optional(),
+        // SECURITY: max 4MB base64 image (~3MB binary) to prevent DoS
+        imageBase64: z.string().max(5_500_000),
+        faceId: z.string().max(256),
+        subjectRef: z.string().max(128).optional(),
       })
     )
     .mutation(async ({ input }) => {
@@ -203,9 +206,10 @@ export const biometricRouter = router({
   ocrDocument: writeProcedure
     .input(
       z.object({
-        imageBase64: z.string(),
+        // SECURITY: max 4MB base64 image (~3MB binary) to prevent DoS
+        imageBase64: z.string().max(5_500_000),
         documentType: z.enum(["NIN_SLIP", "PASSPORT", "DRIVERS_LICENSE", "VOTERS_CARD", "NIN_CARD"]).default("NIN_SLIP"),
-        subjectRef: z.string().optional(),
+        subjectRef: z.string().max(128).optional(),
       })
     )
     .mutation(async ({ input }) => {
@@ -290,11 +294,12 @@ export const biometricRouter = router({
   fullEnrollment: writeProcedure
     .input(
       z.object({
-        livenessImageBase64: z.string(),
-        enrollImageBase64: z.string(),
-        documentImageBase64: z.string().optional(),
+        // SECURITY: max 4MB base64 image (~3MB binary) to prevent DoS
+        livenessImageBase64: z.string().max(5_500_000),
+        enrollImageBase64: z.string().max(5_500_000),
+        documentImageBase64: z.string().max(5_500_000).optional(),
         challenge: z.enum(["blink", "turn_left", "turn_right", "smile", "nod"]).default("blink"),
-        subjectRef: z.string(),
+        subjectRef: z.string().max(128),
         kycRecordId: z.number().optional(),
         documentType: z.enum(["NIN_SLIP", "PASSPORT", "DRIVERS_LICENSE", "VOTERS_CARD", "NIN_CARD"]).optional(),
       })

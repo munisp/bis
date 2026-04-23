@@ -12,7 +12,7 @@ function sarRef(): string {
 export const sarRouter = router({
   list: protectedProcedure
     .input(z.object({
-      limit: z.number().default(50),
+      limit: z.number().min(1).max(250).default(50),
       offset: z.number().default(0),
       status: z.string().optional(),
       category: z.string().optional(),

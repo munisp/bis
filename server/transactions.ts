@@ -235,7 +235,7 @@ export const transactionsRouter = router({
   // ─── AML Alerts ───────────────────────────────────────────────────────────
   listAlerts: protectedProcedure
     .input(z.object({
-      limit: z.number().default(50),
+      limit: z.number().min(1).max(250).default(50),
       offset: z.number().default(0),
       status: z.string().optional(),
       riskLevel: z.string().optional(),

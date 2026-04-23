@@ -1,0 +1,44 @@
+{
+  "name": "BIS — Background Intelligence System",
+  "short_name": "BIS",
+  "description": "Nigerian Bureau of Investigation Services — AML, KYC, Compliance & Intelligence Platform",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#1e40af",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["business", "finance", "productivity"],
+  "lang": "en-NG",
+  "scope": "/",
+  "prefer_related_applications": false,
+  "shortcuts": [
+    {
+      "name": "LEX Submit",
+      "short_name": "LEX",
+      "description": "Submit a LEX incident report",
+      "url": "/lex/submit",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "QuickCheck",
+      "short_name": "Check",
+      "description": "Verify an individual quickly",
+      "url": "/quickcheck",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}

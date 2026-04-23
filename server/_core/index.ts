@@ -149,8 +149,18 @@ async function startServer() {
       xssFilter: true,
       // Referrer policy
       referrerPolicy: { policy: "strict-origin-when-cross-origin" },
+      // Cross-origin isolation
+      crossOriginOpenerPolicy: { policy: "same-origin" },
+      crossOriginResourcePolicy: { policy: "same-origin" },
+      // Permissions policy: disable sensitive browser APIs
+      permittedCrossDomainPolicies: { permittedPolicies: "none" },
     })
   );
+  // Permissions-Policy header (not yet in helmet stable)
+  app.use((_req: Request, res: Response, next: NextFunction) => {
+    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()');
+    next();
+  });
 
   // ── CORS ───────────────────────────────────────────────────────────────────
   // Allow the frontend origin (same host in dev, explicit in prod).
@@ -245,7 +255,8 @@ async function startServer() {
       res.set('Content-Type', promRegister.contentType);
       res.end(await promRegister.metrics());
     } catch (err) {
-      res.status(500).end(String(err));
+      console.error('[Metrics] Error generating metrics:', err);
+      res.status(500).end('Internal server error');
     }
   });
 
@@ -473,6 +484,72 @@ async function startServer() {
     }
   });
 
+  // ── API v1 Bearer token validation middleware ─────────────────────────────
+  // All /api/v1/* requests (except /api/v1/health) must include a valid Bearer token.
+  // Token is validated against the api_tokens table (SHA-256 hash comparison).
+  // Usage is logged to token_usage_log for analytics.
+  app.use("/api/v1", async (req: Request, res: Response, next: NextFunction) => {
+    // Health endpoint is public
+    if (req.path === "/health") return next();
+    const authHeader = req.headers["authorization"] ?? "";
+    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+    if (!token || !token.startsWith("bis")) {
+      res.status(401).json({ error: "API token required", code: "MISSING_TOKEN" });
+      return;
+    }
+    try {
+      const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+      const { getDb } = await import("../db");
+      const { apiTokens, tokenUsageLog } = await import("../../drizzle/schema");
+      const { eq, and, sql: sqlTag } = await import("drizzle-orm");
+      const dbInstance = await getDb();
+      if (!dbInstance) {
+        res.status(503).json({ error: "Database unavailable" });
+        return;
+      }
+      const rows = await dbInstance
+        .select()
+        .from(apiTokens)
+        .where(and(eq(apiTokens.tokenHash, tokenHash), eq(apiTokens.active, true)))
+        .limit(1);
+      if (rows.length === 0) {
+        res.status(401).json({ error: "Invalid or revoked API token", code: "INVALID_TOKEN" });
+        return;
+      }
+      const apiToken = rows[0];
+      // Check token quota
+      if (apiToken.tokenQuota !== null && apiToken.usageCount >= apiToken.tokenQuota) {
+        res.status(429).json({ error: "Token quota exceeded", code: "QUOTA_EXCEEDED" });
+        return;
+      }
+      // Attach token context to request
+      (req as any).apiToken = apiToken;
+      const startTime = Date.now();
+      // Log usage after response
+      res.on("finish", async () => {
+        try {
+          const latencyMs = Date.now() - startTime;
+          await dbInstance.insert(tokenUsageLog).values({
+            tokenId: apiToken.id,
+            endpoint: req.path,
+            method: req.method,
+            statusCode: res.statusCode,
+            latencyMs,
+          });
+          // Increment usage count
+          await dbInstance.execute(
+            sqlTag`UPDATE api_tokens SET "usageCount" = "usageCount" + 1, "lastUsedAt" = NOW() WHERE id = ${apiToken.id}`
+          );
+        } catch (logErr) {
+          console.warn("[APIv1] Usage log error:", logErr);
+        }
+      });
+      next();
+    } catch (err) {
+      console.error("[APIv1] Token validation error:", err);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
   // OpenClaw managed instance + Swagger UI
   app.use(createOpenClawRouter());
 

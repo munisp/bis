@@ -80,7 +80,7 @@ export const apiTokensRouter = router({
   list: protectedProcedure
     .input(z.object({
       tenantId: z.number().optional(),
-      limit: z.number().default(50),
+      limit: z.number().min(1).max(250).default(50),
       offset: z.number().default(0),
     }))
     .query(async ({ input, ctx }) => {

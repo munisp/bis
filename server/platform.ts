@@ -162,13 +162,20 @@ export const totpRouter = router({
 
 /** Simple TOTP validation (RFC 6238, SHA1, 6 digits, 30s window) */
 function validateTotp(secret: string, code: string): boolean {
+  // SECURITY: use timingSafeEqual to prevent timing attacks on TOTP comparison
   const now = Math.floor(Date.now() / 1000);
+  let valid = false;
   for (const offset of [-1, 0, 1]) {
     const counter = Math.floor((now + offset * 30) / 30);
     const expected = generateHotp(secret, counter);
-    if (expected === code) return true;
+    // Always compare all windows to prevent timing side-channel
+    const expectedBuf = Buffer.from(expected, 'utf8');
+    const codeBuf = Buffer.from(code.padEnd(expected.length, '\0'), 'utf8');
+    if (expectedBuf.length === codeBuf.length && crypto.timingSafeEqual(expectedBuf, codeBuf)) {
+      valid = true;
+    }
   }
-  return false;
+  return valid;
 }
 
 function generateHotp(secret: string, counter: number): string {

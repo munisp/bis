@@ -5,7 +5,9 @@ import { httpBatchLink, TRPCClientError } from "@trpc/client";
 import { createRoot } from "react-dom/client";
 import superjson from "superjson";
 import App from "./App";
+import { OfflineBanner } from "./components/OfflineBanner";
 import { getLoginUrl } from "./const";
+import { toast } from "sonner";
 import "./index.css";
 
 const queryClient = new QueryClient();
@@ -35,6 +37,13 @@ queryClient.getMutationCache().subscribe(event => {
   if (event.type === "updated" && event.action.type === "error") {
     const error = event.mutation.state.error;
     redirectToLoginIfUnauthorized(error);
+    // Show demo mode toast for read-only errors
+    if (error instanceof TRPCClientError && error.message.includes("demo mode")) {
+      toast.warning("Demo Mode — Read Only", {
+        description: "Sign in with a real account to make changes.",
+        duration: 4000,
+      });
+    }
     console.error("[API Mutation Error]", error);
   }
 });
@@ -91,6 +100,7 @@ createRoot(document.getElementById("root")!).render(
   <trpc.Provider client={trpcClient} queryClient={queryClient}>
     <QueryClientProvider client={queryClient}>
       <App />
+      <OfflineBanner />
     </QueryClientProvider>
   </trpc.Provider>
 );

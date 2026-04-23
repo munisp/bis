@@ -165,6 +165,12 @@ async function writeAuditLog(db: NonNullable<Awaited<ReturnType<typeof getDb>>>,
   }
 }
 
+// SECURITY: HTML escape to prevent XSS/injection in PDF templates
+function escHtml(s: string | null | undefined): string {
+  if (!s) return '';
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#x27;');
+}
+
 function generateRef(prefix: string): string {
   const year = new Date().getFullYear();
   // Use crypto.randomBytes for cryptographically secure unique IDs
@@ -1190,6 +1196,48 @@ const auditRouter = router({
         return { id: entry.id, valid, reason: valid ? "ok" : "hash_mismatch" };
       });
       return { results, checkedCount: results.length, tamperedCount: results.filter((r) => r.valid === false).length };
+    }),
+
+  /**
+   * Export audit log entries as CSV or JSON.
+   * Supports date range and category filters.
+   */
+  export: adminProcedure
+    .input(z.object({
+      format: z.enum(["csv", "json"]).default("csv"),
+      category: z.string().optional(),
+      dateFrom: z.string().optional(),
+      dateTo: z.string().optional(),
+      limit: z.number().min(1).max(10000).default(1000),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      const conditions: ReturnType<typeof eq>[] = [];
+      if (input.category) conditions.push(eq(auditLog.category, input.category as any));
+      if (input.dateFrom) conditions.push(gte(auditLog.createdAt, new Date(input.dateFrom)));
+      if (input.dateTo) conditions.push(lte(auditLog.createdAt, new Date(input.dateTo)));
+      const rows = await db.select().from(auditLog)
+        .where(conditions.length ? and(...conditions) : undefined)
+        .orderBy(desc(auditLog.createdAt))
+        .limit(input.limit);
+      const suffix = Date.now();
+      if (input.format === "json") {
+        const jsonBuf = Buffer.from(JSON.stringify(rows, null, 2), "utf8");
+        const { url } = await storagePut(`audit/exports/audit-${suffix}.json`, jsonBuf, "application/json");
+        await writeAuditLog(db, { userId: ctx.user!.id, category: "system", action: `Audit log exported (JSON, ${rows.length} rows)` });
+        return { url, count: rows.length, format: "json" };
+      }
+      // CSV
+      const header = ["id", "userId", "category", "action", "targetRef", "result", "ipAddress", "createdAt"].join(",");
+      const csvRows = rows.map(r => [
+        r.id, r.userId ?? "", r.category, `"${(r.action ?? "").replace(/"/g, '""')}"`,
+        r.targetRef ?? "", r.result, r.ipAddress ?? "", r.createdAt.toISOString()
+      ].join(","));
+      const csv = [header, ...csvRows].join("\n");
+      const { url } = await storagePut(`audit/exports/audit-${suffix}.csv`, Buffer.from(csv, "utf8"), "text/csv");
+      await writeAuditLog(db, { userId: ctx.user!.id, category: "system", action: `Audit log exported (CSV, ${rows.length} rows)` });
+      return { url, count: rows.length, format: "csv" };
     }),
 });
 
@@ -2626,8 +2674,8 @@ const casesRouter = router({
       // Send notification with portal link (origin must be passed from frontend)
       const portalUrl = `/stakeholder-portal?token=${accessToken}`;
       notifyOwner({
-        title: `[BIS] Stakeholder Invited — ${c.ref}`,
-        content: `**${input.name}** (${input.role}${input.organisation ? `, ${input.organisation}` : ''}) has been invited to case **${c.ref}: ${c.title}**.\n\nPortal access link: ${portalUrl}\n\nExpires: ${expiresAt.toISOString().split('T')[0]}\n\nInvited by: ${ctx.user?.name ?? 'System'}`,
+        title: `[BIS] Stakeholder Invited — ${escHtml(c.ref)}`,
+        content: `**${input.name}** (${input.role}${input.organisation ? `, ${input.organisation}` : ''}) has been invited to case **${escHtml(c.ref)}: ${escHtml(c.title)}**.\n\nPortal access link: ${portalUrl}\n\nExpires: ${expiresAt.toISOString().split('T')[0]}\n\nInvited by: ${escHtml(ctx.user?.name) || 'System'}`,
       }).catch(() => {/* non-fatal */});
       // Update lastNotifiedAt
       await db.update(caseStakeholders).set({ lastNotifiedAt: new Date() }).where(eq(caseStakeholders.id, stakeholder.id));
@@ -2715,7 +2763,7 @@ const casesRouter = router({
       // Sanitize extension: only allow alphanumeric chars, max 10 chars (prevents path traversal)
       const rawExt = input.fileName.split('.').pop() ?? 'bin';
       const ext = rawExt.replace(/[^a-zA-Z0-9]/g, '').slice(0, 10) || 'bin';
-      const fileKey = `cases/${c.ref}/docs/${suffix}.${ext}`;
+      const fileKey = `cases/${escHtml(c.ref)}/docs/${suffix}.${ext}`;
       const fileBuffer = Buffer.from(input.fileBase64, 'base64');
       const { url } = await storagePut(fileKey, fileBuffer, input.mimeType);
       // Persist metadata
@@ -2770,8 +2818,8 @@ const casesRouter = router({
       if (!c) throw new TRPCError({ code: 'NOT_FOUND', message: 'Case not found' });
       const portalUrl = `${input.origin}/stakeholder-portal?token=${sh.accessToken}`;
       await notifyOwner({
-        title: `[BIS] Case Portal Invite Re-sent — ${c.ref}`,
-        content: `Stakeholder **${sh.name}** (${sh.role}) has been re-invited to case **${c.ref}: ${c.title}**.\n\nPortal link: ${portalUrl}\n\nExpires: ${sh.accessExpiresAt?.toISOString() ?? 'N/A'}`,
+        title: `[BIS] Case Portal Invite Re-sent — ${escHtml(c.ref)}`,
+        content: `Stakeholder **${sh.name}** (${sh.role}) has been re-invited to case **${escHtml(c.ref)}: ${escHtml(c.title)}**.\n\nPortal link: ${portalUrl}\n\nExpires: ${sh.accessExpiresAt?.toISOString() ?? 'N/A'}`,
       });
       await db.update(caseStakeholders)
         .set({ lastNotifiedAt: new Date() })
@@ -2852,7 +2900,7 @@ const casesRouter = router({
         const llmRes = await invokeLLM({
           messages: [
             { role: 'system', content: 'You are a compliance officer writing a concise executive summary for a regulatory case report. Be factual, professional, and concise (3-5 sentences).' },
-            { role: 'user', content: `Case: ${c.ref} — ${c.title}\nType: ${c.type}\nStatus: ${c.status}\nPriority: ${c.priority}\nSummary: ${c.summary ?? 'N/A'}\nParties: ${parties.map(p => `${p.name} (${p.role})`).join(', ') || 'None'}\nTimeline events: ${timeline.length}\nDocuments: ${documents.length}\n\nWrite a 3-5 sentence executive summary for this compliance case report.` },
+            { role: 'user', content: `Case: ${escHtml(c.ref)} — ${escHtml(c.title)}\nType: ${c.type}\nStatus: ${c.status}\nPriority: ${c.priority}\nSummary: ${c.summary ?? 'N/A'}\nParties: ${parties.map(p => `${p.name} (${p.role})`).join(', ') || 'None'}\nTimeline events: ${timeline.length}\nDocuments: ${documents.length}\n\nWrite a 3-5 sentence executive summary for this compliance case report.` },
           ],
         });
         executiveSummary = (llmRes as any)?.choices?.[0]?.message?.content ?? executiveSummary;
@@ -2876,59 +2924,61 @@ td { padding: 6px 10px; border-bottom: 1px solid #e2e8f0; }
 .footer { margin-top: 40px; font-size: 10px; color: #94a3b8; border-top: 1px solid #e2e8f0; padding-top: 8px; }
 </style></head><body>
 <h1>BIS Compliance Case Report</h1>
-<p><strong>Generated:</strong> ${now} &nbsp;&nbsp; <strong>By:</strong> ${ctx.user?.name ?? 'System'} &nbsp;&nbsp; <strong>Classification:</strong> CONFIDENTIAL</p>
+<p><strong>Generated:</strong> ${now} &nbsp;&nbsp; <strong>By:</strong> ${escHtml(ctx.user?.name) || 'System'} &nbsp;&nbsp; <strong>Classification:</strong> CONFIDENTIAL</p>
 
 <h2>Case Overview</h2>
 <table>
-<tr><th>Reference</th><td>${c.ref}</td><th>Status</th><td><span class="badge ${c.status}">${c.status.replace('_',' ')}</span></td></tr>
-<tr><th>Title</th><td colspan="3">${c.title}</td></tr>
-<tr><th>Type</th><td>${c.type.replace('_',' ')}</td><th>Priority</th><td><span class="badge ${c.priority}">${c.priority}</span></td></tr>
-<tr><th>Legal Basis</th><td>${c.legalBasis ?? '—'}</td><th>Jurisdiction</th><td>${c.jurisdiction ?? '—'}</td></tr>
-<tr><th>Regulatory Framework</th><td>${c.regulatoryFramework ?? '—'}</td><th>Risk Score</th><td>${c.riskScore != null ? c.riskScore + '/100' : '—'}</td></tr>
+<tr><th>Reference</th><td>${escHtml(c.ref)}</td><th>Status</th><td><span class="badge ${c.status}">${c.status.replace('_',' ')}</span></td></tr>
+<tr><th>Title</th><td colspan="3">${escHtml(c.title)}</td></tr>
+<tr><th>Type</th><td>${escHtml(c.type).replace('_',' ')}</td><th>Priority</th><td><span class="badge ${c.priority}">${c.priority}</span></td></tr>
+<tr><th>Legal Basis</th><td>${escHtml(c.legalBasis) || '—'}</td><th>Jurisdiction</th><td>${escHtml(c.jurisdiction) || '—'}</td></tr>
+<tr><th>Regulatory Framework</th><td>${escHtml(c.regulatoryFramework) || '—'}</td><th>Risk Score</th><td>${c.riskScore != null ? c.riskScore + '/100' : '—'}</td></tr>
 <tr><th>Created</th><td>${new Date(c.createdAt).toLocaleDateString()}</td><th>Due Date</th><td>${c.dueAt ? new Date(c.dueAt).toLocaleDateString() : '—'}</td></tr>
 </table>
 
 <h2>Executive Summary</h2>
-<p>${executiveSummary}</p>
+<p>${escHtml(executiveSummary)}</p>
 
 ${parties.length > 0 ? `<h2>Parties (${parties.length})</h2>
 <table><tr><th>Name</th><th>Role</th><th>NIN</th><th>BVN</th><th>Phone</th><th>Email</th></tr>
-${parties.map(p => `<tr><td>${p.name}</td><td>${p.role}</td><td>${p.nin ?? '—'}</td><td>${p.bvn ?? '—'}</td><td>${p.phone ?? '—'}</td><td>${p.email ?? '—'}</td></tr>`).join('')}
+${parties.map(p => `<tr><td>${escHtml(p.name)}</td><td>${escHtml(p.role)}</td><td>${escHtml(p.nin) || '—'}</td><td>${escHtml(p.bvn) || '—'}</td><td>${escHtml(p.phone) || '—'}</td><td>${escHtml(p.email) || '—'}</td></tr>`).join('')}
 </table>` : ''}
 
 ${stakeholders.length > 0 ? `<h2>Stakeholders (${stakeholders.length})</h2>
 <table><tr><th>Name</th><th>Role</th><th>Organisation</th><th>Email</th><th>Access Expires</th></tr>
-${stakeholders.map(s => `<tr><td>${s.name}</td><td>${s.role.replace('_',' ')}</td><td>${s.organisation ?? '—'}</td><td>${s.email}</td><td>${s.accessExpiresAt ? new Date(s.accessExpiresAt).toLocaleDateString() : '—'}</td></tr>`).join('')}
+${stakeholders.map(s => `<tr><td>${escHtml(s.name)}</td><td>${escHtml(s.role).replace('_',' ')}</td><td>${escHtml(s.organisation) || '—'}</td><td>${escHtml(s.email)}</td><td>${s.accessExpiresAt ? new Date(s.accessExpiresAt).toLocaleDateString() : '—'}</td></tr>`).join('')}
 </table>` : ''}
 
 ${documents.length > 0 ? `<h2>Documents (${documents.length})</h2>
 <table><tr><th>Filename</th><th>Type</th><th>Size</th><th>Confidential</th><th>Uploaded</th></tr>
-${documents.map(d => `<tr><td>${d.filename}</td><td>${d.mimeType ?? '—'}</td><td>${d.sizeBytes ? (d.sizeBytes/1024).toFixed(1)+' KB' : '—'}</td><td>${d.confidential ? 'Yes' : 'No'}</td><td>${new Date(d.createdAt).toLocaleDateString()}</td></tr>`).join('')}
+${documents.map(d => `<tr><td>${escHtml(d.filename)}</td><td>${escHtml(d.mimeType) || '—'}</td><td>${d.sizeBytes ? (d.sizeBytes/1024).toFixed(1)+' KB' : '—'}</td><td>${d.confidential ? 'Yes' : 'No'}</td><td>${new Date(d.createdAt).toLocaleDateString()}</td></tr>`).join('')}
 </table>` : ''}
 
 <h2>Case Timeline (last ${timeline.length} events)</h2>
 <table><tr><th>Date</th><th>Event</th><th>Actor</th></tr>
-${timeline.map(e => `<tr><td>${new Date(e.createdAt).toLocaleDateString()}</td><td>${e.title}</td><td>${e.actorName ?? 'System'}</td></tr>`).join('')}
+${timeline.map(e => `<tr><td>${new Date(e.createdAt).toLocaleDateString()}</td><td>${escHtml(e.title)}</td><td>${escHtml(e.actorName) || 'System'}</td></tr>`).join('')}
 </table>
 
-<div class="footer">This report was generated by the BIS (Background Intelligence System) compliance platform. Reference: ${c.ref}. Generated: ${new Date().toISOString()}. Recipient should treat this document as confidential.</div>
+<div class="footer">This report was generated by the BIS (Background Intelligence System) compliance platform. Reference: ${escHtml(c.ref)}. Generated: ${new Date().toISOString()}. Recipient should treat this document as confidential.</div>
 </body></html>`;
 
       // Convert HTML to PDF using weasyprint via child_process
+      // SECURITY: use spawnSync with array args to prevent shell/command injection
       const crypto = await import('crypto');
-      const { execSync } = await import('child_process');
+      const { spawnSync } = await import('child_process');
       const tmpDir = '/tmp';
-      const htmlFile = `${tmpDir}/case-${c.ref}-${crypto.randomBytes(4).toString('hex')}.html`;
+      // Sanitize c.ref to prevent path traversal (format: BIS-YYYYMMDD-NNNNNN)
+      const safeRef = c.ref.replace(/[^a-zA-Z0-9-]/g, '_');
+      const htmlFile = `${tmpDir}/case-${safeRef}-${crypto.randomBytes(4).toString('hex')}.html`;
       const pdfFile = htmlFile.replace('.html', '.pdf');
       const { writeFileSync, readFileSync, unlinkSync } = await import('fs');
       writeFileSync(htmlFile, htmlContent, 'utf8');
-      try {
-        execSync(`weasyprint "${htmlFile}" "${pdfFile}"`, { timeout: 30000 });
-      } catch {
+      const weasyprintResult = spawnSync('weasyprint', [htmlFile, pdfFile], { timeout: 30000 });
+      if (weasyprintResult.status !== 0) {
         // Fallback: return HTML as PDF-like download
         const htmlBuf = Buffer.from(htmlContent, 'utf8');
         const suffix = crypto.randomBytes(6).toString('hex');
-        const { url } = await storagePut(`cases/${c.ref}/exports/report-${suffix}.html`, htmlBuf, 'text/html');
+        const { url } = await storagePut(`cases/${escHtml(c.ref)}/exports/report-${suffix}.html`, htmlBuf, 'text/html');
         unlinkSync(htmlFile);
         await db.insert(caseTimeline).values({
           caseId: c.id,
@@ -2939,11 +2989,11 @@ ${timeline.map(e => `<tr><td>${new Date(e.createdAt).toLocaleDateString()}</td><
           actorName: ctx.user?.name,
           actorRole: ctx.user?.role,
         });
-        return { url, format: 'html', filename: `${c.ref}-report.html` };
+        return { url, format: 'html', filename: `${escHtml(c.ref)}-report.html` };
       }
       const pdfBuf = readFileSync(pdfFile);
       const suffix = crypto.randomBytes(6).toString('hex');
-      const { url } = await storagePut(`cases/${c.ref}/exports/report-${suffix}.pdf`, pdfBuf, 'application/pdf');
+      const { url } = await storagePut(`cases/${escHtml(c.ref)}/exports/report-${suffix}.pdf`, pdfBuf, 'application/pdf');
       unlinkSync(htmlFile);
       unlinkSync(pdfFile);
       await db.insert(caseTimeline).values({
@@ -2955,7 +3005,7 @@ ${timeline.map(e => `<tr><td>${new Date(e.createdAt).toLocaleDateString()}</td><
         actorName: ctx.user?.name,
         actorRole: ctx.user?.role,
       });
-      return { url, format: 'pdf', filename: `${c.ref}-report.pdf` };
+      return { url, format: 'pdf', filename: `${escHtml(c.ref)}-report.pdf` };
     }),
 
   exportCaseCsv: protectedProcedure
@@ -3028,7 +3078,7 @@ ${timeline.map(e => `<tr><td>${new Date(e.createdAt).toLocaleDateString()}</td><
           const llmRes = await invokeLLM({
             messages: [
               { role: 'system', content: 'You are a compliance risk analyst. Given a case summary, return a JSON object with fields: riskLevel (low/medium/high/critical), keyRiskFactors (array of strings, max 3), recommendation (string, max 100 chars). Respond ONLY with valid JSON.' },
-              { role: 'user', content: `Case: ${c.title}\nType: ${c.type}\nPriority: ${c.priority}\nParties: ${parties.length}\nSummary: ${c.summary ?? 'N/A'}\nJurisdiction: ${c.jurisdiction ?? 'N/A'}\nLegal basis: ${c.legalBasis ?? 'N/A'}` },
+              { role: 'user', content: `Case: ${escHtml(c.title)}\nType: ${c.type}\nPriority: ${c.priority}\nParties: ${parties.length}\nSummary: ${c.summary ?? 'N/A'}\nJurisdiction: ${c.jurisdiction ?? 'N/A'}\nLegal basis: ${c.legalBasis ?? 'N/A'}` },
             ],
             response_format: { type: 'json_schema', json_schema: { name: 'risk_assessment', strict: true, schema: { type: 'object', properties: { riskLevel: { type: 'string' }, keyRiskFactors: { type: 'array', items: { type: 'string' } }, recommendation: { type: 'string' } }, required: ['riskLevel', 'keyRiskFactors', 'recommendation'], additionalProperties: false } } },
           });
@@ -3285,7 +3335,7 @@ const ollamaRouter = router({
 export const appRouter = router({
   system: systemRouter,
   auth: router({
-    me: publicProcedure.query(opts => opts.ctx.user),
+    me: publicProcedure.query(opts => opts.ctx.user ? { ...opts.ctx.user, isDemo: opts.ctx.isDemo } : null),
     logout: publicProcedure.mutation(({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });

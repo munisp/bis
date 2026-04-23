@@ -189,7 +189,7 @@ export const amlRouter = router({
   alerts: router({
     list: protectedProcedure
       .input(z.object({
-        limit: z.number().default(50), offset: z.number().default(0),
+        limit: z.number().min(1).max(250).default(50), offset: z.number().default(0),
         status: z.string().optional(), riskLevel: z.string().optional(),
       }))
       .query(async ({ input }) => {
@@ -284,7 +284,7 @@ export const amlRouter = router({
   swift: router({
     list: protectedProcedure
       .input(z.object({
-        limit: z.number().default(50), offset: z.number().default(0),
+        limit: z.number().min(1).max(250).default(50), offset: z.number().default(0),
         status: z.string().optional(), messageType: z.string().optional(), search: z.string().optional(),
       }))
       .query(async ({ input }) => {
@@ -352,7 +352,7 @@ export const amlRouter = router({
 
   sepa: router({
     list: protectedProcedure
-      .input(z.object({ limit: z.number().default(50), offset: z.number().default(0), status: z.string().optional() }))
+      .input(z.object({ limit: z.number().min(1).max(250).default(50), offset: z.number().default(0), status: z.string().optional() }))
       .query(async ({ input }) => {
         const db = await getDb();
         if (!db) throw new Error("Database unavailable");
@@ -398,7 +398,7 @@ export const amlRouter = router({
 
   travelRule: router({
     list: protectedProcedure
-      .input(z.object({ limit: z.number().default(50), offset: z.number().default(0), status: z.string().optional() }))
+      .input(z.object({ limit: z.number().min(1).max(250).default(50), offset: z.number().default(0), status: z.string().optional() }))
       .query(async ({ input }) => {
         const db = await getDb();
         if (!db) throw new Error("Database unavailable");
