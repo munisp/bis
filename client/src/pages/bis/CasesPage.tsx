@@ -88,6 +88,8 @@ export default function CasesPage() {
   const [selectedRefs, setSelectedRefs] = useState<Set<string>>(new Set());
   const [bulkStatusDialog, setBulkStatusDialog] = useState(false);
   const [bulkStatus, setBulkStatus] = useState<string>("closed");
+  const [bulkAssignDialog, setBulkAssignDialog] = useState(false);
+  const [bulkAssignAnalystId, setBulkAssignAnalystId] = useState("");
 
   // Form state
   const [form, setForm] = useState({
@@ -145,6 +147,17 @@ export default function CasesPage() {
       utils.cases.stats.invalidate();
       setSelectedRefs(new Set());
       toast.success(`Closed ${r.closed} case(s)`);
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const bulkAssign = trpc.cases.bulkAssign.useMutation({
+    onSuccess: (r) => {
+      utils.cases.list.invalidate();
+      setSelectedRefs(new Set());
+      setBulkAssignDialog(false);
+      setBulkAssignAnalystId("");
+      toast.success(`Assigned ${r.updated} case(s) to analyst`);
     },
     onError: (e) => toast.error(e.message),
   });
@@ -240,6 +253,10 @@ export default function CasesPage() {
               <Button variant="outline" size="sm" className="border-amber-400 text-amber-700"
                 onClick={() => setBulkStatusDialog(true)}>
                 Update Status ({selectedRefs.size})
+              </Button>
+              <Button variant="outline" size="sm" className="border-blue-400 text-blue-700"
+                onClick={() => setBulkAssignDialog(true)}>
+                Assign ({selectedRefs.size})
               </Button>
               <Button variant="outline" size="sm" className="border-red-400 text-red-700"
                 onClick={() => bulkClose.mutate({ refs: Array.from(selectedRefs) })}
@@ -616,6 +633,36 @@ export default function CasesPage() {
             <Button variant="outline" onClick={() => setCreateOpen(false)}>Cancel</Button>
             <Button onClick={handleCreate} disabled={!form.title.trim() || createCase.isPending}>
               {createCase.isPending ? "Creating..." : "Create Case"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Assign Dialog */}
+      <Dialog open={bulkAssignDialog} onOpenChange={setBulkAssignDialog}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Assign {selectedRefs.size} Case(s)</DialogTitle>
+          </DialogHeader>
+          <div className="py-3 space-y-3">
+            <div>
+              <Label>Analyst User ID</Label>
+              <Input
+                type="number"
+                value={bulkAssignAnalystId}
+                onChange={e => setBulkAssignAnalystId(e.target.value)}
+                placeholder="Enter analyst user ID"
+              />
+              <p className="text-xs text-muted-foreground mt-1">Enter the numeric user ID of the analyst to assign these cases to.</p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBulkAssignDialog(false)}>Cancel</Button>
+            <Button
+              onClick={() => bulkAssign.mutate({ refs: Array.from(selectedRefs), leadAnalystId: Number(bulkAssignAnalystId) })}
+              disabled={!bulkAssignAnalystId || isNaN(Number(bulkAssignAnalystId)) || bulkAssign.isPending}
+            >
+              {bulkAssign.isPending ? "Assigning..." : "Assign Cases"}
             </Button>
           </DialogFooter>
         </DialogContent>

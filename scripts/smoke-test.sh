@@ -15,6 +15,11 @@ RISK_ENGINE_URL="${RISK_ENGINE_URL:-http://localhost:8082}"
 CASE_MANAGER_URL="${CASE_MANAGER_URL:-http://localhost:8092}"
 LEX_INTAKE_URL="${LEX_INTAKE_URL:-http://localhost:8087}"
 LEX_VALIDATOR_URL="${LEX_VALIDATOR_URL:-http://localhost:8089}"
+BIOMETRIC_ENGINE_URL="${BIOMETRIC_ENGINE_URL:-http://localhost:8084}"
+LAKEHOUSE_WRITER_URL="${LAKEHOUSE_WRITER_URL:-http://localhost:8085}"
+ML_ENRICHMENT_URL="${ML_ENRICHMENT_URL:-http://localhost:8086}"
+EVENT_EMITTER_URL="${EVENT_EMITTER_URL:-http://localhost:8091}"
+EVENT_PROCESSOR_URL="${EVENT_PROCESSOR_URL:-http://localhost:8090}"
 
 PASS=0
 FAIL=0
@@ -78,14 +83,47 @@ check_health "Payment Rails" "$PAYMENT_RAILS_URL/health" || true
 # ─── Rust Services ────────────────────────────────────────────────────────────
 section "Rust Services"
 check_health "AML Engine" "$AML_ENGINE_URL/health" || true
-
-# ─── Python Services ──────────────────────────────────────────────────────────
+# ─── Python Services ─────────────────────────────────────────────────────────────────────
 section "Python Services"
 check_health "Risk Engine" "$RISK_ENGINE_URL/health" || true
 check_health "LEX Validator" "$LEX_VALIDATOR_URL/health" || true
 check_health "Risk Scoring" "$RISK_SCORING_URL/health" || true
+check_health "Biometric Engine" "$BIOMETRIC_ENGINE_URL/health" || true
+check_health "Lakehouse Writer" "$LAKEHOUSE_WRITER_URL/health" || true
+check_health "ML Enrichment" "$ML_ENRICHMENT_URL/health" || true
 
-# ─── Payment Rails API ────────────────────────────────────────────────────────
+# ─── Rust Services (additional) ─────────────────────────────────────────────────────────────────────
+section "Rust Services (additional)"
+check_health "Event Emitter" "$EVENT_EMITTER_URL/health" || true
+check_health "Event Processor" "$EVENT_PROCESSOR_URL/health" || true
+
+# ─── Biometric Engine API ─────────────────────────────────────────────────────────────────────
+section "Biometric Engine API"
+if curl -sf --max-time 5 "$BIOMETRIC_ENGINE_URL/health" > /dev/null 2>&1; then
+  enroll_resp=$(curl -sf --max-time 10 -X GET "$BIOMETRIC_ENGINE_URL/enrollments" 2>/dev/null || echo '{}')
+  if echo "$enroll_resp" | grep -q "enrolled"; then
+    pass "Biometric enrollments list endpoint"
+  else
+    fail "Biometric enrollments list" "unexpected response"
+  fi
+else
+  skip "Biometric Engine API tests (service not running)"
+fi
+
+# ─── Lakehouse Writer API ─────────────────────────────────────────────────────────────────────
+section "Lakehouse Writer API"
+if curl -sf --max-time 5 "$LAKEHOUSE_WRITER_URL/health" > /dev/null 2>&1; then
+  stats_resp=$(curl -sf --max-time 10 "$LAKEHOUSE_WRITER_URL/stats" 2>/dev/null || echo '{}')
+  if echo "$stats_resp" | grep -q "stats"; then
+    pass "Lakehouse stats endpoint"
+  else
+    fail "Lakehouse stats" "unexpected response"
+  fi
+else
+  skip "Lakehouse Writer API tests (service not running)"
+fi
+
+# ─── Payment Rails API ─────────────────────────────────────────────────────────────────────
 section "Payment Rails API"
 if curl -sf --max-time 5 "$PAYMENT_RAILS_URL/health" > /dev/null 2>&1; then
   # Test SWIFT validation

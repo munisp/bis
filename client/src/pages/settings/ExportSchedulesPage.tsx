@@ -17,13 +17,24 @@ const EXPORT_TYPES = [
   { value: "investigations", label: "Investigations" },
   { value: "lex_submissions", label: "LEX Submissions" },
   { value: "audit_log", label: "Audit Log" },
+  { value: "transactions", label: "Transaction History" },
+  { value: "aml_alerts", label: "AML Alerts" },
+  { value: "frozen_accounts", label: "Frozen Accounts" },
+  { value: "sar_filings", label: "SAR Filings" },
+  { value: "kyc_records", label: "KYC Records" },
+  { value: "regulatory_reports", label: "Regulatory Reports" },
 ] as const;
 
 const CRON_PRESETS = [
   { label: "Every Monday at 8am", value: "0 8 * * 1" },
   { label: "Daily at midnight", value: "0 0 * * *" },
+  { label: "Daily at 6am", value: "0 6 * * *" },
   { label: "Every Sunday at 6am", value: "0 6 * * 0" },
   { label: "1st of every month", value: "0 8 1 * *" },
+  { label: "15th of every month", value: "0 8 15 * *" },
+  { label: "Every weekday at 5pm", value: "0 17 * * 1-5" },
+  { label: "Every 6 hours", value: "0 */6 * * *" },
+  { label: "Quarterly (Jan/Apr/Jul/Oct 1st)", value: "0 8 1 1,4,7,10 *" },
 ];
 
 export default function ExportSchedulesPage() {
@@ -68,8 +79,13 @@ export default function ExportSchedulesPage() {
       <div className="p-6 max-w-4xl mx-auto space-y-6">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold">Export Schedules</h1>
-            <p className="text-muted-foreground text-sm mt-1">Automate recurring data exports to CSV or JSON.</p>
+            <h1 className="text-2xl font-bold flex items-center gap-2">
+              <Calendar className="h-6 w-6 text-blue-400" />
+              Scheduled Transaction History Reports
+            </h1>
+            <p className="text-muted-foreground text-sm mt-1">
+              Automate recurring data exports — transaction history, AML alerts, SAR filings, KYC records, and more.
+            </p>
           </div>
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
@@ -126,6 +142,30 @@ export default function ExportSchedulesPage() {
             </DialogContent>
           </Dialog>
         </div>
+
+        {/* Summary Stats */}
+        {schedules && schedules.length > 0 && (
+          <div className="grid grid-cols-3 gap-4">
+            <Card>
+              <CardContent className="pt-4">
+                <div className="text-sm text-muted-foreground">Total Schedules</div>
+                <div className="text-2xl font-bold mt-1">{schedules.length}</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-4">
+                <div className="text-sm text-muted-foreground">Active</div>
+                <div className="text-2xl font-bold mt-1 text-green-400">{schedules.filter(s => s.enabled).length}</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-4">
+                <div className="text-sm text-muted-foreground">Paused</div>
+                <div className="text-2xl font-bold mt-1 text-yellow-400">{schedules.filter(s => !s.enabled).length}</div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
 
         {isLoading ? (
           <div className="space-y-3">

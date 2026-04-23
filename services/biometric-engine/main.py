@@ -1206,6 +1206,63 @@ async def verify_enrolled_subject(req: VerifyEnrolledRequest):
         raise HTTPException(status_code=500, detail="Internal biometric engine error")
 
 
+# ── Batch Enrollment ─────────────────────────────────────────────────────────────────
+class BatchEnrollRequest(BaseModel):
+    enrollments: list[EnrollRequest]
+
+@app.post("/enroll/batch")
+async def batch_enroll(req: BatchEnrollRequest):
+    """Batch-enroll multiple subjects in a single request."""
+    results = []
+    for item in req.enrollments:
+        try:
+            result = await enroll_subject(item)
+            results.append({"subject_ref": item.subject_ref, "ok": True, **result})
+        except HTTPException as e:
+            results.append({"subject_ref": item.subject_ref, "ok": False, "error": e.detail})
+        except Exception as e:
+            results.append({"subject_ref": item.subject_ref, "ok": False, "error": str(e)})
+    ok_count = sum(1 for r in results if r["ok"])
+    return {"total": len(results), "enrolled": ok_count, "failed": len(results) - ok_count, "results": results}
+
+
+@app.delete("/enrollments/{subject_ref}")
+async def delete_enrollment(subject_ref: str):
+    """Remove a subject's biometric enrollment from Redis."""
+    face_id = f"face:{subject_ref}"
+    if _redis is not None:
+        deleted = await _redis.delete(face_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail=f"Subject '{subject_ref}' not found in enrollment store")
+    REQUEST_COUNT.labels(endpoint="delete_enrollment", status="ok").inc()
+    return {"ok": True, "subject_ref": subject_ref, "deleted": True}
+
+
+@app.get("/enrollments/{subject_ref}")
+async def get_enrollment(subject_ref: str):
+    """Check if a subject is enrolled (returns metadata, no embedding bytes)."""
+    face_id = f"face:{subject_ref}"
+    if _redis is not None:
+        exists = await _redis.exists(face_id)
+        ttl = await _redis.ttl(face_id)
+        if not exists:
+            raise HTTPException(status_code=404, detail=f"Subject '{subject_ref}' not enrolled")
+        return {"subject_ref": subject_ref, "face_id": face_id, "enrolled": True, "ttl_seconds": ttl}
+    return {"subject_ref": subject_ref, "face_id": face_id, "enrolled": False, "note": "Redis unavailable"}
+
+
+@app.get("/enrollments")
+async def list_enrollments(pattern: str = "face:*", count: int = 100):
+    """List enrolled subject references from Redis."""
+    if _redis is None:
+        return {"enrolled": [], "total": 0, "note": "Redis unavailable"}
+    keys = []
+    async for key in _redis.scan_iter(match=pattern, count=count):
+        keys.append(key.decode() if isinstance(key, bytes) else key)
+    refs = [k.replace("face:", "") for k in keys]
+    return {"enrolled": refs, "total": len(refs)}
+
+
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", "8084"))

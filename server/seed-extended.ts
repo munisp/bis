@@ -1101,6 +1101,89 @@ async function seedFrozenAccounts(userIds: number[]) {
   }
 }
 
+// ─── Case Documents ─────────────────────────────────────────────────────────
+async function seedCaseDocuments(userIds: number[], caseIds: number[]) {
+  if (caseIds.length === 0) return;
+  console.log("  → caseDocuments (30 records)");
+  const categories = ["evidence", "legal", "financial", "correspondence", "court_order", "witness_statement", "expert_report", "regulatory"];
+  const mimeTypes = ["application/pdf", "image/jpeg", "image/png", "application/vnd.ms-excel", "application/msword", "text/plain"];
+  const filenames = [
+    "bank_statement_q1_2025.pdf", "property_deed.pdf", "cac_certificate.pdf",
+    "nin_slip.jpg", "passport_scan.jpg", "transaction_history.xlsx",
+    "witness_statement.pdf", "court_order.pdf", "audit_report.pdf",
+    "correspondence_cbn.pdf", "asset_declaration.pdf", "company_accounts.xlsx",
+    "phone_records.pdf", "travel_records.pdf", "email_evidence.pdf",
+  ];
+  for (let i = 1; i <= 30; i++) {
+    const filename = rnd(filenames);
+    const caseId = rnd(caseIds);
+    const fileKey = `cases/${caseId}/docs/${uuid()}-${filename}`;
+    await db.execute(sql`
+      INSERT INTO case_documents (
+        "caseId", filename, "mimeType", "fileKey", url,
+        "sizeBytes", category, description, confidential,
+        "uploadedBy", "createdAt"
+      ) VALUES (
+        ${caseId}, ${filename}, ${rnd(mimeTypes)},
+        ${fileKey}, ${`https://storage.bis.ng/${fileKey}`},
+        ${rndInt(50000, 5000000)}, ${rnd(categories)},
+        ${`Document uploaded during ${rnd(["initial case review", "field investigation", "legal proceedings", "regulatory submission", "evidence gathering"])}`},
+        ${Math.random() > 0.7},
+        ${rnd(userIds)}, ${daysAgo(rndInt(0, 90))}
+      )
+      ON CONFLICT DO NOTHING
+    `);
+  }
+}
+
+// ─── Incoming Reports ─────────────────────────────────────────────────────────
+async function seedIncomingReports() {
+  console.log("  → incomingReports (25 records)");
+  const statuses = ["new", "in_review", "escalated", "resolved", "dismissed"] as const;
+  const languages = ["en", "yo", "ha", "ig"];
+  const senders = [
+    "+2348012345678", "+2347098765432", "+2349011223344",
+    "reporter001@gmail.com", "tipster@yahoo.com",
+    "anonymous_user_7823", "concerned_citizen_4521",
+  ];
+  const contents = [
+    "I want to report suspicious financial activity by my neighbour who receives large cash amounts daily with no known business.",
+    "A government contractor in my area is collecting bribes from vendors. I have evidence of multiple payments.",
+    "My bank account was hacked and N500,000 was transferred without my authorization. Please investigate.",
+    "I suspect my employer is involved in money laundering through fake invoices to shell companies.",
+    "A local politician is using my community cooperative to launder funds from unknown sources.",
+    "I received a suspicious call asking me to transfer money to receive a prize. This seems like fraud.",
+    "My company's finance manager has been diverting funds to personal accounts for the past 6 months.",
+    "There is a group running a Ponzi scheme in my area promising 50% returns in 30 days.",
+    "I have information about a drug dealer who is using a restaurant business to launder proceeds.",
+    "A foreign national is running an illegal forex bureau without CBN authorization in Lagos Island.",
+  ];
+  // Get channel IDs
+  const channelRows = await db.execute(sql`SELECT id FROM messaging_channels ORDER BY id LIMIT 5`);
+  const channelIds = (channelRows.rows as any[]).map((r: any) => r.id);
+  if (channelIds.length === 0) return;
+  for (let i = 1; i <= 25; i++) {
+    const status = rnd(statuses);
+    await db.execute(sql`
+      INSERT INTO incoming_reports (
+        "channelId", "channelType", sender, content, status,
+        "riskScore", language, "attachmentCount",
+        "receivedAt", "processedAt", "createdAt", "updatedAt"
+      ) VALUES (
+        ${rnd(channelIds)},
+        ${rnd(["whatsapp", "telegram", "ussd", "sms", "email"])}::"channel_type",
+        ${rnd(senders)}, ${rnd(contents)},
+        ${status}::"incoming_report_status",
+        ${rndInt(10, 95)}, ${rnd(languages)}, ${rndInt(0, 3)},
+        ${daysAgo(rndInt(0, 60))},
+        ${status !== "new" ? daysAgo(rndInt(0, 30)) : null},
+        ${daysAgo(rndInt(0, 60))}, ${daysAgo(rndInt(0, 30))}
+      )
+      ON CONFLICT DO NOTHING
+    `);
+  }
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 async function main() {
   console.log("🌱 BIS Extended Seed — starting...");
@@ -1143,7 +1226,8 @@ async function main() {
   await seedNotificationsAndSessions(userIds);
   await seedApiTokensAndUsage(userIds);
   await seedFrozenAccounts(userIds);
-
+  await seedCaseDocuments(userIds, caseIds);
+  await seedIncomingReports();
   console.log("✅ BIS Extended Seed complete!");
   await pool.end();
 }

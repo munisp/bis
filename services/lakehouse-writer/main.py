@@ -443,6 +443,168 @@ async def kafka_consumer_loop():
         await consumer.stop()
 
 
+# ── Batch Ingest ─────────────────────────────────────────────────────────────
+class BatchIngestRequest(BaseModel):
+    table: str
+    rows: list[dict]
+
+@app.post("/ingest/batch")
+async def ingest_batch(body: BatchIngestRequest):
+    """Batch-write multiple rows to any supported Delta Lake table."""
+    supported = {"investigations", "alerts", "kyc", "transactions", "aml_alerts", "sar_filings", "cases"}
+    if body.table not in supported:
+        raise HTTPException(status_code=400, detail=f"Unsupported table: {body.table}. Supported: {sorted(supported)}")
+    written = 0
+    errors = []
+    for i, row in enumerate(body.rows):
+        try:
+            row["_ingested_at"] = datetime.now(timezone.utc).isoformat()
+            if "created_at" not in row:
+                row["created_at"] = row["_ingested_at"]
+            ts = datetime.fromisoformat(row["created_at"].replace("Z", "+00:00"))
+            row.update(_partition_cols(ts))
+            write_row(body.table, {k: pd.Timestamp(v) if k.endswith("_at") and v else v for k, v in row.items()})
+            written += 1
+        except Exception as e:
+            errors.append({"index": i, "error": str(e)})
+    return {"ok": True, "table": body.table, "written": written, "errors": errors}
+
+
+# ── Transaction Ingest ────────────────────────────────────────────────────────
+class TransactionRow(BaseModel):
+    id: str
+    ref: Optional[str] = None
+    account_id: Optional[str] = None
+    counterparty_account: Optional[str] = None
+    amount_kobo: Optional[int] = None
+    currency: Optional[str] = "NGN"
+    direction: Optional[str] = None  # credit | debit
+    channel: Optional[str] = None
+    narration: Optional[str] = None
+    status: Optional[str] = None
+    risk_score: Optional[float] = None
+    aml_flag: Optional[bool] = False
+    created_at: Optional[str] = None
+
+@app.post("/ingest/transaction")
+async def ingest_transaction(row: TransactionRow):
+    """Write one transaction row to the Delta Lake."""
+    now = datetime.now(timezone.utc)
+    created_at = datetime.fromisoformat(row.created_at.replace("Z", "+00:00")) if row.created_at else now
+    data = {
+        "id": row.id,
+        "ref": row.ref,
+        "account_id": row.account_id,
+        "counterparty_account": row.counterparty_account,
+        "amount_kobo": row.amount_kobo,
+        "currency": row.currency,
+        "direction": row.direction,
+        "channel": row.channel,
+        "narration": row.narration,
+        "status": row.status,
+        "risk_score": row.risk_score,
+        "aml_flag": row.aml_flag,
+        "created_at": pd.Timestamp(created_at),
+        **_partition_cols(created_at),
+    }
+    try:
+        write_row("transactions", data)
+        return {"ok": True, "table": "transactions", "id": row.id}
+    except Exception as e:
+        logger.error(f"Failed to write transaction {row.id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── AML Alert Ingest ──────────────────────────────────────────────────────────
+class AmlAlertRow(BaseModel):
+    id: str
+    transaction_ref: Optional[str] = None
+    rule_id: Optional[str] = None
+    rule_name: Optional[str] = None
+    risk_level: Optional[str] = None  # low | medium | high | critical
+    amount_kobo: Optional[int] = None
+    subject_name: Optional[str] = None
+    status: Optional[str] = "open"
+    analyst_notes: Optional[str] = None
+    created_at: Optional[str] = None
+
+@app.post("/ingest/aml-alert")
+async def ingest_aml_alert(row: AmlAlertRow):
+    """Write one AML alert row to the Delta Lake."""
+    now = datetime.now(timezone.utc)
+    created_at = datetime.fromisoformat(row.created_at.replace("Z", "+00:00")) if row.created_at else now
+    data = {
+        "id": row.id,
+        "transaction_ref": row.transaction_ref,
+        "rule_id": row.rule_id,
+        "rule_name": row.rule_name,
+        "risk_level": row.risk_level,
+        "amount_kobo": row.amount_kobo,
+        "subject_name": row.subject_name,
+        "status": row.status,
+        "analyst_notes": row.analyst_notes,
+        "created_at": pd.Timestamp(created_at),
+        **_partition_cols(created_at),
+    }
+    try:
+        write_row("aml_alerts", data)
+        return {"ok": True, "table": "aml_alerts", "id": row.id}
+    except Exception as e:
+        logger.error(f"Failed to write AML alert {row.id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── SAR Filing Ingest ─────────────────────────────────────────────────────────
+class SarFilingRow(BaseModel):
+    id: str
+    ref: Optional[str] = None
+    subject_name: Optional[str] = None
+    filing_type: Optional[str] = None  # STR | CTR | GOAML
+    status: Optional[str] = "draft"
+    regulator: Optional[str] = None
+    amount_kobo: Optional[int] = None
+    filed_at: Optional[str] = None
+    created_at: Optional[str] = None
+
+@app.post("/ingest/sar-filing")
+async def ingest_sar_filing(row: SarFilingRow):
+    """Write one SAR/STR filing row to the Delta Lake."""
+    now = datetime.now(timezone.utc)
+    created_at = datetime.fromisoformat(row.created_at.replace("Z", "+00:00")) if row.created_at else now
+    data = {
+        "id": row.id,
+        "ref": row.ref,
+        "subject_name": row.subject_name,
+        "filing_type": row.filing_type,
+        "status": row.status,
+        "regulator": row.regulator,
+        "amount_kobo": row.amount_kobo,
+        "filed_at": pd.Timestamp(datetime.fromisoformat(row.filed_at.replace("Z", "+00:00"))) if row.filed_at else None,
+        "created_at": pd.Timestamp(created_at),
+        **_partition_cols(created_at),
+    }
+    try:
+        write_row("sar_filings", data)
+        return {"ok": True, "table": "sar_filings", "id": row.id}
+    except Exception as e:
+        logger.error(f"Failed to write SAR filing {row.id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Stats ─────────────────────────────────────────────────────────────────────
+@app.get("/stats")
+async def get_stats():
+    """Return row counts for all lakehouse tables."""
+    stats = {}
+    for table in ["investigations", "alerts", "kyc", "transactions", "aml_alerts", "sar_filings", "cases"]:
+        try:
+            result = run_duckdb_query(f"SELECT COUNT(*) as cnt FROM read_parquet('{LAKEHOUSE_BASE}/{table}/**/*.parquet', union_by_name=true)")
+            stats[table] = result[0]["cnt"] if result else 0
+        except Exception:
+            stats[table] = 0
+    return {"ok": True, "stats": stats}
+
+
 @app.on_event("startup")
 async def startup():
     ensure_table_dirs()

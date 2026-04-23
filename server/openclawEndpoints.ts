@@ -263,9 +263,27 @@ export function createOpenClawRouter(): Router {
     }
   });
 
-  // OpenClaw webhook receiver
+  // OpenClaw webhook receiver — requires Bearer token authentication
   router.post("/api/v1/openclaw/webhook", (req, res) => {
-    const { event, data, timestamp } = req.body as { event: string; data: unknown; timestamp: string };
+    const token = validateBearerToken(req as Parameters<typeof validateBearerToken>[0]);
+    if (!token) {
+      return res.status(401).json({ code: "UNAUTHORIZED", message: "Invalid or missing Bearer token" });
+    }
+    const body = req.body as Record<string, unknown>;
+    const event = typeof body.event === "string" ? body.event : null;
+    const timestamp = typeof body.timestamp === "string" ? body.timestamp : new Date().toISOString();
+    const data = body.data ?? null;
+    if (!event) {
+      return res.status(400).json({ code: "MISSING_EVENT", message: "event field is required" });
+    }
+    const validEvents = [
+      "investigation.created", "investigation.updated", "investigation.closed",
+      "alert.triggered", "alert.resolved", "sar.filed", "sar.acknowledged",
+      "kyc.completed", "kyc.failed", "sanctions.hit", "sanctions.cleared",
+    ];
+    if (!validEvents.includes(event)) {
+      return res.status(400).json({ code: "INVALID_EVENT", message: `Unknown event. Valid events: ${validEvents.join(", ")}` });
+    }
     console.log(`[OpenClaw Webhook] event=${event} timestamp=${timestamp}`, data);
     // In production: emit to Kafka bis.openclaw topic, trigger investigation updates
     return res.json({ received: true, event });

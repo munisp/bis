@@ -1693,3 +1693,63 @@
 - [x] getFreezeHistory, unfreezeAccount, listFrozenAccounts, getBatchMonitor procedures
 - [x] All 269 Node.js + 5 Go packages + 8 Rust + 21 Python tests passing
 - [x] v60 checkpoint saved
+
+## Phase v61 — Full Production Feature Sprint (All Features End-to-End)
+
+### Payment Rails Enhancements
+- [x] FrozenAccountsDashboard: filter by reason dropdown (AML/Fraud/Sanctions/Court Order/Regulatory)
+- [x] FrozenAccountsDashboard: filter by status (Active/Unfrozen/All)
+- [x] FrozenAccountsDashboard: date range filter
+- [x] BatchMonitor: real-time progress bar for active batch processing
+- [x] BatchMonitor: batch history table with per-batch stats
+- [x] BatchMonitor: alert thresholds configuration panel
+- [x] Scheduled export reports UI (/payment-rails/export-schedules)
+- [ ] Transfer analytics dashboard with daily/weekly/monthly charts
+- [ ] Payment reconciliation report page
+
+### AML/Compliance Features
+- [x] SAR filing lifecycle: Draft → Under Review → Approved → Filed → Acknowledged
+- [x] SAR filing: attach supporting documents, link to investigation
+- [ ] Trade Finance LC: full CRUD with status workflow (Issued/Confirmed/Drawn/Expired)
+- [ ] Correspondent Banking: SWIFT/BIC lookup, nostro account management
+- [ ] Evidence Custody: chain of custody log, integrity hash verification
+- [ ] Regulatory Reports: CBN/NFIU submission workflow with acknowledgment tracking
+- [ ] AML Transactions: add create/flag/unflag/block actions
+- [ ] Alert Rules: test rule button, rule performance metrics
+
+### Investigation & KYC Enhancements
+- [x] Investigation bulk actions (bulk assign, bulk close, bulk export)
+- [ ] Investigation advanced timeline with evidence attachments
+- [ ] Document vault page (/document-vault) with upload/download/version control
+- [ ] Risk scoring dashboard (/risk-dashboard) with entity risk heatmap
+- [ ] KYC records bulk export to CSV/PDF
+- [ ] KYC records advanced search (by NIN/BVN/name/status)
+
+### Admin & Platform Features
+- [ ] System health dashboard (/admin/health) with all service statuses
+- [ ] Audit trail export with date range and entity type filters
+- [ ] Tenant billing lifecycle: invoice generation, payment tracking
+- [ ] API rate-limit dashboard showing per-tenant usage
+- [ ] OpenAPI spec at /api/docs (Swagger UI)
+- [ ] .env.example with all variables and safe defaults
+
+### Security Hardening
+- [x] Add rate limiting to all auth endpoints (login, token refresh)
+- [x] Add CSRF token validation to all mutation endpoints
+- [x] Add request ID tracing header to all responses
+- [x] Add security.txt at /.well-known/security.txt
+- [x] Verify all admin procedures have role check
+- [x] Add input sanitization for all text fields (webhook endpoint hardened)
+
+### Seed Data & Testing
+- [x] Add 50+ realistic Nigerian transaction seed records
+- [x] Add 10+ SAR filing seed records
+- [x] Add 5+ trade finance LC seed records
+- [x] Add 10+ correspondent bank seed records
+- [x] Add 20+ evidence custody seed records
+- [x] Add smoke tests for all new features (biometric, lakehouse, ml-enrichment, event-emitter, event-processor)
+
+### Documentation
+- [ ] Update docs/architecture.md with v61 changes
+- [ ] Create docs/api-reference.md with all tRPC procedures
+- [ ] Update docs/runbook.md with new service details

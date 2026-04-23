@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
   FileText, Plus, Search, Eye, ChevronLeft, ChevronRight,
-  RefreshCw, Send, CheckCircle
+  RefreshCw, Send, CheckCircle, Download, Link, XCircle
 } from "lucide-react";
 
 const STATUS_COLORS: Record<string, string> = {
@@ -379,6 +379,34 @@ export default function SARFilingPage() {
                     <span className="text-sm">Filed — Ref: {selectedSar.filingReference}</span>
                   </div>
                 )}
+                {selectedSar.status === "acknowledged" && (
+                  <div className="flex items-center gap-2 text-teal-400">
+                    <CheckCircle className="w-4 h-4" />
+                    <span className="text-sm">Acknowledged by NFIU — Ref: {selectedSar.filingReference}</span>
+                  </div>
+                )}
+                {selectedSar.status === "rejected" && (
+                  <div className="flex items-center gap-2 text-red-400">
+                    <XCircle className="w-4 h-4" />
+                    <span className="text-sm">Rejected — {selectedSar.reviewNotes ?? "No notes"}</span>
+                  </div>
+                )}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const data = JSON.stringify(selectedSar, null, 2);
+                    const blob = new Blob([data], { type: "application/json" });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = url;
+                    a.download = `SAR-${selectedSar.sarRef}.json`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  }}
+                >
+                  <Download className="w-3 h-3 mr-1" /> Export SAR
+                </Button>
               </div>
             </div>
           </DialogContent>
