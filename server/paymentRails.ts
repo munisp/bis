@@ -866,4 +866,177 @@ export const paymentRailsRouter = router({
       nextArchivalRun: "02:00 UTC daily",
     };
   }),
+
+  /**
+   * Transfer analytics: daily/weekly/monthly NGN volume, count, and status breakdown.
+   * Used by the /payment-rails/analytics dashboard.
+   */
+  getTransferAnalytics: protectedProcedure
+    .input(z.object({
+      period: z.enum(["daily", "weekly", "monthly"]).default("daily"),
+      days: z.number().min(7).max(365).default(30),
+    }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
+
+      const since = new Date(Date.now() - input.days * 24 * 60 * 60 * 1000);
+
+      // Get all transactions in the period
+      const rows = await db
+        .select({
+          createdAt: transactions.createdAt,
+          amount: transactions.amount,
+          currency: transactions.currency,
+          status: transactions.status,
+          amlScore: transactions.amlScore,
+        })
+        .from(transactions)
+        .where(gte(transactions.createdAt, since))
+        .orderBy(transactions.createdAt);
+
+      // Group by period bucket
+      const buckets: Record<string, { date: string; volume: number; count: number; flagged: number; blocked: number; avgRisk: number; riskSum: number }> = {};
+
+      for (const row of rows) {
+        const d = new Date(row.createdAt);
+        let key: string;
+        if (input.period === "daily") {
+          key = d.toISOString().slice(0, 10);
+        } else if (input.period === "weekly") {
+          // ISO week: Monday-based
+          const day = d.getDay() || 7;
+          const monday = new Date(d);
+          monday.setDate(d.getDate() - day + 1);
+          key = monday.toISOString().slice(0, 10);
+        } else {
+          key = d.toISOString().slice(0, 7); // YYYY-MM
+        }
+
+        if (!buckets[key]) {
+          buckets[key] = { date: key, volume: 0, count: 0, flagged: 0, blocked: 0, avgRisk: 0, riskSum: 0 };
+        }
+        const amountNgn = (row.amount ?? 0) / 100; // kobo → NGN
+        buckets[key].volume += amountNgn;
+        buckets[key].count += 1;
+        if (row.status === "flagged") buckets[key].flagged += 1;
+        if (row.status === "blocked") buckets[key].blocked += 1;
+        buckets[key].riskSum += (row.amlScore ?? 0);
+      }
+
+      const series = Object.values(buckets)
+        .sort((a, b) => a.date.localeCompare(b.date))
+        .map(b => ({
+          ...b,
+          avgRisk: b.count > 0 ? Math.round(b.riskSum / b.count) : 0,
+          riskSum: undefined,
+        }));
+
+      // Overall stats
+      const totalVolume = rows.reduce((s, r) => s + (r.amount ?? 0) / 100, 0);
+      const totalCount = rows.length;
+      const flaggedCount = rows.filter(r => r.status === "flagged").length;
+      const blockedCount = rows.filter(r => r.status === "blocked").length;
+      const avgRiskScore = totalCount > 0
+        ? Math.round(rows.reduce((s, r) => s + (r.amlScore ?? 0), 0) / totalCount)
+        : 0;
+
+      // Currency breakdown
+      const byCurrency: Record<string, number> = {};
+      for (const r of rows) {
+        const ccy = r.currency ?? "NGN";
+        byCurrency[ccy] = (byCurrency[ccy] ?? 0) + (r.amount ?? 0) / 100;
+      }
+
+      return {
+        series,
+        summary: { totalVolume, totalCount, flaggedCount, blockedCount, avgRiskScore },
+        byCurrency,
+        period: input.period,
+        days: input.days,
+      };
+    }),
+
+  /**
+   * Payment reconciliation: compare expected vs actual settled transfers.
+   * Identifies mismatches, pending settlements, and failed reversals.
+   */
+  getReconciliationReport: adminProcedure
+    .input(z.object({
+      date: z.string().optional(), // YYYY-MM-DD, defaults to yesterday
+    }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
+
+      const targetDate = input.date ?? new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+      const dayStart = new Date(`${targetDate}T00:00:00.000Z`);
+      const dayEnd = new Date(`${targetDate}T23:59:59.999Z`);
+
+      const dayTxns = await db
+        .select()
+        .from(transactions)
+        .where(and(gte(transactions.createdAt, dayStart), lt(transactions.createdAt, dayEnd)))
+        .orderBy(transactions.createdAt);
+
+      const posted = dayTxns.filter(t => t.status === "completed");
+      const pending = dayTxns.filter(t => t.status === "pending");
+      const failed = dayTxns.filter(t => t.status === "failed");
+      const reversed = dayTxns.filter(t => t.status === "reversed");
+      const flagged = dayTxns.filter(t => t.status === "flagged");
+      const blocked = dayTxns.filter(t => t.status === "blocked");
+
+      const totalSettled = posted.reduce((s: number, t: typeof dayTxns[0]) => s + (t.amount ?? 0) / 100, 0);
+      const totalPending = pending.reduce((s: number, t: typeof dayTxns[0]) => s + (t.amount ?? 0) / 100, 0);
+      const totalFailed = failed.reduce((s: number, t: typeof dayTxns[0]) => s + (t.amount ?? 0) / 100, 0);
+      const totalReversed = reversed.reduce((s: number, t: typeof dayTxns[0]) => s + (t.amount ?? 0) / 100, 0);
+
+      // Settlement rate
+      const settlementRate = dayTxns.length > 0
+        ? Math.round((posted.length / dayTxns.length) * 100)
+        : 100;
+
+      // Identify mismatches: transactions that should have settled but are still pending >1h
+      const oneHourAgo = new Date(Date.now() - 3600000);
+      const stalePending = pending.filter(t => new Date(t.createdAt) < oneHourAgo);
+
+      return {
+        date: targetDate,
+        summary: {
+          total: dayTxns.length,
+          posted: posted.length,
+          pending: pending.length,
+          failed: failed.length,
+          reversed: reversed.length,
+          flagged: flagged.length,
+          blocked: blocked.length,
+          settlementRate,
+        },
+        volumes: {
+          settled: totalSettled,
+          pending: totalPending,
+          failed: totalFailed,
+          reversed: totalReversed,
+        },
+        stalePending: stalePending.map(t => ({
+          id: t.id,
+          txRef: t.txRef,
+          amount: (t.amount ?? 0) / 100,
+          currency: t.currency,
+          originatorName: t.originatorName,
+          beneficiaryName: t.beneficiaryName,
+          createdAt: t.createdAt,
+          ageMinutes: Math.round((Date.now() - new Date(t.createdAt).getTime()) / 60000),
+        })),
+        flaggedTransactions: flagged.slice(0, 20).map(t => ({
+          id: t.id,
+          txRef: t.txRef,
+          amount: (t.amount ?? 0) / 100,
+          currency: t.currency,
+          riskScore: t.amlScore,
+          originatorName: t.originatorName,
+          beneficiaryName: t.beneficiaryName,
+        })),
+      };
+    }),
 });

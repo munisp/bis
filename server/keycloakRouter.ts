@@ -80,6 +80,22 @@ export const keycloakRouter = router({
   loginUrl: publicProcedure
     .input(z.object({ redirectUri: z.string().url() }))
     .query(({ input }) => {
+      // Security: validate redirectUri origin to prevent open redirect attacks.
+      // Only allow origins that match known app origins or configured OAuth URLs.
+      const parsed = new URL(input.redirectUri);
+      const allowedOrigins = [
+        process.env.VITE_OAUTH_PORTAL_URL,
+        process.env.OAUTH_SERVER_URL,
+        'http://localhost:3000',
+        'http://localhost:5173',
+        'http://localhost:8081',
+      ].filter(Boolean) as string[];
+      const isAllowed = allowedOrigins.some(o => {
+        try { return new URL(o).origin === parsed.origin; } catch { return false; }
+      });
+      if (!isAllowed) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Redirect URI origin not allowed' });
+      }
       const url = getKeycloakLoginUrl(input.redirectUri);
       return { url };
     }),

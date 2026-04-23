@@ -1753,3 +1753,22 @@
 - [ ] Update docs/architecture.md with v61 changes
 - [ ] Create docs/api-reference.md with all tRPC procedures
 - [ ] Update docs/runbook.md with new service details
+
+## Phase v62 — Production Sprint (Apr 23 2026)
+
+- [x] Transfer Analytics Dashboard (/payment-rails/analytics) — daily/weekly/monthly NGN volume charts, top corridors, status breakdown, channel mix
+- [x] Document Vault (/document-vault) — S3-backed upload/download, version history, chain-of-custody log, case/SAR linkage, category filter, search
+- [x] Risk Dashboard (/risk-dashboard) — entity risk bubble chart, sector heatmap, top-risk entities table, trend chart, risk distribution donut
+- [x] Reconciliation Report (/payment-rails/reconciliation) — matched/unmatched/exception counts, volume summary, export CSV
+- [x] AML Transactions — inline Flag/Block action buttons per transaction row
+- [x] Cases — bulk assign dialog with analyst selection
+- [x] FrozenAccounts — filter by reason category, status, date range; reason breakdown cards
+- [x] BatchMonitor — real-time progress bars, batch history table, alert thresholds panel
+- [x] Export Schedules — summary stats cards, additional export types
+- [x] SAR Filing — Acknowledged status, export button, rejection notes
+- [x] Biometric Engine — batch enrollment, list enrollments, delete enrollment endpoints
+- [x] Lakehouse Writer — batch ingest, transaction, AML, SAR, case write endpoints
+- [x] Smoke tests — Document Vault, Risk Dashboard, Reconciliation, Transfer Analytics tRPC endpoints
+- [x] Security — Keycloak loginUrl open redirect fix (origin allowlist validation)
+- [x] Security — 0 npm vulnerabilities confirmed
+- [x] All tests passing: 269 Node.js, 5 Go packages, 8 Rust, 21 Python

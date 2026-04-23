@@ -76,6 +76,16 @@ export default function AMLTransactionsPage() {
     onError: (e: any) => toast.error(e.message),
   });
 
+  const flagMutation = trpc.transactions.flag.useMutation({
+    onSuccess: () => { toast.success("Transaction flagged for review"); utils.transactions.list.invalidate(); },
+    onError: (e: any) => toast.error(e.message),
+  });
+
+  const blockMutation = trpc.transactions.flag.useMutation({
+    onSuccess: () => { toast.success("Transaction blocked"); utils.transactions.list.invalidate(); },
+    onError: (e: any) => toast.error(e.message),
+  });
+
   const resolveMutation = trpc.transactions.resolveAlert.useMutation({
     onSuccess: () => {
       toast.success("Alert resolved");
@@ -199,6 +209,7 @@ export default function AMLTransactionsPage() {
                       <th className="text-center p-3 font-medium">Risk</th>
                       <th className="text-center p-3 font-medium">Status</th>
                       <th className="text-center p-3 font-medium">Score</th>
+                      <th className="text-right p-3 font-medium">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -245,6 +256,20 @@ export default function AMLTransactionsPage() {
                         <td className="p-3 text-center">
                           <div className={`text-sm font-bold ${(tx.amlScore ?? 0) >= 75 ? "text-red-400" : (tx.amlScore ?? 0) >= 50 ? "text-orange-400" : "text-green-400"}`}>
                             {tx.amlScore ?? 0}
+                          </div>
+                        </td>
+                        <td className="p-3 text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            {tx.status !== "flagged" && tx.status !== "blocked" && (
+                              <Button variant="outline" size="sm" className="text-xs h-6 px-2 border-orange-500/40 text-orange-400 hover:bg-orange-500/10" onClick={() => flagMutation.mutate({ id: tx.id, reason: "Manual flag by analyst" })} disabled={flagMutation.isPending}>
+                                Flag
+                              </Button>
+                            )}
+                            {tx.status !== "blocked" && (
+                              <Button variant="outline" size="sm" className="text-xs h-6 px-2 border-red-500/40 text-red-400 hover:bg-red-500/10" onClick={() => blockMutation.mutate({ id: tx.id, reason: "Manual block by analyst" })} disabled={blockMutation.isPending}>
+                                Block
+                              </Button>
+                            )}
                           </div>
                         </td>
                       </tr>

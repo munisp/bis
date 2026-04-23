@@ -29,6 +29,8 @@ import { lexRouter } from "./lex";
 import { sessionsRouter, totpRouter, notificationsRouter, investigationLinksRouter, exportSchedulesRouter } from "./platform";
 import { archivalRouter } from "./archival";
 import { paymentRailsRouter } from "./paymentRails";
+import { documentVaultRouter } from "./documentVault";
+import { riskDashboardRouter } from "./riskDashboard";
 import { getDb } from "./db";
 import { evaluateAlertRules } from "./alertRules";
 import {
@@ -3338,5 +3340,7 @@ export const appRouter = router({
   redis: redisRouter,
   archival: archivalRouter,
   paymentRails: paymentRailsRouter,
+  documentVault: documentVaultRouter,
+  riskDashboard: riskDashboardRouter,
 });
 export type AppRouter = typeof appRouter;

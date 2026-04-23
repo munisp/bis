@@ -10,7 +10,7 @@ import {
   Briefcase, Globe, MapPin, MessageSquare, Building2, Eye,
   UserCheck, BarChart3, Key, Zap, CheckCheck, ArrowRight, Sun, Moon, ClipboardList, Wallet, UserSearch, Shield, BarChart2,
   BookOpen, Link2, Brain, Gavel, ClipboardCheck, SendToBack, Smartphone, Download, Link as LinkIcon, BellRing, ShieldAlert,
-  FileBarChart, TrendingUp, Landmark, Scale, Lock, Server, Workflow, Database as DbIcon
+  FileBarChart, TrendingUp, Landmark, Scale, Lock, Server, Workflow, Database as DbIcon, ArrowLeftRight
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -103,6 +103,8 @@ const BASE_NAV_GROUPS: NavGroup[] = [
       { label: 'Payment Rails', href: '/payment-rails', icon: <TrendingUp size={15} /> },
       { label: 'Frozen Accounts', href: '/payment-rails/frozen', icon: <Lock size={15} /> },
       { label: 'Batch Monitor', href: '/payment-rails/batch-monitor', icon: <Activity size={15} /> },
+      { label: 'Transfer Analytics', href: '/payment-rails/analytics', icon: <BarChart2 size={15} /> },
+      { label: 'Reconciliation', href: '/payment-rails/reconciliation', icon: <ArrowLeftRight size={15} /> },
       { label: 'Notifications', href: '/notifications', icon: <BellRing size={15} /> },
       { label: 'Settings', href: '/settings', icon: <Settings size={15} /> },
       { label: 'Audit Log', href: '/audit-log', icon: <ClipboardList size={15} /> },
@@ -141,6 +143,8 @@ const BASE_NAV_GROUPS: NavGroup[] = [
       { label: 'Correspondent Banks', href: '/correspondent-banking', icon: <Building2 size={15} /> },
       { label: 'Evidence Custody', href: '/evidence', icon: <Lock size={15} /> },
       { label: 'Regulatory Reports', href: '/regulatory-reports', icon: <FileBarChart size={15} /> },
+      { label: 'Document Vault', href: '/document-vault', icon: <Database size={15} /> },
+      { label: 'Risk Dashboard', href: '/risk-dashboard', icon: <Shield size={15} /> },
     ],
   },
   {

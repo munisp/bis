@@ -82,6 +82,11 @@ const TradeFinancePage           = lazy(() => import("@/pages/bis/TradeFinancePa
 const CorrespondentBankingPage   = lazy(() => import("@/pages/bis/CorrespondentBankingPage"));
 const EvidencePage               = lazy(() => import("@/pages/bis/EvidencePage"));
 const RegulatoryReportsPage      = lazy(() => import("@/pages/bis/RegulatoryReportsPage"));
+// New v62 pages
+const DocumentVaultPage          = lazy(() => import("@/pages/DocumentVaultPage"));
+const RiskDashboardPage          = lazy(() => import("@/pages/RiskDashboardPage"));
+const TransferAnalyticsDashboard = lazy(() => import("@/pages/TransferAnalyticsDashboard"));
+const ReconciliationReportPage   = lazy(() => import("@/pages/ReconciliationReportPage"));
 
 // ─── Page loading skeleton ────────────────────────────────────────────────────
 
@@ -173,6 +178,11 @@ function Router() {
         <Route path="/correspondent-banking" component={CorrespondentBankingPage} />
         <Route path="/evidence" component={EvidencePage} />
         <Route path="/regulatory-reports" component={RegulatoryReportsPage} />
+        {/* v62 New Pages */}
+        <Route path="/document-vault" component={DocumentVaultPage} />
+        <Route path="/risk-dashboard" component={RiskDashboardPage} />
+        <Route path="/payment-rails/analytics" component={TransferAnalyticsDashboard} />
+        <Route path="/payment-rails/reconciliation" component={ReconciliationReportPage} />
         {/* Infrastructure */}
         <Route path="/infra/keycloak" component={KeycloakPage} />
         <Route path="/infra/temporal" component={TemporalPage} />
