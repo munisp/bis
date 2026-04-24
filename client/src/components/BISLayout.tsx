@@ -19,6 +19,7 @@ import { useLocation as useWouterLocation } from 'wouter';
 import { useTheme } from '@/contexts/ThemeContext';
 import { trpc } from '@/lib/trpc';
 import { useAuth } from '@/_core/hooks/useAuth';
+import { useEventStream } from '@/hooks/useEventStream';
 
 // ─── Nav config ───────────────────────────────────────────────────────────────
 
@@ -402,8 +403,18 @@ export default function BISLayout({ children, title, subtitle, actions }: BISLay
     );
   }, [alertsData]);
 
-  // ── Mark alert read via tRPC ──────────────────────────────────────────────
+  // ── SSE event stream — instant invalidation on new alerts ─────────────────
   const utils = trpc.useUtils();
+  useEventStream({
+    eventTypes: ['ALERT_TRIGGERED', 'KYC_COMPLETED', 'CASE_ESCALATED', 'SANCTIONS_HIT', 'SAR_SUBMITTED'],
+    onEvent: () => {
+      // Immediately refresh alerts and dashboard stats on any relevant event
+      utils.alerts.list.invalidate();
+      utils.dashboard.stats.invalidate();
+    },
+  });
+
+  // ── Mark alert read via tRPC ──────────────────────────────────────────────
   const markReadMutation = trpc.alerts.acknowledge.useMutation({
     onSuccess: () => utils.alerts.list.invalidate(),
   });

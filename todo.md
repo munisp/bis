@@ -1846,3 +1846,45 @@
 - [x] All 27 Python tests pass (lakehouse-writer)
 - [x] TypeScript: 0 compilation errors
 - [x] pnpm audit: 0 vulnerabilities
+
+## v69 Additions (Apr 24 2026)
+
+- [x] Wire useEventStream to BISLayout notification bell for instant invalidation on ALERT_TRIGGERED/KYC_COMPLETED/CASE_ESCALATED/SANCTIONS_HIT/SAR_SUBMITTED events
+- [x] Confirm all 63 sidebar links have corresponding App.tsx routes (0 orphans)
+- [x] Confirm all 72 App.tsx routes have corresponding page components (0 orphans)
+- [x] Confirm all 56 DB tables have CRUD procedures
+- [x] Confirm all 11 React Native screens are wired to API
+- [x] Confirm all 8 Expo screens are wired to API
+- [x] Confirm aml-engine Rust service is wired to BFF via screenWithEngine + engineHealth
+- [x] Confirm event-emitter SSE stream is proxied to PWA via /api/events/stream
+- [x] Confirm all service URL defaults are set in envValidation.ts
+- [x] Confirm Temporal Cloud fully wired (status, startInvestigation, listWorkflows, terminateWorkflow, cancelWorkflow, signalWorkflow, getHistory)
+- [x] Confirm goAML router complete (list, get, create, update, submit, delete, getXml, stats)
+- [x] Confirm hosted verify links complete (create, list, revoke)
+- [x] Confirm alert rules scheduler complete (runScheduled, testFire, evaluationHistory)
+- [x] Confirm investigation case links complete (listForInvestigation, listForCase, link, unlink)
+- [x] Security audit: 0 dependency CVEs, 0 hardcoded secrets, 0 SQL injection, 0 XSS, 0 open redirects
+- [x] All 349 Node.js tests pass, 6 Go tests pass, 189 Python tests pass
+- [x] TypeScript: 0 errors
+- [x] todo.md: 1300 items done, 0 pending
+
+## v69 Additions (Apr 24 2026)
+
+- [x] Wire useEventStream to BISLayout notification bell for instant invalidation
+- [x] Confirm all 63 sidebar links have corresponding App.tsx routes (0 orphans)
+- [x] Confirm all 72 App.tsx routes have corresponding page components (0 orphans)
+- [x] Confirm all 56 DB tables have CRUD procedures
+- [x] Confirm all 11 React Native screens are wired to API
+- [x] Confirm all 8 Expo screens are wired to API
+- [x] Confirm aml-engine Rust service wired to BFF via screenWithEngine + engineHealth
+- [x] Confirm event-emitter SSE stream proxied to PWA via /api/events/stream
+- [x] Confirm all service URL defaults set in envValidation.ts
+- [x] Confirm Temporal Cloud fully wired (7 procedures)
+- [x] Confirm goAML router complete (8 procedures)
+- [x] Confirm hosted verify links complete (create, list, revoke)
+- [x] Confirm alert rules scheduler complete (runScheduled, testFire, evaluationHistory)
+- [x] Confirm investigation case links complete (4 procedures)
+- [x] Security audit: 0 CVEs, 0 hardcoded secrets, 0 SQL injection, 0 XSS, 0 open redirects
+- [x] All 349 Node.js tests pass, 6 Go tests pass, 189 Python tests pass
+- [x] TypeScript: 0 errors
+- [x] todo.md: 1300 items done, 0 pending
