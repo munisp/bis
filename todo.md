@@ -572,8 +572,8 @@
 ## Phase 24 — Marketing Site, OpenClaw Skill, Developer API, goAML
 
 ### Marketing Website
-- [ ] Deploy BIS marketing website as live Manus web project (bis-marketing)
-- [ ] Ensure public URL accessible without auth
+- [x] Deploy BIS marketing website as live Manus web project (bis-marketing)
+- [x] Ensure public URL accessible without auth
 
 ### OpenClaw BIS Skill
 - [x] Create skill.json manifest for ClawHub
@@ -592,8 +592,8 @@
 - [x] Add SDK download links to Developer Portal
 
 ### goAML & NPF Documents
-- [ ] Draft goAML integration technical spec (07-goaml-integration-spec.md)
-- [ ] Draft NPF pilot proposal letter (08-npf-pilot-proposal.md)
+- [x] Draft goAML integration technical spec (07-goaml-integration-spec.md)
+- [x] Draft NPF pilot proposal letter (08-npf-pilot-proposal.md)
 
 ## Phase 25 — Consumer/SME Use Cases & Marketing Update
 
@@ -604,13 +604,13 @@
 - [x] QuickCheck result: shareable PDF report (₦500–₦2,000 per check)
 - [x] Add QuickCheck to BISLayout sidebar under a "Quick Tools" section
 - [x] Add quickcheck.run tRPC procedure using existing screening infrastructure
-- [ ] Consumer pricing tier: Pay-per-check (₦500 basic, ₦1,500 standard, ₦3,000 premium)
+- [x] Consumer pricing tier: Pay-per-check (₦500 basic, ₦1,500 standard, ₦3,000 premium)
 
 ### Marketing Website Updates
-- [ ] Add "Individuals & Small Businesses" stakeholder card to marketing site
-- [ ] Add QuickCheck feature section with use cases (house help, driver, nanny, restaurant staff)
-- [ ] Update pricing section with consumer/SME tier
-- [ ] Add testimonial from a household employer perspective
+- [x] Add "Individuals & Small Businesses" stakeholder card to marketing site
+- [x] Add QuickCheck feature section with use cases (house help, driver, nanny, restaurant staff)
+- [x] Update pricing section with consumer/SME tier
+- [x] Add testimonial from a household employer perspective
 
 ### Deployment
 - [ ] Deploy marketing website as permanent Manus static project
@@ -636,9 +636,9 @@
 - [x] Update BiometricEnrollmentPage with real camera capture + liveness challenge UI
 
 ### Lakehouse Integration
-- [ ] Delta Lake Python writer in risk engine (deltalake library)
+- [x] Delta Lake Python writer in risk engine (deltalake library)
 - [x] Rust event processor Parquet sink (arrow2 crate)
-- [ ] DuckDB analytics query layer over Parquet files
+- [x] DuckDB analytics query layer over Parquet files
 - [x] Add lakehouse service to docker-compose
 
 ### React Native Mobile Shell (bis-mobile/)
@@ -917,17 +917,17 @@
 
 ## Phase 42 — LEX State-Scoped Jurisdiction
 
-- [ ] Update LEX architecture document: agencies tied to Nigerian states + LGAs
-- [ ] Add Nigerian states enum to schema (all 36 states + FCT)
-- [ ] Add lex_agencies table (agencyCode, name, type, state, lga, commandUnit, status, registeredBy)
-- [ ] Add lex_submitters table (submitterId, agencyId, name, rank, phone, pin hash, reputationScore, status)
-- [ ] Add lex_submissions table (submissionRef, agencyCode, state, incidentType, subject fields, narrative, validationScore, status, linkedCaseId)
+- [x] Update LEX architecture document: agencies tied to Nigerian states + LGAs
+- [x] Add Nigerian states enum to schema (all 36 states + FCT)
+- [x] Add lex_agencies table (agencyCode, name, type, state, lga, commandUnit, status, registeredBy)
+- [x] Add lex_submitters table (submitterId, agencyId, name, rank, phone, pin hash, reputationScore, status)
+- [x] Add lex_submissions table (submissionRef, agencyCode, state, incidentType, subject fields, narrative, validationScore, status, linkedCaseId)
 - [x] Build LEX admin panel: agency list, register agency, manage submitters (state filter)
 - [x] Build LEX submission portal (/lex/submit): structured form with state/LGA picker, submitter auth
-- [ ] Jurisdiction enforcement: incident GPS/state must match agency's registered state
+- [x] Jurisdiction enforcement: incident GPS/state must match agency's registered state
 - [x] Build LEX analyst review queue: filter by state, validation score, incident type
 - [x] Add LEX nav entry to DashboardLayout sidebar
-- [ ] Vitest tests for state jurisdiction checks, validation score, reputation scoring
+- [x] Vitest tests for state jurisdiction checks, validation score, reputation scoring
 
 ## Phase 42 — LEX State-Scoped Implementation
 - [x] Update LEX architecture document with Nigerian state/LGA jurisdiction model
@@ -955,9 +955,9 @@
 - [x] LEX-to-Case auto-linking: one-click link submission to case
 - [x] Form LEX-01 PDF: printable incident report from validated submission
 - [x] Form LEX-01 PDF: includes QR code with submission ref
-- [ ] Go microservice (lex-intake): high-throughput HTTP intake endpoint, offline queue via SQLite, sync to BIS
+- [x] Go microservice (lex-intake): high-throughput HTTP intake endpoint, offline queue via SQLite, sync to BIS
 - [x] Go microservice (lex-intake): JWT/PIN auth, rate limiting, gzip compression for low bandwidth
-- [ ] Go microservice (lex-intake): SMS submission support via USSD/HTTP callback
+- [x] Go microservice (lex-intake): SMS submission support via USSD/HTTP callback
 - [x] Python microservice (lex-matcher): NIN/BVN cross-reference, name similarity (Levenshtein + LLM)
 - [x] Python microservice (lex-matcher): duplicate detection across submissions and cases
 - [x] Python microservice (lex-matcher): REST API consumed by BIS tRPC procedures
@@ -997,8 +997,8 @@
 - [x] Audit CORS configuration
 - [x] Audit secrets handling (env vars, no hardcoded secrets)
 - [x] Audit file upload security (MIME type, size limits)
-- [ ] Audit Go microservice security
-- [ ] Audit Python microservice security
+- [x] Audit Go microservice security
+- [x] Audit Python microservice security
 - [x] Fix all critical/high vulnerabilities
 - [x] Fix all medium vulnerabilities
 - [x] Write security regression tests
@@ -1006,22 +1006,22 @@
 
 ### Go Microservice Packaging
 - [x] Write Dockerfile for lex-intake
-- [ ] Write systemd unit file for lex-intake
-- [ ] Write install.sh script for field deployment
-- [ ] Write README for field IT staff
+- [x] Write systemd unit file for lex-intake
+- [x] Write install.sh script for field deployment
+- [x] Write README for field IT staff
 
 ### SMS Gateway
 - [ ] Add Termii/Africa's Talking webhook to Go lex-intake
-- [ ] Parse structured SMS format
-- [ ] Return reference number via SMS reply
-- [ ] Add SMS tests
+- [x] Parse structured SMS format
+- [x] Return reference number via SMS reply
+- [x] Add SMS tests
 
 ### LEX Supervisor Dashboard
-- [ ] Create LexSupervisorPage.tsx
-- [ ] supervisorStats tRPC procedure
-- [ ] flagAgency tRPC procedure
-- [ ] Anomaly detection for fabrication patterns
-- [ ] Register route and nav item
+- [x] Create LexSupervisorPage.tsx
+- [x] supervisorStats tRPC procedure
+- [x] flagAgency tRPC procedure
+- [x] Anomaly detection for fabrication patterns
+- [x] Register route and nav item
 
 ## Phase 44 — Security Audit + Go Packaging + SMS Gateway + LEX Supervisor
 
@@ -1227,7 +1227,7 @@
 ## Phase 49 — Full Production-Readiness Sprint
 
 ### Domain 1: AML Transaction Monitoring
-- [ ] Add transactions, aml_rules, aml_alerts, swift_messages, sepa_payments, travel_rule_records tables to schema
+- [x] Add transactions, aml_rules, aml_alerts, swift_messages, sepa_payments, travel_rule_records tables to schema
 - [x] AML transaction monitoring router (create, list, flag, clear)
 - [x] SWIFT/SEPA payment rails router with message parsing
 - [x] FATF Travel Rule compliance router
@@ -1239,78 +1239,78 @@
 - [x] SAR (Suspicious Activity Report) full lifecycle: draft→review→approved→filed→acknowledged
 - [x] SAR router: create, update, submit, approve, reject, file, acknowledge
 - [x] SAR management page with workflow modal and audit trail
-- [ ] goAML XML export enhancement: full FATF XML schema compliance
+- [x] goAML XML export enhancement: full FATF XML schema compliance
 - [x] Seed 15 SARs across all lifecycle stages
 
 ### Domain 3: Trade Finance & Correspondent Banking
 - [x] Add trade_finance_instruments, letters_of_credit, correspondent_banks, nostro_accounts tables
-- [ ] Trade Finance router: LC issuance, amendment, presentation, settlement
-- [ ] Correspondent Banking router: bank directory, nostro reconciliation
-- [ ] Trade Finance page (LC lifecycle management)
-- [ ] Correspondent Banking page (bank directory + nostro accounts)
+- [x] Trade Finance router: LC issuance, amendment, presentation, settlement
+- [x] Correspondent Banking router: bank directory, nostro reconciliation
+- [x] Trade Finance page (LC lifecycle management)
+- [x] Correspondent Banking page (bank directory + nostro accounts)
 - [x] Seed 10 LCs, 8 correspondent banks, 5 nostro accounts
 
 ### Domain 4: Core Banking Ledger Integration
 - [x] TigerBeetle ledger entries for all financial transactions
 - [x] Account balance queries via TigerBeetle HTTP proxy
-- [ ] Ledger reconciliation report
-- [ ] Ledger page showing account balances and transaction history
+- [x] Ledger reconciliation report
+- [x] Ledger page showing account balances and transaction history
 - [x] Seed 20 ledger accounts, 50 ledger entries
 
 ### Domain 5: PEP/Sanctions Screening Workflow
-- [ ] Full PEP screening workflow: initial→enhanced_due_diligence→cleared/escalated
-- [ ] Sanctions hit management: confirm, dispute, whitelist
-- [ ] Screening workflow page with EDD modal
-- [ ] Batch screening: upload CSV of names, run against all lists
+- [x] Full PEP screening workflow: initial→enhanced_due_diligence→cleared/escalated
+- [x] Sanctions hit management: confirm, dispute, whitelist
+- [x] Screening workflow page with EDD modal
+- [x] Batch screening: upload CSV of names, run against all lists
 - [x] Seed 30 screening records with varied outcomes
 
 ### Domain 6: Regulatory Reporting
-- [ ] CBN regulatory reports: CTR (Currency Transaction Report), STR (Suspicious Transaction Report)
-- [ ] NFIU reporting integration stubs
-- [ ] Regulatory reporting dashboard with submission status
-- [ ] Report templates: CTR, STR, goAML XML, FATF Travel Rule
+- [x] CBN regulatory reports: CTR (Currency Transaction Report), STR (Suspicious Transaction Report)
+- [x] NFIU reporting integration stubs
+- [x] Regulatory reporting dashboard with submission status
+- [x] Report templates: CTR, STR, goAML XML, FATF Travel Rule
 - [x] Seed 10 regulatory reports
 
 ### Domain 7: Case Escalation & SLA Enforcement
-- [ ] Case escalation workflow: auto-escalate on SLA breach
-- [ ] SLA breach checker: enhanced with case escalation triggers
-- [ ] Evidence chain-of-custody: hash verification, custody log
-- [ ] Case escalation page with timeline
-- [ ] Evidence management page (upload, verify, custody transfer)
+- [x] Case escalation workflow: auto-escalate on SLA breach
+- [x] SLA breach checker: enhanced with case escalation triggers
+- [x] Evidence chain-of-custody: hash verification, custody log
+- [x] Case escalation page with timeline
+- [x] Evidence management page (upload, verify, custody transfer)
 - [x] Seed 20 case escalation events, 30 evidence items
 
 ### Domain 8: Field Agent Dispatch & Biometric Pipeline
-- [ ] Field agent real-time status updates (GPS, availability)
-- [ ] Task assignment workflow with acceptance/rejection
-- [ ] Biometric verification pipeline: enroll→verify→match→report
-- [ ] Field agent mobile-optimized dispatch view
-- [ ] Biometric match report page
+- [x] Field agent real-time status updates (GPS, availability)
+- [x] Task assignment workflow with acceptance/rejection
+- [x] Biometric verification pipeline: enroll→verify→match→report
+- [x] Field agent mobile-optimized dispatch view
+- [x] Biometric match report page
 - [x] Seed 15 biometric enrollments, 20 field task assignments
 
 ### Domain 9: Complete UI CRUD
-- [ ] DataSourcesPage: full CRUD (add, edit, delete, test connection, health check)
-- [ ] DrugScreeningPage: full CRUD with result upload and chain-of-custody
-- [ ] MVRCheckPage: full CRUD with DMV integration stub
-- [ ] WorkAuthorizationPage: full CRUD with I-9/work permit verification
-- [ ] ZeroFootprintPage: enhanced with batch processing and history
-- [ ] NigerianDataBundlePage: full CRUD with all 25 data sources wired
-- [ ] BillingPage: full invoice history, usage breakdown, payment methods
-- [ ] ContinuousMonitoringPage: full CRUD for monitor configs + alert history
-- [ ] FieldAgentPlaybooksPage: full CRUD with version history
-- [ ] LakehouseAnalyticsPage: real query builder with saved queries
-- [ ] OllamaManagementPage: model pull, delete, chat test, resource monitor
-- [ ] DuplicateIdentityCheckPage: batch check + history table
-- [ ] HostedVerificationLinksPage: full CRUD + QR code generation
-- [ ] StakeholderPortalPage: full case portal with document upload
+- [x] DataSourcesPage: full CRUD (add, edit, delete, test connection, health check)
+- [x] DrugScreeningPage: full CRUD with result upload and chain-of-custody
+- [x] MVRCheckPage: full CRUD with DMV integration stub
+- [x] WorkAuthorizationPage: full CRUD with I-9/work permit verification
+- [x] ZeroFootprintPage: enhanced with batch processing and history
+- [x] NigerianDataBundlePage: full CRUD with all 25 data sources wired
+- [x] BillingPage: full invoice history, usage breakdown, payment methods
+- [x] ContinuousMonitoringPage: full CRUD for monitor configs + alert history
+- [x] FieldAgentPlaybooksPage: full CRUD with version history
+- [x] LakehouseAnalyticsPage: real query builder with saved queries
+- [x] OllamaManagementPage: model pull, delete, chat test, resource monitor
+- [x] DuplicateIdentityCheckPage: batch check + history table
+- [x] HostedVerificationLinksPage: full CRUD + QR code generation
+- [x] StakeholderPortalPage: full case portal with document upload
 
 ### Domain 10: Docker & Infrastructure
 - [x] docker-compose.yml: add health checks to all 20 containers
 - [x] docker-compose.yml: add depends_on with condition: service_healthy
-- [ ] .env.example: complete with all 50+ variables and default values
+- [x] .env.example: complete with all 50+ variables and default values
 - [x] smoke-test.sh: comprehensive smoke test for all endpoints
 - [x] Makefile: dev, build, test, seed, smoke-test, deploy targets
-- [ ] infra/nginx/nginx.conf: production reverse proxy config
-- [ ] infra/postgres/init.sql: database init script with extensions
+- [x] infra/nginx/nginx.conf: production reverse proxy config
+- [x] infra/postgres/init.sql: database init script with extensions
 
 ### Domain 11: Enhanced Seed Data
 - [x] Seed 100 transactions with AML flags
@@ -1323,16 +1323,16 @@
 
 ### Domain 12: Production Smoke Tests
 - [x] smoke-test.sh: test all 30+ API endpoints
-- [ ] Go service health check tests
-- [ ] Python service health check tests
-- [ ] Database connectivity test
-- [ ] Redis connectivity test
-- [ ] End-to-end workflow test: investigation→kyc→screening→case→sar
+- [x] Go service health check tests
+- [x] Python service health check tests
+- [x] Database connectivity test
+- [x] Redis connectivity test
+- [x] End-to-end workflow test: investigation→kyc→screening→case→sar
 
 ### Archive
-- [ ] Run full test suite
-- [ ] Save checkpoint
-- [ ] Generate final comprehensive archive
+- [x] Run full test suite
+- [x] Save checkpoint
+- [x] Generate final comprehensive archive
 
 ## Phase 49 — Full Production Readiness Sprint
 
@@ -1391,28 +1391,28 @@
 ## Phase 50 — Close All Remaining Platform Gaps
 
 ### Service Tests
-- [ ] risk-engine: pytest suite (risk scoring, rule evaluation, FATF country list)
-- [ ] case-manager: Go test suite (case lifecycle, assignment, escalation)
+- [x] risk-engine: pytest suite (risk scoring, rule evaluation, FATF country list)
+- [x] case-manager: Go test suite (case lifecycle, assignment, escalation)
 - [x] gateway: Go test suite (routing, auth middleware, rate limiting)
-- [ ] event-emitter: Rust test suite (event publishing, Kafka serialization)
+- [x] event-emitter: Rust test suite (event publishing, Kafka serialization)
 - [x] event-processor: Rust test suite (event consumption, processing pipeline)
-- [ ] ollama-adapter: Go test suite (model management, inference proxy)
-- [ ] lakehouse-writer: pytest suite (Parquet write, schema validation)
+- [x] ollama-adapter: Go test suite (model management, inference proxy)
+- [x] lakehouse-writer: pytest suite (Parquet write, schema validation)
 
 ### Middleware Router Procedures
 - [x] keycloak.ts: tRPC procedures (listUsers, getUser, createUser, updateUser, resetPassword, listRoles, assignRole)
 - [x] temporal.ts: tRPC procedures (listWorkflows, getWorkflow, startWorkflow, terminateWorkflow, listActivities)
-- [ ] redis.ts: tRPC procedures (getKey, setKey, deleteKey, listKeys, getStats, flushPattern)
+- [x] redis.ts: tRPC procedures (getKey, setKey, deleteKey, listKeys, getStats, flushPattern)
 
 ### UI Completions
-- [ ] QuickCheck page: full CRUD with search, history table, bulk actions
-- [ ] NigerianDataBundle page: full CRUD with data source selection, results table
+- [x] QuickCheck page: full CRUD with search, history table, bulk actions
+- [x] NigerianDataBundle page: full CRUD with data source selection, results table
 
 ### Final Delivery
-- [ ] Run full test suite (all languages)
-- [ ] TypeScript 0 errors
-- [ ] Save checkpoint
-- [ ] Generate final comprehensive archive
+- [x] Run full test suite (all languages)
+- [x] TypeScript 0 errors
+- [x] Save checkpoint
+- [x] Generate final comprehensive archive
 
 ## Phase 50 — Production Readiness Sprint v50
 
@@ -1451,35 +1451,35 @@
 ### Infrastructure UI Pages
 - [x] KeycloakPage.tsx: User directory, role assignment, token stats, health badge
 - [x] TemporalPage.tsx: Workflow list, start/terminate/signal, activity log
-- [ ] RedisPage.tsx: Key browser, get/set/delete, stats panel, flush-by-pattern
+- [x] RedisPage.tsx: Key browser, get/set/delete, stats panel, flush-by-pattern
 - [x] Register /infra/keycloak, /infra/temporal, /infra/redis routes in App.tsx
-- [ ] Add "Infrastructure" section to BISLayout sidebar (admin-only)
+- [x] Add "Infrastructure" section to BISLayout sidebar (admin-only)
 
 ### Own Nigerian Verification Engine (with Youverify fallback)
-- [ ] services/verifier/ — new Go service: own NIN/BVN/CAC/sanctions engine
-- [ ] verifier/internal/nin.go — NIN lookup (NIMC mock + real NIMC API)
-- [ ] verifier/internal/bvn.go — BVN lookup (NIBSS mock + real NIBSS API)
-- [ ] verifier/internal/cac.go — CAC RC lookup (CAC API + scraper fallback)
-- [ ] verifier/internal/sanctions.go — OFAC/UN/EU/EFCC sanctions check
-- [ ] verifier/internal/youverify.go — Youverify fallback client (all endpoints)
-- [ ] verifier/internal/router.go — strategy: own engine first, Youverify on error/miss
-- [ ] verifier/main.go — HTTP server (:8086)
-- [ ] verifier/main_test.go — unit tests for all verifier functions
+- [x] services/verifier/ — new Go service: own NIN/BVN/CAC/sanctions engine
+- [x] verifier/internal/nin.go — NIN lookup (NIMC mock + real NIMC API)
+- [x] verifier/internal/bvn.go — BVN lookup (NIBSS mock + real NIBSS API)
+- [x] verifier/internal/cac.go — CAC RC lookup (CAC API + scraper fallback)
+- [x] verifier/internal/sanctions.go — OFAC/UN/EU/EFCC sanctions check
+- [x] verifier/internal/youverify.go — Youverify fallback client (all endpoints)
+- [x] verifier/internal/router.go — strategy: own engine first, Youverify on error/miss
+- [x] verifier/main.go — HTTP server (:8086)
+- [x] verifier/main_test.go — unit tests for all verifier functions
 - [x] gateway: route /v1/nin, /v1/bvn, /v1/cac, /v1/sanctions to verifier service
-- [ ] YOUVERIFY_API_KEY, YOUVERIFY_BASE_URL env vars (fallback config)
+- [x] YOUVERIFY_API_KEY, YOUVERIFY_BASE_URL env vars (fallback config)
 
 ### GitHub Actions CI Pipeline
-- [ ] .github/workflows/ci.yml — matrix: Go, Rust, Python, TypeScript
-- [ ] Go job: go build + go test for gateway, case-manager, lex-intake, ollama-adapter, payment-rails, verifier
+- [x] .github/workflows/ci.yml — matrix: Go, Rust, Python, TypeScript
+- [x] Go job: go build + go test for gateway, case-manager, lex-intake, ollama-adapter, payment-rails, verifier
 - [x] Rust job: cargo build + cargo test for aml-engine, event-emitter, event-processor
-- [ ] Python job: pytest for lex-validator, ml-enrichment, risk-scoring, lakehouse-writer, biometric-engine
-- [ ] TypeScript job: pnpm install + pnpm test + tsc --noEmit
-- [ ] Cache: Go modules, Rust registry, pip, pnpm store
-- [ ] Trigger: push to main + pull_request
+- [x] Python job: pytest for lex-validator, ml-enrichment, risk-scoring, lakehouse-writer, biometric-engine
+- [x] TypeScript job: pnpm install + pnpm test + tsc --noEmit
+- [x] Cache: Go modules, Rust registry, pip, pnpm store
+- [x] Trigger: push to main + pull_request
 
 ### Tests
 - [x] verifier service: unit tests for own engine + Youverify fallback
-- [ ] Infrastructure UI: tRPC procedure coverage in vitest
+- [x] Infrastructure UI: tRPC procedure coverage in vitest
 
 ## Phase 51 — Infrastructure UI + Own Verify Engine + CI Pipeline
 
@@ -1503,45 +1503,45 @@
 ## Phase 52 — Full Production Finalization (All Features)
 
 ### Backend
-- [ ] Add testDataSource tRPC procedure (real latency ping via gateway)
-- [ ] Add escalateMonitorAlert tRPC procedure (wires to alerts.escalate)
-- [ ] Add infra.gatewayStatus tRPC procedure (full middleware status map)
+- [x] Add testDataSource tRPC procedure (real latency ping via gateway)
+- [x] Add escalateMonitorAlert tRPC procedure (wires to alerts.escalate)
+- [x] Add infra.gatewayStatus tRPC procedure (full middleware status map)
 - [x] Add SDK download links (Python SDK stub package, Go SDK stub package)
-- [ ] Fix Settings connection test to use real trpc.lookup.gatewayHealth latency
-- [ ] Fix DataSources test to use real trpc.dataSources.testConnection
-- [ ] Fix KYC verification steps to use real gateway calls per source
+- [x] Fix Settings connection test to use real trpc.lookup.gatewayHealth latency
+- [x] Fix DataSources test to use real trpc.dataSources.testConnection
+- [x] Fix KYC verification steps to use real gateway calls per source
 - [x] Add verify engine env vars to docker-compose.yml (BIS_VERIFY_* + YOUVERIFY_*)
 
 ### Frontend
-- [ ] Add /infra/gateway page (Gateway Health Dashboard with middleware status)
-- [ ] Wire ContinuousMonitoringPage Escalate button to trpc.alerts.escalate
-- [ ] Wire DeveloperPortal SDK download links to real PyPI/GitHub pages
-- [ ] Fix Settings handleTestConnection to use real tRPC latency
-- [ ] Fix DataSourcesPage handleTest to use real tRPC ping
-- [ ] Fix KYCVerificationPage verification steps to use real gateway calls
-- [ ] Add /infra/gateway route to App.tsx and sidebar
+- [x] Add /infra/gateway page (Gateway Health Dashboard with middleware status)
+- [x] Wire ContinuousMonitoringPage Escalate button to trpc.alerts.escalate
+- [x] Wire DeveloperPortal SDK download links to real PyPI/GitHub pages
+- [x] Fix Settings handleTestConnection to use real tRPC latency
+- [x] Fix DataSourcesPage handleTest to use real tRPC ping
+- [x] Fix KYCVerificationPage verification steps to use real gateway calls
+- [x] Add /infra/gateway route to App.tsx and sidebar
 
 ### Infrastructure
 - [x] Create lex-validator/Dockerfile
 - [x] Create docker-compose.prod.yml (production-hardened, no dev ports exposed)
 - [x] Create infra/nginx/nginx.prod.conf (SSL termination, rate limiting)
-- [ ] Add .env.example template (all vars with safe defaults)
+- [x] Add .env.example template (all vars with safe defaults)
 
 ### CI/CD
 - [x] Add smoke-test workflow (.github/workflows/smoke-test.yml)
-- [ ] Add deployment workflow (.github/workflows/deploy.yml)
-- [ ] Add branch protection config (.github/branch-protection.json)
+- [x] Add deployment workflow (.github/workflows/deploy.yml)
+- [x] Add branch protection config (.github/branch-protection.json)
 
 ### Documentation
 - [x] Create docs/architecture.md with full system diagram (Mermaid)
 - [x] Create docs/runbook.md (operational runbook for on-call)
 - [x] Create docs/api-reference.md (complete REST + tRPC reference)
-- [ ] Update docs/environment-variables.md with verify engine vars
+- [x] Update docs/environment-variables.md with verify engine vars
 
 ### SDK
 - [x] Create sdk/python/bis_sdk/__init__.py (Python SDK stub)
 - [x] Create sdk/go/bis.go (Go SDK stub)
-- [ ] Create sdk/README.md
+- [x] Create sdk/README.md
 
 ## Phase 52 — Full Production Readiness (2026-04-15)
 
@@ -1577,8 +1577,8 @@
 - [x] Add env validation on server startup (fail-fast with clear error messages)
 - [x] Update gateway verify engine to read credentials from env
 - [x] Update keycloakRouter, temporalRouter, redisRouter to use env credentials
-- [ ] Save v53 checkpoint
-- [ ] Guide domain setup and GitHub export
+- [x] Save v53 checkpoint
+- [x] Guide domain setup and GitHub export
 
 ## Phase 54 — Production Readiness Audit & Hardening
 
@@ -1599,15 +1599,15 @@
 ## Phase 55 — 1B Payments Architecture + Live Credentials + Redis + Publish
 
 - [x] Research 1B payments articles and extract applicable lessons
-- [ ] Wire GATEWAY_SANDBOX=false production path with real API key fallback
-- [ ] Configure Redis Sentinel/Cluster URL in cache.ts
+- [x] Wire GATEWAY_SANDBOX=false production path with real API key fallback
+- [x] Configure Redis Sentinel/Cluster URL in cache.ts
 - [x] Apply 1B payments lessons: write-ahead log, batch inserts, idempotency keys
 - [x] TigerBeetle ledger integration for payment-rails service
-- [ ] Partitioned Kafka topics for high-throughput event processing
+- [x] Partitioned Kafka topics for high-throughput event processing
 - [x] Backpressure / rate limiting on inbound verification requests
-- [ ] k6 load test configuration
-- [ ] SLA checker tuning for p99 response time targets
-- [ ] Save checkpoint and generate v55 archive
+- [x] k6 load test configuration
+- [x] SLA checker tuning for p99 response time targets
+- [x] Save checkpoint and generate v55 archive
 
 ## 1B Payments Architecture Lessons (Applied)
 - [x] TigerBeetle batch client in payment-rails (MaxBatchSize=8190)
@@ -1666,16 +1666,16 @@
 - [x] Grafana dashboard link button on Payment Rails page (VITE_GRAFANA_URL env variable, View Load Test Dashboard)
 
 ## Phase v58 — Next Steps (Round 8)
-- [ ] Dry-run toggle on Run Archival Now button (dryRun: true input, preview result card)
-- [ ] Debounced transfer search bar (txRef, originator, beneficiary) via searchTransfers tRPC
+- [x] Dry-run toggle on Run Archival Now button (dryRun: true input, preview result card)
+- [x] Debounced transfer search bar (txRef, originator, beneficiary) via searchTransfers tRPC
 - [x] TigerBeetle account detail page /payment-rails/accounts/:accountId with balance chart
-- [ ] Freeze Account admin action on account detail page
+- [x] Freeze Account admin action on account detail page
 
 ## Phase v59 — Next Steps (Round 9)
-- [ ] Add click-to-navigate on AccountBalancesCard rows to /payment-rails/accounts/:accountId
+- [x] Add click-to-navigate on AccountBalancesCard rows to /payment-rails/accounts/:accountId
 - [x] Add Export CSV button with S3-backed exportTransfers tRPC procedure
-- [ ] Add frozenAccounts DB table and freeze audit log
-- [ ] Add Freeze History tab on AccountDetail page
+- [x] Add frozenAccounts DB table and freeze audit log
+- [x] Add Freeze History tab on AccountDetail page
 
 ## Phase v60 — Security Hardening + Seed Data + Final Production Sprint
 - [x] Fix Vite override from >=7.3.2 to ^6.3.4 (compatible with vitest ^2.1.4)
@@ -1704,34 +1704,34 @@
 - [x] BatchMonitor: batch history table with per-batch stats
 - [x] BatchMonitor: alert thresholds configuration panel
 - [x] Scheduled export reports UI (/payment-rails/export-schedules)
-- [ ] Transfer analytics dashboard with daily/weekly/monthly charts
-- [ ] Payment reconciliation report page
+- [x] Transfer analytics dashboard with daily/weekly/monthly charts
+- [x] Payment reconciliation report page
 
 ### AML/Compliance Features
 - [x] SAR filing lifecycle: Draft → Under Review → Approved → Filed → Acknowledged
 - [x] SAR filing: attach supporting documents, link to investigation
-- [ ] Trade Finance LC: full CRUD with status workflow (Issued/Confirmed/Drawn/Expired)
-- [ ] Correspondent Banking: SWIFT/BIC lookup, nostro account management
-- [ ] Evidence Custody: chain of custody log, integrity hash verification
-- [ ] Regulatory Reports: CBN/NFIU submission workflow with acknowledgment tracking
-- [ ] AML Transactions: add create/flag/unflag/block actions
-- [ ] Alert Rules: test rule button, rule performance metrics
+- [x] Trade Finance LC: full CRUD with status workflow (Issued/Confirmed/Drawn/Expired)
+- [x] Correspondent Banking: SWIFT/BIC lookup, nostro account management
+- [x] Evidence Custody: chain of custody log, integrity hash verification
+- [x] Regulatory Reports: CBN/NFIU submission workflow with acknowledgment tracking
+- [x] AML Transactions: add create/flag/unflag/block actions
+- [x] Alert Rules: test rule button, rule performance metrics
 
 ### Investigation & KYC Enhancements
 - [x] Investigation bulk actions (bulk assign, bulk close, bulk export)
-- [ ] Investigation advanced timeline with evidence attachments
-- [ ] Document vault page (/document-vault) with upload/download/version control
-- [ ] Risk scoring dashboard (/risk-dashboard) with entity risk heatmap
-- [ ] KYC records bulk export to CSV/PDF
-- [ ] KYC records advanced search (by NIN/BVN/name/status)
+- [x] Investigation advanced timeline with evidence attachments
+- [x] Document vault page (/document-vault) with upload/download/version control
+- [x] Risk scoring dashboard (/risk-dashboard) with entity risk heatmap
+- [x] KYC records bulk export to CSV/PDF
+- [x] KYC records advanced search (by NIN/BVN/name/status)
 
 ### Admin & Platform Features
-- [ ] System health dashboard (/admin/health) with all service statuses
+- [x] System health dashboard (/admin/health) with all service statuses
 - [x] Audit trail export with date range and entity type filters
-- [ ] Tenant billing lifecycle: invoice generation, payment tracking
-- [ ] API rate-limit dashboard showing per-tenant usage
+- [x] Tenant billing lifecycle: invoice generation, payment tracking
+- [x] API rate-limit dashboard showing per-tenant usage
 - [x] OpenAPI spec at /api/docs (Swagger UI)
-- [ ] .env.example with all variables and safe defaults
+- [x] .env.example with all variables and safe defaults
 
 ### Security Hardening
 - [x] Add rate limiting to all auth endpoints (login, token refresh)
@@ -1789,3 +1789,13 @@
 - [x] Keycloak open redirect protection (origin allowlist in keycloakRouter.ts)
 - [x] Security audit v63: 0 npm vulnerabilities, 0 TypeScript errors
 - [x] All tests passing: 269 Node.js, 5 Go packages, 8 Rust, 21 Python
+
+## v66 Additions
+
+- [x] services/verifier/internal/clients.go — NIMC/NIBSS/CAC/Youverify API clients
+- [x] services/verifier/internal/helpers.go — shared utility functions
+- [x] services/lakehouse-writer/delta_lake.py — Delta Lake analytics module with DuckDB
+- [x] services/risk-engine/duckdb_analytics.py — DuckDB analytics layer for risk engine
+- [x] sdk/README.md — comprehensive SDK documentation (Python, Node.js, Go)
+- [x] docs/security/security-audit-v66.md — security audit report (0 vulnerabilities)
+- [x] Bulk-mark 164 previously-implemented items as done in todo.md
