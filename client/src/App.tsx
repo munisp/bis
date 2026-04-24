@@ -71,10 +71,11 @@ const ExportSchedulesPage  = lazy(() => import("@/pages/settings/ExportSchedules
 const InvestigationCaseLinksPage = lazy(() => import("@/pages/InvestigationCaseLinksPage"));
 const NotificationCentrePage     = lazy(() => import("@/pages/NotificationCentrePage"));
 // Infrastructure
-const KeycloakPage     = lazy(() => import("@/pages/infra/KeycloakPage"));
-const GatewayHealthPage = lazy(() => import("@/pages/infra/GatewayHealthPage"));
-const TemporalPage     = lazy(() => import("@/pages/infra/TemporalPage"));
-const RedisPage        = lazy(() => import("@/pages/infra/RedisPage"));
+const KeycloakPage           = lazy(() => import("@/pages/infra/KeycloakPage"));
+const GatewayHealthPage      = lazy(() => import("@/pages/infra/GatewayHealthPage"));
+const TemporalPage           = lazy(() => import("@/pages/infra/TemporalPage"));
+const RedisPage              = lazy(() => import("@/pages/infra/RedisPage"));
+const SystemHealthDashboard  = lazy(() => import("@/pages/infra/SystemHealthDashboard"));
 // Banking & Compliance
 const AMLTransactionsPage        = lazy(() => import("@/pages/bis/AMLTransactionsPage"));
 const SARFilingPage              = lazy(() => import("@/pages/bis/SARFilingPage"));
@@ -188,6 +189,7 @@ function Router() {
         <Route path="/infra/temporal" component={TemporalPage} />
         <Route path="/infra/redis" component={RedisPage} />
         <Route path="/infra/gateway" component={GatewayHealthPage} />
+        <Route path="/infra/health" component={SystemHealthDashboard} />
         {/* Fallback */}
         <Route path="/404" component={NotFound} />
         <Route component={NotFound} />

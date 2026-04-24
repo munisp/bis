@@ -12,6 +12,10 @@ Provides:
   - VACUUM / OPTIMIZE wrappers (Delta Lake maintenance)
 
 All queries are read-only unless explicitly noted.
+
+Security: All date/threshold values are passed as DuckDB parameters (not
+interpolated into SQL strings). Table paths are constructed from a hardcoded
+LAKEHOUSE_BASE directory — no user input reaches the path construction.
 """
 from __future__ import annotations
 
@@ -21,10 +25,19 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-import duckdb
-import pandas as pd
-import pyarrow as pa
-from deltalake import DeltaTable, write_deltalake
+try:
+    import duckdb
+    DUCKDB_AVAILABLE = True
+except ImportError:
+    DUCKDB_AVAILABLE = False
+
+try:
+    import pandas as pd
+    import pyarrow as pa
+    from deltalake import DeltaTable, write_deltalake
+    DELTALAKE_AVAILABLE = True
+except ImportError:
+    DELTALAKE_AVAILABLE = False
 
 logger = logging.getLogger("bis-delta-lake")
 
@@ -32,7 +45,7 @@ LAKEHOUSE_BASE = Path(os.getenv("LAKEHOUSE_BASE_PATH", "/data/lakehouse"))
 
 # ─── DuckDB connection (in-memory, reads parquet files) ──────────────────────
 
-def get_duckdb_conn() -> duckdb.DuckDBPyConnection:
+def get_duckdb_conn():
     """Return a new in-memory DuckDB connection configured for Delta Lake reads."""
     conn = duckdb.connect(":memory:")
     conn.execute("INSTALL parquet; LOAD parquet;")
@@ -106,8 +119,9 @@ def table_stats(table_name: str, days: int = 30) -> dict[str, Any]:
                 COUNT(DISTINCT year) as distinct_years,
                 COUNT(DISTINCT month) as distinct_months
             FROM read_parquet('{path}', union_by_name=true)
-            WHERE created_at >= '{cutoff}'
-            """
+            WHERE created_at >= ?
+            """,
+            [cutoff],
         )
         return {"table": table_name, "exists": True, "period_days": days, **rows[0]}
     except Exception as e:
@@ -131,10 +145,11 @@ def transaction_volume_by_day(days: int = 30) -> list[dict[str, Any]]:
             AVG(amount_kobo) / 100.0 as avg_ngn,
             COUNT(CASE WHEN aml_flag THEN 1 END) as flagged_count
         FROM read_parquet('{path}', union_by_name=true)
-        WHERE created_at >= '{cutoff}'
+        WHERE created_at >= ?
         GROUP BY 1
         ORDER BY 1
-        """
+        """,
+        [cutoff],
     )
 
 
@@ -152,11 +167,12 @@ def top_corridors(days: int = 30, limit: int = 20) -> list[dict[str, Any]]:
             COUNT(*) as tx_count,
             SUM(amount_kobo) / 100.0 as total_ngn
         FROM read_parquet('{path}', union_by_name=true)
-        WHERE created_at >= '{cutoff}'
+        WHERE created_at >= ?
         GROUP BY 1, 2
         ORDER BY total_ngn DESC
-        LIMIT {limit}
-        """
+        LIMIT ?
+        """,
+        [cutoff, limit],
     )
 
 
@@ -172,11 +188,12 @@ def high_risk_transactions(risk_threshold: float = 70.0, days: int = 7) -> list[
                amount_kobo / 100.0 as amount_ngn, channel,
                risk_score, aml_flag, created_at
         FROM read_parquet('{path}', union_by_name=true)
-        WHERE created_at >= '{cutoff}'
-          AND risk_score >= {risk_threshold}
+        WHERE created_at >= ?
+          AND risk_score >= ?
         ORDER BY risk_score DESC, created_at DESC
         LIMIT 500
-        """
+        """,
+        [cutoff, risk_threshold],
     )
 
 
@@ -200,8 +217,9 @@ def aml_alert_summary(days: int = 30) -> dict[str, Any]:
             COUNT(CASE WHEN status = 'closed' THEN 1 END) as closed_count,
             COUNT(DISTINCT rule_name) as distinct_rules
         FROM read_parquet('{path}', union_by_name=true)
-        WHERE created_at >= '{cutoff}'
-        """
+        WHERE created_at >= ?
+        """,
+        [cutoff],
     )
     return {"period_days": days, **rows[0]} if rows else {}
 
@@ -220,10 +238,11 @@ def aml_alerts_by_rule(days: int = 30) -> list[dict[str, Any]]:
             COUNT(CASE WHEN risk_level IN ('high', 'critical') THEN 1 END) as high_risk_count,
             AVG(amount_kobo) / 100.0 as avg_amount_ngn
         FROM read_parquet('{path}', union_by_name=true)
-        WHERE created_at >= '{cutoff}'
+        WHERE created_at >= ?
         GROUP BY rule_name
         ORDER BY alert_count DESC
-        """
+        """,
+        [cutoff],
     )
 
 
@@ -247,14 +266,15 @@ def structuring_detection(days: int = 30, threshold_kobo: int = 500_000_00) -> l
             MAX(amount_kobo) / 100.0 as max_ngn,
             COUNT(DISTINCT CAST(created_at AS DATE)) as active_days
         FROM read_parquet('{path}', union_by_name=true)
-        WHERE created_at >= '{cutoff}'
-          AND amount_kobo BETWEEN {sub_threshold} AND {threshold_kobo}
+        WHERE created_at >= ?
+          AND amount_kobo BETWEEN ? AND ?
           AND direction = 'debit'
         GROUP BY account_id
         HAVING COUNT(*) >= 5
         ORDER BY tx_count DESC
         LIMIT 100
-        """
+        """,
+        [cutoff, sub_threshold, threshold_kobo],
     )
 
 
@@ -274,10 +294,11 @@ def sar_filing_trend(days: int = 90) -> list[dict[str, Any]]:
             COUNT(*) as filing_count,
             SUM(amount_kobo) / 100.0 as total_ngn
         FROM read_parquet('{path}', union_by_name=true)
-        WHERE created_at >= '{cutoff}'
+        WHERE created_at >= ?
         GROUP BY 1, 2
         ORDER BY 1, 2
-        """
+        """,
+        [cutoff],
     )
 
 
@@ -294,7 +315,8 @@ def investigation_to_alert_funnel(days: int = 30) -> dict[str, Any]:
         path = table_path("investigations")
         cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
         rows = run_query(
-            f"SELECT COUNT(*) as cnt FROM read_parquet('{path}', union_by_name=true) WHERE created_at >= '{cutoff}'"
+            f"SELECT COUNT(*) as cnt FROM read_parquet('{path}', union_by_name=true) WHERE created_at >= ?",
+            [cutoff],
         )
         result["investigations_opened"] = rows[0]["cnt"] if rows else 0
 
@@ -302,7 +324,8 @@ def investigation_to_alert_funnel(days: int = 30) -> dict[str, Any]:
         path = table_path("aml_alerts")
         cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
         rows = run_query(
-            f"SELECT COUNT(*) as cnt FROM read_parquet('{path}', union_by_name=true) WHERE created_at >= '{cutoff}'"
+            f"SELECT COUNT(*) as cnt FROM read_parquet('{path}', union_by_name=true) WHERE created_at >= ?",
+            [cutoff],
         )
         result["aml_alerts_triggered"] = rows[0]["cnt"] if rows else 0
 
@@ -310,7 +333,8 @@ def investigation_to_alert_funnel(days: int = 30) -> dict[str, Any]:
         path = table_path("sar_filings")
         cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
         rows = run_query(
-            f"SELECT COUNT(*) as cnt FROM read_parquet('{path}', union_by_name=true) WHERE created_at >= '{cutoff}'"
+            f"SELECT COUNT(*) as cnt FROM read_parquet('{path}', union_by_name=true) WHERE created_at >= ?",
+            [cutoff],
         )
         result["strs_filed"] = rows[0]["cnt"] if rows else 0
 

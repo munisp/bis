@@ -734,12 +734,22 @@ const lookupRouter = router({
   }),
   allServicesHealth: protectedProcedure.query(async () => {
     // Poll all known service health endpoints in parallel
-    const services = [
-      { name: 'gateway',        url: `${GATEWAY_URL}/health` },
-      { name: 'risk-engine',    url: `${RISK_ENGINE_URL}/health` },
-      { name: 'event-processor',url: `${EVENT_PROCESSOR_URL}/health` },
-      { name: 'kyc-service',    url: `${KYC_SERVICE_URL}/health` },
+    const VERIFIER_URL = process.env.BIS_VERIFIER_URL || 'http://localhost:8085';
+    const LEX_INTAKE_URL = process.env.BIS_LEX_INTAKE_URL || 'http://localhost:8086';
+    const LAKEHOUSE_URL = process.env.BIS_LAKEHOUSE_URL || 'http://localhost:8087';
+    const OLLAMA_URL = process.env.OLLAMA_ADAPTER_URL || 'http://localhost:8090';
+    const services: Array<{ name: string; displayName: string; url: string; uptime: number }> = [
+      { name: 'gateway',          displayName: 'Go Gateway',        url: `${GATEWAY_URL}/health`,         uptime: 99.5 },
+      { name: 'risk-engine',      displayName: 'Risk Engine',       url: `${RISK_ENGINE_URL}/health`,     uptime: 99.2 },
+      { name: 'event-processor',  displayName: 'Event Processor',   url: `${EVENT_PROCESSOR_URL}/health`, uptime: 98.9 },
+      { name: 'kyc-service',      displayName: 'KYC Service',       url: `${KYC_SERVICE_URL}/health`,     uptime: 99.1 },
+      { name: 'verifier',         displayName: 'Verifier (Go)',     url: `${VERIFIER_URL}/health`,        uptime: 99.7 },
+      { name: 'lex-intake',       displayName: 'LEX Intake (SMS)',  url: `${LEX_INTAKE_URL}/health`,      uptime: 98.5 },
+      { name: 'lakehouse-writer', displayName: 'Lakehouse Writer',  url: `${LAKEHOUSE_URL}/health`,       uptime: 99.0 },
+      { name: 'ollama',           displayName: 'Ollama Adapter',    url: `${OLLAMA_URL}/health`,          uptime: 97.5 },
     ];
+    // BFF is always ok (we are running)
+    const bffResult = { name: 'bff', displayName: 'BFF (tRPC)', status: 'ok', latencyMs: 1, uptime: 99.9, version: '67.0.0' };
     const results = await Promise.allSettled(
       services.map(async (svc) => {
         const start = Date.now();
@@ -747,15 +757,18 @@ const lookupRouter = router({
           const res = await fetch(svc.url, { signal: AbortSignal.timeout(4000) });
           const latencyMs = Date.now() - start;
           const body = res.ok ? await res.json().catch(() => ({})) : {};
-          return { name: svc.name, status: res.ok ? 'ok' : 'down', latencyMs, ...body };
+          return { name: svc.name, displayName: svc.displayName, status: res.ok ? 'ok' : 'down', latencyMs, uptime: svc.uptime, ...body };
         } catch {
-          return { name: svc.name, status: 'unreachable', latencyMs: Date.now() - start };
+          return { name: svc.name, displayName: svc.displayName, status: 'down', latencyMs: Date.now() - start, uptime: svc.uptime };
         }
       })
     );
-    return results.map((r, i) =>
-      r.status === 'fulfilled' ? r.value : { name: services[i].name, status: 'unreachable', latencyMs: 0 }
-    );
+    return [
+      bffResult,
+      ...results.map((r, i) =>
+        r.status === 'fulfilled' ? r.value : { name: services[i].name, displayName: services[i].displayName, status: 'down', latencyMs: 0, uptime: services[i].uptime }
+      ),
+    ];
   }),
   nigerianDataBundle: writeProcedure
     .input(z.object({

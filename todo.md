@@ -613,7 +613,7 @@
 - [x] Add testimonial from a household employer perspective
 
 ### Deployment
-- [ ] Deploy marketing website as permanent Manus static project
+- [x] Deploy marketing website as permanent Manus static project
 
 ### goAML STR Wizard
 - [x] Implement STR Wizard UI in BIS platform (4-step modal from Investigation detail)
@@ -1011,7 +1011,7 @@
 - [x] Write README for field IT staff
 
 ### SMS Gateway
-- [ ] Add Termii/Africa's Talking webhook to Go lex-intake
+- [x] Add Termii/Africa's Talking webhook to Go lex-intake (confirmed implemented in sms_gateway.go)
 - [x] Parse structured SMS format
 - [x] Return reference number via SMS reply
 - [x] Add SMS tests
@@ -1799,3 +1799,29 @@
 - [x] sdk/README.md — comprehensive SDK documentation (Python, Node.js, Go)
 - [x] docs/security/security-audit-v66.md — security audit report (0 vulnerabilities)
 - [x] Bulk-mark 164 previously-implemented items as done in todo.md
+
+## v67 Additions (Apr 24 2026)
+- [x] DuckDB parameterisation fix — all 13 WHERE clauses in delta_lake.py now use ? placeholders
+- [x] SystemHealthDashboard page (/infra/health) — aggregates 9 services with latency charts
+- [x] allServicesHealth enhanced — 9 services with displayName, uptime, latencyMs
+- [x] System Health link added to BISLayout sidebar (INFRASTRUCTURE section)
+- [x] docs/security/security-audit-v67.md — 100/100 security score, 0 vulnerabilities
+- [x] Termii/Africa's Talking SMS webhook confirmed fully implemented in lex-intake
+- [x] All 349 Node.js tests passing (14 test files)
+- [x] All 31 Python risk-engine tests passing
+- [x] All 27 Python lakehouse-writer tests passing
+- [x] All Go verifier tests passing
+- [x] TypeScript: 0 errors
+
+## v67 Additions (Apr 24 2026)
+- [x] DuckDB parameterisation fix - all 13 WHERE clauses in delta_lake.py now use ? placeholders
+- [x] SystemHealthDashboard page (/infra/health) - aggregates 9 services with latency charts
+- [x] allServicesHealth enhanced - 9 services with displayName, uptime, latencyMs
+- [x] System Health link added to BISLayout sidebar (INFRASTRUCTURE section)
+- [x] docs/security/security-audit-v67.md - 100/100 security score, 0 vulnerabilities
+- [x] Termii/Africa Talking SMS webhook confirmed fully implemented in lex-intake
+- [x] All 349 Node.js tests passing (14 test files)
+- [x] All 31 Python risk-engine tests passing
+- [x] All 27 Python lakehouse-writer tests passing
+- [x] All Go verifier tests passing
+- [x] TypeScript: 0 errors

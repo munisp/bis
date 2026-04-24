@@ -151,6 +151,7 @@ const BASE_NAV_GROUPS: NavGroup[] = [
     label: 'INFRASTRUCTURE',
     defaultOpen: false,
     items: [
+      { label: 'System Health', href: '/infra/health', icon: <Activity size={15} />, adminOnly: true },
       { label: 'Gateway Health', href: '/infra/gateway', icon: <Activity size={15} />, adminOnly: true },
       { label: 'Keycloak IDP', href: '/infra/keycloak', icon: <Server size={15} />, adminOnly: true },
       { label: 'Temporal Workflows', href: '/infra/temporal', icon: <Workflow size={15} />, adminOnly: true },
