@@ -400,3 +400,82 @@ Alert rules are defined in `infra/prometheus/alert-rules.yml`. Key alerts:
 | `PostgreSQLSlowQuery` | p99 query latency > 1s | warning |
 | `VerificationFallbackHigh` | Youverify fallback rate > 50% for 10m | warning |
 | `DiskSpaceLow` | disk usage > 85% | warning |
+
+---
+
+## v65 Operations: open-appsec WAF
+
+### Start with WAF enabled
+
+```bash
+docker compose --profile waf up -d
+```
+
+### WAF Smoke Test
+
+```bash
+./scripts/waf-smoke-test.sh http://localhost:80
+```
+
+### Switch WAF to detect-only mode (emergency)
+
+```bash
+# Edit .env
+OPEN_APPSEC_MODE=detect
+
+# Restart open-appsec
+docker compose restart open-appsec
+```
+
+### View WAF blocked requests
+
+```bash
+docker compose logs open-appsec | grep "BLOCK\|DETECT"
+```
+
+### Add WAF exception (false positive)
+
+Edit `infra/open-appsec/local_policy.yaml`:
+```yaml
+exceptions:
+  - match:
+      url: /api/trpc/your.procedure
+      method: POST
+    action: allow
+```
+Then restart: `docker compose restart open-appsec`
+
+---
+
+## v65 Operations: lex-matcher Service
+
+```bash
+# Start lex-matcher
+docker compose up -d lex-matcher
+
+# Health check
+curl http://localhost:8090/health
+
+# Test matching
+curl -X POST http://localhost:8090/match \
+  -H "Content-Type: application/json" \
+  -d '{"subject_name":"JOHN DOE","candidates":[{"id":"1","name":"John Doe","type":"individual"}],"threshold":0.6}'
+```
+
+---
+
+## v65 Operations: verifier Service
+
+```bash
+# Start verifier
+docker compose up -d verifier
+
+# Health check
+curl http://localhost:8086/health
+
+# Test NIN verification
+curl -X POST http://localhost:8086/v1/verify \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $BIS_GATEWAY_KEY" \
+  -d '{"type":"nin","value":"12345678901","first_name":"JOHN","last_name":"DOE"}'
+```

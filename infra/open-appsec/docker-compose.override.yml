@@ -1,0 +1,79 @@
+# ─── open-appsec WAF Docker Compose Override ─────────────────────────────────
+# Usage:
+#   docker compose -f docker-compose.yml -f infra/open-appsec/docker-compose.override.yml up -d
+#
+# This overlay adds the open-appsec WAF service in front of APISIX.
+# open-appsec is the open-source ML-based WAF from Check Point.
+# Image: openappsec/open-appsec-nginx:latest
+# Docs:  https://docs.openappsec.io
+#
+# Traffic flow:
+#   Internet → open-appsec (port 80/443) → APISIX (9080) → BIS Services
+
+version: "3.9"
+
+services:
+  # ─── open-appsec WAF ────────────────────────────────────────────────────────
+  open-appsec:
+    image: openappsec/open-appsec-nginx:latest
+    container_name: bis-open-appsec
+    restart: unless-stopped
+    ports:
+      - "80:80"         # HTTP ingress (replaces direct APISIX 9080 exposure)
+      - "443:443"       # HTTPS ingress (when TLS is configured)
+      - "8080:8080"     # open-appsec management/metrics
+    volumes:
+      # nginx reverse proxy configuration
+      - ./infra/open-appsec/nginx.conf:/etc/nginx/nginx.conf:ro
+      # open-appsec main policy
+      - ./infra/open-appsec/open-appsec.yaml:/etc/cp/conf/open-appsec.yaml:ro
+      # Local enforcement policy (offline mode)
+      - ./infra/open-appsec/local_policy.yaml:/etc/cp/conf/local_policy.yaml:ro
+      # OpenAPI schema for API validation
+      - ./openapi.yaml:/etc/cp/conf/assets/openapi.yaml:ro
+      # Persistent WAF data (ML models, attack signatures)
+      - open_appsec_data:/etc/cp/data
+      # Log output
+      - open_appsec_logs:/var/log/nginx
+    environment:
+      # open-appsec registration token (get from https://my.openappsec.io)
+      # Leave empty for local-only mode (no cloud management)
+      OPEN_APPSEC_TOKEN: ${OPEN_APPSEC_TOKEN:-}
+      # Policy mode: prevent | detect | inactive
+      OPEN_APPSEC_MODE: ${OPEN_APPSEC_MODE:-prevent}
+      # Upstream APISIX address
+      UPSTREAM_HOST: apisix
+      UPSTREAM_PORT: "9080"
+    networks: [bis-net]
+    depends_on:
+      apisix:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:80/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    labels:
+      - "com.bis.service=waf"
+      - "com.bis.component=open-appsec"
+      - "com.bis.version=latest"
+
+  # ─── Override APISIX to NOT expose port 9080 publicly ─────────────────────
+  # When WAF is active, APISIX should only be reachable from within bis-net.
+  # The WAF handles all public ingress on port 80/443.
+  apisix:
+    ports:
+      - "127.0.0.1:9080:9080"   # Bind to localhost only — WAF is the public ingress
+      - "127.0.0.1:9180:9180"   # Admin API — localhost only
+      - "127.0.0.1:9091:9091"   # Prometheus metrics — localhost only
+
+volumes:
+  open_appsec_data:
+    driver: local
+    labels:
+      com.bis.volume: "open-appsec-data"
+  open_appsec_logs:
+    driver: local
+    labels:
+      com.bis.volume: "open-appsec-logs"

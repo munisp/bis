@@ -1,0 +1,286 @@
+{
+  "name": "BIS Intelligence Platform",
+  "slug": "bis-intelligence",
+  "version": "1.0.0",
+  "description": "Nigeria's premier intelligence-led compliance and investigation platform. Provides KYC verification, sanctions screening, adverse media checks, risk scoring, investigation management, and field agent dispatch via the OpenClaw protocol.",
+  "author": "BIS Team",
+  "homepage": "https://bis.example.ng",
+  "documentation": "https://bis.example.ng/developer",
+  "icon": "https://bis.example.ng/favicon.ico",
+  "categories": ["compliance", "kyc", "aml", "investigation", "risk"],
+  "tags": ["nigeria", "fintech", "compliance", "kyc", "aml", "efcc", "cbn", "nfiu", "sanctions"],
+  "license": "Proprietary",
+  "auth": {
+    "type": "bearer",
+    "header": "Authorization",
+    "prefix": "Bearer",
+    "token_prefix": "bis_live_",
+    "obtain_url": "https://bis.example.ng/developer"
+  },
+  "base_url": "https://bis.example.ng/api/v1/openclaw",
+  "endpoints": {
+    "execute": "POST /execute"
+  },
+  "actions": [
+    {
+      "name": "kyc_verify",
+      "description": "Verify an individual's identity using NIN, BVN, or passport. Returns identity match score, photo, and verification status.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "subject_name": { "type": "string", "description": "Full legal name of the subject" },
+          "nin": { "type": "string", "description": "National Identification Number (11 digits)" },
+          "bvn": { "type": "string", "description": "Bank Verification Number (11 digits)" },
+          "passport_number": { "type": "string", "description": "International passport number" },
+          "date_of_birth": { "type": "string", "format": "date", "description": "Date of birth (YYYY-MM-DD)" }
+        },
+        "required": ["subject_name"]
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "verified": { "type": "boolean" },
+          "match_score": { "type": "number", "description": "Identity match confidence 0-100" },
+          "status": { "type": "string", "enum": ["verified", "partial_match", "not_found", "flagged"] },
+          "reference": { "type": "string" },
+          "report": { "type": "string", "description": "Markdown-formatted verification report" }
+        }
+      },
+      "token_cost": 6
+    },
+    {
+      "name": "sanctions_screen",
+      "description": "Screen an individual or entity against OFAC, UN, EU, and Nigerian (NFIU/CBN) sanctions lists.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "subject_name": { "type": "string", "description": "Full name or entity name to screen" },
+          "nationality": { "type": "string", "description": "ISO 3166-1 alpha-2 country code" },
+          "date_of_birth": { "type": "string", "format": "date" },
+          "entity_type": { "type": "string", "enum": ["individual", "entity", "vessel", "aircraft"] }
+        },
+        "required": ["subject_name"]
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "is_sanctioned": { "type": "boolean" },
+          "hit_count": { "type": "integer" },
+          "lists_checked": { "type": "array", "items": { "type": "string" } },
+          "hits": { "type": "array", "items": { "type": "object" } },
+          "reference": { "type": "string" },
+          "report": { "type": "string" }
+        }
+      },
+      "token_cost": 4
+    },
+    {
+      "name": "adverse_media",
+      "description": "Search for adverse media, negative news, and reputational risk signals for an individual or entity.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "subject_name": { "type": "string" },
+          "entity_type": { "type": "string", "enum": ["individual", "company"] },
+          "country": { "type": "string", "description": "ISO 3166-1 alpha-2 country code" },
+          "lookback_days": { "type": "integer", "default": 365, "description": "Number of days to look back" }
+        },
+        "required": ["subject_name"]
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "risk_level": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+          "article_count": { "type": "integer" },
+          "categories": { "type": "array", "items": { "type": "string" } },
+          "reference": { "type": "string" },
+          "report": { "type": "string" }
+        }
+      },
+      "token_cost": 5
+    },
+    {
+      "name": "risk_score",
+      "description": "Generate a comprehensive risk score for an individual or entity combining KYC, sanctions, adverse media, and transaction pattern analysis.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "subject_name": { "type": "string" },
+          "subject_type": { "type": "string", "enum": ["individual", "company", "pep", "ngo"] },
+          "nin": { "type": "string" },
+          "bvn": { "type": "string" },
+          "rc_number": { "type": "string", "description": "CAC registration number for companies" },
+          "industry": { "type": "string" },
+          "country": { "type": "string" }
+        },
+        "required": ["subject_name"]
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "overall_score": { "type": "number", "description": "Risk score 0-100 (higher = more risk)" },
+          "risk_rating": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+          "component_scores": { "type": "object" },
+          "recommendation": { "type": "string" },
+          "reference": { "type": "string" },
+          "report": { "type": "string" }
+        }
+      },
+      "token_cost": 8
+    },
+    {
+      "name": "create_investigation",
+      "description": "Create a new investigation case in the BIS platform for a subject.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "subject_name": { "type": "string" },
+          "subject_type": { "type": "string", "enum": ["individual", "company", "vehicle", "property"] },
+          "priority": { "type": "string", "enum": ["low", "medium", "high", "critical"], "default": "medium" },
+          "description": { "type": "string" },
+          "assigned_to": { "type": "string", "description": "Username of the investigator to assign" }
+        },
+        "required": ["subject_name", "subject_type"]
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "case_ref": { "type": "string" },
+          "case_id": { "type": "string" },
+          "status": { "type": "string" },
+          "reference": { "type": "string" },
+          "report": { "type": "string" }
+        }
+      },
+      "token_cost": 3
+    },
+    {
+      "name": "dispatch_field_agent",
+      "description": "Dispatch a field agent to conduct on-site verification, surveillance, or evidence collection.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "task_type": { "type": "string", "enum": ["address_verification", "surveillance", "evidence_collection", "interview", "biometric_enrollment"] },
+          "subject_name": { "type": "string" },
+          "address": { "type": "string", "description": "Physical address for the field visit" },
+          "state": { "type": "string", "description": "Nigerian state" },
+          "lga": { "type": "string", "description": "Local Government Area" },
+          "priority": { "type": "string", "enum": ["low", "medium", "high", "urgent"], "default": "medium" },
+          "instructions": { "type": "string" },
+          "case_ref": { "type": "string", "description": "Link to an existing case" }
+        },
+        "required": ["task_type", "subject_name", "address"]
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "task_ref": { "type": "string" },
+          "assigned_agent": { "type": "string" },
+          "estimated_completion": { "type": "string" },
+          "reference": { "type": "string" },
+          "report": { "type": "string" }
+        }
+      },
+      "token_cost": 160
+    },
+    {
+      "name": "get_investigation",
+      "description": "Retrieve the current status and details of an investigation case.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "case_ref": { "type": "string", "description": "Investigation case reference (e.g. BIS-2025-00123)" }
+        },
+        "required": ["case_ref"]
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "case_ref": { "type": "string" },
+          "status": { "type": "string" },
+          "subject_name": { "type": "string" },
+          "risk_score": { "type": "number" },
+          "findings": { "type": "string" },
+          "reference": { "type": "string" },
+          "report": { "type": "string" }
+        }
+      },
+      "token_cost": 1
+    },
+    {
+      "name": "list_alerts",
+      "description": "List active AML/compliance alerts for a subject or account.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "subject_name": { "type": "string" },
+          "account_number": { "type": "string" },
+          "severity": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+          "limit": { "type": "integer", "default": 10, "maximum": 50 }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "alert_count": { "type": "integer" },
+          "alerts": { "type": "array", "items": { "type": "object" } },
+          "reference": { "type": "string" },
+          "report": { "type": "string" }
+        }
+      },
+      "token_cost": 1
+    },
+    {
+      "name": "full_due_diligence",
+      "description": "Run a comprehensive Enhanced Due Diligence (EDD) check combining KYC, sanctions, adverse media, PEP screening, and risk scoring.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "subject_name": { "type": "string" },
+          "subject_type": { "type": "string", "enum": ["individual", "company"] },
+          "nin": { "type": "string" },
+          "bvn": { "type": "string" },
+          "rc_number": { "type": "string" },
+          "date_of_birth": { "type": "string", "format": "date" },
+          "nationality": { "type": "string" },
+          "purpose": { "type": "string", "description": "Business relationship or transaction purpose" }
+        },
+        "required": ["subject_name"]
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "overall_risk_rating": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+          "kyc_status": { "type": "string" },
+          "sanctions_status": { "type": "string" },
+          "adverse_media_status": { "type": "string" },
+          "pep_status": { "type": "string" },
+          "recommendation": { "type": "string" },
+          "reference": { "type": "string" },
+          "report": { "type": "string" }
+        }
+      },
+      "token_cost": 30
+    }
+  ],
+  "rate_limits": {
+    "standard": { "requests_per_minute": 100 },
+    "professional": { "requests_per_minute": 1000 },
+    "enterprise": { "requests_per_minute": 10000 }
+  },
+  "pricing": {
+    "currency": "NGN",
+    "token_price_ngn": 10,
+    "minimum_purchase": 1000,
+    "tiers": [
+      { "name": "Starter", "tokens": 1000, "price_ngn": 10000 },
+      { "name": "Professional", "tokens": 10000, "price_ngn": 80000 },
+      { "name": "Enterprise", "tokens": 100000, "price_ngn": 600000 }
+    ]
+  },
+  "compliance": {
+    "data_residency": "Nigeria",
+    "certifications": ["ISO 27001", "NDPR", "CBN Data Governance"],
+    "regulatory_frameworks": ["CBN AML/CFT Guidelines", "NFIU Regulations", "FATF 40 Recommendations"]
+  }
+}

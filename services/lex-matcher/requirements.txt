@@ -1,0 +1,15 @@
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+pydantic==2.10.3
+python-jose[cryptography]==3.3.0
+httpx==0.28.1
+python-Levenshtein==0.26.1
+rapidfuzz==3.11.0
+jellyfish==1.1.0
+phonenumbers==8.13.50
+python-dotenv==1.0.1
+structlog==24.4.0
+prometheus-client==0.21.1
+pytest==8.3.4
+pytest-asyncio==0.24.0
+httpx[testing]==0.28.1

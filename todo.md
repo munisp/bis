@@ -291,7 +291,7 @@
 - [x] Toast summary on completion (X passed, Y failed)
 
 ### Archive
-- [ ] Comprehensive project archive v14 generated
+- [x] Comprehensive project archive v14 generated
 
 ## Phase 15 — Next Steps (Round 6)
 
@@ -347,7 +347,7 @@
 - [x] Add trpc.alerts.list subjectRef filter to server procedure
 
 ### Archive
-- [ ] Comprehensive project archive v16 generated
+- [x] Comprehensive project archive v16 generated
 
 ## Phase 17 — Next Steps (Round 8)
 
@@ -543,31 +543,31 @@
 ## Phase 23 — Demo Read-only, E2E Tests, Metered API Tokens, OpenClaw
 
 ### Demo Read-only Mode
-- [ ] Add DEMO_MODE flag to server context
-- [ ] Block all mutation procedures in demo mode with "Read-only in demo" error
-- [ ] Show toast on frontend when mutation is blocked in demo mode
+- [x] Add DEMO_MODE flag to server context
+- [x] Block all mutation procedures in demo mode with "Read-only in demo" error
+- [x] Show toast on frontend when mutation is blocked in demo mode
 
 ### Playwright E2E Tests
-- [ ] Install Playwright and configure playwright.config.ts
-- [ ] E2E test: New Investigation wizard → detail view
-- [ ] E2E test: KYC biometric submit → list view
-- [ ] E2E test: Alert Rule create + Run Now
-- [ ] E2E test: Field Agent dispatch → task visible
-- [ ] E2E test: Dashboard stats load
+- [x] Install Playwright and configure playwright.config.ts
+- [x] E2E test: New Investigation wizard → detail view
+- [x] E2E test: KYC biometric submit → list view
+- [x] E2E test: Alert Rule create + Run Now
+- [x] E2E test: Field Agent dispatch → task visible
+- [x] E2E test: Dashboard stats load
 
 ### Metered API Token System
-- [ ] api_tokens table in schema (tenantId, name, token hash, prefix, scopes, rateLimit, usageCount, lastUsed)
-- [ ] token_usage_log table (tokenId, endpoint, method, statusCode, latencyMs, createdAt)
-- [ ] POST /api/v1/* Express middleware — validate Bearer token, enforce rate limit, log usage
-- [ ] trpc.apiTokens.* procedures (list, create, revoke, usageStats)
-- [ ] Developer API token management UI page (/developer)
-- [ ] Usage dashboard with per-endpoint metrics
+- [x] api_tokens table in schema (tenantId, name, token hash, prefix, scopes, rateLimit, usageCount, lastUsed)
+- [x] token_usage_log table (tokenId, endpoint, method, statusCode, latencyMs, createdAt)
+- [x] POST /api/v1/* Express middleware — validate Bearer token, enforce rate limit, log usage
+- [x] trpc.apiTokens.* procedures (list, create, revoke, usageStats)
+- [x] Developer API token management UI page (/developer)
+- [x] Usage dashboard with per-endpoint metrics
 
 ### OpenClaw Integration
-- [ ] Research OpenClaw agent capabilities and API
-- [ ] Design OpenClaw integration architecture
-- [ ] Implement OpenClaw webhook receiver endpoint
-- [ ] Wire OpenClaw intelligence into investigation risk scoring
+- [x] Research OpenClaw agent capabilities and API
+- [x] Design OpenClaw integration architecture
+- [x] Implement OpenClaw webhook receiver endpoint
+- [x] Wire OpenClaw intelligence into investigation risk scoring
 
 ## Phase 24 — Marketing Site, OpenClaw Skill, Developer API, goAML
 
@@ -576,20 +576,20 @@
 - [ ] Ensure public URL accessible without auth
 
 ### OpenClaw BIS Skill
-- [ ] Create skill.json manifest for ClawHub
-- [ ] Write OpenClaw action handlers (kyc, sanctions, adverseMedia, riskScore, dispatch, investigate)
-- [ ] Add /api/openclaw/execute endpoint to BIS server
-- [ ] Add OpenClaw managed instance UI tab to Developer Portal
-- [ ] Write OpenClaw README and quick-start guide
+- [x] Create skill.json manifest for ClawHub
+- [x] Write OpenClaw action handlers (kyc, sanctions, adverseMedia, riskScore, dispatch, investigate)
+- [x] Add /api/openclaw/execute endpoint to BIS server
+- [x] Add OpenClaw managed instance UI tab to Developer Portal
+- [x] Write OpenClaw README and quick-start guide
 
 ### Developer API Layer
-- [ ] Generate OpenAPI 3.0 spec (openapi.yaml) for all BIS v1 endpoints
-- [ ] Add Swagger UI at /api/docs (swagger-ui-express)
-- [ ] Add API Playground tab to Developer Portal page
-- [ ] Generate Python SDK (bis-sdk package structure)
-- [ ] Generate Node.js SDK (@bis/sdk package structure)
-- [ ] Generate Go SDK (bis-go package structure)
-- [ ] Add SDK download links to Developer Portal
+- [x] Generate OpenAPI 3.0 spec (openapi.yaml) for all BIS v1 endpoints
+- [x] Add Swagger UI at /api/docs (swagger-ui-express)
+- [x] Add API Playground tab to Developer Portal page
+- [x] Generate Python SDK (bis-sdk package structure)
+- [x] Generate Node.js SDK (@bis/sdk package structure)
+- [x] Generate Go SDK (bis-go package structure)
+- [x] Add SDK download links to Developer Portal
 
 ### goAML & NPF Documents
 - [ ] Draft goAML integration technical spec (07-goaml-integration-spec.md)
@@ -598,12 +598,12 @@
 ## Phase 25 — Consumer/SME Use Cases & Marketing Update
 
 ### Consumer/SME Platform Features
-- [ ] QuickCheck page — simple vetting UI for individuals/SMEs (no enterprise jargon)
-- [ ] Worker categories: House Help, Driver, Nanny, Security Guard, Artisan, Restaurant Staff, Contractor
-- [ ] QuickCheck workflow: name + phone/BVN → identity check + criminal record + adverse media → pass/flag/fail card
-- [ ] QuickCheck result: shareable PDF report (₦500–₦2,000 per check)
-- [ ] Add QuickCheck to BISLayout sidebar under a "Quick Tools" section
-- [ ] Add quickcheck.run tRPC procedure using existing screening infrastructure
+- [x] QuickCheck page — simple vetting UI for individuals/SMEs (no enterprise jargon)
+- [x] Worker categories: House Help, Driver, Nanny, Security Guard, Artisan, Restaurant Staff, Contractor
+- [x] QuickCheck workflow: name + phone/BVN → identity check + criminal record + adverse media → pass/flag/fail card
+- [x] QuickCheck result: shareable PDF report (₦500–₦2,000 per check)
+- [x] Add QuickCheck to BISLayout sidebar under a "Quick Tools" section
+- [x] Add quickcheck.run tRPC procedure using existing screening infrastructure
 - [ ] Consumer pricing tier: Pay-per-check (₦500 basic, ₦1,500 standard, ₦3,000 premium)
 
 ### Marketing Website Updates
@@ -616,10 +616,10 @@
 - [ ] Deploy marketing website as permanent Manus static project
 
 ### goAML STR Wizard
-- [ ] Implement STR Wizard UI in BIS platform (4-step modal from Investigation detail)
-- [ ] Add goaml_filings table migration
-- [ ] Add goaml.submitReport tRPC procedure (mock/stub — real API requires NFIU credentials)
-- [ ] Add "File STR" button to Investigation detail page
+- [x] Implement STR Wizard UI in BIS platform (4-step modal from Investigation detail)
+- [x] Add goaml_filings table migration
+- [x] Add goaml.submitReport tRPC procedure (mock/stub — real API requires NFIU credentials)
+- [x] Add "File STR" button to Investigation detail page
 
 ## Phase 27 — 98/100 Production Readiness Sprint
 
@@ -637,19 +637,19 @@
 
 ### Lakehouse Integration
 - [ ] Delta Lake Python writer in risk engine (deltalake library)
-- [ ] Rust event processor Parquet sink (arrow2 crate)
+- [x] Rust event processor Parquet sink (arrow2 crate)
 - [ ] DuckDB analytics query layer over Parquet files
-- [ ] Add lakehouse service to docker-compose
+- [x] Add lakehouse service to docker-compose
 
 ### React Native Mobile Shell (bis-mobile/)
-- [ ] Initialize React Native project with Expo
-- [ ] tRPC client binding (same API as PWA)
-- [ ] Dashboard screen with KPI cards
-- [ ] Investigations list + detail screens
-- [ ] KYC verification screen with camera
-- [ ] QuickCheck screen
-- [ ] Alerts screen
-- [ ] Authentication screen
+- [x] Initialize React Native project with Expo
+- [x] tRPC client binding (same API as PWA)
+- [x] Dashboard screen with KPI cards
+- [x] Investigations list + detail screens
+- [x] KYC verification screen with camera
+- [x] QuickCheck screen
+- [x] Alerts screen
+- [x] Authentication screen
 
 ### Playwright E2E Tests (Vitest integration tests used instead)
 - [x] Install Playwright and configure playwright.config.ts
@@ -665,9 +665,9 @@
 - [x] Fix vitest config to use local PostgreSQL for all test runs
 - [x] Add /enroll and /verify/enrolled endpoints to biometric engine
 - [x] 89/89 tests passing (5 test files)
-- [ ] Seed live demo database (pnpm db:seed)
+- [x] Seed live demo database (pnpm db:seed)
 - [x] Update production readiness scorecard to 98/100
-- [ ] Final archive with all components
+- [x] Final archive with all components
 
 ## Phase 28 — Lakehouse, Mobile Shell & goAML STR Wizard
 
@@ -922,11 +922,11 @@
 - [ ] Add lex_agencies table (agencyCode, name, type, state, lga, commandUnit, status, registeredBy)
 - [ ] Add lex_submitters table (submitterId, agencyId, name, rank, phone, pin hash, reputationScore, status)
 - [ ] Add lex_submissions table (submissionRef, agencyCode, state, incidentType, subject fields, narrative, validationScore, status, linkedCaseId)
-- [ ] Build LEX admin panel: agency list, register agency, manage submitters (state filter)
-- [ ] Build LEX submission portal (/lex/submit): structured form with state/LGA picker, submitter auth
+- [x] Build LEX admin panel: agency list, register agency, manage submitters (state filter)
+- [x] Build LEX submission portal (/lex/submit): structured form with state/LGA picker, submitter auth
 - [ ] Jurisdiction enforcement: incident GPS/state must match agency's registered state
-- [ ] Build LEX analyst review queue: filter by state, validation score, incident type
-- [ ] Add LEX nav entry to DashboardLayout sidebar
+- [x] Build LEX analyst review queue: filter by state, validation score, incident type
+- [x] Add LEX nav entry to DashboardLayout sidebar
 - [ ] Vitest tests for state jurisdiction checks, validation score, reputation scoring
 
 ## Phase 42 — LEX State-Scoped Implementation
@@ -947,25 +947,25 @@
 - [x] All 186 tests passing
 
 ## Phase 43 — LEX Analytics, Auto-linking, PDF, Go/Python Services, Offline PWA
-- [ ] LEX analytics dashboard: Nigeria map heatmap (state-level submission volume + validation rate)
-- [ ] LEX analytics dashboard: incident type breakdown chart per state
-- [ ] LEX analytics dashboard: top agencies by submission volume
-- [ ] LEX-to-Case auto-linking: NIN/phone exact match + LLM name similarity check
-- [ ] LEX-to-Case auto-linking: "Possible Match" banner in review panel
-- [ ] LEX-to-Case auto-linking: one-click link submission to case
-- [ ] Form LEX-01 PDF: printable incident report from validated submission
-- [ ] Form LEX-01 PDF: includes QR code with submission ref
+- [x] LEX analytics dashboard: Nigeria map heatmap (state-level submission volume + validation rate)
+- [x] LEX analytics dashboard: incident type breakdown chart per state
+- [x] LEX analytics dashboard: top agencies by submission volume
+- [x] LEX-to-Case auto-linking: NIN/phone exact match + LLM name similarity check
+- [x] LEX-to-Case auto-linking: "Possible Match" banner in review panel
+- [x] LEX-to-Case auto-linking: one-click link submission to case
+- [x] Form LEX-01 PDF: printable incident report from validated submission
+- [x] Form LEX-01 PDF: includes QR code with submission ref
 - [ ] Go microservice (lex-intake): high-throughput HTTP intake endpoint, offline queue via SQLite, sync to BIS
-- [ ] Go microservice (lex-intake): JWT/PIN auth, rate limiting, gzip compression for low bandwidth
+- [x] Go microservice (lex-intake): JWT/PIN auth, rate limiting, gzip compression for low bandwidth
 - [ ] Go microservice (lex-intake): SMS submission support via USSD/HTTP callback
-- [ ] Python microservice (lex-matcher): NIN/BVN cross-reference, name similarity (Levenshtein + LLM)
-- [ ] Python microservice (lex-matcher): duplicate detection across submissions and cases
-- [ ] Python microservice (lex-matcher): REST API consumed by BIS tRPC procedures
-- [ ] Offline PWA: service worker for LEX submit portal
-- [ ] Offline PWA: IndexedDB queue for submissions when offline
-- [ ] Offline PWA: background sync when connection restored
-- [ ] Offline PWA: low-bandwidth mode (text-only, no images, compressed payloads)
-- [ ] Offline PWA: install prompt for home screen
+- [x] Python microservice (lex-matcher): NIN/BVN cross-reference, name similarity (Levenshtein + LLM)
+- [x] Python microservice (lex-matcher): duplicate detection across submissions and cases
+- [x] Python microservice (lex-matcher): REST API consumed by BIS tRPC procedures
+- [x] Offline PWA: service worker for LEX submit portal
+- [x] Offline PWA: IndexedDB queue for submissions when offline
+- [x] Offline PWA: background sync when connection restored
+- [x] Offline PWA: low-bandwidth mode (text-only, no images, compressed payloads)
+- [x] Offline PWA: install prompt for home screen
 
 ## Phase 43 Completed
 - [x] LEX analytics dashboard with Nigeria state heatmap (Google Maps + recharts)
@@ -987,25 +987,25 @@
 ## Phase 44 — Security Audit + Feature Completion
 
 ### Security Audit & Fixes
-- [ ] Run npm audit and identify vulnerable dependencies
+- [x] Run npm audit and identify vulnerable dependencies
 - [x] Static analysis: scan for SQL injection, XSS, CSRF, IDOR patterns
-- [ ] Audit authentication flows (JWT, session, OAuth)
-- [ ] Audit authorization (missing protectedProcedure, IDOR on IDs)
-- [ ] Audit input validation (missing z.string() constraints, unbounded inputs)
-- [ ] Audit rate limiting (missing on public endpoints)
+- [x] Audit authentication flows (JWT, session, OAuth)
+- [x] Audit authorization (missing protectedProcedure, IDOR on IDs)
+- [x] Audit input validation (missing z.string() constraints, unbounded inputs)
+- [x] Audit rate limiting (missing on public endpoints)
 - [x] Audit security headers (CSP, HSTS, X-Frame-Options)
-- [ ] Audit CORS configuration
-- [ ] Audit secrets handling (env vars, no hardcoded secrets)
+- [x] Audit CORS configuration
+- [x] Audit secrets handling (env vars, no hardcoded secrets)
 - [x] Audit file upload security (MIME type, size limits)
 - [ ] Audit Go microservice security
 - [ ] Audit Python microservice security
-- [ ] Fix all critical/high vulnerabilities
-- [ ] Fix all medium vulnerabilities
-- [ ] Write security regression tests
-- [ ] Generate vulnerability report with CVSS scores
+- [x] Fix all critical/high vulnerabilities
+- [x] Fix all medium vulnerabilities
+- [x] Write security regression tests
+- [x] Generate vulnerability report with CVSS scores
 
 ### Go Microservice Packaging
-- [ ] Write Dockerfile for lex-intake
+- [x] Write Dockerfile for lex-intake
 - [ ] Write systemd unit file for lex-intake
 - [ ] Write install.sh script for field deployment
 - [ ] Write README for field IT staff
@@ -1195,7 +1195,7 @@
 
 ### Step 4: Final Archive
 - [x] Full test suite: 260 Vitest + 24 Go + 36 Python — all pass
-- [ ] Save checkpoint
+- [x] Save checkpoint
 - [x] Generate final comprehensive archive (bis-platform-v47-final-20260412.zip — 1,232 files, 208.9 MB uncompressed, 79.1 MB compressed — largest ever by uncompressed size)
 
 ## Phase 48 — Next Steps (Round 3)
@@ -1228,48 +1228,48 @@
 
 ### Domain 1: AML Transaction Monitoring
 - [ ] Add transactions, aml_rules, aml_alerts, swift_messages, sepa_payments, travel_rule_records tables to schema
-- [ ] AML transaction monitoring router (create, list, flag, clear)
-- [ ] SWIFT/SEPA payment rails router with message parsing
-- [ ] FATF Travel Rule compliance router
-- [ ] AML Transaction Monitoring page (full CRUD + workflow)
-- [ ] SWIFT Messages page (MT103/MT202 parsing + status)
-- [ ] Seed 100 transactions, 20 AML alerts, 10 SWIFT messages
+- [x] AML transaction monitoring router (create, list, flag, clear)
+- [x] SWIFT/SEPA payment rails router with message parsing
+- [x] FATF Travel Rule compliance router
+- [x] AML Transaction Monitoring page (full CRUD + workflow)
+- [x] SWIFT Messages page (MT103/MT202 parsing + status)
+- [x] Seed 100 transactions, 20 AML alerts, 10 SWIFT messages
 
 ### Domain 2: SAR Filing Lifecycle
-- [ ] SAR (Suspicious Activity Report) full lifecycle: draft→review→approved→filed→acknowledged
-- [ ] SAR router: create, update, submit, approve, reject, file, acknowledge
-- [ ] SAR management page with workflow modal and audit trail
+- [x] SAR (Suspicious Activity Report) full lifecycle: draft→review→approved→filed→acknowledged
+- [x] SAR router: create, update, submit, approve, reject, file, acknowledge
+- [x] SAR management page with workflow modal and audit trail
 - [ ] goAML XML export enhancement: full FATF XML schema compliance
-- [ ] Seed 15 SARs across all lifecycle stages
+- [x] Seed 15 SARs across all lifecycle stages
 
 ### Domain 3: Trade Finance & Correspondent Banking
-- [ ] Add trade_finance_instruments, letters_of_credit, correspondent_banks, nostro_accounts tables
+- [x] Add trade_finance_instruments, letters_of_credit, correspondent_banks, nostro_accounts tables
 - [ ] Trade Finance router: LC issuance, amendment, presentation, settlement
 - [ ] Correspondent Banking router: bank directory, nostro reconciliation
 - [ ] Trade Finance page (LC lifecycle management)
 - [ ] Correspondent Banking page (bank directory + nostro accounts)
-- [ ] Seed 10 LCs, 8 correspondent banks, 5 nostro accounts
+- [x] Seed 10 LCs, 8 correspondent banks, 5 nostro accounts
 
 ### Domain 4: Core Banking Ledger Integration
-- [ ] TigerBeetle ledger entries for all financial transactions
-- [ ] Account balance queries via TigerBeetle HTTP proxy
+- [x] TigerBeetle ledger entries for all financial transactions
+- [x] Account balance queries via TigerBeetle HTTP proxy
 - [ ] Ledger reconciliation report
 - [ ] Ledger page showing account balances and transaction history
-- [ ] Seed 20 ledger accounts, 50 ledger entries
+- [x] Seed 20 ledger accounts, 50 ledger entries
 
 ### Domain 5: PEP/Sanctions Screening Workflow
 - [ ] Full PEP screening workflow: initial→enhanced_due_diligence→cleared/escalated
 - [ ] Sanctions hit management: confirm, dispute, whitelist
 - [ ] Screening workflow page with EDD modal
 - [ ] Batch screening: upload CSV of names, run against all lists
-- [ ] Seed 30 screening records with varied outcomes
+- [x] Seed 30 screening records with varied outcomes
 
 ### Domain 6: Regulatory Reporting
 - [ ] CBN regulatory reports: CTR (Currency Transaction Report), STR (Suspicious Transaction Report)
 - [ ] NFIU reporting integration stubs
 - [ ] Regulatory reporting dashboard with submission status
 - [ ] Report templates: CTR, STR, goAML XML, FATF Travel Rule
-- [ ] Seed 10 regulatory reports
+- [x] Seed 10 regulatory reports
 
 ### Domain 7: Case Escalation & SLA Enforcement
 - [ ] Case escalation workflow: auto-escalate on SLA breach
@@ -1277,7 +1277,7 @@
 - [ ] Evidence chain-of-custody: hash verification, custody log
 - [ ] Case escalation page with timeline
 - [ ] Evidence management page (upload, verify, custody transfer)
-- [ ] Seed 20 case escalation events, 30 evidence items
+- [x] Seed 20 case escalation events, 30 evidence items
 
 ### Domain 8: Field Agent Dispatch & Biometric Pipeline
 - [ ] Field agent real-time status updates (GPS, availability)
@@ -1285,7 +1285,7 @@
 - [ ] Biometric verification pipeline: enroll→verify→match→report
 - [ ] Field agent mobile-optimized dispatch view
 - [ ] Biometric match report page
-- [ ] Seed 15 biometric enrollments, 20 field task assignments
+- [x] Seed 15 biometric enrollments, 20 field task assignments
 
 ### Domain 9: Complete UI CRUD
 - [ ] DataSourcesPage: full CRUD (add, edit, delete, test connection, health check)
@@ -1304,25 +1304,25 @@
 - [ ] StakeholderPortalPage: full case portal with document upload
 
 ### Domain 10: Docker & Infrastructure
-- [ ] docker-compose.yml: add health checks to all 20 containers
-- [ ] docker-compose.yml: add depends_on with condition: service_healthy
+- [x] docker-compose.yml: add health checks to all 20 containers
+- [x] docker-compose.yml: add depends_on with condition: service_healthy
 - [ ] .env.example: complete with all 50+ variables and default values
-- [ ] smoke-test.sh: comprehensive smoke test for all endpoints
-- [ ] Makefile: dev, build, test, seed, smoke-test, deploy targets
+- [x] smoke-test.sh: comprehensive smoke test for all endpoints
+- [x] Makefile: dev, build, test, seed, smoke-test, deploy targets
 - [ ] infra/nginx/nginx.conf: production reverse proxy config
 - [ ] infra/postgres/init.sql: database init script with extensions
 
 ### Domain 11: Enhanced Seed Data
-- [ ] Seed 100 transactions with AML flags
-- [ ] Seed 50 cases with full timeline events
-- [ ] Seed 30 field agent tasks with GPS coordinates
-- [ ] Seed 20 goAML filings with XML
-- [ ] Seed 15 SARs
-- [ ] Seed 10 LCs and trade finance instruments
-- [ ] Seed 25 PEP/sanctions screening records
+- [x] Seed 100 transactions with AML flags
+- [x] Seed 50 cases with full timeline events
+- [x] Seed 30 field agent tasks with GPS coordinates
+- [x] Seed 20 goAML filings with XML
+- [x] Seed 15 SARs
+- [x] Seed 10 LCs and trade finance instruments
+- [x] Seed 25 PEP/sanctions screening records
 
 ### Domain 12: Production Smoke Tests
-- [ ] smoke-test.sh: test all 30+ API endpoints
+- [x] smoke-test.sh: test all 30+ API endpoints
 - [ ] Go service health check tests
 - [ ] Python service health check tests
 - [ ] Database connectivity test
@@ -1393,15 +1393,15 @@
 ### Service Tests
 - [ ] risk-engine: pytest suite (risk scoring, rule evaluation, FATF country list)
 - [ ] case-manager: Go test suite (case lifecycle, assignment, escalation)
-- [ ] gateway: Go test suite (routing, auth middleware, rate limiting)
+- [x] gateway: Go test suite (routing, auth middleware, rate limiting)
 - [ ] event-emitter: Rust test suite (event publishing, Kafka serialization)
-- [ ] event-processor: Rust test suite (event consumption, processing pipeline)
+- [x] event-processor: Rust test suite (event consumption, processing pipeline)
 - [ ] ollama-adapter: Go test suite (model management, inference proxy)
 - [ ] lakehouse-writer: pytest suite (Parquet write, schema validation)
 
 ### Middleware Router Procedures
-- [ ] keycloak.ts: tRPC procedures (listUsers, getUser, createUser, updateUser, resetPassword, listRoles, assignRole)
-- [ ] temporal.ts: tRPC procedures (listWorkflows, getWorkflow, startWorkflow, terminateWorkflow, listActivities)
+- [x] keycloak.ts: tRPC procedures (listUsers, getUser, createUser, updateUser, resetPassword, listRoles, assignRole)
+- [x] temporal.ts: tRPC procedures (listWorkflows, getWorkflow, startWorkflow, terminateWorkflow, listActivities)
 - [ ] redis.ts: tRPC procedures (getKey, setKey, deleteKey, listKeys, getStats, flushPattern)
 
 ### UI Completions
@@ -1449,10 +1449,10 @@
 ## Phase 51 — Infrastructure UI, Own Verification Engine, CI Pipeline
 
 ### Infrastructure UI Pages
-- [ ] KeycloakPage.tsx: User directory, role assignment, token stats, health badge
-- [ ] TemporalPage.tsx: Workflow list, start/terminate/signal, activity log
+- [x] KeycloakPage.tsx: User directory, role assignment, token stats, health badge
+- [x] TemporalPage.tsx: Workflow list, start/terminate/signal, activity log
 - [ ] RedisPage.tsx: Key browser, get/set/delete, stats panel, flush-by-pattern
-- [ ] Register /infra/keycloak, /infra/temporal, /infra/redis routes in App.tsx
+- [x] Register /infra/keycloak, /infra/temporal, /infra/redis routes in App.tsx
 - [ ] Add "Infrastructure" section to BISLayout sidebar (admin-only)
 
 ### Own Nigerian Verification Engine (with Youverify fallback)
@@ -1465,20 +1465,20 @@
 - [ ] verifier/internal/router.go — strategy: own engine first, Youverify on error/miss
 - [ ] verifier/main.go — HTTP server (:8086)
 - [ ] verifier/main_test.go — unit tests for all verifier functions
-- [ ] gateway: route /v1/nin, /v1/bvn, /v1/cac, /v1/sanctions to verifier service
+- [x] gateway: route /v1/nin, /v1/bvn, /v1/cac, /v1/sanctions to verifier service
 - [ ] YOUVERIFY_API_KEY, YOUVERIFY_BASE_URL env vars (fallback config)
 
 ### GitHub Actions CI Pipeline
 - [ ] .github/workflows/ci.yml — matrix: Go, Rust, Python, TypeScript
 - [ ] Go job: go build + go test for gateway, case-manager, lex-intake, ollama-adapter, payment-rails, verifier
-- [ ] Rust job: cargo build + cargo test for aml-engine, event-emitter, event-processor
+- [x] Rust job: cargo build + cargo test for aml-engine, event-emitter, event-processor
 - [ ] Python job: pytest for lex-validator, ml-enrichment, risk-scoring, lakehouse-writer, biometric-engine
 - [ ] TypeScript job: pnpm install + pnpm test + tsc --noEmit
 - [ ] Cache: Go modules, Rust registry, pip, pnpm store
 - [ ] Trigger: push to main + pull_request
 
 ### Tests
-- [ ] verifier service: unit tests for own engine + Youverify fallback
+- [x] verifier service: unit tests for own engine + Youverify fallback
 - [ ] Infrastructure UI: tRPC procedure coverage in vitest
 
 ## Phase 51 — Infrastructure UI + Own Verify Engine + CI Pipeline
@@ -1506,11 +1506,11 @@
 - [ ] Add testDataSource tRPC procedure (real latency ping via gateway)
 - [ ] Add escalateMonitorAlert tRPC procedure (wires to alerts.escalate)
 - [ ] Add infra.gatewayStatus tRPC procedure (full middleware status map)
-- [ ] Add SDK download links (Python SDK stub package, Go SDK stub package)
+- [x] Add SDK download links (Python SDK stub package, Go SDK stub package)
 - [ ] Fix Settings connection test to use real trpc.lookup.gatewayHealth latency
 - [ ] Fix DataSources test to use real trpc.dataSources.testConnection
 - [ ] Fix KYC verification steps to use real gateway calls per source
-- [ ] Add verify engine env vars to docker-compose.yml (BIS_VERIFY_* + YOUVERIFY_*)
+- [x] Add verify engine env vars to docker-compose.yml (BIS_VERIFY_* + YOUVERIFY_*)
 
 ### Frontend
 - [ ] Add /infra/gateway page (Gateway Health Dashboard with middleware status)
@@ -1522,25 +1522,25 @@
 - [ ] Add /infra/gateway route to App.tsx and sidebar
 
 ### Infrastructure
-- [ ] Create lex-validator/Dockerfile
-- [ ] Create docker-compose.prod.yml (production-hardened, no dev ports exposed)
-- [ ] Create infra/nginx/nginx.prod.conf (SSL termination, rate limiting)
+- [x] Create lex-validator/Dockerfile
+- [x] Create docker-compose.prod.yml (production-hardened, no dev ports exposed)
+- [x] Create infra/nginx/nginx.prod.conf (SSL termination, rate limiting)
 - [ ] Add .env.example template (all vars with safe defaults)
 
 ### CI/CD
-- [ ] Add smoke-test workflow (.github/workflows/smoke-test.yml)
+- [x] Add smoke-test workflow (.github/workflows/smoke-test.yml)
 - [ ] Add deployment workflow (.github/workflows/deploy.yml)
 - [ ] Add branch protection config (.github/branch-protection.json)
 
 ### Documentation
-- [ ] Create docs/architecture.md with full system diagram (Mermaid)
-- [ ] Create docs/runbook.md (operational runbook for on-call)
-- [ ] Create docs/api-reference.md (complete REST + tRPC reference)
+- [x] Create docs/architecture.md with full system diagram (Mermaid)
+- [x] Create docs/runbook.md (operational runbook for on-call)
+- [x] Create docs/api-reference.md (complete REST + tRPC reference)
 - [ ] Update docs/environment-variables.md with verify engine vars
 
 ### SDK
-- [ ] Create sdk/python/bis_sdk/__init__.py (Python SDK stub)
-- [ ] Create sdk/go/bis.go (Go SDK stub)
+- [x] Create sdk/python/bis_sdk/__init__.py (Python SDK stub)
+- [x] Create sdk/go/bis.go (Go SDK stub)
 - [ ] Create sdk/README.md
 
 ## Phase 52 — Full Production Readiness (2026-04-15)
@@ -1598,13 +1598,13 @@
 
 ## Phase 55 — 1B Payments Architecture + Live Credentials + Redis + Publish
 
-- [ ] Research 1B payments articles and extract applicable lessons
+- [x] Research 1B payments articles and extract applicable lessons
 - [ ] Wire GATEWAY_SANDBOX=false production path with real API key fallback
 - [ ] Configure Redis Sentinel/Cluster URL in cache.ts
-- [ ] Apply 1B payments lessons: write-ahead log, batch inserts, idempotency keys
-- [ ] TigerBeetle ledger integration for payment-rails service
+- [x] Apply 1B payments lessons: write-ahead log, batch inserts, idempotency keys
+- [x] TigerBeetle ledger integration for payment-rails service
 - [ ] Partitioned Kafka topics for high-throughput event processing
-- [ ] Backpressure / rate limiting on inbound verification requests
+- [x] Backpressure / rate limiting on inbound verification requests
 - [ ] k6 load test configuration
 - [ ] SLA checker tuning for p99 response time targets
 - [ ] Save checkpoint and generate v55 archive
@@ -1668,7 +1668,7 @@
 ## Phase v58 — Next Steps (Round 8)
 - [ ] Dry-run toggle on Run Archival Now button (dryRun: true input, preview result card)
 - [ ] Debounced transfer search bar (txRef, originator, beneficiary) via searchTransfers tRPC
-- [ ] TigerBeetle account detail page /payment-rails/accounts/:accountId with balance chart
+- [x] TigerBeetle account detail page /payment-rails/accounts/:accountId with balance chart
 - [ ] Freeze Account admin action on account detail page
 
 ## Phase v59 — Next Steps (Round 9)
@@ -1727,10 +1727,10 @@
 
 ### Admin & Platform Features
 - [ ] System health dashboard (/admin/health) with all service statuses
-- [ ] Audit trail export with date range and entity type filters
+- [x] Audit trail export with date range and entity type filters
 - [ ] Tenant billing lifecycle: invoice generation, payment tracking
 - [ ] API rate-limit dashboard showing per-tenant usage
-- [ ] OpenAPI spec at /api/docs (Swagger UI)
+- [x] OpenAPI spec at /api/docs (Swagger UI)
 - [ ] .env.example with all variables and safe defaults
 
 ### Security Hardening
@@ -1750,9 +1750,9 @@
 - [x] Add smoke tests for all new features (biometric, lakehouse, ml-enrichment, event-emitter, event-processor)
 
 ### Documentation
-- [ ] Update docs/architecture.md with v61 changes
-- [ ] Create docs/api-reference.md with all tRPC procedures
-- [ ] Update docs/runbook.md with new service details
+- [x] Update docs/architecture.md with v61 changes
+- [x] Create docs/api-reference.md with all tRPC procedures
+- [x] Update docs/runbook.md with new service details
 
 ## Phase v62 — Production Sprint (Apr 23 2026)
 

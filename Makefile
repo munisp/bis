@@ -4,7 +4,8 @@
 
 .PHONY: help setup dev build test test-all test-go test-rust test-python \
         test-ts lint clean docker-up docker-down docker-logs docker-ps \
-        db-push db-seed smoke-test services-build services-test
+        db-push db-seed smoke-test services-build services-test \
+        waf-up waf-down waf-logs waf-status waf-test waf-policy-reload
 
 SHELL := /bin/bash
 SERVICES_DIR := services
@@ -168,6 +169,36 @@ format: ## Format all code
 		[ -d "$(SERVICES_DIR)/$$svc" ] && cd $(SERVICES_DIR)/$$svc && gofmt -w . && cd ../.. || true; \
 	done
 
-# ─── CI ───────────────────────────────────────────────────────────────────────
+# ─── open-appsec WAF ─────────────────────────────────────────────────────────────────────────
+waf-up: ## Start full stack WITH open-appsec WAF (ML-based OWASP protection on port 80)
+	docker compose --profile waf up -d
+	@echo "✔ open-appsec WAF started"
+	@echo "  Public HTTP:   http://localhost:80  (WAF → APISIX → BIS)"
+	@echo "  WAF metrics:   http://localhost:8090"
+	@echo "  APISIX admin:  http://localhost:9180 (localhost-only when WAF active)"
+
+waf-down: ## Stop the open-appsec WAF service only
+	docker compose --profile waf stop open-appsec
+
+waf-logs: ## Follow open-appsec WAF logs
+	docker compose logs -f open-appsec
+
+waf-status: ## Check open-appsec WAF health and policy status
+	@echo "=== open-appsec WAF Status ==="
+	@docker compose ps open-appsec 2>/dev/null || echo "WAF not running (use: make waf-up)"
+	@echo ""
+	@echo "=== WAF Health ==="
+	@curl -sf http://localhost:80/health 2>/dev/null && echo " OK" || echo " FAILED (WAF not running)"
+	@echo "=== APISIX Health ==="
+	@curl -sf http://localhost:9080/health 2>/dev/null && echo " OK" || echo " FAILED"
+
+waf-test: ## Run WAF attack simulation tests (OWASP Top 10 coverage)
+	@bash scripts/waf-smoke-test.sh
+
+waf-policy-reload: ## Reload open-appsec policy without container restart
+	@docker exec bis-open-appsec nginx -s reload
+	@echo "✔ open-appsec policy reloaded"
+
+# ─── CI ──────────────────────────────────────────────────────────────────────────────
 ci: lint test-all ## Run all CI checks (lint + all tests)
 	@echo "✓ CI checks passed"

@@ -285,3 +285,66 @@ See `sdk/` directory for source code and usage examples.
 | Document Vault | `/document-vault` | S3-backed upload/download, version history, chain-of-custody log |
 | Risk Dashboard | `/risk-dashboard` | Entity risk bubble chart, sector heatmap, top-risk entities table |
 | Reconciliation Report | `/payment-rails/reconciliation` | Matched/unmatched/exception counts, CSV export |
+
+---
+
+## v64/v65 New Services and Features
+
+### New Microservices
+
+| Service | Technology | Port | Purpose |
+|---------|-----------|------|---------|
+| `verifier` | Go | 8086 | Standalone NIN/BVN/CAC/sanctions verification with Youverify fallback |
+| `lex-matcher` | Python (FastAPI) | 8090 | NLP-based LEX subject name matching (TF-IDF + fuzzy) |
+
+### open-appsec + APISIX WAF Integration
+
+The platform now ships with a fully configured open-appsec ML-based WAF in front of APISIX:
+
+```
+Internet → open-appsec (port 80/443) → APISIX (port 9080) → BIS Services
+```
+
+**Activation:**
+```bash
+docker compose --profile waf up -d
+```
+
+**Configuration files:**
+- `infra/open-appsec/open-appsec.yaml` — main WAF policy
+- `infra/open-appsec/local_policy.yaml` — enforcement rules (prevent mode)
+- `infra/open-appsec/nginx.conf` — nginx reverse proxy config
+- `infra/open-appsec/docker-compose.override.yml` — override for WAF profile
+
+**WAF Smoke Test:**
+```bash
+./scripts/waf-smoke-test.sh http://localhost:80
+```
+
+### Security Fixes (v64/v65)
+
+| Severity | Vulnerability | Fix |
+|----------|--------------|-----|
+| Critical | Command injection in PDF generation | `execSync` → `spawnSync` with array args |
+| High | XSS in LEX-01 and Case PDF templates | Added `escHtml()` to all user-supplied fields |
+| Medium | TOTP timing attack | `===` → `crypto.timingSafeEqual()` |
+| Medium | Biometric DoS via large base64 | Added `.max(5_500_000)` to all imageBase64 inputs |
+| Low | Stack trace leakage in `/metrics` | Removed `err.stack` from error responses |
+| Low | Keycloak token body logged | Removed response body from error log |
+| Low | Unbounded pagination limits | Added `.max(200)` to all limit fields |
+| Low | Missing `Permissions-Policy` header | Added to Helmet config |
+| Low | Missing COOP/CORP headers | Added `crossOriginOpenerPolicy` and `crossOriginResourcePolicy` |
+
+### PWA Offline Support
+
+- `client/public/sw.js` — service worker with background sync queue
+- `client/public/manifest.json` — PWA manifest (installable)
+- `client/src/components/OfflineBanner.tsx` — offline status banner
+- `client/src/hooks/useOfflineSync.ts` — offline queue hook
+
+### LEX Enhancements
+
+- LEX-to-Case auto-linking with AI confidence scores
+- LEX-01 PDF download button in review panel
+- Demo mode banner with toast notifications for blocked writes
+- Audit trail CSV export with S3 upload and signed URL

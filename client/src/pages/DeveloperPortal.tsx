@@ -647,7 +647,7 @@ export default function DeveloperPortal() {
   const { user } = useAuth();
   const utils = trpc.useUtils();
   const [createOpen, setCreateOpen] = useState(false);
-  const [activeSection, setActiveSection] = useState<"tokens" | "playground" | "docs">("tokens");
+  const [activeSection, setActiveSection] = useState<"tokens" | "playground" | "docs" | "openclaw">("tokens");
 
   const { data: tokensData, isLoading } = trpc.apiTokens.list.useQuery({ limit: 50, offset: 0 });
   void user;
@@ -713,6 +713,7 @@ export default function DeveloperPortal() {
           { key: "tokens", label: "API Tokens", icon: Key },
           { key: "playground", label: "Playground", icon: Play },
           { key: "docs", label: "API Docs", icon: BookOpen },
+          { key: "openclaw", label: "OpenClaw", icon: Zap },
         ] as const).map(({ key, label, icon: Icon }) => (
           <button
             key={key}
@@ -757,6 +758,66 @@ export default function DeveloperPortal() {
 
       {/* Playground section */}
       {activeSection === "playground" && <APIPlayground />}
+
+      {/* OpenClaw Managed Instance section */}
+      {activeSection === "openclaw" && (
+        <div className="space-y-6">
+          <div className="flex items-center gap-3 p-4 rounded-lg bg-gradient-to-r from-violet-500/10 to-indigo-500/10 border border-violet-500/20">
+            <div className="p-2 rounded-lg bg-violet-500/20">
+              <Zap className="h-5 w-5 text-violet-400" />
+            </div>
+            <div>
+              <h3 className="font-semibold text-foreground">OpenClaw Managed Instance</h3>
+              <p className="text-sm text-muted-foreground">BIS is registered on ClawHub as an OpenClaw skill. Any AI agent with OpenClaw support can invoke BIS actions using your API token.</p>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {[
+              { action: "kyc_verify", label: "KYC Verify", cost: 6, desc: "Identity verification via NIN/BVN" },
+              { action: "sanctions_screen", label: "Sanctions Screen", cost: 4, desc: "OFAC/UN/EU/NFIU sanctions check" },
+              { action: "adverse_media", label: "Adverse Media", cost: 5, desc: "Negative news & reputational risk" },
+              { action: "risk_score", label: "Risk Score", cost: 8, desc: "Comprehensive risk assessment" },
+              { action: "create_investigation", label: "Create Investigation", cost: 3, desc: "Open a new investigation case" },
+              { action: "dispatch_field_agent", label: "Dispatch Field Agent", cost: 160, desc: "On-site verification & surveillance" },
+              { action: "get_investigation", label: "Get Investigation", cost: 1, desc: "Retrieve case status & findings" },
+              { action: "list_alerts", label: "List Alerts", cost: 1, desc: "Active compliance alerts" },
+              { action: "full_due_diligence", label: "Full Due Diligence", cost: 30, desc: "Enhanced EDD combining all checks" },
+            ].map(({ action, label, cost, desc }) => (
+              <div key={action} className="p-4 rounded-lg border bg-card hover:border-violet-500/40 transition-colors">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="font-medium text-sm">{label}</span>
+                  <span className="text-xs bg-violet-500/10 text-violet-400 px-2 py-0.5 rounded-full">{cost} tokens</span>
+                </div>
+                <p className="text-xs text-muted-foreground mb-2">{desc}</p>
+                <code className="text-xs text-muted-foreground font-mono">{action}</code>
+              </div>
+            ))}
+          </div>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm flex items-center gap-2"><Terminal className="h-4 w-4" />Quick Start</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <pre className="text-xs font-mono text-muted-foreground bg-muted p-3 rounded-lg overflow-x-auto">{`curl -X POST ${window.location.origin}/api/v1/openclaw/execute \\\n  -H "Authorization: Bearer bis_live_YOUR_TOKEN" \\\n  -H "Content-Type: application/json" \\\n  -d '{"action": "kyc_verify", "prompt": "Verify Chukwuemeka Okafor, NIN: 12345678901"}'`}</pre>
+            </CardContent>
+          </Card>
+          <div className="flex gap-3">
+            <a href="/api/docs" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline">
+              <BookOpen className="h-3.5 w-3.5" /> View Full API Docs
+            </a>
+            <button
+              onClick={() => {
+                const skillJson = JSON.stringify({ name: "BIS Intelligence Platform", slug: "bis-intelligence", base_url: window.location.origin + "/api/v1/openclaw", execute_endpoint: "POST /execute" }, null, 2);
+                navigator.clipboard.writeText(skillJson);
+                toast.success('skill.json copied to clipboard');
+              }}
+              className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline"
+            >
+              <Copy className="h-3.5 w-3.5" /> Copy skill.json
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* API Docs section */}
       {activeSection === "docs" && (

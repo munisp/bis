@@ -33,6 +33,23 @@ deployment:
     admin_key_required: true
 
 plugin_attr:
+  # ─── open-appsec WAF Header Validation (Defense-in-Depth) ───────────────────
+  # Validates that all requests passed through the open-appsec WAF nginx proxy.
+  # The X-BIS-WAF-Protected: open-appsec header is injected by nginx.conf.
+  # In OPEN_APPSEC_MODE=prevent, requests that bypass the WAF are logged.
+  serverless-pre-function:
+    phase: rewrite
+    functions:
+      - |
+        local env_mode = os.getenv("OPEN_APPSEC_MODE") or "detect"
+        if env_mode == "prevent" then
+          local waf_hdr = ngx.req.get_headers()["x-bis-waf-protected"]
+          if not waf_hdr then
+            ngx.log(ngx.WARN, "[BIS-WAF] Request bypassed open-appsec WAF: ",
+              ngx.var.remote_addr, " ", ngx.var.request_uri)
+          end
+        end
+
   prometheus:
     export_uri: /apisix/prometheus/metrics
     export_addr:

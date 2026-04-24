@@ -1,0 +1,184 @@
+# ─── open-appsec Policy Configuration for BIS Platform ──────────────────────
+# ML-based WAF protecting the BIS compliance platform.
+# Reference: https://docs.openappsec.io/policy-configuration
+# Version: 1.0.0
+# Last updated: 2026-04-24
+
+version: v1beta2
+
+# ─── Global Defaults ─────────────────────────────────────────────────────────
+default:
+  mode: prevent-learn          # Learn from traffic, block confirmed threats
+  practice:
+    - name: BIS-Threat-Prevention
+      mode: prevent
+      anti-bot:
+        injected-source: all
+        non-browser-source: all
+      web-attacks:
+        minimum-confidence: high
+        max-object-depth: 40
+        max-url-size-bytes: 32768
+        max-body-size-kb: 1024
+        max-header-size-bytes: 102400
+        max-response-body-size-kb: 512
+  triggers:
+    - name: BIS-Log-Trigger
+      log:
+        verbosity: extended
+        response-body: true
+        http-level: headers
+        request-body: true
+        url-body: true
+        log-to-agent: true
+        log-to-server: true
+        format: json
+
+# ─── Trusted Sources ─────────────────────────────────────────────────────────
+trusted-sources:
+  - name: internal-network
+    sources:
+      - 10.0.0.0/8
+      - 172.16.0.0/12
+      - 192.168.0.0/16
+      - 127.0.0.1/32
+
+# ─── Specific Route Policies ─────────────────────────────────────────────────
+specific-assets:
+  # Public LEX incident submission — stricter limits, no auth required
+  - name: lex-submit-policy
+    urls:
+      - /api/trpc/lex.submitIncident
+    mode: prevent
+    practice:
+      - name: LEX-Submit-Protection
+        mode: prevent
+        web-attacks:
+          minimum-confidence: medium
+          max-body-size-kb: 256
+          max-object-depth: 20
+        anti-bot:
+          injected-source: all
+          non-browser-source: all
+
+  # API v1 external endpoints — enforce OpenAPI schema
+  - name: api-v1-policy
+    urls:
+      - /api/v1/*
+    mode: prevent
+    practice:
+      - name: API-V1-Protection
+        mode: prevent
+        web-attacks:
+          minimum-confidence: high
+          max-body-size-kb: 512
+        schema-validation:
+          override-mode: prevent
+    triggers:
+      - name: API-V1-Log-Trigger
+        log:
+          verbosity: extended
+          response-body: false
+          request-body: true
+
+  # Authentication endpoints — maximum protection
+  - name: auth-policy
+    urls:
+      - /api/oauth/*
+      - /api/trpc/auth.*
+    mode: prevent
+    practice:
+      - name: Auth-Protection
+        mode: prevent
+        web-attacks:
+          minimum-confidence: medium
+          max-body-size-kb: 64
+        anti-bot:
+          injected-source: all
+          non-browser-source: all
+          browser-control: all
+
+  # Admin and infrastructure endpoints — IP allowlist enforced
+  - name: admin-policy
+    urls:
+      - /api/trpc/admin.*
+      - /api/trpc/platform.*
+      - /api/trpc/archival.*
+      - /api/trpc/infra.*
+    mode: prevent
+    practice:
+      - name: Admin-Protection
+        mode: prevent
+        web-attacks:
+          minimum-confidence: low     # Block even low-confidence threats on admin routes
+          max-body-size-kb: 256
+    access-control:
+      - name: Admin-IP-Allowlist
+        source-identifier: x-forwarded-for
+        trusted-sources: internal-network
+
+  # File upload endpoints — MIME and size enforcement
+  - name: upload-policy
+    urls:
+      - /api/trpc/evidence.upload
+      - /api/trpc/biometric.*
+    mode: prevent
+    practice:
+      - name: Upload-Protection
+        mode: prevent
+        web-attacks:
+          minimum-confidence: high
+          max-body-size-kb: 10240    # 10MB max for evidence uploads
+
+# ─── Rate Limiting ────────────────────────────────────────────────────────────
+rate-limit:
+  - name: global-rate-limit
+    urls:
+      - /*
+    limit: 200
+    window: 60s
+    identifier: ip
+    action: block
+    response:
+      code: 429
+      body: '{"error":"Too many requests","code":"RATE_LIMITED"}'
+
+  - name: auth-rate-limit
+    urls:
+      - /api/oauth/*
+      - /api/trpc/auth.*
+    limit: 20
+    window: 60s
+    identifier: ip
+    action: block
+
+  - name: lex-submit-rate-limit
+    urls:
+      - /api/trpc/lex.submitIncident
+    limit: 10
+    window: 60s
+    identifier: ip
+    action: block
+
+  - name: quickcheck-rate-limit
+    urls:
+      - /api/trpc/quickcheck.*
+      - /api/v1/quickcheck/*
+    limit: 30
+    window: 60s
+    identifier: ip
+    action: block
+
+# ─── Exception Policies ──────────────────────────────────────────────────────
+exceptions:
+  # Allow large base64 biometric payloads (already validated server-side)
+  - name: biometric-base64-exception
+    urls:
+      - /api/trpc/biometric.enroll
+      - /api/trpc/biometric.verify
+    exception:
+      - parameterName: imageBase64
+        parameterType: body
+        operation: equals
+        value: ".*"    # Allow any value — server validates max 5.5MB
+        comment: "Biometric base64 validated server-side with .max(5_500_000)"

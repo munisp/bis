@@ -1,0 +1,62 @@
+# ─── APISIX Plugin Configuration for open-appsec Integration ─────────────────
+# This snippet should be merged into infra/apisix/conf/config.yaml
+# to enable the open-appsec plugin within APISIX for defense-in-depth.
+#
+# open-appsec runs as a SEPARATE service in front of APISIX (primary WAF layer).
+# This APISIX plugin provides a SECONDARY layer for requests that bypass the WAF.
+#
+# Reference: https://apisix.apache.org/docs/apisix/plugins/openid-connect/
+
+# Add to the plugins list in config.yaml:
+plugins:
+  # Core security plugins
+  - ip-restriction          # IP allowlist/blocklist per route
+  - ua-restriction          # Block malicious user agents
+  - referer-restriction     # Referer header validation
+  - uri-blocker             # Block URIs matching patterns (SQLi, path traversal)
+  - request-validation      # JSON Schema validation on request body/headers
+  - csrf                    # CSRF token validation for state-changing requests
+  - cors                    # CORS policy enforcement
+  - jwt-auth                # JWT token authentication
+  - key-auth                # API key authentication for /api/v1/*
+  - hmac-auth               # HMAC signature validation for webhooks
+  - basic-auth              # Basic auth for admin endpoints
+  # Rate limiting
+  - limit-req               # Per-route request rate limiting
+  - limit-conn              # Connection limiting
+  - limit-count             # Request count limiting (sliding window)
+  # Observability
+  - prometheus              # Prometheus metrics export
+  - request-id              # Inject X-BIS-Request-ID header
+  - kafka-logger            # Audit log to Kafka
+  - http-logger             # HTTP webhook logging
+  - skywalking              # Distributed tracing
+  # Traffic management
+  - proxy-rewrite           # Rewrite upstream URLs
+  - response-rewrite        # Modify response headers/body
+  - redirect                # HTTP redirects
+  - echo                    # Debug echo endpoint
+  # open-appsec integration
+  # NOTE: open-appsec runs as a separate nginx service in front of APISIX.
+  # The X-BIS-WAF-Protected header is injected by nginx.conf and can be
+  # validated here to ensure all traffic passed through the WAF.
+  - serverless-pre-function # Custom Lua for WAF header validation
+
+# Global plugin attributes for WAF header validation:
+plugin_attr:
+  serverless-pre-function:
+    phase: rewrite
+    functions:
+      - |
+        -- Validate that all requests passed through open-appsec WAF
+        -- (only enforced in production mode)
+        local mode = os.getenv("OPEN_APPSEC_MODE") or "prevent"
+        if mode == "prevent" then
+          local waf_header = ngx.req.get_headers()["X-BIS-WAF-Protected"]
+          if not waf_header or waf_header ~= "open-appsec" then
+            -- Log the bypass attempt
+            ngx.log(ngx.WARN, "Request bypassed WAF: ", ngx.var.remote_addr, " ", ngx.var.request_uri)
+            -- In strict mode, block the request
+            -- ngx.exit(403)
+          end
+        end

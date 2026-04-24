@@ -1,0 +1,184 @@
+# ─── open-appsec Local Enforcement Policy ────────────────────────────────────
+# This file defines the local (offline) enforcement policy for open-appsec.
+# It is used when the open-appsec cloud management is not available.
+# Reference: https://docs.openappsec.io/local-policy
+
+version: v1beta2
+
+policies:
+  # ─── Default Policy (all routes not explicitly matched) ───────────────────
+  default:
+    mode: prevent-learn
+    practices:
+      - name: BIS-Default-Practice
+        web-attacks:
+          minimum-confidence: high
+          max-object-depth: 40
+          max-url-size-bytes: 32768
+          max-body-size-kb: 1024
+          max-header-size-bytes: 102400
+        anti-bot:
+          injected-source: all
+          non-browser-source: all
+    triggers:
+      - name: BIS-Default-Log
+        log:
+          verbosity: extended
+          response-body: false
+          request-body: true
+          log-to-agent: true
+          format: json
+
+  # ─── Specific Asset Policies ──────────────────────────────────────────────
+  specific-assets:
+    - asset: lex-submit
+      url: /api/trpc/lex.submitIncident
+      mode: prevent
+      practices:
+        - name: LEX-Submit-Practice
+          web-attacks:
+            minimum-confidence: medium
+            max-body-size-kb: 256
+          anti-bot:
+            injected-source: all
+            non-browser-source: all
+            browser-control: all
+
+    - asset: api-v1
+      url: /api/v1/*
+      mode: prevent
+      practices:
+        - name: API-V1-Practice
+          web-attacks:
+            minimum-confidence: high
+            max-body-size-kb: 512
+          schema-validation:
+            override-mode: prevent
+            filename: /etc/cp/conf/assets/openapi.yaml
+
+    - asset: auth-endpoints
+      url: /api/oauth/*
+      mode: prevent
+      practices:
+        - name: Auth-Practice
+          web-attacks:
+            minimum-confidence: medium
+            max-body-size-kb: 64
+          anti-bot:
+            injected-source: all
+            non-browser-source: all
+            browser-control: all
+
+    - asset: admin-endpoints
+      url: /api/trpc/admin.*
+      mode: prevent
+      practices:
+        - name: Admin-Practice
+          web-attacks:
+            minimum-confidence: low
+            max-body-size-kb: 256
+
+    - asset: biometric-upload
+      url: /api/trpc/biometric.*
+      mode: prevent
+      practices:
+        - name: Biometric-Practice
+          web-attacks:
+            minimum-confidence: high
+            max-body-size-kb: 10240
+
+practices:
+  - name: BIS-Default-Practice
+    type: WebApplication
+    web-attacks:
+      override-mode: prevent
+      minimum-confidence: high
+      advanced-setting:
+        body-size: 1024
+        url-size: 32768
+        header-size: 102400
+        max-object-depth: 40
+        illegal-http-methods: true
+    anti-bot:
+      injected-source: all
+      non-browser-source: all
+
+  - name: LEX-Submit-Practice
+    type: WebApplication
+    web-attacks:
+      override-mode: prevent
+      minimum-confidence: medium
+      advanced-setting:
+        body-size: 256
+        url-size: 8192
+        header-size: 16384
+        max-object-depth: 20
+        illegal-http-methods: true
+    anti-bot:
+      injected-source: all
+      non-browser-source: all
+      browser-control: all
+
+  - name: API-V1-Practice
+    type: WebApplication
+    web-attacks:
+      override-mode: prevent
+      minimum-confidence: high
+      advanced-setting:
+        body-size: 512
+        url-size: 16384
+        header-size: 32768
+        max-object-depth: 30
+        illegal-http-methods: true
+
+  - name: Auth-Practice
+    type: WebApplication
+    web-attacks:
+      override-mode: prevent
+      minimum-confidence: medium
+      advanced-setting:
+        body-size: 64
+        url-size: 4096
+        header-size: 16384
+        max-object-depth: 10
+        illegal-http-methods: true
+    anti-bot:
+      injected-source: all
+      non-browser-source: all
+      browser-control: all
+
+  - name: Admin-Practice
+    type: WebApplication
+    web-attacks:
+      override-mode: prevent
+      minimum-confidence: low
+      advanced-setting:
+        body-size: 256
+        url-size: 8192
+        header-size: 32768
+        max-object-depth: 20
+        illegal-http-methods: true
+
+  - name: Biometric-Practice
+    type: WebApplication
+    web-attacks:
+      override-mode: prevent
+      minimum-confidence: high
+      advanced-setting:
+        body-size: 10240
+        url-size: 4096
+        header-size: 16384
+        max-object-depth: 5
+        illegal-http-methods: true
+
+triggers:
+  - name: BIS-Default-Log
+    type: log
+    verbosity: extended
+    response-body: false
+    request-body: true
+    url-body: true
+    log-to-agent: true
+    log-to-server: false
+    format: json
+    cef-severity: 3
