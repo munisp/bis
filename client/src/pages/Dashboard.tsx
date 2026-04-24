@@ -19,6 +19,7 @@ import {
 } from "recharts";
 import BISLayout from "@/components/BISLayout";
 import { trpc } from "@/lib/trpc";
+import { useEventStream } from "@/hooks/useEventStream";
 
 function formatDateTime(d: Date | string | null | undefined): string {
   if (!d) return "—";
@@ -178,6 +179,22 @@ export default function Dashboard() {
   const recentTriggers = recentTriggersData ?? [];
   const caseActivity = caseActivityData ?? [];
 
+  // ─── Real-time event stream (event-emitter Rust service) ──────────────────────────
+  const { connected: streamConnected } = useEventStream({
+    onEvent: (event) => {
+      // Invalidate relevant queries when live events arrive
+      if (event.type === "INVESTIGATION_CREATED" || event.type === "INVESTIGATION_FLAGGED") {
+        utils.investigations.list.invalidate();
+        utils.dashboard.stats.invalidate();
+      } else if (event.type === "ALERT_TRIGGERED" || event.type === "ALERT_ACKNOWLEDGED") {
+        utils.alerts.list.invalidate();
+        utils.dashboard.stats.invalidate();
+      } else if (event.type === "KYC_COMPLETED" || event.type === "KYC_FAILED") {
+        utils.dashboard.stats.invalidate();
+      }
+    },
+  });
+
   const handleRefresh = () => {
     setRefreshing(true);
     utils.dashboard.stats.invalidate();
@@ -203,8 +220,9 @@ export default function Dashboard() {
         <div className="flex items-center">
           {/* Label */}
           <div className="flex items-center gap-2 px-3 py-2 border-r border-border bg-muted/30 flex-shrink-0">
-            <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse" />
+            <span className={cn("w-1.5 h-1.5 rounded-full animate-pulse", streamConnected ? "bg-green-400" : "bg-red-400")} />
             <span className="text-[9px] font-mono font-bold text-muted-foreground uppercase tracking-widest">LIVE FEED</span>
+            {streamConnected && <span className="text-[8px] font-mono text-green-500 uppercase">STREAM</span>}
           </div>
           {/* Scrolling ticker */}
           <div className="flex-1 overflow-hidden relative">

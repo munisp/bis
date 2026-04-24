@@ -6,6 +6,23 @@ import {
 } from "../drizzle/schema";
 import { eq, desc, and, gte, lte, like, or, sql, count, sum } from "drizzle-orm";
 
+// ─── AML Engine (Rust microservice, port 8095) ────────────────────────────────
+const AML_ENGINE_URL = process.env.BIS_AML_ENGINE_URL ?? "http://localhost:8095";
+async function callAmlEngine(path: string, body: unknown): Promise<unknown> {
+  try {
+    const res = await fetch(`${AML_ENGINE_URL}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (!res.ok) throw new Error(`AML engine HTTP ${res.status}`);
+    return await res.json();
+  } catch {
+    return null; // graceful degradation — engine offline
+  }
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function txRef(): string {
@@ -183,6 +200,58 @@ export const amlRouter = router({
         total: Number(totals.total), totalAmount: Number(totals.totalAmount ?? 0),
         flagged: Number(totals.flagged), highRisk: Number(totals.highRisk),
       };
+    }),
+
+    // ─── AML Engine (Rust) direct screening ──────────────────────────────────────────
+    screenWithEngine: writeProcedure
+      .input(z.object({
+        type: z.string(),
+        amount: z.number().positive(),
+        currency: z.string().length(3).default("NGN"),
+        originatorName: z.string(),
+        originatorAccount: z.string().optional(),
+        originatorCountry: z.string().length(2).default("NG"),
+        beneficiaryName: z.string(),
+        beneficiaryAccount: z.string().optional(),
+        beneficiaryCountry: z.string().length(2).default("NG"),
+        narration: z.string().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        const engineResult = await callAmlEngine("/v1/screen", {
+          transaction_type: input.type,
+          amount: input.amount,
+          currency: input.currency,
+          originator_name: input.originatorName,
+          originator_account: input.originatorAccount,
+          originator_country: input.originatorCountry,
+          beneficiary_name: input.beneficiaryName,
+          beneficiary_account: input.beneficiaryAccount,
+          beneficiary_country: input.beneficiaryCountry,
+          narration: input.narration,
+        });
+        // Fall back to local scoring if engine is offline
+        const localResult = scoreTransaction({
+          amount: input.amount, currency: input.currency,
+          originatorCountry: input.originatorCountry, beneficiaryCountry: input.beneficiaryCountry,
+          type: input.type, narration: input.narration,
+        });
+        return {
+          engineResult,
+          localScore: localResult.score,
+          localFlags: localResult.flags,
+          engineOnline: engineResult !== null,
+          riskLevel: localResult.score >= 70 ? "critical" : localResult.score >= 50 ? "high" : localResult.score >= 25 ? "medium" : "low",
+        };
+      }),
+
+    engineHealth: protectedProcedure.query(async () => {
+      try {
+        const res = await fetch(`${AML_ENGINE_URL}/health`, { signal: AbortSignal.timeout(3_000) });
+        const data = await res.json();
+        return { online: res.ok, ...data };
+      } catch {
+        return { online: false, status: "unreachable" };
+      }
     }),
   }),
 

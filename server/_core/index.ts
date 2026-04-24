@@ -428,6 +428,49 @@ async function startServer() {
   // OAuth callback under /api/oauth/callback
   registerOAuthRoutes(app);
 
+  // ── Event Emitter SSE proxy ────────────────────────────────────────────────────
+  // Proxies the Rust event-emitter SSE stream to authenticated PWA clients.
+  // Client usage: new EventSource('/api/events/stream') after login.
+  app.get("/api/events/stream", async (req: Request, res: Response) => {
+    // Validate session cookie
+    const { sdk } = await import("./sdk");
+    const user = await sdk.authenticateRequest(req).catch(() => null);
+    if (!user) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    const EVENT_EMITTER_URL = process.env.BIS_EVENT_EMITTER_URL ?? "http://localhost:8082";
+    try {
+      const upstream = await fetch(`${EVENT_EMITTER_URL}/events/stream`, {
+        headers: { Accept: "text/event-stream" },
+      });
+      if (!upstream.ok || !upstream.body) {
+        res.status(502).json({ error: "Event emitter unavailable" });
+        return;
+      }
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("X-Accel-Buffering", "no");
+      res.flushHeaders();
+      const reader = upstream.body.getReader();
+      const decoder = new TextDecoder();
+      const pump = async () => {
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done || res.writableEnded) break;
+            res.write(decoder.decode(value, { stream: true }));
+          }
+        } catch { /* client disconnected */ }
+        res.end();
+      };
+      pump();
+      req.on("close", () => reader.cancel());
+    } catch {
+      res.status(502).json({ error: "Event emitter unavailable" });
+    }
+  });
+
   // ── Grafana alert webhook ──────────────────────────────────────────────────
   app.post("/api/webhooks/grafana-alert", async (req, res) => {
     try {

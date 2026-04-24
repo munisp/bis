@@ -1825,3 +1825,24 @@
 - [x] All 27 Python lakehouse-writer tests passing
 - [x] All Go verifier tests passing
 - [x] TypeScript: 0 errors
+
+## v68 Comprehensive Audit (Apr 24 2026)
+- [x] Deep audit: all 63 sidebar links verified against App.tsx routes (0 orphan links)
+- [x] All 72 App.tsx routes have corresponding page components
+- [x] All 56 database tables have CRUD procedures in server routers
+- [x] aml-engine Rust service wired to BFF via screenWithEngine + engineHealth procedures
+- [x] event-emitter SSE stream proxied to PWA via /api/events/stream endpoint
+- [x] useEventStream hook created for PWA real-time event consumption
+- [x] Dashboard.tsx wired to event stream (auto-invalidates queries on live events)
+- [x] React Native: all 11 screens verified wired to REST API
+- [x] Expo (bis-mobile): all 8 screens verified wired to API
+- [x] Architecture verified: lex-matcher/lex-validator called by lex-intake (correct)
+- [x] Architecture verified: ml-enrichment called by ollama-adapter + case-manager (correct)
+- [x] Architecture verified: risk-scoring called by aml-engine (correct)
+- [x] Architecture verified: case-manager uses shared PostgreSQL via Kafka events (correct)
+- [x] All 349 Node.js tests pass (14 test files)
+- [x] All 6 Go tests pass (verifier)
+- [x] All 31 Python tests pass (risk-engine)
+- [x] All 27 Python tests pass (lakehouse-writer)
+- [x] TypeScript: 0 compilation errors
+- [x] pnpm audit: 0 vulnerabilities
