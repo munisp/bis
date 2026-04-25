@@ -160,3 +160,421 @@ export const fieldAgentApi = {
   completeAssignment: (assignmentId: string, notes: string) =>
     request<void>('POST', `/field-agent/assignments/${assignmentId}/complete`, { notes }),
 };
+
+// ── KYC / KYB ─────────────────────────────────────────────────────────────────
+export const kycApi = {
+  list: (params?: Record<string, string | number>) =>
+    request<{ data: unknown[]; total: number }>('GET', '/kyc/records', undefined, params),
+  get: (id: number) =>
+    request<{ data: unknown }>('GET', `/kyc/records/${id}`),
+  create: (data: Record<string, unknown>) =>
+    request<{ data: unknown }>('POST', '/kyc/verify', data),
+  update: (id: number, data: Record<string, unknown>) =>
+    request<{ data: unknown }>('PUT', `/kyc/records/${id}`, data),
+  delete: (id: number) =>
+    request<void>('DELETE', `/kyc/records/${id}`),
+  bulkExport: (ids: number[]) =>
+    request<{ url: string }>('POST', '/kyc/records/export', { ids }),
+};
+
+// ── AML ───────────────────────────────────────────────────────────────────────
+export const amlApi = {
+  list: (params?: Record<string, string | number>) =>
+    request<{ data: unknown[]; total: number }>('GET', '/aml/transactions', undefined, params),
+  get: (id: number) =>
+    request<{ data: unknown }>('GET', `/aml/transactions/${id}`),
+  screen: (data: Record<string, unknown>) =>
+    request<{ data: unknown }>('POST', '/aml/screen', data),
+  screenWithEngine: (data: Record<string, unknown>) =>
+    request<{ data: unknown }>('POST', '/aml/screen-engine', data),
+  listSanctions: (params?: Record<string, string | number>) =>
+    request<{ data: unknown[] }>('GET', '/aml/sanctions', undefined, params),
+  stats: () =>
+    request<{ data: unknown }>('GET', '/aml/stats'),
+  travelRule: (data: Record<string, unknown>) =>
+    request<{ data: unknown }>('POST', '/aml/travel-rule', data),
+};
+
+// ── Screening ─────────────────────────────────────────────────────────────────
+export const screeningApi = {
+  list: (params?: Record<string, string | number>) =>
+    request<{ data: unknown[]; total: number }>('GET', '/screening/records', undefined, params),
+  get: (id: number) =>
+    request<{ data: unknown }>('GET', `/screening/records/${id}`),
+  create: (data: Record<string, unknown>) =>
+    request<{ data: unknown }>('POST', '/screening/create', data),
+  update: (id: number, data: Record<string, unknown>) =>
+    request<{ data: unknown }>('PUT', `/screening/records/${id}`, data),
+  delete: (id: number) =>
+    request<void>('DELETE', `/screening/records/${id}`),
+};
+
+// ── Cases ─────────────────────────────────────────────────────────────────────
+export const casesApi = {
+  list: (params?: Record<string, string | number>) =>
+    request<{ data: unknown[]; total: number }>('GET', '/cases', undefined, params),
+  get: (id: number) =>
+    request<{ data: unknown }>('GET', `/cases/${id}`),
+  create: (data: Record<string, unknown>) =>
+    request<{ data: unknown }>('POST', '/cases', data),
+  update: (id: number, data: Record<string, unknown>) =>
+    request<{ data: unknown }>('PUT', `/cases/${id}`, data),
+  delete: (id: number) =>
+    request<void>('DELETE', `/cases/${id}`),
+  addNote: (id: number, note: string) =>
+    request<void>('POST', `/cases/${id}/notes`, { note }),
+  escalate: (id: number) =>
+    request<void>('POST', `/cases/${id}/escalate`),
+};
+
+// ── Biometric ─────────────────────────────────────────────────────────────────
+export const biometricApi = {
+  list: (params?: Record<string, string | number>) =>
+    request<{ data: unknown[]; total: number }>('GET', '/biometric/enrollments', undefined, params),
+  get: (id: number) =>
+    request<{ data: unknown }>('GET', `/biometric/enrollments/${id}`),
+  enroll: (data: Record<string, unknown>) =>
+    request<{ data: unknown }>('POST', '/biometric/enroll', data),
+  verify: (data: Record<string, unknown>) =>
+    request<{ data: unknown }>('POST', '/biometric/verify', data),
+  revoke: (id: number) =>
+    request<void>('DELETE', `/biometric/enrollments/${id}`),
+};
+
+// ── Onboarding ────────────────────────────────────────────────────────────────
+export const onboardingApi = {
+  list: (params?: Record<string, string | number>) =>
+    request<{ data: unknown[]; total: number }>('GET', '/onboarding/applications', undefined, params),
+  get: (id: number) =>
+    request<{ data: unknown }>('GET', `/onboarding/applications/${id}`),
+  create: (data: Record<string, unknown>) =>
+    request<{ data: unknown }>('POST', '/onboarding/apply', data),
+  update: (id: number, data: Record<string, unknown>) =>
+    request<{ data: unknown }>('PUT', `/onboarding/applications/${id}`, data),
+  approve: (id: number) =>
+    request<void>('POST', `/onboarding/applications/${id}/approve`),
+  reject: (id: number, reason: string) =>
+    request<void>('POST', `/onboarding/applications/${id}/reject`, { reason }),
+};
+
+// ── goAML STR ─────────────────────────────────────────────────────────────────
+export const goAmlApi = {
+  list: (params?: Record<string, string | number>) =>
+    request<{ data: unknown[]; total: number }>('GET', '/goaml/reports', undefined, params),
+  get: (id: number) =>
+    request<{ data: unknown }>('GET', `/goaml/reports/${id}`),
+  create: (data: Record<string, unknown>) =>
+    request<{ data: unknown }>('POST', '/goaml/reports', data),
+  update: (id: number, data: Record<string, unknown>) =>
+    request<{ data: unknown }>('PUT', `/goaml/reports/${id}`, data),
+  submit: (id: number) =>
+    request<void>('POST', `/goaml/reports/${id}/submit`),
+  delete: (id: number) =>
+    request<void>('DELETE', `/goaml/reports/${id}`),
+  getXml: (id: number) =>
+    request<{ xml: string }>('GET', `/goaml/reports/${id}/xml`),
+  stats: () =>
+    request<{ data: unknown }>('GET', '/goaml/stats'),
+};
+
+// ── Payment Rails ─────────────────────────────────────────────────────────────
+export const paymentRailsApi = {
+  list: (params?: Record<string, string | number>) =>
+    request<{ data: unknown[]; total: number }>('GET', '/payment-rails', undefined, params),
+  get: (id: number) =>
+    request<{ data: unknown }>('GET', `/payment-rails/${id}`),
+  create: (data: Record<string, unknown>) =>
+    request<{ data: unknown }>('POST', '/payment-rails', data),
+  update: (id: number, data: Record<string, unknown>) =>
+    request<{ data: unknown }>('PUT', `/payment-rails/${id}`, data),
+  freeze: (accountId: string, reason: string) =>
+    request<void>('POST', '/payment-rails/freeze', { accountId, reason }),
+  unfreeze: (accountId: string) =>
+    request<void>('POST', '/payment-rails/unfreeze', { accountId }),
+  stats: () =>
+    request<{ data: unknown }>('GET', '/payment-rails/stats'),
+};
+
+// ── Document Vault ────────────────────────────────────────────────────────────
+export const documentVaultApi = {
+  list: (params?: Record<string, string | number>) =>
+    request<{ data: unknown[]; total: number }>('GET', '/documents', undefined, params),
+  get: (id: number) =>
+    request<{ data: unknown }>('GET', `/documents/${id}`),
+  delete: (id: number) =>
+    request<void>('DELETE', `/documents/${id}`),
+  getDownloadUrl: (id: number) =>
+    request<{ url: string }>('GET', `/documents/${id}/download`),
+};
+
+// ── Regulatory Reports ────────────────────────────────────────────────────────
+export const regulatoryReportsApi = {
+  list: (params?: Record<string, string | number>) =>
+    request<{ data: unknown[]; total: number }>('GET', '/regulatory-reports', undefined, params),
+  get: (id: number) =>
+    request<{ data: unknown }>('GET', `/regulatory-reports/${id}`),
+  create: (data: Record<string, unknown>) =>
+    request<{ data: unknown }>('POST', '/regulatory-reports', data),
+  update: (id: number, data: Record<string, unknown>) =>
+    request<{ data: unknown }>('PUT', `/regulatory-reports/${id}`, data),
+  submit: (id: number) =>
+    request<void>('POST', `/regulatory-reports/${id}/submit`),
+  delete: (id: number) =>
+    request<void>('DELETE', `/regulatory-reports/${id}`),
+};
+
+// ── Duplicate Identity Check ──────────────────────────────────────────────────
+export const duplicateCheckApi = {
+  check: (data: Record<string, unknown>) =>
+    request<{ data: unknown }>('POST', '/duplicate-check', data),
+  list: (params?: Record<string, string | number>) =>
+    request<{ data: unknown[]; total: number }>('GET', '/duplicate-check/history', undefined, params),
+};
+
+// ── Alert Rules ───────────────────────────────────────────────────────────────
+export const alertRulesApi = {
+  list: () =>
+    request<{ data: unknown[] }>('GET', '/alert-rules'),
+  get: (id: number) =>
+    request<{ data: unknown }>('GET', `/alert-rules/${id}`),
+  create: (data: Record<string, unknown>) =>
+    request<{ data: unknown }>('POST', '/alert-rules', data),
+  update: (id: number, data: Record<string, unknown>) =>
+    request<{ data: unknown }>('PUT', `/alert-rules/${id}`, data),
+  delete: (id: number) =>
+    request<void>('DELETE', `/alert-rules/${id}`),
+  testFire: (id: number) =>
+    request<{ data: unknown }>('POST', `/alert-rules/${id}/test`),
+};
+
+// ── Social Monitoring ─────────────────────────────────────────────────────────
+export const socialMonitoringApi = {
+  list: (params?: Record<string, string | number>) =>
+    request<{ data: unknown[]; total: number }>('GET', '/social-monitoring', undefined, params),
+  get: (id: number) =>
+    request<{ data: unknown }>('GET', `/social-monitoring/${id}`),
+  create: (data: Record<string, unknown>) =>
+    request<{ data: unknown }>('POST', '/social-monitoring', data),
+  delete: (id: number) =>
+    request<void>('DELETE', `/social-monitoring/${id}`),
+};
+
+// ── Nigerian Data Bundle ──────────────────────────────────────────────────────
+export const nigerianDataApi = {
+  lookup: (data: Record<string, unknown>) =>
+    request<{ data: unknown }>('POST', '/nigeria-data/lookup', data),
+  listRecords: (params?: Record<string, string | number>) =>
+    request<{ data: unknown[]; total: number }>('GET', '/nigeria-data/records', undefined, params),
+};
+
+// ── Hosted Verify Links ───────────────────────────────────────────────────────
+export const hostedLinksApi = {
+  list: () =>
+    request<{ data: unknown[] }>('GET', '/hosted-links'),
+  create: (data: Record<string, unknown>) =>
+    request<{ data: unknown }>('POST', '/hosted-links', data),
+  revoke: (id: number) =>
+    request<void>('DELETE', `/hosted-links/${id}`),
+};
+
+// ── LEX ───────────────────────────────────────────────────────────────────────
+export const lexApi = {
+  list: (params?: Record<string, string | number>) =>
+    request<{ data: unknown[]; total: number }>('GET', '/lex/submissions', undefined, params),
+  get: (id: number) =>
+    request<{ data: unknown }>('GET', `/lex/submissions/${id}`),
+  submit: (data: Record<string, unknown>) =>
+    request<{ data: unknown }>('POST', '/lex/submit', data),
+  update: (id: number, data: Record<string, unknown>) =>
+    request<{ data: unknown }>('PUT', `/lex/submissions/${id}`, data),
+  analytics: () =>
+    request<{ data: unknown }>('GET', '/lex/analytics'),
+};
+
+// ── Tenants & API Keys ────────────────────────────────────────────────────────
+export const tenantsApi = {
+  list: () =>
+    request<{ data: unknown[] }>('GET', '/tenants'),
+  get: (id: number) =>
+    request<{ data: unknown }>('GET', `/tenants/${id}`),
+  create: (data: Record<string, unknown>) =>
+    request<{ data: unknown }>('POST', '/tenants', data),
+  update: (id: number, data: Record<string, unknown>) =>
+    request<{ data: unknown }>('PUT', `/tenants/${id}`, data),
+  delete: (id: number) =>
+    request<void>('DELETE', `/tenants/${id}`),
+  rotateKey: (id: number) =>
+    request<{ key: string }>('POST', `/tenants/${id}/rotate-key`),
+};
+
+// ── Reports ───────────────────────────────────────────────────────────────────
+export const reportsApi = {
+  list: (params?: Record<string, string | number>) =>
+    request<{ data: unknown[]; total: number }>('GET', '/reports', undefined, params),
+  get: (id: number) =>
+    request<{ data: unknown }>('GET', `/reports/${id}`),
+  create: (data: Record<string, unknown>) =>
+    request<{ data: unknown }>('POST', '/reports', data),
+  delete: (id: number) =>
+    request<void>('DELETE', `/reports/${id}`),
+  download: (id: number) =>
+    request<{ url: string }>('GET', `/reports/${id}/download`),
+};
+
+// ── Dashboard ─────────────────────────────────────────────────────────────────
+export const dashboardApi = {
+  stats: () =>
+    request<{ data: unknown }>('GET', '/dashboard/stats'),
+  recentActivity: () =>
+    request<{ data: unknown[] }>('GET', '/dashboard/activity'),
+};
+
+// ── SAR Filings ───────────────────────────────────────────────────────────────
+export const sarApi = {
+  list: (params?: Record<string, string | number>) =>
+    request<{ data: unknown[]; total: number }>('GET', '/sar', undefined, params),
+  get: (id: number) =>
+    request<{ data: unknown }>('GET', `/sar/${id}`),
+  create: (data: Record<string, unknown>) =>
+    request<{ data: unknown }>('POST', '/sar', data),
+  update: (id: number, data: Record<string, unknown>) =>
+    request<{ data: unknown }>('PUT', `/sar/${id}`, data),
+  submit: (id: number) =>
+    request<void>('POST', `/sar/${id}/submit`),
+  delete: (id: number) =>
+    request<void>('DELETE', `/sar/${id}`),
+};
+
+// ── Trade Finance ─────────────────────────────────────────────────────────────
+export const tradeFinanceApi = {
+  list: (params?: Record<string, string | number>) =>
+    request<{ data: unknown[]; total: number }>('GET', '/trade-finance', undefined, params),
+  get: (id: number) =>
+    request<{ data: unknown }>('GET', `/trade-finance/${id}`),
+  create: (data: Record<string, unknown>) =>
+    request<{ data: unknown }>('POST', '/trade-finance', data),
+  update: (id: number, data: Record<string, unknown>) =>
+    request<{ data: unknown }>('PUT', `/trade-finance/${id}`, data),
+  approve: (id: number) =>
+    request<void>('POST', `/trade-finance/${id}/approve`),
+  reject: (id: number, reason: string) =>
+    request<void>('POST', `/trade-finance/${id}/reject`, { reason }),
+};
+
+// ── Correspondent Banking ─────────────────────────────────────────────────────
+export const correspondentBankingApi = {
+  list: (params?: Record<string, string | number>) =>
+    request<{ data: unknown[]; total: number }>('GET', '/correspondent-banking', undefined, params),
+  get: (id: number) =>
+    request<{ data: unknown }>('GET', `/correspondent-banking/${id}`),
+  create: (data: Record<string, unknown>) =>
+    request<{ data: unknown }>('POST', '/correspondent-banking', data),
+  update: (id: number, data: Record<string, unknown>) =>
+    request<{ data: unknown }>('PUT', `/correspondent-banking/${id}`, data),
+  delete: (id: number) =>
+    request<void>('DELETE', `/correspondent-banking/${id}`),
+};
+
+// ── Risk Dashboard ────────────────────────────────────────────────────────────
+export const riskDashboardApi = {
+  summary: () =>
+    request<{ data: unknown }>('GET', '/risk-dashboard/summary'),
+  entityRisk: (params?: Record<string, string | number>) =>
+    request<{ data: unknown[] }>('GET', '/risk-dashboard/entities', undefined, params),
+  trends: () =>
+    request<{ data: unknown }>('GET', '/risk-dashboard/trends'),
+};
+
+// ── Billing ───────────────────────────────────────────────────────────────────
+export const billingApi = {
+  summary: () =>
+    request<{ data: unknown }>('GET', '/billing/summary'),
+  transactions: (params?: Record<string, string | number>) =>
+    request<{ data: unknown[]; total: number }>('GET', '/billing/transactions', undefined, params),
+  invoices: () =>
+    request<{ data: unknown[] }>('GET', '/billing/invoices'),
+};
+
+// ── Audit Log ─────────────────────────────────────────────────────────────────
+export const auditLogApi = {
+  list: (params?: Record<string, string | number>) =>
+    request<{ data: unknown[]; total: number }>('GET', '/audit-log', undefined, params),
+};
+
+// ── Users ─────────────────────────────────────────────────────────────────────
+export const usersApi = {
+  list: (params?: Record<string, string | number>) =>
+    request<{ data: unknown[]; total: number }>('GET', '/users', undefined, params),
+  get: (id: number) =>
+    request<{ data: unknown }>('GET', `/users/${id}`),
+  update: (id: number, data: Record<string, unknown>) =>
+    request<{ data: unknown }>('PUT', `/users/${id}`, data),
+  updateRole: (id: number, role: string) =>
+    request<void>('PUT', `/users/${id}/role`, { role }),
+  delete: (id: number) =>
+    request<void>('DELETE', `/users/${id}`),
+};
+
+// ── Continuous Monitoring ─────────────────────────────────────────────────────
+export const continuousMonitoringApi = {
+  list: (params?: Record<string, string | number>) =>
+    request<{ data: unknown[]; total: number }>('GET', '/continuous-monitoring', undefined, params),
+  get: (id: number) =>
+    request<{ data: unknown }>('GET', `/continuous-monitoring/${id}`),
+  create: (data: Record<string, unknown>) =>
+    request<{ data: unknown }>('POST', '/continuous-monitoring', data),
+  update: (id: number, data: Record<string, unknown>) =>
+    request<{ data: unknown }>('PUT', `/continuous-monitoring/${id}`, data),
+  delete: (id: number) =>
+    request<void>('DELETE', `/continuous-monitoring/${id}`),
+};
+
+// ── Messaging Channels ────────────────────────────────────────────────────────
+export const messagingApi = {
+  list: (params?: Record<string, string | number>) =>
+    request<{ data: unknown[]; total: number }>('GET', '/messaging', undefined, params),
+  send: (data: Record<string, unknown>) =>
+    request<{ data: unknown }>('POST', '/messaging/send', data),
+  getThread: (id: number) =>
+    request<{ data: unknown }>('GET', `/messaging/threads/${id}`),
+};
+
+// ── Data Sources ──────────────────────────────────────────────────────────────
+export const dataSourcesApi = {
+  list: () =>
+    request<{ data: unknown[] }>('GET', '/data-sources'),
+  get: (id: number) =>
+    request<{ data: unknown }>('GET', `/data-sources/${id}`),
+  create: (data: Record<string, unknown>) =>
+    request<{ data: unknown }>('POST', '/data-sources', data),
+  update: (id: number, data: Record<string, unknown>) =>
+    request<{ data: unknown }>('PUT', `/data-sources/${id}`, data),
+  delete: (id: number) =>
+    request<void>('DELETE', `/data-sources/${id}`),
+  test: (id: number) =>
+    request<{ ok: boolean; latencyMs: number }>('POST', `/data-sources/${id}/test`),
+};
+
+// ── Playbooks ─────────────────────────────────────────────────────────────────
+export const playbooksApi = {
+  list: () =>
+    request<{ data: unknown[] }>('GET', '/playbooks'),
+  get: (id: number) =>
+    request<{ data: unknown }>('GET', `/playbooks/${id}`),
+  create: (data: Record<string, unknown>) =>
+    request<{ data: unknown }>('POST', '/playbooks', data),
+  update: (id: number, data: Record<string, unknown>) =>
+    request<{ data: unknown }>('PUT', `/playbooks/${id}`, data),
+  delete: (id: number) =>
+    request<void>('DELETE', `/playbooks/${id}`),
+};
+
+// ── Lakehouse Analytics ───────────────────────────────────────────────────────
+export const lakehouseApi = {
+  stats: () =>
+    request<{ data: unknown }>('GET', '/lakehouse/stats'),
+  runQuery: (sql: string, params?: unknown[]) =>
+    request<{ data: unknown[] }>('POST', '/lakehouse/query', { sql, params }),
+  listTables: () =>
+    request<{ data: string[] }>('GET', '/lakehouse/tables'),
+};

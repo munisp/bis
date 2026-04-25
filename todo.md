@@ -1888,3 +1888,22 @@
 - [x] All 349 Node.js tests pass, 6 Go tests pass, 189 Python tests pass
 - [x] TypeScript: 0 errors
 - [x] todo.md: 1300 items done, 0 pending
+
+## v70 Additions (Apr 24 2026) — Expo bis-mobile Full Parity
+- [x] Create bis-mobile/app/(tabs)/aml.tsx — AML transactions with flag/block actions
+- [x] Create bis-mobile/app/(tabs)/screening.tsx — Background screening records with CRUD
+- [x] Create bis-mobile/app/(tabs)/cases.tsx — Investigation cases with create, escalate, add note
+- [x] Create bis-mobile/app/(tabs)/goaml.tsx — goAML STR reports with create, submit, delete
+- [x] Create bis-mobile/app/(tabs)/sar.tsx — SAR filings with create, submit, delete
+- [x] Create bis-mobile/app/(tabs)/documents.tsx — Document vault with list, download, delete
+- [x] Create bis-mobile/app/(tabs)/payments.tsx — Payment Rails with transfer initiation and queue stats
+- [x] Create bis-mobile/app/(tabs)/reports.tsx — Regulatory reports (CTR/STR/ANNUAL) with create, submit, delete
+- [x] Update bis-mobile/app/(tabs)/_layout.tsx — Register all 13 tabs (5 primary + 8 secondary)
+- [x] TypeScript: 0 errors (npx tsc --noEmit)
+- [x] Security: 0 CVEs (pnpm audit clean)
+- [x] Node.js tests: 349/349 passing
+- [x] Go tests: 6/6 passing (verifier service)
+- [x] Python tests: 189/189 passing (31+27+21+36+29+29+16 across 7 services)
+- [x] bis-mobile now has 13 screens covering all major platform features
+- [x] Full mobile parity: PWA (72 pages) + React Native (11 screens) + Expo bis-mobile (13 screens)
+- [x] todo.md: all v70 items done, 0 pending

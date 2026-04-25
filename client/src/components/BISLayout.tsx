@@ -407,10 +407,28 @@ export default function BISLayout({ children, title, subtitle, actions }: BISLay
   const utils = trpc.useUtils();
   useEventStream({
     eventTypes: ['ALERT_TRIGGERED', 'KYC_COMPLETED', 'CASE_ESCALATED', 'SANCTIONS_HIT', 'SAR_SUBMITTED'],
-    onEvent: () => {
+    onEvent: (event) => {
       // Immediately refresh alerts and dashboard stats on any relevant event
       utils.alerts.list.invalidate();
       utils.dashboard.stats.invalidate();
+      // Audible alert for critical/high severity events (Web Audio API — no external file)
+      if (event.severity === 'critical' || event.severity === 'high') {
+        try {
+          const ctx = new AudioContext();
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(880, ctx.currentTime);
+          gain.gain.setValueAtTime(0.25, ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.18);
+          osc.start(ctx.currentTime);
+          osc.stop(ctx.currentTime + 0.18);
+        } catch {
+          // AudioContext blocked by browser policy — ignore silently
+        }
+      }
     },
   });
 

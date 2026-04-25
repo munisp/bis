@@ -471,6 +471,59 @@ async function startServer() {
     }
   });
 
+  // ── Scheduled task endpoint — alert rules evaluation ──────────────────────
+  // Called by Manus scheduled task every 15 min via:
+  //   curl -X POST $SCHEDULED_TASK_ENDPOINT_BASE/api/scheduled/alert-rules \
+  //     -H "Cookie: app_session_id=$SCHEDULED_TASK_COOKIE"
+  app.post("/api/scheduled/alert-rules", async (req: Request, res: Response) => {
+    try {
+      const { sdk } = await import("./sdk");
+      const user = await sdk.authenticateRequest(req);
+      if (!user) {
+        res.status(401).json({ error: "Unauthorized" });
+        return;
+      }
+      const { getDb } = await import("../db");
+      const db = await getDb();
+      const schema = await import("../../drizzle/schema");
+      const { eq, gte, sql } = await import("drizzle-orm");
+      const cutoff = new Date(Date.now() - 15 * 60 * 1000);
+      const activeRules = await db!
+        .select()
+        .from(schema.alertRules)
+        .where(eq(schema.alertRules.enabled, true));
+      let triggered = 0;
+      for (const rule of activeRules) {
+        try {
+          const recentTxCount = await db!
+            .select({ count: sql<number>`count(*)` })
+            .from(schema.transactions)
+            .where(gte(schema.transactions.createdAt, cutoff));
+          const count = Number(recentTxCount[0]?.count ?? 0);
+          const threshold = Number(rule.threshold ?? 0);
+          if (count >= threshold && threshold > 0) {
+            await db!.insert(schema.alerts).values({
+              type: 'risk_threshold',
+              severity: rule.severity,
+              title: `Alert Rule Triggered: ${rule.name}`,
+              body: `Rule "${rule.name}" triggered: ${count} events in last 15 min (threshold: ${threshold})`,
+              subjectRef: 'scheduled-eval',
+              sourceService: 'bff-scheduler',
+            });
+            triggered++;
+          }
+        } catch (ruleErr) {
+          console.warn(`[ScheduledAlerts] Rule ${rule.id} eval error:`, ruleErr);
+        }
+      }
+      log("info", "[ScheduledAlerts] Evaluation complete", { rulesChecked: activeRules.length, triggered });
+      res.json({ ok: true, rulesChecked: activeRules.length, triggered });
+    } catch (err) {
+      console.error("[ScheduledAlerts] Error:", err);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
   // ── Grafana alert webhook ──────────────────────────────────────────────────
   app.post("/api/webhooks/grafana-alert", async (req, res) => {
     try {
