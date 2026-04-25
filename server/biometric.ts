@@ -365,8 +365,61 @@ export const biometricRouter = router({
     }),
 
   /**
-   * GET /biometric/status/:subjectRef — get biometric enrollment status for a subject
+   * GET /biometric/list — paginated list of enrolled biometric records (from kyc_records)
    */
+  list: protectedProcedure
+    .input(z.object({ page: z.number().int().min(1).default(1), limit: z.number().int().min(1).max(100).default(20) }))
+    .query(async ({ input }) => {
+      try {
+        const db = await getDb();
+        if (!db) return { data: [], total: 0 };
+        const offset = (input.page - 1) * input.limit;
+        const rows = await db
+          .select({
+            id: kycRecords.id,
+            subjectId: kycRecords.subjectRef,
+            subjectName: kycRecords.subjectName,
+            modality: kycRecords.biometricFaceId,
+            status: kycRecords.biometricStatus,
+            qualityScore: kycRecords.riskScore,
+            enrolledAt: kycRecords.createdAt,
+          })
+          .from(kycRecords)
+          .where(eq(kycRecords.biometricStatus, "enrolled"))
+          .limit(input.limit)
+          .offset(offset);
+        const countResult = await db
+          .select({ count: kycRecords.id })
+          .from(kycRecords)
+          .where(eq(kycRecords.biometricStatus, "enrolled"));
+        return {
+          data: rows.map(r => ({ ...r, modality: "face" })),
+          total: countResult.length,
+        };
+      } catch (e) {
+        return { data: [], total: 0 };
+      }
+    }),
+
+  /**
+   * DELETE /biometric/:id — revoke a biometric enrollment
+   */
+  delete: writeProcedure
+    .input(z.object({ id: z.number().int() }))
+    .mutation(async ({ input }) => {
+      try {
+        const db = await getDb();
+        if (!db) return { success: false };
+        await db
+          .update(kycRecords)
+          .set({ biometricStatus: "revoked", biometricFaceId: null })
+          .where(eq(kycRecords.id, input.id));
+        return { success: true };
+      } catch (e) {
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Failed to revoke biometric enrollment" });
+      }
+    }),
+
   getStatus: protectedProcedure
     .input(z.object({ subjectRef: z.string() }))
     .query(async ({ input }) => {

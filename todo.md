@@ -1907,3 +1907,24 @@
 - [x] bis-mobile now has 13 screens covering all major platform features
 - [x] Full mobile parity: PWA (72 pages) + React Native (11 screens) + Expo bis-mobile (13 screens)
 - [x] todo.md: all v70 items done, 0 pending
+
+## v71 Additions (Apr 25 2026)
+- [ ] Create bis-mobile more.tsx drawer
+- [ ] Create bis-mobile biometric.tsx screen
+- [ ] PWA UI audit and CRUD fixes across all 72 pages
+- [ ] Backend audit: all 51 routers, 57 tables, business logic
+- [ ] Security audit: 0 CVEs, 0 TypeScript errors
+- [ ] v71 archive and change manifest
+
+## v71 Additions (Apr 25 2026)
+
+- [x] bis-mobile: More drawer screen (grid launcher for 8 hidden tabs)
+- [x] bis-mobile: Biometric enrollment screen with enroll/verify/list/delete
+- [x] bis-mobile: Push notification wiring (Expo Notifications)
+- [x] bis-mobile: Updated tab layout to 15 screens (5 primary + 10 secondary)
+- [x] Backend: biometric.list procedure (paginated enrolled records)
+- [x] Backend: biometric.delete procedure (revoke enrollment)
+- [x] Backend: paymentRails.initiateTransfer procedure (create NIP transfer)
+- [x] Backend: sar.getOverdue procedure (72h NFIU deadline enforcement)
+- [x] Security: 0 CVEs, 0 TypeScript errors, 0 hardcoded secrets
+- [x] Tests: 349 Node.js + 6 Go + 189 Python = 544 total passing

@@ -206,6 +206,39 @@ export const sarRouter = router({
       return { success: true };
     }),
 
+  /**
+   * GET /sar/getOverdue — SAR filings exceeding the 72-hour NFIU filing deadline.
+   * CBN AML/CFT Regulations 2013 (as amended) require SARs within 72 hours of detection.
+   */
+  getOverdue: protectedProcedure.query(async () => {
+    const db = await getDb();
+    if (!db) return { overdue: [], count: 0 };
+    const cutoff = new Date(Date.now() - 72 * 60 * 60 * 1000);
+    const overdue = await db
+      .select()
+      .from(sarFilings)
+      .where(
+        and(
+          sql`${sarFilings.status} NOT IN ('filed', 'acknowledged', 'withdrawn')`,
+          sql`${sarFilings.createdAt} < ${cutoff.toISOString()}`
+        )
+      )
+      .orderBy(sarFilings.createdAt);
+    return {
+      overdue: overdue.map(s => ({
+        id: s.id,
+        sarRef: s.sarRef,
+        title: s.title,
+        status: s.status,
+        subjectName: s.subjectName,
+        createdAt: s.createdAt,
+        hoursOverdue: Math.round((Date.now() - new Date(s.createdAt).getTime()) / 3600000 - 72),
+        deadlineBreached: true,
+      })),
+      count: overdue.length,
+    };
+  }),
+
   stats: protectedProcedure.query(async () => {
     const db = await getDb();
     if (!db) throw new Error("Database unavailable");

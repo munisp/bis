@@ -1,11 +1,8 @@
 /**
- * BIS Mobile — Tab Navigator Layout
- * Registers all 13 tabs: Dashboard, Investigations, KYC, Alerts, AML,
- * Screening, Cases, goAML, SAR, Documents, Payments, Reports, Profile.
- *
- * Tabs are grouped into two rows via a custom tab bar to avoid overflow.
- * The first 5 tabs are shown in the bottom bar; the rest are accessible
- * via the "More" tab which opens a drawer-style grid.
+ * BIS Mobile — Tab Navigator Layout (v71)
+ * Primary tabs: Dashboard, Alerts, AML, Cases, More
+ * Secondary tabs (hidden from bar, accessible via More screen or deep links):
+ *   Investigations, KYC, Screening, goAML, SAR, Documents, Payments, Reports, Biometric, Profile
  */
 import { Tabs } from "expo-router";
 import { Platform } from "react-native";
@@ -41,7 +38,7 @@ export default function TabLayout() {
         },
       }}
     >
-      {/* ── Primary tabs (always visible) ── */}
+      {/* ── Primary tabs (always visible in bottom bar) ── */}
       <Tabs.Screen
         name="index"
         options={{
@@ -79,21 +76,31 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="more"
+        options={{
+          title: "More",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="grid-outline" size={size} color={color} />
+          ),
+        }}
+      />
+
+      {/* ── Secondary tabs (hidden from tab bar, accessible via More screen) ── */}
+      <Tabs.Screen
         name="profile"
         options={{
           title: "Profile",
+          tabBarButton: () => null,
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="person-outline" size={size} color={color} />
           ),
         }}
       />
-
-      {/* ── Secondary tabs (hidden from tab bar, accessible via deep link / navigation) ── */}
       <Tabs.Screen
         name="investigations"
         options={{
           title: "Investigations",
-          tabBarButton: () => null, // hidden from tab bar
+          tabBarButton: () => null,
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="search-outline" size={size} color={color} />
           ),
@@ -166,6 +173,16 @@ export default function TabLayout() {
           tabBarButton: () => null,
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="bar-chart-outline" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="biometric"
+        options={{
+          title: "Biometric",
+          tabBarButton: () => null,
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="finger-print-outline" size={size} color={color} />
           ),
         }}
       />

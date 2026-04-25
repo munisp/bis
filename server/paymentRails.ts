@@ -11,7 +11,7 @@
  *   - Queue depth = number of transfers awaiting the next batch flush
  */
 import { z } from "zod";
-import { router, protectedProcedure, adminProcedure } from "./_core/trpc";
+import { router, protectedProcedure, adminProcedure, writeProcedure } from "./_core/trpc";
 import { getDb } from "./db";
 import { transactions, frozenAccounts, auditLog, exportSchedules } from "../drizzle/schema";
 import { desc, eq, sql, and, gte, lt, or, ilike, inArray, isNull } from "drizzle-orm";
@@ -79,6 +79,44 @@ export const paymentRailsRouter = router({
    * List recent transfers with optional status filter and pagination.
    * Returns transfers in descending order of creation time.
    */
+  /**
+   * POST /paymentRails/initiateTransfer — create a new payment transfer
+   */
+  initiateTransfer: writeProcedure
+    .input(
+      z.object({
+        originatorAccountId: z.string().min(1),
+        beneficiaryAccountId: z.string().min(1),
+        beneficiaryName: z.string().min(1).max(128),
+        amount: z.number().positive(), // NGN
+        currency: z.string().default("NGN"),
+        narration: z.string().max(256).optional(),
+        reference: z.string().max(64).optional(),
+      })
+    )
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      const txRef = input.reference ?? `TXN-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+      const amountKobo = Math.round(input.amount * 100);
+      const [created] = await db
+        .insert(transactions)
+        .values({
+          txRef,
+          type: "nip" as const,
+          status: "pending" as const,
+          amount: amountKobo,
+          currency: input.currency,
+          originatorName: input.originatorAccountId,
+          originatorAccount: input.originatorAccountId,
+          beneficiaryAccount: input.beneficiaryAccountId,
+          beneficiaryName: input.beneficiaryName,
+          narration: input.narration ?? undefined,
+        })
+        .returning();
+      return { success: true, txRef, id: created.id, status: "pending" };
+    }),
+
   listTransfers: protectedProcedure
     .input(z.object({
       status: z.enum(["all", "pending", "posted", "voided", "failed", "reversed"]).default("all"),
