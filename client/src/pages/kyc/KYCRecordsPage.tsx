@@ -149,6 +149,7 @@ export default function KYCRecordsPage() {
   const { data: firstPage, isLoading, refetch: refetchFirst } = trpc.kyc.list.useQuery(
     { limit: PAGE_SIZE, status: serverStatus },
   );
+  const { data: expiryData } = trpc.kyc.getExpiring.useQuery({ daysAhead: 30, limit: 5 }, { refetchInterval: 120000 });
 
   // Reset pagination state when filter changes
   useEffect(() => {
@@ -292,6 +293,32 @@ export default function KYCRecordsPage() {
 
   return (
     <BISLayout title="KYC Records" subtitle="Batch status dashboard for all KYC verifications">
+      {/* KYC Expiry Alert — 12-month re-verification cycle */}
+      {expiryData && expiryData.count > 0 && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800 p-4 mb-4">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">
+                {expiryData.count} KYC record{expiryData.count > 1 ? 's' : ''} expiring within 30 days — re-verification required
+              </p>
+              <div className="mt-2 space-y-1">
+                {expiryData.expiring.map((r: any) => (
+                  <div key={r.id} className="flex items-center gap-2 text-xs">
+                    <Clock className="w-3 h-3 text-amber-400 flex-shrink-0" />
+                    <span className="font-medium text-amber-700 dark:text-amber-400 truncate max-w-[180px]">{r.subjectName}</span>
+                    {r.nin && <span className="text-muted-foreground">NIN: {r.nin}</span>}
+                    <span className={`font-semibold flex-shrink-0 ${r.daysUntilExpiry <= 7 ? 'text-red-600' : 'text-amber-600'}`}>
+                      {r.daysUntilExpiry <= 0 ? 'Expired' : `${r.daysUntilExpiry}d left`}
+                    </span>
+                    <button onClick={() => setReVerifying(r.id)} className="text-xs text-amber-600 hover:underline flex-shrink-0">Re-verify →</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       {/* ── Toolbar ── */}
       <div className="flex flex-col sm:flex-row gap-3 mb-5">
         <div className="relative flex-1">

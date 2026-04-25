@@ -8,7 +8,7 @@ import { z } from "zod";
 import { router, protectedProcedure, writeProcedure, adminProcedure } from "./_core/trpc";
 import { getDb } from "./db";
 import { goamlFilings } from "../drizzle/schema";
-import { eq, desc, and, like } from "drizzle-orm";
+import { eq, desc, and, like, lt } from "drizzle-orm";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -318,6 +318,33 @@ export const goamlRouter = router({
         .limit(1);
       if (!filing) throw new Error("Filing not found");
       return { xml: filing.goamlXml, filingRef: filing.filingRef };
+    }),
+
+  /** Get draft filings breaching the 72-hour NFIU filing deadline */
+  getOverdue: protectedProcedure
+    .input(z.object({ limit: z.number().min(1).max(50).default(10) }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return { count: 0, overdue: [] };
+      const cutoff = new Date(Date.now() - 72 * 3_600_000);
+      const rows = await db
+        .select()
+        .from(goamlFilings)
+        .where(and(eq(goamlFilings.status, 'draft'), lt(goamlFilings.createdAt, cutoff)))
+        .orderBy(goamlFilings.createdAt)
+        .limit(input.limit);
+      const now = Date.now();
+      return {
+        count: rows.length,
+        overdue: rows.map(r => ({
+          id: r.id,
+          filingRef: r.filingRef,
+          subjectName: r.subjectName,
+          reportType: r.reportType,
+          createdAt: r.createdAt,
+          hoursOverdue: Math.round((now - new Date(r.createdAt).getTime()) / 3_600_000) - 72,
+        })),
+      };
     }),
 
   /** Summary stats for the dashboard widget */

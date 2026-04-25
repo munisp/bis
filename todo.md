@@ -1936,3 +1936,19 @@
 - [x] TypeScript: 0 errors
 - [x] Security: 0 CVEs
 - [x] Tests: 544 passing (349 Node.js + 6 Go + 189 Python)
+
+## v73 Additions (Apr 25 2026)
+- [x] SAR overdue widget with 72h NFIU deadline badge and File Now shortcut
+- [x] Payment Rails New Transfer modal with beneficiaryName field and NIP transfer
+- [x] KYC Records biometric enrollment column with inline revoke action
+- [x] goAML deadline tracker widget (72h NFIU deadline alert with File Now)
+- [x] Case SLA breach widget (getSLABreaches procedure + red badge in CasesPage)
+- [x] KYC expiry workflow (getExpiring procedure + amber alert in KYCRecordsPage)
+- [x] goAML getOverdue procedure added to goaml.ts
+- [x] KYC getExpiring procedure added to kycRouter in routers.ts
+- [x] Cases getSLABreaches procedure added to casesRouter
+- [x] Full UI CRUD audit: 0 orphan pages, 0 non-functional buttons, 0 mock data
+- [x] All 51 routers verified in appRouter, all 27 services in docker-compose.yml
+- [x] Security audit: 0 CVEs, CSRF+Helmet+rateLimit+httpOnly+sameSite all active
+- [x] TypeScript: 0 errors
+- [x] Tests: 544 passing (349 Node.js + 6 Go + 189 Python)

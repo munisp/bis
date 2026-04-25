@@ -32,6 +32,8 @@ import {
   Download,
   Loader2,
   SortAsc,
+  Clock,
+  AlertTriangle,
 } from "lucide-react";
 import { useAuth } from "@/_core/hooks/useAuth";
 
@@ -118,6 +120,7 @@ export default function CasesPage() {
 
   const { data, isLoading } = trpc.cases.list.useQuery(queryInput);
   const { data: stats } = trpc.cases.stats.useQuery();
+  const { data: slaData } = trpc.cases.getSLABreaches.useQuery({ limit: 5 }, { refetchInterval: 60000 });
 
   const createCase = trpc.cases.create.useMutation({
     onSuccess: (newCase) => {
@@ -279,6 +282,31 @@ export default function CasesPage() {
           </Button>
         </div>
       </div>
+
+      {/* SLA Breach Alert */}
+      {slaData && slaData.count > 0 && (
+        <div className="rounded-lg border border-red-200 bg-red-50 dark:bg-red-950/20 dark:border-red-800 p-4">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-red-800 dark:text-red-300">
+                {slaData.count} Case{slaData.count > 1 ? 's' : ''} breaching SLA deadline
+              </p>
+              <div className="mt-2 space-y-1">
+                {slaData.breaches.map((c: any) => (
+                  <div key={c.ref} className="flex items-center gap-2 text-xs">
+                    <Clock className="w-3 h-3 text-red-400 flex-shrink-0" />
+                    <span className="font-mono text-red-700 dark:text-red-400">{c.ref}</span>
+                    <span className="text-muted-foreground truncate max-w-[180px]">{c.title}</span>
+                    <Badge variant="destructive" className="text-xs py-0 flex-shrink-0">{c.hoursOverdue}h overdue</Badge>
+                    <a href={`/cases/${c.ref}`} className="text-xs text-red-600 hover:underline flex-shrink-0">Open →</a>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Stats */}
       {stats && (

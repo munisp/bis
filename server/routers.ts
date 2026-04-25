@@ -78,7 +78,7 @@ import {
   getMonitors, createMonitor, updateMonitor,
   getScreeningRequests, createScreeningRequest, updateScreeningRequest,
 } from "./db";
-import { eq, desc, asc, and, ilike, gte, lte, sql, count, inArray } from "drizzle-orm";
+import { eq, desc, asc, and, ilike, gte, lte, lt, sql, count, inArray } from "drizzle-orm";
 import { z } from "zod";
 
 // ─── Service URLs ─────────────────────────────────────────────────────────────
@@ -1140,6 +1140,47 @@ const kycRouter = router({
       await writeAuditLog(db, { userId: ctx.user!.id, category: "kyc", action: `KYC ${status}`, targetRef: input.subjectName });
       await publishEvent("KYC_COMPLETED", input.subjectName, status === "failed" ? "high" : "info", { status, score: scoreResult.composite_score });
       return { status, riskScore: scoreResult.composite_score, nin, bvn, sanctions, pep, credit };
+    }),
+
+  /** Get KYC records expiring within daysAhead days (12-month re-verification cycle) */
+  getExpiring: protectedProcedure
+    .input(z.object({
+      daysAhead: z.number().min(1).max(90).default(30),
+      limit: z.number().min(1).max(100).default(20),
+    }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return { count: 0, expiring: [] };
+      const expiryThreshold = new Date(Date.now() - (365 - input.daysAhead) * 86400000);
+      const alreadyExpired = new Date(Date.now() - 365 * 86400000);
+      const rows = await db
+        .select({
+          id: kycRecords.id,
+          subjectName: kycRecords.subjectName,
+          nin: kycRecords.nin,
+          bvn: kycRecords.bvn,
+          status: kycRecords.status,
+          riskScore: kycRecords.riskScore,
+          updatedAt: kycRecords.updatedAt,
+        })
+        .from(kycRecords)
+        .where(
+          and(
+            lte(kycRecords.updatedAt, expiryThreshold),
+            gte(kycRecords.updatedAt, alreadyExpired),
+            sql`${kycRecords.status} IN ('verified', 'approved')`
+          )
+        )
+        .orderBy(asc(kycRecords.updatedAt))
+        .limit(input.limit);
+      const now = Date.now();
+      return {
+        count: rows.length,
+        expiring: rows.map(r => ({
+          ...r,
+          daysUntilExpiry: Math.round((new Date(r.updatedAt).getTime() + 365 * 86400000 - now) / 86400000),
+        })),
+      };
     }),
 });
 
@@ -3259,6 +3300,39 @@ ${timeline.map(e => `<tr><td>${new Date(e.createdAt).toLocaleDateString()}</td><
       await db.update(cases).set({ status: 'closed', updatedAt: new Date() }).where(inArray(cases.ref, input.refs));
       await writeAuditLog(db, { userId: ctx.user.id, category: 'case' as any, action: `Bulk close: ${input.refs.length} cases`, targetRef: input.refs.join(',') });
       return { closed: input.refs.length };
+    }),
+  getSLABreaches: protectedProcedure
+    .input(z.object({ limit: z.number().min(1).max(50).default(10) }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return { count: 0, breaches: [] };
+      const now = new Date();
+      const breached = await db
+        .select({
+          id: cases.id,
+          ref: cases.ref,
+          title: cases.title,
+          type: cases.type,
+          priority: cases.priority,
+          status: cases.status,
+          dueAt: cases.dueAt,
+        })
+        .from(cases)
+        .where(
+          and(
+            lt(cases.dueAt, now),
+            sql`${cases.status} NOT IN ('closed','archived')`
+          )
+        )
+        .orderBy(asc(cases.dueAt))
+        .limit(input.limit);
+      return {
+        count: breached.length,
+        breaches: breached.map(c => ({
+          ...c,
+          hoursOverdue: c.dueAt ? Math.round((now.getTime() - new Date(c.dueAt).getTime()) / 3_600_000) : 0,
+        })),
+      };
     }),
 });
 // ─── Ollama Router ────────────────────────────────────────────────────────────

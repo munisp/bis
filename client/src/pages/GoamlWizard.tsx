@@ -366,6 +366,7 @@ export default function GoamlWizard() {
   });
 
   const { data: stats } = trpc.goaml.stats.useQuery();
+  const { data: overdueData } = trpc.goaml.getOverdue.useQuery({ limit: 5 }, { refetchInterval: 60000 });
 
   const submitMutation = trpc.goaml.submit.useMutation({
     onSuccess: (data) => {
@@ -408,6 +409,37 @@ export default function GoamlWizard() {
           <Plus size={14} /> New Filing
         </Button>
       </div>
+
+      {/* goAML Deadline Alert — 72h NFIU requirement */}
+      {overdueData && overdueData.count > 0 && (
+        <div className="rounded-lg border border-red-500/30 bg-red-950/20 p-4">
+          <div className="flex items-start gap-3">
+            <AlertTriangle size={16} className="text-red-400 mt-0.5 flex-shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-red-300">
+                {overdueData.count} draft filing{overdueData.count > 1 ? 's' : ''} breaching the 72-hour NFIU deadline
+              </p>
+              <div className="mt-2 space-y-1">
+                {overdueData.overdue.map((f: any) => (
+                  <div key={f.filingRef} className="flex items-center gap-2 text-xs">
+                    <Clock size={11} className="text-red-400 flex-shrink-0" />
+                    <span className="font-mono text-red-300">{f.filingRef}</span>
+                    <span className="text-muted-foreground truncate max-w-[160px]">{f.subjectName}</span>
+                    <span className="text-red-400 font-semibold flex-shrink-0">{f.hoursOverdue}h overdue</span>
+                    <button
+                      onClick={() => submitMutation.mutate({ id: f.id })}
+                      disabled={submitMutation.isPending}
+                      className="text-xs text-red-300 hover:text-red-100 underline flex-shrink-0"
+                    >
+                      File Now →
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Stats */}
       {stats && (
