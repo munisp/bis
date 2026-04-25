@@ -15,7 +15,7 @@
  *   - "Run Archival Now" button with progress toast and result card
  *   - "View Load Test Dashboard" Grafana link (VITE_GRAFANA_URL env var)
  */
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -762,6 +762,22 @@ export default function PaymentRailsPage() {
     narration: "",
     reference: "",
   });
+  const [lookupAccountNum, setLookupAccountNum] = useState("");
+  const [lookupBankCode, setLookupBankCode] = useState("");
+  const lookupQuery = trpc.paymentRails.lookupAccount.useQuery(
+    { accountNumber: lookupAccountNum, bankCode: lookupBankCode || undefined },
+    {
+      enabled: /^\d{10}$/.test(lookupAccountNum),
+      staleTime: 30_000,
+      retry: false,
+    }
+  );
+  // Auto-fill beneficiary name when lookup succeeds
+  useEffect(() => {
+    if (lookupQuery.data?.accountName) {
+      setTransferForm(f => ({ ...f, beneficiaryName: lookupQuery.data!.accountName }));
+    }
+  }, [lookupQuery.data]);
   const utils = trpc.useUtils();
   const initiateTransfer = trpc.paymentRails.initiateTransfer.useMutation({
     onSuccess: (data: any) => {
@@ -769,6 +785,8 @@ export default function PaymentRailsPage() {
       utils.paymentRails.listTransfers.invalidate();
       setShowNewTransfer(false);
       setTransferForm({ debitAccountId: "", creditAccountId: "", beneficiaryName: "", amountNgn: "", narration: "", reference: "" });
+      setLookupAccountNum("");
+      setLookupBankCode("");
     },
     onError: (err: any) => toast.error(err.message),
   });
@@ -901,9 +919,37 @@ export default function PaymentRailsPage() {
               </div>
             </div>
             <div className="space-y-1.5">
+              <Label className="text-xs text-slate-400">Beneficiary Account (NUBAN)</Label>
+              <div className="relative">
+                <Input
+                  placeholder="10-digit NUBAN e.g. 0123456789"
+                  value={lookupAccountNum}
+                  onChange={e => {
+                    setLookupAccountNum(e.target.value.replace(/\D/g, "").slice(0, 10));
+                    setTransferForm(f => ({ ...f, creditAccountId: e.target.value.replace(/\D/g, "").slice(0, 10) }));
+                  }}
+                  className="bg-slate-800 border-slate-700 text-slate-100 text-xs h-8 pr-8"
+                />
+                {lookupQuery.isFetching && (
+                  <RefreshCw size={11} className="absolute right-2 top-1/2 -translate-y-1/2 animate-spin text-slate-400" />
+                )}
+                {lookupQuery.data && !lookupQuery.isFetching && (
+                  <Check size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-emerald-400" />
+                )}
+              </div>
+              {lookupQuery.data && (
+                <p className="text-[10px] text-emerald-400">
+                  {lookupQuery.data.accountName} · {lookupQuery.data.bankName}
+                </p>
+              )}
+              {lookupQuery.error && (
+                <p className="text-[10px] text-red-400">Lookup failed — enter name manually</p>
+              )}
+            </div>
+            <div className="space-y-1.5">
               <Label className="text-xs text-slate-400">Beneficiary Name</Label>
               <Input
-                placeholder="e.g. Adaeze Okonkwo"
+                placeholder="Auto-filled from NUBAN lookup"
                 value={transferForm.beneficiaryName}
                 onChange={e => setTransferForm(f => ({ ...f, beneficiaryName: e.target.value }))}
                 className="bg-slate-800 border-slate-700 text-slate-100 text-xs h-8"

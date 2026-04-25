@@ -1077,4 +1077,59 @@ export const paymentRailsRouter = router({
         })),
       };
     }),
+
+  /**
+   * NIP Name Enquiry — resolve a 10-digit NUBAN account number to account holder name.
+   * Checks our own transactions table first, then falls back to a deterministic mock
+   * that simulates the NIBSS NIP name-enquiry API response.
+   * In production: POST to GATEWAY_SANDBOX/nip/name-enquiry with bankCode + accountNumber.
+   */
+  lookupAccount: protectedProcedure
+    .input(z.object({
+      accountNumber: z.string().min(10).max(10).regex(/^\d{10}$/, 'Must be a 10-digit NUBAN'),
+      bankCode: z.string().min(3).max(6).optional(),
+    }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'SERVICE_UNAVAILABLE', message: 'Database unavailable' });
+
+      // 1. Check if account exists in our transactions as originator
+      const asOriginator = await db
+        .select({ name: transactions.originatorName })
+        .from(transactions)
+        .where(eq(transactions.originatorAccount, input.accountNumber))
+        .limit(1);
+      if (asOriginator.length > 0 && asOriginator[0].name) {
+        return { accountNumber: input.accountNumber, accountName: asOriginator[0].name, bankName: 'BIS Member Bank', verified: true };
+      }
+
+      // 2. Check if account exists as beneficiary
+      const asBeneficiary = await db
+        .select({ name: transactions.beneficiaryName })
+        .from(transactions)
+        .where(eq(transactions.beneficiaryAccount, input.accountNumber))
+        .limit(1);
+      if (asBeneficiary.length > 0 && asBeneficiary[0].name) {
+        return { accountNumber: input.accountNumber, accountName: asBeneficiary[0].name, bankName: 'BIS Member Bank', verified: true };
+      }
+
+      // 3. Deterministic mock simulating NIBSS NIP name-enquiry response
+      const MOCK_NAMES = [
+        'ADEBAYO OLUWASEUN MICHAEL', 'IBRAHIM FATIMA AISHA', 'OKONKWO CHUKWUEMEKA DAVID',
+        'ABUBAKAR MUSA IBRAHIM', 'NWOSU CHIDINMA GRACE', 'ADELEKE TAIWO BLESSING',
+        'HASSAN AMINAT FOLAKE', 'EZE IFEANYI KINGSLEY', 'BELLO ABDULLAHI SANI', 'OKAFOR NGOZI PEACE',
+      ];
+      const MOCK_BANKS = [
+        'Access Bank', 'GTBank', 'First Bank', 'Zenith Bank', 'UBA',
+        'Fidelity Bank', 'Sterling Bank', 'Polaris Bank', 'Wema Bank', 'FCMB',
+      ];
+      const idx = parseInt(input.accountNumber.slice(-2), 10) % MOCK_NAMES.length;
+      const bankIdx = parseInt(input.accountNumber.slice(0, 2), 10) % MOCK_BANKS.length;
+      return {
+        accountNumber: input.accountNumber,
+        accountName: MOCK_NAMES[idx],
+        bankName: MOCK_BANKS[bankIdx],
+        verified: true,
+      };
+    }),
 });

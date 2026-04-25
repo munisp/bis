@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import BISLayout from "@/components/BISLayout";
@@ -14,6 +14,7 @@ import {
   FileText, Plus, Search, Eye, ChevronLeft, ChevronRight,
   RefreshCw, Send, CheckCircle, Download, Link, XCircle, AlertTriangle, Clock
 } from "lucide-react";
+import { useLocation } from "wouter";
 
 const STATUS_COLORS: Record<string, string> = {
   draft: "bg-gray-500/20 text-gray-400",
@@ -44,9 +45,26 @@ export default function SARFilingPage() {
   const [page, setPage] = useState(0);
   const [showCreate, setShowCreate] = useState(false);
   const [selectedSar, setSelectedSar] = useState<any>(null);
+  const [location] = useLocation();
 
   const limit = 20;
   const utils = trpc.useUtils();
+
+  // Pre-select a SAR when ?id=<sarId> is present in the URL (e.g. from overdue widget "File Now")
+  const preselectId = new URLSearchParams(location.split('?')[1] ?? '').get('id');
+  const { data: preselectData } = trpc.sar.list.useQuery(
+    { limit: 1, offset: 0 },
+    {
+      enabled: !!preselectId && selectedSar === null,
+      staleTime: 60_000,
+    }
+  );
+  useEffect(() => {
+    if (preselectId && preselectData?.items?.length && selectedSar === null) {
+      const match = preselectData.items.find((s: any) => s.id === preselectId);
+      if (match) setSelectedSar(match);
+    }
+  }, [preselectData, preselectId, selectedSar]);
 
   const { data: sarData, isLoading } = trpc.sar.list.useQuery({
     limit,

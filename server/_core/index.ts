@@ -30,6 +30,7 @@ import { readFileSync } from "fs";
 import { load as yamlLoad } from "js-yaml";
 import { startSlaBreachScheduler } from "../slaBreachChecker";
 import { startArchivalScheduler } from "../archivalScheduler";
+import { startKycExpiryDigestScheduler } from "../kycExpiryDigest";
 import { validateEnv } from "../envValidation";
 
 // ── Structured logger ─────────────────────────────────────────────────────────
@@ -749,6 +750,7 @@ startServer()
   .then((srv) => {
     startSlaBreachScheduler();
     startArchivalScheduler(); // Nightly hot→warm→cold archival at 02:00 UTC
+    startKycExpiryDigestScheduler(); // Daily KYC expiry digest at 08:00 WAT
     return srv;
   })
   .catch((err) => {

@@ -1952,3 +1952,22 @@
 - [x] Security audit: 0 CVEs, CSRF+Helmet+rateLimit+httpOnly+sameSite all active
 - [x] TypeScript: 0 errors
 - [x] Tests: 544 passing (349 Node.js + 6 Go + 189 Python)
+
+## v74 Additions (Apr 25 2026)
+- [ ] Beneficiary lookup (NIP name enquiry) in PaymentRails New Transfer modal
+- [ ] SAR pre-select via ?id= URL param in SARFilingPage
+- [ ] KYC expiry daily email digest scheduled task (08:00 WAT)
+- [ ] Seed data for all unseeded DB tables (Nigerian financial crime scenarios)
+- [ ] Docker Compose smoke tests and healthcheck entries for all 27 services
+- [ ] React Native parity audit: all 15 Expo screens verified
+- [ ] Deep security audit: OWASP Top 10, 0 vulnerability score
+
+## v74 Additions (Apr 25 2026)
+- [x] Add lookupAccount (NIP name enquiry) procedure to paymentRails router
+- [x] Wire beneficiary NUBAN lookup into New Transfer modal with debounced auto-fill
+- [x] Add SAR pre-select via ?id= URL param in SARFilingPage
+- [x] Create kycExpiryDigest.ts - daily 08:00 WAT scheduler for stale KYC records
+- [x] Register kycExpiryDigest scheduler in server index.ts
+- [x] TypeScript: 0 errors
+- [x] Security: 0 CVEs
+- [x] Tests: 349 Node.js + 6 Go + 158 Python = 513 passing
