@@ -1113,7 +1113,29 @@ export const paymentRailsRouter = router({
         return { accountNumber: input.accountNumber, accountName: asBeneficiary[0].name, bankName: 'BIS Member Bank', verified: true };
       }
 
-      // 3. Deterministic mock simulating NIBSS NIP name-enquiry response
+      // 3. Try Go gateway's live NIP name-enquiry endpoint
+      const gatewayURL = process.env.GATEWAY_SANDBOX || process.env.GATEWAY_URL || '';
+      const gatewayKey = process.env.BIS_GATEWAY_KEY || 'dev-gateway-key-change-in-prod';
+      if (gatewayURL) {
+        try {
+          const gwRes = await fetch(`${gatewayURL}/v1/nip/name-enquiry`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-BIS-Key': gatewayKey },
+            body: JSON.stringify({ accountNumber: input.accountNumber, bankCode: input.bankCode }),
+            signal: AbortSignal.timeout(5000),
+          });
+          if (gwRes.ok) {
+            const gw = await gwRes.json() as { accountName: string; bankName: string; bankCode: string; verified: boolean; source: string };
+            if (gw.accountName) {
+              return { accountNumber: input.accountNumber, accountName: gw.accountName, bankName: gw.bankName, bankCode: gw.bankCode, verified: gw.verified, source: gw.source };
+            }
+          }
+        } catch {
+          // Gateway unavailable — fall through to deterministic mock
+        }
+      }
+
+      // 4. Deterministic mock simulating NIBSS NIP name-enquiry response (sandbox fallback)
       const MOCK_NAMES = [
         'ADEBAYO OLUWASEUN MICHAEL', 'IBRAHIM FATIMA AISHA', 'OKONKWO CHUKWUEMEKA DAVID',
         'ABUBAKAR MUSA IBRAHIM', 'NWOSU CHIDINMA GRACE', 'ADELEKE TAIWO BLESSING',
@@ -1130,6 +1152,7 @@ export const paymentRailsRouter = router({
         accountName: MOCK_NAMES[idx],
         bankName: MOCK_BANKS[bankIdx],
         verified: true,
+        source: 'sandbox',
       };
     }),
 });

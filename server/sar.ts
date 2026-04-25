@@ -1,8 +1,9 @@
 import { z } from "zod";
+import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure, writeProcedure, adminProcedure } from "./_core/trpc";
 import { getDb } from "./db";
 import { sarFilings } from "../drizzle/schema";
-import { eq, desc, and, like, or, count, sql } from "drizzle-orm";
+import { eq, desc, and, like, or, count, sql, lte } from "drizzle-orm";
 
 function sarRef(): string {
   const year = new Date().getFullYear();
@@ -237,6 +238,52 @@ export const sarRouter = router({
       })),
       count: overdue.length,
     };
+  }),
+
+  /**
+   * POST /sar/bulkFileOverdue — File all SAR filings that have breached the 72-hour NFIU deadline.
+   * Returns a per-filing success/error summary with filed count and any errors.
+   * Regulatory basis: CBN AML/CFT Regulations 2013 — SARs must be filed within 72 hours of detection.
+   */
+  bulkFileOverdue: adminProcedure.mutation(async ({ ctx }) => {
+    const db = await getDb();
+    if (!db) throw new TRPCError({ code: 'SERVICE_UNAVAILABLE', message: 'Database unavailable' });
+    const cutoff = new Date(Date.now() - 72 * 3600 * 1000);
+    const overdueFilings = await db
+      .select({ id: sarFilings.id, title: sarFilings.title, subjectName: sarFilings.subjectName, status: sarFilings.status })
+      .from(sarFilings)
+      .where(
+        and(
+          lte(sarFilings.createdAt, cutoff),
+          sql`${sarFilings.status} NOT IN ('filed', 'acknowledged', 'withdrawn', 'rejected')`
+        )
+      );
+    if (overdueFilings.length === 0) {
+      return { filed: 0, errors: 0, results: [] as Array<{ id: number; title: string; success: boolean; error?: string }> };
+    }
+    const results: Array<{ id: number; title: string; success: boolean; error?: string }> = [];
+    let filed = 0;
+    let errors = 0;
+    for (const filing of overdueFilings) {
+      try {
+        await db
+          .update(sarFilings)
+          .set({
+            status: 'filed' as any,
+            filedAt: new Date(),
+            filedWith: 'NFIU',
+            filingReference: `NFIU-BULK-${Date.now()}-${filing.id}`,
+            updatedAt: new Date(),
+          })
+          .where(eq(sarFilings.id, filing.id));
+        results.push({ id: filing.id, title: filing.title, success: true });
+        filed++;
+      } catch (err) {
+        results.push({ id: filing.id, title: filing.title, success: false, error: String(err) });
+        errors++;
+      }
+    }
+    return { filed, errors, results };
   }),
 
   stats: protectedProcedure.query(async () => {

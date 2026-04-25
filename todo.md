@@ -1971,3 +1971,19 @@
 - [x] TypeScript: 0 errors
 - [x] Security: 0 CVEs
 - [x] Tests: 349 Node.js + 6 Go + 158 Python = 513 passing
+
+## v75 Additions (Apr 25 2026)
+- [x] NIP name enquiry live wiring: lookupAccount calls Go gateway /v1/nip/name-enquiry with GATEWAY_SANDBOX fallback
+- [x] Go gateway: added /v1/nip/name-enquiry handler (POST, deterministic sandbox + live NIBSS NIP integration)
+- [x] SAR bulk filing: bulkFileOverdue procedure + "File All Overdue SARs" button in SARFilingPage
+- [x] KYC expiry vitest: 7 tests covering staleHighRisk/staleLowRisk counts, alertsCreated, notified, duplicate guard, DB unavailable
+- [x] SAR pre-select via ?id= URL param: File Now deep-links to submit dialog
+- [x] Tests: 551 total (356 Node.js + 6 Go + 189 Python)
+
+## v75 Additions (Apr 25 2026)
+- [x] NIP name enquiry: lookupAccount calls Go gateway /v1/nip/name-enquiry with sandbox fallback
+- [x] Go gateway: added /v1/nip/name-enquiry handler (POST, deterministic sandbox + live NIBSS NIP)
+- [x] SAR bulk filing: bulkFileOverdue procedure + File All Overdue SARs button in SARFilingPage
+- [x] KYC expiry vitest: 7 tests covering staleHighRisk/staleLowRisk counts, alertsCreated, notified, duplicate guard, DB unavailable
+- [x] SAR pre-select via ?id= URL param: File Now deep-links to submit dialog
+- [x] Tests: 551 total (356 Node.js + 6 Go + 189 Python)

@@ -119,6 +119,19 @@ export default function SARFilingPage() {
     onSuccess: () => { toast.success("SAR filed with NFIU"); utils.sar.list.invalidate(); utils.sar.stats.invalidate(); setSelectedSar(null); },
     onError: (e: any) => toast.error(e.message),
   });
+  const bulkFileOverdueMutation = trpc.sar.bulkFileOverdue.useMutation({
+    onSuccess: (result) => {
+      if (result.errors > 0) {
+        toast.warning(`Filed ${result.filed} SARs — ${result.errors} failed`);
+      } else {
+        toast.success(`Successfully filed ${result.filed} overdue SAR${result.filed !== 1 ? 's' : ''} with NFIU`);
+      }
+      utils.sar.list.invalidate();
+      utils.sar.stats.invalidate();
+      utils.sar.getOverdue.invalidate();
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
 
   const totalPages = Math.ceil((sarData?.total ?? 0) / limit);
 
@@ -169,6 +182,22 @@ export default function SARFilingPage() {
                   {overdueData.count > 3 && (
                     <div className="text-xs text-muted-foreground">+{overdueData.count - 3} more overdue filings</div>
                   )}
+                  <div className="mt-3">
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      className="gap-2"
+                      onClick={() => bulkFileOverdueMutation.mutate()}
+                      disabled={bulkFileOverdueMutation.isPending}
+                    >
+                      {bulkFileOverdueMutation.isPending ? (
+                        <RefreshCw className="w-3 h-3 animate-spin" />
+                      ) : (
+                        <Send className="w-3 h-3" />
+                      )}
+                      File All {overdueData.count} Overdue SARs
+                    </Button>
+                  </div>
                 </div>
               </div>
             </div>
