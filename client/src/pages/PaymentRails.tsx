@@ -41,8 +41,10 @@ import { useLocation } from "wouter";
 import {
   TrendingUp, Activity, AlertCircle, CheckCircle2, XCircle,
   Clock, RefreshCw, Database, Archive, Layers, Zap,
-  ArrowUpDown, ExternalLink, Play, Copy, Check, Search, X, Download,
+  ArrowUpDown, ExternalLink, Play, Copy, Check, Search, X, Download, Plus, Send,
 } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -751,6 +753,24 @@ function TransferList() {
 export default function PaymentRailsPage() {
   const [archivalResult, setArchivalResult] = useState<ArchivalResultData | null>(null);
   const [isDryRun, setIsDryRun] = useState(false);
+  const [showNewTransfer, setShowNewTransfer] = useState(false);
+  const [transferForm, setTransferForm] = useState({
+    debitAccountId: "",
+    creditAccountId: "",
+    amountNgn: "",
+    narration: "",
+    reference: "",
+  });
+  const utils = trpc.useUtils();
+  const initiateTransfer = trpc.paymentRails.initiateTransfer.useMutation({
+    onSuccess: (data: any) => {
+      toast.success(`Transfer initiated — ${data.txRef}`);
+      utils.paymentRails.listTransfers.invalidate();
+      setShowNewTransfer(false);
+      setTransferForm({ debitAccountId: "", creditAccountId: "", amountNgn: "", narration: "", reference: "" });
+    },
+    onError: (err: any) => toast.error(err.message),
+  });
   const runArchival = trpc.archival.runArchival.useMutation({
     onMutate: () => {
       toast.loading("Running archival job…", { id: "archival-job" });
@@ -838,8 +858,103 @@ export default function PaymentRailsPage() {
           <Badge variant="outline" className="text-[10px] font-mono bg-indigo-500/10 text-indigo-400 border-indigo-500/30">
             1B payments/day architecture
           </Badge>
+          <Button
+            size="sm"
+            className="h-8 text-xs gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white"
+            onClick={() => setShowNewTransfer(true)}
+          >
+            <Plus size={11} />
+            New Transfer
+          </Button>
         </div>
       </div>
+
+      {/* New Transfer Modal */}
+      <Dialog open={showNewTransfer} onOpenChange={setShowNewTransfer}>
+        <DialogContent className="bg-slate-900 border-slate-700 text-slate-100 max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-slate-100">
+              <Send size={16} className="text-indigo-400" />
+              Initiate NIP Transfer
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label className="text-xs text-slate-400">Debit Account ID</Label>
+                <Input
+                  placeholder="e.g. ACC-001"
+                  value={transferForm.debitAccountId}
+                  onChange={e => setTransferForm(f => ({ ...f, debitAccountId: e.target.value }))}
+                  className="bg-slate-800 border-slate-700 text-slate-100 text-xs h-8"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs text-slate-400">Credit Account ID</Label>
+                <Input
+                  placeholder="e.g. ACC-002"
+                  value={transferForm.creditAccountId}
+                  onChange={e => setTransferForm(f => ({ ...f, creditAccountId: e.target.value }))}
+                  className="bg-slate-800 border-slate-700 text-slate-100 text-xs h-8"
+                />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-slate-400">Amount (NGN)</Label>
+              <div className="relative">
+                <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500 text-xs">₦</span>
+                <Input
+                  type="number"
+                  placeholder="0.00"
+                  value={transferForm.amountNgn}
+                  onChange={e => setTransferForm(f => ({ ...f, amountNgn: e.target.value }))}
+                  className="bg-slate-800 border-slate-700 text-slate-100 text-xs h-8 pl-6"
+                />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-slate-400">Reference (optional)</Label>
+              <Input
+                placeholder="Auto-generated if blank"
+                value={transferForm.reference}
+                onChange={e => setTransferForm(f => ({ ...f, reference: e.target.value }))}
+                className="bg-slate-800 border-slate-700 text-slate-100 text-xs h-8"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-slate-400">Narration</Label>
+              <Textarea
+                placeholder="Payment narration…"
+                value={transferForm.narration}
+                onChange={e => setTransferForm(f => ({ ...f, narration: e.target.value }))}
+                className="bg-slate-800 border-slate-700 text-slate-100 text-xs resize-none"
+                rows={2}
+              />
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" size="sm" className="border-slate-700 text-slate-400" onClick={() => setShowNewTransfer(false)}>
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              className="bg-indigo-600 hover:bg-indigo-700 text-white gap-1.5"
+              disabled={initiateTransfer.isPending || !transferForm.debitAccountId || !transferForm.creditAccountId || !transferForm.amountNgn}
+              onClick={() => initiateTransfer.mutate({
+                originatorAccountId: transferForm.debitAccountId,
+                beneficiaryAccountId: transferForm.creditAccountId,
+                beneficiaryName: transferForm.creditAccountId,
+                amount: parseFloat(transferForm.amountNgn),
+                narration: transferForm.narration || undefined,
+                reference: transferForm.reference || undefined,
+              })}
+            >
+              {initiateTransfer.isPending ? <RefreshCw size={11} className="animate-spin" /> : <Send size={11} />}
+              {initiateTransfer.isPending ? "Initiating…" : "Initiate Transfer"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Architecture note */}
       <Alert className="bg-slate-800/60 border-slate-700">

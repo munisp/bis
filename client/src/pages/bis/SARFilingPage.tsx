@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
   FileText, Plus, Search, Eye, ChevronLeft, ChevronRight,
-  RefreshCw, Send, CheckCircle, Download, Link, XCircle
+  RefreshCw, Send, CheckCircle, Download, Link, XCircle, AlertTriangle, Clock
 } from "lucide-react";
 
 const STATUS_COLORS: Record<string, string> = {
@@ -56,6 +56,7 @@ export default function SARFilingPage() {
   });
 
   const { data: stats } = trpc.sar.stats.useQuery();
+  const { data: overdueData } = trpc.sar.getOverdue.useQuery(undefined, { refetchInterval: 60000 });
 
   const [form, setForm] = useState({
     category: "money_laundering" as any,
@@ -114,6 +115,47 @@ export default function SARFilingPage() {
             New SAR
           </Button>
         </div>
+
+        {/* 72-hour NFIU Deadline Breach Alert */}
+        {overdueData && overdueData.count > 0 && (
+          <div className="rounded-lg border border-red-500/50 bg-red-500/10 p-4">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 text-red-400 mt-0.5 shrink-0" />
+              <div className="flex-1">
+                <div className="font-semibold text-red-400 text-sm">
+                  {overdueData.count} SAR{overdueData.count > 1 ? 's' : ''} breaching 72-hour NFIU filing deadline
+                </div>
+                <div className="text-xs text-muted-foreground mt-1">
+                  CBN AML/CFT Regulations 2013 require SARs to be filed within 72 hours of detection.
+                </div>
+                <div className="mt-2 space-y-1">
+                  {overdueData.overdue.slice(0, 3).map((s: any) => (
+                    <div key={s.id} className="flex items-center gap-2 text-xs">
+                      <Clock className="w-3 h-3 text-red-400" />
+                      <span className="font-mono text-red-300">{s.sarRef}</span>
+                      <span className="text-muted-foreground">{s.subjectName}</span>
+                      <Badge variant="destructive" className="text-xs py-0">
+                        {s.hoursOverdue}h overdue
+                      </Badge>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        className="h-5 text-xs px-2 py-0"
+                        onClick={() => fileMutation.mutate({ id: s.id, filedWith: 'NFIU' })}
+                        disabled={fileMutation.isPending}
+                      >
+                        File Now
+                      </Button>
+                    </div>
+                  ))}
+                  {overdueData.count > 3 && (
+                    <div className="text-xs text-muted-foreground">+{overdueData.count - 3} more overdue filings</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Stats */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

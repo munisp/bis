@@ -1928,3 +1928,11 @@
 - [x] Backend: sar.getOverdue procedure (72h NFIU deadline enforcement)
 - [x] Security: 0 CVEs, 0 TypeScript errors, 0 hardcoded secrets
 - [x] Tests: 349 Node.js + 6 Go + 189 Python = 544 total passing
+
+## v72 Additions (Apr 25 2026)
+- [x] SAR overdue widget - red badge count + File Now shortcut in SARFilingPage
+- [x] Payment initiation form - New Transfer modal in PaymentRails page calling initiateTransfer
+- [x] Biometric enrollment list view in KYCRecordsPage - Fingerprint column + inline revoke
+- [x] TypeScript: 0 errors
+- [x] Security: 0 CVEs
+- [x] Tests: 544 passing (349 Node.js + 6 Go + 189 Python)

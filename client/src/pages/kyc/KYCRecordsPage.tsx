@@ -16,8 +16,44 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { toast } from "sonner";
 import {
   Search, RefreshCw, Download, CheckCircle2, XCircle, Clock,
-  AlertTriangle, Loader2, ShieldCheck, RotateCcw, Eye, ChevronDown, ListChecks
+  AlertTriangle, Loader2, ShieldCheck, RotateCcw, Eye, ChevronDown, ListChecks, Fingerprint, Trash2
 } from "lucide-react";
+
+// ── Biometric Status Cell ──────────────────────────────────────────────────────
+function BiometricStatusCell({ subjectId }: { subjectId: number }) {
+  const utils = trpc.useUtils();
+  const { data, isLoading } = trpc.biometric.list.useQuery(
+    { limit: 1 },
+    { staleTime: 30000 }
+  );
+  const revokeMutation = trpc.biometric.delete.useMutation({
+    onSuccess: () => {
+      toast.success("Biometric enrollment revoked");
+      utils.biometric.list.invalidate();
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+  if (isLoading) return <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />;
+  // Find enrollment for this specific subject
+  const enrollment = data?.data?.find((r: any) => r.subjectId === String(subjectId));
+  if (!enrollment) {
+    return <span className="text-xs text-muted-foreground">Not enrolled</span>;
+  }
+  return (
+    <div className="flex items-center gap-1.5">
+      <Fingerprint className="w-3 h-3 text-green-500" />
+      <span className="text-xs text-green-600 dark:text-green-400 capitalize">{enrollment.modality ?? 'face'}</span>
+      <button
+        className="text-muted-foreground hover:text-red-500 transition-colors"
+        title="Revoke enrollment"
+        onClick={() => revokeMutation.mutate({ id: enrollment.id })}
+        disabled={revokeMutation.isPending}
+      >
+        <Trash2 className="w-3 h-3" />
+      </button>
+    </div>
+  );
+}
 
 type KYCStatus = "pending" | "processing" | "passed" | "failed" | "review";
 
@@ -361,6 +397,7 @@ export default function KYCRecordsPage() {
                     <th className="text-left px-4 py-3 font-medium text-muted-foreground">Status</th>
                     <th className="text-left px-4 py-3 font-medium text-muted-foreground">Risk Score</th>
                     <th className="text-left px-4 py-3 font-medium text-muted-foreground">NIN / BVN</th>
+                    <th className="text-left px-4 py-3 font-medium text-muted-foreground">Biometric</th>
                     <th className="text-left px-4 py-3 font-medium text-muted-foreground">Date</th>
                     <th className="text-right px-4 py-3 font-medium text-muted-foreground">Actions</th>
                   </tr>
@@ -400,6 +437,9 @@ export default function KYCRecordsPage() {
                         {record.nin ? <div>NIN: {record.nin}</div> : null}
                         {record.bvn ? <div>BVN: {record.bvn}</div> : null}
                         {!record.nin && !record.bvn && "—"}
+                      </td>
+                      <td className="px-4 py-3">
+                        <BiometricStatusCell subjectId={record.id} />
                       </td>
                       <td className="px-4 py-3 text-xs text-muted-foreground">
                         {new Date(record.createdAt).toLocaleDateString()}
