@@ -347,6 +347,72 @@ export const goamlRouter = router({
       };
     }),
 
+  /**
+   * Bulk-submit multiple draft STR filings in a single call.
+   * Returns per-filing results so the caller can surface partial failures.
+   * Only draft filings are eligible; already-submitted ones are skipped.
+   */
+  bulkSubmit: writeProcedure
+    .input(
+      z.object({
+        ids: z.array(z.number()).min(1).max(50),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+
+      const results: Array<{
+        id: number;
+        filingRef: string;
+        status: "submitted" | "skipped" | "error";
+        goamlReferenceNumber?: string;
+        reason?: string;
+      }> = [];
+
+      for (const id of input.ids) {
+        try {
+          const [filing] = await db
+            .select()
+            .from(goamlFilings)
+            .where(eq(goamlFilings.id, id))
+            .limit(1);
+
+          if (!filing) {
+            results.push({ id, filingRef: "", status: "error", reason: "Filing not found" });
+            continue;
+          }
+          if (filing.status !== "draft") {
+            results.push({ id, filingRef: filing.filingRef, status: "skipped", reason: `Already ${filing.status}` });
+            continue;
+          }
+
+          // Simulate NFIU submission (production: POST filing.goamlXml to goAML API)
+          const simulatedRef = `NFIU-BULK-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 5).toUpperCase()}`;
+
+          await db
+            .update(goamlFilings)
+            .set({
+              status: "submitted",
+              goamlReferenceNumber: simulatedRef,
+              submittedAt: new Date(),
+              updatedAt: new Date(),
+            })
+            .where(eq(goamlFilings.id, id));
+
+          results.push({ id, filingRef: filing.filingRef, status: "submitted", goamlReferenceNumber: simulatedRef });
+        } catch (err) {
+          results.push({ id, filingRef: "", status: "error", reason: String(err) });
+        }
+      }
+
+      const submittedCount = results.filter(r => r.status === "submitted").length;
+      const skippedCount = results.filter(r => r.status === "skipped").length;
+      const errorCount = results.filter(r => r.status === "error").length;
+
+      return { results, submittedCount, skippedCount, errorCount };
+    }),
+
   /** Summary stats for the dashboard widget */
   stats: protectedProcedure.query(async () => {
       const db = await getDb();

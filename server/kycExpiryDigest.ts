@@ -62,7 +62,7 @@ export async function runKycExpiryDigest(): Promise<KycExpiryDigestResult> {
     .where(
       and(
         lte(kycRecords.updatedAt, highRiskCutoff),
-        ne(kycRecords.status, "rejected" as any),
+        ne(kycRecords.status, "failed" as any),
         sql`${kycRecords.riskScore} >= 70`
       )
     )
@@ -83,7 +83,7 @@ export async function runKycExpiryDigest(): Promise<KycExpiryDigestResult> {
     .where(
       and(
         lte(kycRecords.updatedAt, lowRiskCutoff),
-        ne(kycRecords.status, "rejected" as any),
+        ne(kycRecords.status, "failed" as any),
         sql`(${kycRecords.riskScore} IS NULL OR ${kycRecords.riskScore} < 70)`
       )
     )

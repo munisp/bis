@@ -2006,3 +2006,14 @@
 - [x] Go tests: 6/6 passing
 - [x] Python tests: 189/189 passing (7 services)
 - [x] Total: 551 tests passing
+## v77 Additions (Apr 26 2026)
+- [x] PBAC expansion: permifyCheck added to investigations.bulkUpdateStatus (close/archive), cases.update (close/archive), cases.bulkClose, audit.list (read), reports.generate (create), kyc.run (create)
+- [x] Magic-byte validation: added to cases.uploadDocument (routers.ts) and documentVault.upload (documentVault.ts) — PDF/PNG/JPEG/DOC/DOCX/XLS/XLSX validated against file header bytes
+- [x] AML auto-escalation: autoEscalateToCase() helper in aml.ts — when transaction risk score ≥70 and alertRules with autoEscalate=true exist, a Case is automatically created with type=aml, priority=high/critical
+- [x] goAML bulkSubmit: new procedure in goaml.ts — accepts up to 50 filing IDs, skips non-draft, sets status=submitted + NFIU reference number, returns per-filing results with submittedCount/skippedCount/errorCount
+- [x] Permify schema expanded: 4 new entities (case, aml_alert, goaml_filing, document) with full permission sets (read/update/delete/close/export/submit/download)
+- [x] kyc.verify procedure added: alias for kyc.run used by KYCRecordsPage re-verification flow
+- [x] Permify schema tests updated: assertions for all 4 new entities + close/export/download permissions
+- [x] Node.js tests: 358/358 passing (15 test files)
+- [x] Go tests: all passing (gateway, case-manager, lex-intake, ollama-adapter, payment-rails, verifier)
+- [x] Python tests: all passing (biometric-engine, lakehouse-writer, lex-validator, ml-enrichment, risk-engine, risk-scoring, lex-matcher)

@@ -146,6 +146,32 @@ export const documentVaultRouter = router({
 
       // Decode base64 and upload to S3
       const buffer = Buffer.from(input.base64Content, "base64");
+
+      // Magic-byte validation: verify actual file header matches declared MIME type
+      const magicBytes = buffer.slice(0, 8);
+      const VAULT_MAGIC: Record<string, number[][]> = {
+        'application/pdf':  [[0x25, 0x50, 0x44, 0x46]],
+        'image/png':        [[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]],
+        'image/jpeg':       [[0xFF, 0xD8, 0xFF]],
+        'image/jpg':        [[0xFF, 0xD8, 0xFF]],
+        'application/msword': [[0xD0, 0xCF, 0x11, 0xE0]],
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document': [[0x50, 0x4B, 0x03, 0x04]],
+        'application/vnd.ms-excel': [[0xD0, 0xCF, 0x11, 0xE0]],
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': [[0x50, 0x4B, 0x03, 0x04]],
+        'text/plain': [],
+        'application/json': [],
+        'text/csv': [],
+      };
+      const expectedMagics = VAULT_MAGIC[input.mimeType];
+      if (expectedMagics && expectedMagics.length > 0) {
+        const matches = expectedMagics.some(magic =>
+          magic.every((byte, i) => magicBytes[i] === byte)
+        );
+        if (!matches) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'File content does not match declared MIME type (magic-byte mismatch)' });
+        }
+      }
+
       const suffix = Math.random().toString(36).slice(2, 10);
       const ext = input.filename.split(".").pop() ?? "bin";
       const fileKey = `vault/${input.category}/${Date.now()}-${suffix}.${ext}`;

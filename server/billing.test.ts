@@ -167,6 +167,7 @@ describe("Permify schema", () => {
       new URL("../infra/permify/schema.perm", import.meta.url),
       "utf-8"
     );
+    // Original 9 entities
     expect(content).toContain("entity investigation");
     expect(content).toContain("entity organization");
     expect(content).toContain("entity kyc_record");
@@ -176,6 +177,30 @@ describe("Permify schema", () => {
     expect(content).toContain("entity audit_log");
     expect(content).toContain("entity api_key");
     expect(content).toContain("entity webhook");
+    // v77: 4 new entities
+    expect(content).toContain("entity case");
+    expect(content).toContain("entity aml_alert");
+    expect(content).toContain("entity goaml_filing");
+    expect(content).toContain("entity document");
+  });
+
+  it("case entity has close permission", async () => {
+    const fs = await import("fs/promises");
+    const content = await fs.readFile(
+      new URL("../infra/permify/schema.perm", import.meta.url),
+      "utf-8"
+    );
+    expect(content).toContain("permission close");
+    expect(content).toContain("permission export");
+  });
+
+  it("document entity has download permission", async () => {
+    const fs = await import("fs/promises");
+    const content = await fs.readFile(
+      new URL("../infra/permify/schema.perm", import.meta.url),
+      "utf-8"
+    );
+    expect(content).toContain("permission download");
   });
 
   it("investigation entity has required permissions", async () => {

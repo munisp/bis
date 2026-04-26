@@ -666,6 +666,13 @@ const investigationsRouter = router({
     .mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new Error("Database unavailable");
+      // PBAC: closing/archiving requires 'close' permission on each investigation
+      if (input.status === "archived" || input.status === "completed") {
+        for (const ref of input.refs) {
+          const canClose = await permifyCheck("investigation", ref, "close", String(ctx.user!.id));
+          if (!canClose) throw new TRPCError({ code: 'FORBIDDEN', message: `Insufficient permissions to close investigation ${ref}` });
+        }
+      }
       for (const ref of input.refs) {
         await db.update(investigations)
           .set({
@@ -1084,7 +1091,7 @@ const kycRouter = router({
       }
     }),
 
-  verify: writeProcedure
+  run: writeProcedure
     .input(z.object({
       subjectName: z.string().min(2),
       nin: z.string().optional(),
@@ -1096,6 +1103,9 @@ const kycRouter = router({
     .mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new Error("Database unavailable");
+      // PBAC: running KYC requires 'create' permission on kyc_record entity
+      const canCreate = await permifyCheck("kyc_record", "global", "create", String(ctx.user!.id));
+      if (!canCreate) throw new TRPCError({ code: 'FORBIDDEN', message: 'Insufficient permissions to run KYC checks' });
       const [record] = await db.insert(kycRecords).values({
         subjectName: input.subjectName,
         nin: input.nin,
@@ -1140,6 +1150,65 @@ const kycRouter = router({
       await writeAuditLog(db, { userId: ctx.user!.id, category: "kyc", action: `KYC ${status}`, targetRef: input.subjectName });
       await publishEvent("KYC_COMPLETED", input.subjectName, status === "failed" ? "high" : "info", { status, score: scoreResult.composite_score });
       return { status, riskScore: scoreResult.composite_score, nin, bvn, sanctions, pep, credit };
+    }),
+
+  /**
+   * verify: alias for `run` — used by KYCRecordsPage for re-verification.
+   * Accepts the same input as `run` and returns the same output.
+   */
+  verify: writeProcedure
+    .input(z.object({
+      subjectName: z.string().min(2),
+      nin: z.string().optional(),
+      bvn: z.string().optional(),
+      dob: z.string().optional(),
+      phone: z.string().optional(),
+      investigationId: z.number().optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      const [record] = await db.insert(kycRecords).values({
+        subjectName: input.subjectName,
+        nin: input.nin,
+        bvn: input.bvn,
+        dob: input.dob,
+        phone: input.phone,
+        investigationId: input.investigationId,
+        status: "processing",
+        createdBy: ctx.user!.id,
+      }).returning();
+      const [ninResult, bvnResult, sanctionsResult, pepResult, creditResult] = await Promise.allSettled([
+        input.nin ? gatewayFetch(`/v1/nin/${input.nin}`) : Promise.resolve(null),
+        input.bvn ? gatewayFetch(`/v1/bvn/${input.bvn}`) : Promise.resolve(null),
+        gatewayFetch(`/v1/sanctions/${encodeURIComponent(input.subjectName)}`),
+        gatewayFetch(`/v1/pep/${encodeURIComponent(input.subjectName)}`),
+        input.bvn ? gatewayFetch(`/v1/credit/${input.bvn}`) : Promise.resolve(null),
+      ]);
+      const nin = ninResult.status === "fulfilled" ? ninResult.value : null;
+      const bvn = bvnResult.status === "fulfilled" ? bvnResult.value : null;
+      const sanctions = sanctionsResult.status === "fulfilled" ? sanctionsResult.value : null;
+      const pep = pepResult.status === "fulfilled" ? pepResult.value : null;
+      const credit = creditResult.status === "fulfilled" ? creditResult.value : null;
+      const scoreResult = await riskEngineFetch("/v1/score", {
+        subject_id: input.subjectName,
+        identity: { nin_verified: !!nin?.status, bvn_verified: !!bvn?.bvn, nin_match_score: nin?.matchScore ?? 0, bvn_match_score: bvn?.matchScore ?? 0 },
+        sanctions: { ofac_hit: !sanctions?.clear, bvn_watchlisted: bvn?.watchlisted ?? false },
+        pep: { is_pep: pep?.isPEP ?? false },
+        credit: { credit_score: credit?.score ?? 700, defaults: credit?.defaults ?? 0 },
+      }).catch(() => ({ composite_score: 50, risk_tier: "medium" }));
+      const status = scoreResult.risk_tier === "critical" ? "failed" : scoreResult.risk_tier === "high" ? "review" : "passed";
+      await db.update(kycRecords).set({
+        status,
+        riskScore: scoreResult.composite_score,
+        ninResult: nin as any,
+        bvnResult: bvn as any,
+        sanctionsResult: sanctions as any,
+        pepResult: pep as any,
+        creditResult: credit as any,
+      }).where(eq(kycRecords.id, record!.id));
+      await writeAuditLog(db, { userId: ctx.user!.id, category: "kyc", action: `KYC re-verified: ${status}`, targetRef: input.subjectName });
+      return { status, riskScore: scoreResult.composite_score };
     }),
 
   /** Get KYC records expiring within daysAhead days (12-month re-verification cycle) */
@@ -1196,7 +1265,10 @@ const auditRouter = router({
       limit: z.number().min(1).max(500).default(100),
       offset: z.number().default(0),
     }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      // PBAC: reading audit log requires 'read' permission on audit_log entity
+      const canRead = await permifyCheck("audit_log", "global", "read", String(ctx.user!.id));
+      if (!canRead) throw new TRPCError({ code: 'FORBIDDEN', message: 'Insufficient permissions to read audit log' });
       const db = await getDb();
       if (!db) return { items: [], total: 0 };
       const conditions = [];
@@ -1375,6 +1447,9 @@ const reportsRouter = router({
     .mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new Error("Database unavailable");
+      // PBAC: generating a report requires 'create' permission on report entity
+      const canCreate = await permifyCheck("report", "global", "create", String(ctx.user!.id));
+      if (!canCreate) throw new TRPCError({ code: 'FORBIDDEN', message: 'Insufficient permissions to generate reports' });
       const reportRef = generateRef("RPT");
       await db.insert(reports).values({
         reportRef,
@@ -2639,6 +2714,11 @@ const casesRouter = router({
       const { ref, ...updates } = input;
       const [c] = await db.select().from(cases).where(eq(cases.ref, ref)).limit(1);
       if (!c) throw new TRPCError({ code: 'NOT_FOUND' });
+      // PBAC: closing/archiving a case requires 'close' permission
+      if (updates.status === 'closed' || updates.status === 'archived') {
+        const canClose = await permifyCheck("case", ref, "close", String(ctx.user?.id ?? ''));
+        if (!canClose) throw new TRPCError({ code: 'FORBIDDEN', message: 'Insufficient permissions to close this case' });
+      }
       const updateData: any = { ...updates, updatedAt: new Date() };
       if (updates.status === 'closed' || updates.status === 'archived') {
         updateData.closedAt = new Date();
@@ -2811,6 +2891,29 @@ const casesRouter = router({
       if (!allowedTypes.includes(input.mimeType)) {
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'File type not allowed. Permitted: PDF, DOCX, XLSX, PNG, JPG, TXT' });
       }
+      // Magic-byte validation: verify actual file header matches declared MIME type
+      const fileBuffer = Buffer.from(input.fileBase64, 'base64');
+      const magicBytes = fileBuffer.slice(0, 8);
+      const MAGIC: Record<string, number[][]> = {
+        'application/pdf':  [[0x25, 0x50, 0x44, 0x46]],                                // %PDF
+        'image/png':        [[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]],       // PNG
+        'image/jpeg':       [[0xFF, 0xD8, 0xFF]],                                       // JPEG
+        'image/jpg':        [[0xFF, 0xD8, 0xFF]],                                       // JPEG
+        'application/msword': [[0xD0, 0xCF, 0x11, 0xE0]],                              // DOC (OLE2)
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document': [[0x50, 0x4B, 0x03, 0x04]], // DOCX (ZIP)
+        'application/vnd.ms-excel': [[0xD0, 0xCF, 0x11, 0xE0]],                       // XLS (OLE2)
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': [[0x50, 0x4B, 0x03, 0x04]], // XLSX (ZIP)
+        'text/plain': [],  // no reliable magic bytes for plain text
+      };
+      const expectedMagics = MAGIC[input.mimeType];
+      if (expectedMagics && expectedMagics.length > 0) {
+        const matches = expectedMagics.some(magic =>
+          magic.every((byte, i) => magicBytes[i] === byte)
+        );
+        if (!matches) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'File content does not match declared MIME type (magic-byte mismatch)' });
+        }
+      }
       // Upload to S3
       const crypto = await import('crypto');
       const suffix = crypto.randomBytes(8).toString('hex');
@@ -2818,7 +2921,6 @@ const casesRouter = router({
       const rawExt = input.fileName.split('.').pop() ?? 'bin';
       const ext = rawExt.replace(/[^a-zA-Z0-9]/g, '').slice(0, 10) || 'bin';
       const fileKey = `cases/${escHtml(c.ref)}/docs/${suffix}.${ext}`;
-      const fileBuffer = Buffer.from(input.fileBase64, 'base64');
       const { url } = await storagePut(fileKey, fileBuffer, input.mimeType);
       // Persist metadata
       const [doc] = await db.insert(caseDocuments).values({
@@ -3297,6 +3399,11 @@ ${timeline.map(e => `<tr><td>${new Date(e.createdAt).toLocaleDateString()}</td><
     .mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR' });
+      // PBAC: check 'close' permission on each case entity
+      for (const ref of input.refs) {
+        const canClose = await permifyCheck("case", ref, "close", String(ctx.user.id));
+        if (!canClose) throw new TRPCError({ code: 'FORBIDDEN', message: `Insufficient permissions to close case ${ref}` });
+      }
       await db.update(cases).set({ status: 'closed', updatedAt: new Date() }).where(inArray(cases.ref, input.refs));
       await writeAuditLog(db, { userId: ctx.user.id, category: 'case' as any, action: `Bulk close: ${input.refs.length} cases`, targetRef: input.refs.join(',') });
       return { closed: input.refs.length };

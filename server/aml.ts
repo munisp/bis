@@ -2,9 +2,45 @@ import { z } from "zod";
 import { router, protectedProcedure, writeProcedure, adminProcedure } from "./_core/trpc";
 import { getDb } from "./db";
 import {
-  transactions, amlRules, amlAlerts, swiftMessages, sepaPayments, travelRuleRecords,
+  transactions, amlRules, amlAlerts, swiftMessages, sepaPayments, travelRuleRecords, cases, alertRules,
 } from "../drizzle/schema";
 import { eq, desc, and, gte, lte, like, or, sql, count, sum } from "drizzle-orm";
+
+// ─── AML Auto-Escalation ─────────────────────────────────────────────────────
+/**
+ * When an AML alert is created and the triggering rule has autoEscalate=true,
+ * automatically create a Case in the case management system.
+ */
+async function autoEscalateToCase(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, alert: {
+  id: number;
+  alertRef: string;
+  riskLevel: string;
+  title: string;
+  description: string;
+  transactionId?: number | null;
+  investigationId?: number | null;
+}, createdBy: number): Promise<void> {
+  try {
+    const caseRef = `CASE-AML-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 5).toUpperCase()}`;
+    const priority = alert.riskLevel === "critical" ? "critical" : alert.riskLevel === "high" ? "high" : "medium";
+    await db.insert(cases).values({
+      ref: caseRef,
+      title: `[AUTO-ESCALATED] ${alert.title}`,
+      type: "aml",
+      status: "open",
+      priority: priority as any,
+      summary: `Automatically escalated from AML alert ${alert.alertRef}. ${alert.description}`,
+      legalBasis: "MLPA 2011 s.6 — Suspicious Transaction Reporting",
+      regulatoryFramework: "NFIU/CBN AML/CFT Framework 2022",
+      riskScore: alert.riskLevel === "critical" ? 90 : alert.riskLevel === "high" ? 70 : 50,
+      createdBy,
+      investigationRefs: alert.investigationId ? [String(alert.investigationId)] : [],
+    });
+  } catch (err) {
+    // Non-blocking: log but don't fail the alert creation
+    console.error("[AML AutoEscalate] Failed to create case:", err);
+  }
+}
 
 // ─── AML Engine (Rust microservice, port 8095) ────────────────────────────────
 const AML_ENGINE_URL = process.env.BIS_AML_ENGINE_URL ?? "http://localhost:8095";
@@ -149,13 +185,30 @@ export const amlRouter = router({
           valueDate: input.valueDate ? new Date(input.valueDate) : new Date(),
         }).returning();
         if (score >= 50 && flags.length > 0) {
-          await db.insert(amlAlerts).values({
+          const [newAlert] = await db.insert(amlAlerts).values({
             alertRef: amlAlertRef(), transactionId: tx.id, status: "open",
             riskLevel: riskLevel as any,
             title: `${riskLevel.toUpperCase()} Risk: ${input.originatorName} → ${input.beneficiaryName}`,
             description: `Transaction ${tx.txRef} triggered: ${flags.join(", ")}. Amount: ${input.currency} ${input.amount.toLocaleString()}`,
             triggeredValue: input.amount, investigationId: input.investigationId,
-          });
+          }).returning();
+          // Auto-escalation: if risk is critical or high, check enabled alertRules with autoEscalate=true
+          if (score >= 70) {
+            const autoEscRules = await db.select().from(alertRules).where(
+              and(eq(alertRules.enabled, true), eq(alertRules.autoEscalate, true))
+            );
+            if (autoEscRules.length > 0) {
+              await autoEscalateToCase(db, {
+                id: newAlert.id,
+                alertRef: newAlert.alertRef,
+                riskLevel: riskLevel,
+                title: newAlert.title ?? `AML Alert ${newAlert.alertRef}`,
+                description: newAlert.description ?? ``,
+                transactionId: tx.id,
+                investigationId: input.investigationId,
+              }, ctx.user.id);
+            }
+          }
         }
         return tx;
       }),

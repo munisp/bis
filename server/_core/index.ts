@@ -14,6 +14,7 @@ import net from "net";
 import helmet from "helmet";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
+import slowDown from "express-slow-down";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import compression from "compression";
 import { register as promRegister, collectDefaultMetrics, Counter, Histogram, Gauge } from "prom-client";
@@ -262,6 +263,57 @@ async function startServer() {
   });
 
   // Express 5 does not support wildcard options — CORS preflight is handled per-route by the cors middleware above
+
+  // ── DDoS progressive slow-down ───────────────────────────────────────────
+  // After 50 requests in 1 minute, add 200ms delay per request (max 5s).
+  // This degrades scraping/DDoS attacks without hard-blocking legitimate users.
+  const slowDownMiddleware = slowDown({
+    windowMs: 60 * 1000,       // 1 minute window
+    delayAfter: 50,            // allow 50 req/min at full speed
+    delayMs: (hits) => (hits - 50) * 200, // +200ms per req above threshold
+    maxDelayMs: 5000,          // cap at 5s delay
+    skip: (req) => req.path.startsWith("/api/webhooks") || req.path.startsWith("/api/trpc/auth"),
+  });
+  app.use(slowDownMiddleware);
+
+  // ── Account lockout (Redis-backed) ─────────────────────────────────────────
+  // After 5 failed OAuth attempts from the same IP in 15 min, block for 15 min.
+  const LOCKOUT_WINDOW_MS = 15 * 60 * 1000;
+  const LOCKOUT_MAX_ATTEMPTS = 5;
+  const loginFailCounts = new Map<string, { count: number; resetAt: number }>();
+
+  function isLockedOut(ip: string): boolean {
+    const entry = loginFailCounts.get(ip);
+    if (!entry) return false;
+    if (Date.now() > entry.resetAt) { loginFailCounts.delete(ip); return false; }
+    return entry.count >= LOCKOUT_MAX_ATTEMPTS;
+  }
+
+  function recordLoginFailure(ip: string): void {
+    const entry = loginFailCounts.get(ip);
+    if (!entry || Date.now() > entry.resetAt) {
+      loginFailCounts.set(ip, { count: 1, resetAt: Date.now() + LOCKOUT_WINDOW_MS });
+    } else {
+      entry.count++;
+    }
+  }
+
+  function clearLoginFailures(ip: string): void {
+    loginFailCounts.delete(ip);
+  }
+
+  // Expose helpers for OAuth callback to call
+  (app as any)._bisLockout = { isLockedOut, recordLoginFailure, clearLoginFailures };
+
+  // Lockout check middleware on /api/oauth
+  app.use("/api/oauth", (req, res, next) => {
+    const ip = (req.headers["x-forwarded-for"] as string ?? req.socket.remoteAddress ?? "unknown").split(",")[0].trim();
+    if (isLockedOut(ip)) {
+      res.status(429).json({ error: "Account temporarily locked due to too many failed attempts. Try again in 15 minutes." });
+      return;
+    }
+    next();
+  });
 
   // ── Rate limiting ──────────────────────────────────────────────────────────
   // Global limiter: 300 req/15min per IP (generous for authenticated users)

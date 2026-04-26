@@ -94,3 +94,46 @@ entity webhook {
   permission delete = tenant.admin
   permission test   = tenant.admin
 }
+
+entity case {
+  relation lead_analyst @user          // analyst managing the case
+  relation reviewer     @user          // reviewer / approver
+  relation org          @organization  // owning organisation
+
+  permission create  = org.admin or org.member
+  permission read    = lead_analyst or reviewer or org.admin or org.member
+  permission update  = lead_analyst or reviewer or org.admin
+  permission delete  = org.admin
+  permission close   = reviewer or org.admin
+  permission export  = lead_analyst or reviewer or org.admin
+}
+
+entity aml_alert {
+  relation assignee @user
+  relation org      @organization
+
+  permission read    = assignee or org.admin or org.member
+  permission update  = assignee or org.admin
+  permission clear   = assignee or org.admin
+  permission escalate = org.admin
+}
+
+entity goaml_filing {
+  relation creator @user
+  relation org     @organization
+
+  permission read   = creator or org.admin or org.member
+  permission create = org.admin or org.member
+  permission submit = creator or org.admin
+  permission delete = creator or org.admin
+}
+
+entity document {
+  relation uploader @user
+  relation org      @organization
+
+  permission read       = uploader or org.admin or org.member
+  permission create     = org.admin or org.member
+  permission delete     = org.admin
+  permission download   = uploader or org.admin or org.member
+}
