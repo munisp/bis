@@ -2041,3 +2041,8 @@
 - [x] Stakeholder portal document upload — S3 upload via storagePut; file attachment on portalPostComment; file type/size validation; download link in comment feed
 - [x] Risk trend alert threshold — configurable threshold in riskDashboard.analytics; notifyOwner fires when 7-day avg score exceeds threshold; threshold stored in platform_settings
 - [x] OpenClaw replay audit trail UI — "Replay History" tab on webhook config page; lists openclaw.replay.* entries from auditLog; shows original event ID, replay timestamp, outcome
+
+## Next Steps Round 3 (May 13 2026)
+- [x] Threshold configuration UI — slider + toggle card in Risk Trend widget wired to trpc.riskDashboard.setAlertThreshold; shows current threshold and notification status
+- [x] Portal document viewer — inline PDF/image preview in stakeholder portal comment feed using presigned S3 URL; iframe for PDF, img for images; fallback download link
+- [x] Replay history pagination — limit/offset controls in Replay History tab; page size selector; total count display; prev/next navigation

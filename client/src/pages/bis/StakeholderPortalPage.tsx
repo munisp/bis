@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Shield, Clock, FileText, AlertTriangle, MessageSquare,
-  RefreshCw, Send, Bell, Upload, Paperclip, X, Download,
+  RefreshCw, Send, Bell, Upload, Paperclip, X, Download, Eye, ChevronDown, ChevronUp,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -56,6 +56,7 @@ export default function StakeholderPortalPage() {
   const [newBadge, setNewBadge] = useState(0);
   const [allComments, setAllComments] = useState<any[]>([]);
   const [allDocuments, setAllDocuments] = useState<any[]>([]);
+  const [previewDocId, setPreviewDocId] = useState<number | null>(null);
   const initialised = useRef(false);
 
   useEffect(() => {
@@ -329,26 +330,67 @@ export default function StakeholderPortalPage() {
               {/* Document list */}
               {allDocuments.length > 0 ? (
                 <div className="space-y-2">
-                  {allDocuments.map((doc: any) => (
-                    <div key={doc.id} className="flex items-center justify-between p-3 bg-muted/40 rounded">
-                      <div className="min-w-0 flex-1">
-                        <p className="font-medium text-sm truncate">{doc.filename}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {doc.category?.replace(/_/g, " ")}
-                          {doc.sizeBytes ? ` · ${formatBytes(doc.sizeBytes)}` : ""}
-                          {" · "}{new Date(doc.createdAt).toLocaleDateString()}
-                        </p>
+                  {allDocuments.map((doc: any) => {
+                    const isImage = doc.mimeType?.startsWith("image/");
+                    const isPdf = doc.mimeType === "application/pdf";
+                    const canPreview = isImage || isPdf;
+                    const isOpen = previewDocId === doc.id;
+                    return (
+                      <div key={doc.id} className="border rounded-lg overflow-hidden">
+                        {/* Row header */}
+                        <div className="flex items-center justify-between p-3 bg-muted/40">
+                          <div className="min-w-0 flex-1">
+                            <p className="font-medium text-sm truncate">{doc.filename}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {doc.category?.replace(/_/g, " ")}
+                              {doc.sizeBytes ? ` · ${formatBytes(doc.sizeBytes)}` : ""}
+                              {" · "}{new Date(doc.createdAt).toLocaleDateString()}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2 ml-3 shrink-0">
+                            {canPreview && (
+                              <button
+                                onClick={() => setPreviewDocId(isOpen ? null : doc.id)}
+                                className="flex items-center gap-1 text-xs text-primary hover:underline"
+                                title={isOpen ? "Hide preview" : "Preview inline"}
+                              >
+                                {isOpen ? <ChevronUp className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                                {isOpen ? "Hide" : "Preview"}
+                              </button>
+                            )}
+                            <a
+                              href={doc.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary hover:underline"
+                            >
+                              <Download className="w-3 h-3" /> Download
+                            </a>
+                          </div>
+                        </div>
+                        {/* Inline preview panel */}
+                        {isOpen && (
+                          <div className="border-t bg-background">
+                            {isImage ? (
+                              <img
+                                src={doc.url}
+                                alt={doc.filename}
+                                className="max-w-full max-h-[480px] object-contain mx-auto block p-2"
+                                loading="lazy"
+                              />
+                            ) : isPdf ? (
+                              <iframe
+                                src={`${doc.url}#toolbar=0`}
+                                title={doc.filename}
+                                className="w-full h-[520px] border-0"
+                                loading="lazy"
+                              />
+                            ) : null}
+                          </div>
+                        )}
                       </div>
-                      <a
-                        href={doc.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-1 text-xs text-primary hover:underline ml-3 shrink-0"
-                      >
-                        <Download className="w-3 h-3" /> View
-                      </a>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               ) : (
                 <p className="text-sm text-muted-foreground">No documents shared yet.</p>

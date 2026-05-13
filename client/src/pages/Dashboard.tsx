@@ -8,11 +8,14 @@ import {
   Shield, Search, CheckCircle, AlertTriangle, TrendingUp, RefreshCw,
   FileDown, Eye, Clock, Flag, Activity, Fingerprint, Users, Database,
   Zap, BarChart3, ArrowUpRight, ArrowDownRight, ChevronRight, Radio, MessageSquare,
-  Briefcase, Gavel, AlertOctagon, FileCheck
+  Briefcase, Gavel, AlertOctagon, FileCheck, SlidersHorizontal
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
+import { Slider } from "@/components/ui/slider";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   LineChart, Line, AreaChart, Area, Legend, ReferenceLine
@@ -176,8 +179,21 @@ export default function Dashboard() {
     { metric: "all", days: 7 },
     { refetchInterval: 30_000, refetchIntervalInBackground: false }
   );
-  const { data: thresholdConfig } = trpc.riskDashboard.getAlertThreshold.useQuery();
+  const { data: thresholdConfig, refetch: refetchThreshold } = trpc.riskDashboard.getAlertThreshold.useQuery();
   const checkThreshold = trpc.riskDashboard.checkThreshold.useMutation();
+  const setAlertThreshold = trpc.riskDashboard.setAlertThreshold.useMutation({
+    onSuccess: () => { refetchThreshold(); setShowThresholdConfig(false); }
+  });
+  const [showThresholdConfig, setShowThresholdConfig] = useState(false);
+  const [localThreshold, setLocalThreshold] = useState<number>(70);
+  const [localNotifEnabled, setLocalNotifEnabled] = useState<boolean>(true);
+  // Sync local state when config loads
+  useEffect(() => {
+    if (thresholdConfig) {
+      setLocalThreshold(thresholdConfig.threshold);
+      setLocalNotifEnabled(thresholdConfig.notificationsEnabled);
+    }
+  }, [thresholdConfig]);
   // Check threshold on each analytics refresh
   const prevRiskDataRef = useRef<typeof riskAnalyticsData | null>(null);
   useEffect(() => {
@@ -615,8 +631,59 @@ export default function Dashboard() {
               <RefreshCw size={11} className="animate-spin text-muted-foreground" />
             )}
           </h3>
-          <span className="text-[10px] text-muted-foreground">7-day · refreshes every 30s</span>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-muted-foreground">7-day · refreshes every 30s</span>
+            <button
+              onClick={() => setShowThresholdConfig(v => !v)}
+              className="p-1 rounded hover:bg-muted transition-colors"
+              title="Configure alert threshold"
+            >
+              <SlidersHorizontal size={12} className={cn("text-muted-foreground", showThresholdConfig && "text-primary")} />
+            </button>
+          </div>
         </div>
+
+        {/* ── Threshold Configuration Panel ── */}
+        {showThresholdConfig && (
+          <div className="mb-3 p-3 rounded-md border border-border bg-muted/40 space-y-3">
+            <p className="text-[11px] font-semibold text-foreground">Alert Threshold Configuration</p>
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <Label className="text-[11px] text-muted-foreground">Score threshold</Label>
+                <span className="text-[11px] font-semibold tabular-nums w-8 text-right">{localThreshold}</span>
+              </div>
+              <Slider
+                min={0}
+                max={100}
+                step={1}
+                value={[localThreshold]}
+                onValueChange={([v]) => setLocalThreshold(v)}
+                className="w-full"
+              />
+              <p className="text-[10px] text-muted-foreground">Notify when 7-day average score ≥ {localThreshold}</p>
+            </div>
+            <div className="flex items-center justify-between">
+              <Label htmlFor="notif-toggle" className="text-[11px] text-muted-foreground">Enable notifications</Label>
+              <Switch
+                id="notif-toggle"
+                checked={localNotifEnabled}
+                onCheckedChange={setLocalNotifEnabled}
+              />
+            </div>
+            <div className="flex gap-2 justify-end">
+              <Button size="sm" variant="ghost" className="h-6 text-[11px] px-2" onClick={() => setShowThresholdConfig(false)}>Cancel</Button>
+              <Button
+                size="sm"
+                className="h-6 text-[11px] px-3"
+                disabled={setAlertThreshold.isPending}
+                onClick={() => setAlertThreshold.mutate({ threshold: localThreshold, notificationsEnabled: localNotifEnabled })}
+              >
+                {setAlertThreshold.isPending ? "Saving…" : "Save"}
+              </Button>
+            </div>
+          </div>
+        )}
+
         <div className="flex items-center justify-between mb-3">
           <p className="text-xs text-muted-foreground">Average daily risk score across all investigations</p>
           {checkThreshold.data?.exceeded && (

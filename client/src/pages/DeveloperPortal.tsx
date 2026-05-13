@@ -649,8 +649,10 @@ export default function DeveloperPortal() {
   const [createOpen, setCreateOpen] = useState(false);
   const [activeSection, setActiveSection] = useState<"tokens" | "playground" | "docs" | "openclaw" | "replay">("tokens");
   const [openclawTab, setOpenclawTab] = useState<"skills" | "history">("skills");
+  const REPLAY_PAGE_SIZE = 20;
+  const [replayPage, setReplayPage] = useState(0);
   const { data: replayHistoryData, isLoading: replayLoading, refetch: refetchReplay } = trpc.audit.replayHistory.useQuery(
-    { limit: 50, offset: 0 },
+    { limit: REPLAY_PAGE_SIZE, offset: replayPage * REPLAY_PAGE_SIZE },
     { enabled: activeSection === "openclaw" && openclawTab === "history" }
   );
 
@@ -854,10 +856,32 @@ export default function DeveloperPortal() {
                       </div>
                     );
                   })}
-                  {replayHistoryData.total > replayHistoryData.items.length && (
-                    <p className="text-xs text-center text-muted-foreground pt-2">
-                      Showing {replayHistoryData.items.length} of {replayHistoryData.total} replays
-                    </p>
+                  {/* Pagination controls */}
+                  {replayHistoryData.total > REPLAY_PAGE_SIZE && (
+                    <div className="flex items-center justify-between pt-3 border-t mt-2">
+                      <p className="text-xs text-muted-foreground">
+                        {replayPage * REPLAY_PAGE_SIZE + 1}–{Math.min((replayPage + 1) * REPLAY_PAGE_SIZE, replayHistoryData.total)} of {replayHistoryData.total} replays
+                      </p>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => setReplayPage(p => Math.max(0, p - 1))}
+                          disabled={replayPage === 0}
+                          className="px-2 py-1 text-xs rounded border border-border hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                        >
+                          ← Prev
+                        </button>
+                        <span className="text-xs text-muted-foreground px-2">
+                          Page {replayPage + 1} / {Math.ceil(replayHistoryData.total / REPLAY_PAGE_SIZE)}
+                        </span>
+                        <button
+                          onClick={() => setReplayPage(p => p + 1)}
+                          disabled={(replayPage + 1) * REPLAY_PAGE_SIZE >= replayHistoryData.total}
+                          className="px-2 py-1 text-xs rounded border border-border hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                        >
+                          Next →
+                        </button>
+                      </div>
+                    </div>
                   )}
                 </div>
               )}
