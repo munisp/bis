@@ -1365,9 +1365,32 @@ const auditRouter = router({
       await writeAuditLog(db, { userId: ctx.user!.id, category: "system", action: `Audit log exported (CSV, ${rows.length} rows)` });
       return { url, count: rows.length, format: "csv" };
     }),
-});
 
-// ─── Field Tasks Router ───────────────────────────────────────────────────────
+  /**
+   * List OpenClaw replay history entries from the audit log.
+   * Returns all entries where action starts with 'openclaw.replay.'.
+   */
+  replayHistory: adminProcedure
+    .input(z.object({
+      limit: z.number().min(1).max(200).default(50),
+      offset: z.number().default(0),
+    }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return { items: [], total: 0 };
+      const [items, countResult] = await Promise.all([
+        db.select().from(auditLog)
+          .where(sql`${auditLog.action} LIKE 'openclaw.replay.%'`)
+          .orderBy(desc(auditLog.createdAt))
+          .limit(input.limit)
+          .offset(input.offset),
+        db.select({ count: sql<number>`count(*)` }).from(auditLog)
+          .where(sql`${auditLog.action} LIKE 'openclaw.replay.%'`),
+      ]);
+      return { items, total: Number(countResult[0]?.count ?? 0) };
+    }),
+});
+// ─── Field Tasks Router ────────────────────────────────────────────────────────
 
 const fieldTasksRouter = router({
   list: protectedProcedure
@@ -3527,6 +3550,106 @@ ${timeline.map(e => `<tr><td>${new Date(e.createdAt).toLocaleDateString()}</td><
         actorRole: stakeholder.role ?? 'stakeholder',
       });
       return comment;
+    }),
+
+  /**
+   * Portal document upload — external stakeholders can attach files to a case.
+   * Accepts base64-encoded file content, validates magic bytes, uploads to S3,
+   * creates a caseDocuments record, and optionally posts a comment with the link.
+   */
+  portalUploadDocument: publicProcedure
+    .input(z.object({
+      token: z.string(),
+      filename: z.string().min(1).max(300),
+      mimeType: z.string().min(1).max(100),
+      base64Content: z.string().min(1),
+      description: z.string().max(500).optional(),
+      postComment: z.boolean().default(true),
+    }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
+
+      // Validate access token
+      const [stakeholder] = await db.select().from(caseStakeholders)
+        .where(eq(caseStakeholders.accessToken, input.token)).limit(1);
+      if (!stakeholder) throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Invalid access token' });
+      if (stakeholder.accessExpiresAt && stakeholder.accessExpiresAt < new Date()) {
+        throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Access token expired' });
+      }
+
+      // Decode and validate file size
+      const buffer = Buffer.from(input.base64Content, 'base64');
+      const MAX_SIZE = 10 * 1024 * 1024; // 10 MB
+      if (buffer.length > MAX_SIZE) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'File exceeds 10 MB limit' });
+      }
+
+      // Magic-byte validation
+      const ALLOWED_MAGIC: Record<string, number[][]> = {
+        'application/pdf':  [[0x25, 0x50, 0x44, 0x46]],
+        'image/png':        [[0x89, 0x50, 0x4E, 0x47]],
+        'image/jpeg':       [[0xFF, 0xD8, 0xFF]],
+        'image/jpg':        [[0xFF, 0xD8, 0xFF]],
+        'application/msword': [[0xD0, 0xCF, 0x11, 0xE0]],
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document': [[0x50, 0x4B, 0x03, 0x04]],
+        'application/vnd.ms-excel': [[0xD0, 0xCF, 0x11, 0xE0]],
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': [[0x50, 0x4B, 0x03, 0x04]],
+      };
+      const allowedMagic = ALLOWED_MAGIC[input.mimeType];
+      if (!allowedMagic) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: `File type ${input.mimeType} is not permitted` });
+      }
+      const magicMatches = allowedMagic.some(magic =>
+        magic.every((byte, i) => buffer[i] === byte)
+      );
+      if (!magicMatches) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'File content does not match declared MIME type' });
+      }
+
+      // Upload to S3
+      const ext = input.filename.split('.').pop() ?? 'bin';
+      const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const fileKey = `portal-uploads/case-${stakeholder.caseId}/${suffix}.${ext}`;
+      const { url } = await storagePut(fileKey, buffer, input.mimeType);
+
+      // Create caseDocuments record
+      const [doc] = await db.insert(caseDocuments).values({
+        caseId: stakeholder.caseId,
+        filename: input.filename,
+        mimeType: input.mimeType,
+        fileKey,
+        url,
+        sizeBytes: buffer.length,
+        category: 'stakeholder_submission',
+        description: input.description ?? `Uploaded by ${stakeholder.name}`,
+        confidential: false,
+        uploadedBy: null,
+      }).returning();
+
+      // Timeline event
+      await db.insert(caseTimeline).values({
+        caseId: stakeholder.caseId,
+        eventType: 'document_uploaded',
+        title: `Stakeholder document: ${input.filename}`,
+        actorName: stakeholder.name,
+        actorRole: stakeholder.role ?? 'stakeholder',
+      });
+
+      // Optionally post a comment linking the document
+      if (input.postComment && stakeholder.canComment) {
+        const commentText = `📎 Attached document: [${input.filename}](${url})${input.description ? `\n${input.description}` : ''}`;
+        await db.insert(caseComments).values({
+          caseId: stakeholder.caseId,
+          content: commentText,
+          stakeholderId: stakeholder.id,
+          authorName: stakeholder.name,
+          authorRole: stakeholder.role ?? 'stakeholder',
+          confidential: false,
+        });
+      }
+
+      return { id: doc.id, url, filename: input.filename, sizeBytes: buffer.length };
     }),
 });
 // ─── Ollama Router ────────────────────────────────────────────────────────────

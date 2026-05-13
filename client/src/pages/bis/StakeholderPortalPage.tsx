@@ -4,9 +4,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Shield, Clock, FileText, AlertTriangle, MessageSquare,
-  RefreshCw, Send, Bell,
+  RefreshCw, Send, Bell, Upload, Paperclip, X, Download,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -19,7 +21,23 @@ const STATUS_COLORS: Record<string, string> = {
   archived: "bg-slate-100 text-slate-500",
 };
 
+const ALLOWED_TYPES: Record<string, string> = {
+  "application/pdf": ".pdf",
+  "image/png": ".png",
+  "image/jpeg": ".jpg / .jpeg",
+  "application/msword": ".doc",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+  "application/vnd.ms-excel": ".xls",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+};
+
 const POLL_INTERVAL_MS = 30_000; // 30 seconds
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 export default function StakeholderPortalPage() {
   const [token, setToken] = useState<string | null>(null);
@@ -34,25 +52,19 @@ export default function StakeholderPortalPage() {
   );
 
   // ── Real-time polling state ──────────────────────────────────────────────
-  // Track the ISO timestamp of the last successful poll so we only fetch new items
   const [lastPollAt, setLastPollAt] = useState<string>(() => new Date().toISOString());
   const [newBadge, setNewBadge] = useState(0);
-
-  // Accumulated comments and documents (starts from initial portalAccess load)
   const [allComments, setAllComments] = useState<any[]>([]);
   const [allDocuments, setAllDocuments] = useState<any[]>([]);
   const initialised = useRef(false);
 
-  // Seed state from the initial portalAccess query
   useEffect(() => {
     if (data && !initialised.current) {
       initialised.current = true;
       setAllDocuments(data.documents ?? []);
-      // portalAccess doesn't return comments; they start empty and are fetched via poll
     }
   }, [data]);
 
-  // Poll every 30 s using tRPC refetchInterval
   const pollQuery = trpc.cases.portalPollUpdates.useQuery(
     { token: token ?? "", since: lastPollAt },
     {
@@ -62,7 +74,6 @@ export default function StakeholderPortalPage() {
     }
   );
 
-  // Handle poll results in useEffect (tRPC v11 removed onSuccess from useQuery)
   const prevPollDataRef = useRef<typeof pollQuery.data | null>(null);
   useEffect(() => {
     const result = pollQuery.data;
@@ -72,13 +83,11 @@ export default function StakeholderPortalPage() {
     if (hasNew) {
       setAllComments((prev) => {
         const existingIds = new Set(prev.map((c: any) => c.id));
-        const fresh = result.newComments.filter((c: any) => !existingIds.has(c.id));
-        return [...prev, ...fresh];
+        return [...prev, ...result.newComments.filter((c: any) => !existingIds.has(c.id))];
       });
       setAllDocuments((prev) => {
         const existingIds = new Set(prev.map((d: any) => d.id));
-        const fresh = result.newDocuments.filter((d: any) => !existingIds.has(d.id));
-        return [...prev, ...fresh];
+        return [...prev, ...result.newDocuments.filter((d: any) => !existingIds.has(d.id))];
       });
       setNewBadge((n) => n + result.newComments.length + result.newDocuments.length);
       toast.success("New updates", {
@@ -94,12 +103,72 @@ export default function StakeholderPortalPage() {
     onSuccess: (comment) => {
       setAllComments((prev) => [...prev, comment]);
       setCommentText("");
-      toast.success("Comment posted", { description: "Your comment has been submitted." });
+      toast.success("Comment posted");
+    },
+    onError: (err) => toast.error("Failed to post comment", { description: err.message }),
+  });
+
+  // ── File upload state ────────────────────────────────────────────────────
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [fileDescription, setFileDescription] = useState("");
+  const [uploadProgress, setUploadProgress] = useState(false);
+
+  const uploadDocument = trpc.cases.portalUploadDocument.useMutation({
+    onSuccess: (doc) => {
+      setAllDocuments((prev) => [...prev, doc]);
+      setPendingFile(null);
+      setFileDescription("");
+      setUploadProgress(false);
+      toast.success("Document uploaded", { description: `${doc.filename} (${formatBytes(doc.sizeBytes)}) attached successfully.` });
     },
     onError: (err) => {
-      toast.error("Failed to post comment", { description: err.message });
+      setUploadProgress(false);
+      toast.error("Upload failed", { description: err.message });
     },
   });
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!ALLOWED_TYPES[file.type]) {
+      toast.error("File type not allowed", {
+        description: `Allowed types: ${Object.values(ALLOWED_TYPES).join(", ")}`,
+      });
+      e.target.value = "";
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error("File too large", { description: "Maximum file size is 10 MB." });
+      e.target.value = "";
+      return;
+    }
+    setPendingFile(file);
+  };
+
+  const handleUpload = async () => {
+    if (!pendingFile || !token) return;
+    setUploadProgress(true);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const dataUrl = e.target?.result as string;
+      // Strip the data:mime/type;base64, prefix
+      const base64 = dataUrl.split(",")[1] ?? "";
+      uploadDocument.mutate({
+        token,
+        filename: pendingFile.name,
+        mimeType: pendingFile.type,
+        base64Content: base64,
+        description: fileDescription.trim() || undefined,
+        postComment: true,
+      });
+    };
+    reader.onerror = () => {
+      setUploadProgress(false);
+      toast.error("Failed to read file");
+    };
+    reader.readAsDataURL(pendingFile);
+  };
 
   // ── Guard states ─────────────────────────────────────────────────────────
   if (!token) {
@@ -250,30 +319,33 @@ export default function StakeholderPortalPage() {
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
-                <FileText className="w-4 h-4" /> Shared Documents
+                <FileText className="w-4 h-4" /> Documents
                 {pollQuery.isFetching && (
                   <RefreshCw className="w-3 h-3 animate-spin text-muted-foreground ml-auto" />
                 )}
               </CardTitle>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-4">
+              {/* Document list */}
               {allDocuments.length > 0 ? (
                 <div className="space-y-2">
                   {allDocuments.map((doc: any) => (
                     <div key={doc.id} className="flex items-center justify-between p-3 bg-muted/40 rounded">
-                      <div>
-                        <p className="font-medium text-sm">{doc.filename}</p>
+                      <div className="min-w-0 flex-1">
+                        <p className="font-medium text-sm truncate">{doc.filename}</p>
                         <p className="text-xs text-muted-foreground">
-                          {doc.category} · {new Date(doc.createdAt).toLocaleDateString()}
+                          {doc.category?.replace(/_/g, " ")}
+                          {doc.sizeBytes ? ` · ${formatBytes(doc.sizeBytes)}` : ""}
+                          {" · "}{new Date(doc.createdAt).toLocaleDateString()}
                         </p>
                       </div>
                       <a
                         href={doc.url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-xs text-primary hover:underline"
+                        className="flex items-center gap-1 text-xs text-primary hover:underline ml-3 shrink-0"
                       >
-                        View
+                        <Download className="w-3 h-3" /> View
                       </a>
                     </div>
                   ))}
@@ -281,6 +353,82 @@ export default function StakeholderPortalPage() {
               ) : (
                 <p className="text-sm text-muted-foreground">No documents shared yet.</p>
               )}
+
+              {/* File upload — shown to all stakeholders who can view documents */}
+              <div className="pt-3 border-t space-y-3">
+                <p className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
+                  <Upload className="w-3.5 h-3.5" /> Submit a Document
+                </p>
+
+                {/* Hidden file input */}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept={Object.keys(ALLOWED_TYPES).join(",")}
+                  className="hidden"
+                  onChange={handleFileSelect}
+                />
+
+                {!pendingFile ? (
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="w-full border-2 border-dashed border-border rounded-lg p-6 text-center hover:border-primary/50 hover:bg-muted/30 transition-colors group"
+                  >
+                    <Paperclip className="w-6 h-6 text-muted-foreground group-hover:text-primary mx-auto mb-2 transition-colors" />
+                    <p className="text-sm font-medium">Click to select a file</p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      PDF, PNG, JPEG, DOC, DOCX, XLS, XLSX · Max 10 MB
+                    </p>
+                  </button>
+                ) : (
+                  <div className="border rounded-lg p-4 space-y-3 bg-muted/20">
+                    <div className="flex items-start justify-between">
+                      <div className="min-w-0 flex-1">
+                        <p className="font-medium text-sm truncate">{pendingFile.name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {pendingFile.type} · {formatBytes(pendingFile.size)}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => { setPendingFile(null); setFileDescription(""); if (fileInputRef.current) fileInputRef.current.value = ""; }}
+                        className="text-muted-foreground hover:text-destructive ml-2 shrink-0"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="file-desc" className="text-xs">Description (optional)</Label>
+                      <Input
+                        id="file-desc"
+                        placeholder="Brief description of this document…"
+                        value={fileDescription}
+                        onChange={(e) => setFileDescription(e.target.value)}
+                        maxLength={500}
+                        className="text-sm h-8"
+                      />
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        onClick={handleUpload}
+                        disabled={uploadProgress}
+                        className="flex-1"
+                      >
+                        <Upload className="w-3.5 h-3.5 mr-1.5" />
+                        {uploadProgress ? "Uploading…" : "Upload Document"}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={uploadProgress}
+                      >
+                        Change File
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </CardContent>
           </Card>
         )}
@@ -320,7 +468,6 @@ export default function StakeholderPortalPage() {
               ))}
             </div>
 
-            {/* Post comment form — only shown if stakeholder has canComment permission */}
             {stakeholder.canComment && (
               <div className="pt-2 border-t space-y-2">
                 <Textarea
@@ -351,11 +498,11 @@ export default function StakeholderPortalPage() {
 
         {/* Footer */}
         <p className="text-center text-xs text-muted-foreground pb-4">
-          Secure, read-only view of case {c.ref}. Access expires on{" "}
+          Secure view of case {c.ref}. Access expires on{" "}
           {stakeholder.accessExpiresAt
             ? new Date(stakeholder.accessExpiresAt).toLocaleDateString()
             : "—"}
-          . All access is logged and audited. Auto-refreshes every 30 seconds.
+          . All access and uploads are logged and audited. Auto-refreshes every 30 seconds.
         </p>
       </div>
     </div>

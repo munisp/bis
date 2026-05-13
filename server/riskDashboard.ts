@@ -8,11 +8,12 @@
  * - Sector-level risk aggregation
  */
 import { z } from "zod";
-import { router, protectedProcedure } from "./_core/trpc";
+import { router, protectedProcedure, adminProcedure } from "./_core/trpc";
 import { getDb } from "./db";
-import { investigations, kycRecords } from "../drizzle/schema";
-import { desc, sql, gte, and } from "drizzle-orm";
+import { investigations, kycRecords, platformSettings } from "../drizzle/schema";
+import { desc, sql, gte, and, eq } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
+import { notifyOwner } from "./_core/notification";
 
 export const riskDashboardRouter = router({
   /**
@@ -292,5 +293,115 @@ export const riskDashboardRouter = router({
           count: Number(r.count),
         })),
       };
+      }),
+
+  /**
+   * Get the current risk alert threshold configuration.
+   * Returns the threshold value (0-100) and whether notifications are enabled.
+   */
+  getAlertThreshold: protectedProcedure.query(async () => {
+    const db = await getDb();
+    if (!db) return { threshold: 70, notificationsEnabled: true };
+    const [row] = await db.select().from(platformSettings)
+      .where(eq(platformSettings.key, 'risk_alert_threshold')).limit(1);
+    if (!row) return { threshold: 70, notificationsEnabled: true };
+    const val = row.value as any;
+    return {
+      threshold: Number(val?.threshold ?? 70),
+      notificationsEnabled: Boolean(val?.notificationsEnabled ?? true),
+    };
+  }),
+
+  /**
+   * Update the risk alert threshold.
+   * Admin-only. When the 7-day average score exceeds this value,
+   * a Slack/email notification fires via notifyOwner.
+   */
+  setAlertThreshold: adminProcedure
+    .input(z.object({
+      threshold: z.number().min(0).max(100),
+      notificationsEnabled: z.boolean().default(true),
+    }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
+      const existing = await db.select().from(platformSettings)
+        .where(eq(platformSettings.key, 'risk_alert_threshold')).limit(1);
+      if (existing.length > 0) {
+        await db.update(platformSettings)
+          .set({ value: { threshold: input.threshold, notificationsEnabled: input.notificationsEnabled }, updatedAt: new Date() })
+          .where(eq(platformSettings.key, 'risk_alert_threshold'));
+      } else {
+        await db.insert(platformSettings).values({
+          key: 'risk_alert_threshold',
+          value: { threshold: input.threshold, notificationsEnabled: input.notificationsEnabled },
+        });
+      }
+      return { threshold: input.threshold, notificationsEnabled: input.notificationsEnabled };
     }),
+
+  /**
+   * Check the 7-day average risk score against the configured threshold.
+   * If exceeded and notifications are enabled, fires a notifyOwner alert.
+   * Called by the dashboard widget on each 30-second poll.
+   */
+  checkThreshold: protectedProcedure.mutation(async () => {
+    const db = await getDb();
+    if (!db) return { exceeded: false, avgScore: 0, threshold: 70 };
+
+    // Get threshold config
+    const [row] = await db.select().from(platformSettings)
+      .where(eq(platformSettings.key, 'risk_alert_threshold')).limit(1);
+    const config = row?.value as any;
+    const threshold = Number(config?.threshold ?? 70);
+    const notificationsEnabled = Boolean(config?.notificationsEnabled ?? true);
+
+    // Compute 7-day average risk score from investigations
+    const since = new Date(Date.now() - 7 * 86_400_000);
+    const [result] = await db.select({
+      avgScore: sql<number>`AVG(${investigations.riskScore})`,
+      count: sql<number>`COUNT(*)`,
+      criticalCount: sql<number>`SUM(CASE WHEN ${investigations.riskScore} >= 80 THEN 1 ELSE 0 END)`,
+    }).from(investigations).where(gte(investigations.createdAt, since));
+
+    const avgScore = Math.round(Number(result?.avgScore ?? 0));
+    const count = Number(result?.count ?? 0);
+    const criticalCount = Number(result?.criticalCount ?? 0);
+    const exceeded = avgScore >= threshold && count > 0;
+
+    if (exceeded && notificationsEnabled) {
+      // Check if we already sent a notification in the last hour (rate-limit)
+      const [lastNotif] = await db.select().from(platformSettings)
+        .where(eq(platformSettings.key, 'risk_threshold_last_notified')).limit(1);
+      const lastNotifAt = lastNotif?.value as any;
+      const oneHourAgo = Date.now() - 3_600_000;
+      const shouldNotify = !lastNotifAt?.timestamp || lastNotifAt.timestamp < oneHourAgo;
+
+      if (shouldNotify) {
+        await notifyOwner({
+          title: `⚠️ Risk Alert: 7-day average score ${avgScore} exceeds threshold ${threshold}`,
+          content: [
+            `The 7-day average risk score across all investigations has reached **${avgScore}** (threshold: ${threshold}).`,
+            `- Investigations in window: ${count}`,
+            `- Critical (≥80): ${criticalCount}`,
+            ``,
+            `Review high-risk investigations in the BIS platform dashboard.`,
+          ].join('\n'),
+        });
+        // Record notification timestamp to prevent spam
+        if (lastNotif) {
+          await db.update(platformSettings)
+            .set({ value: { timestamp: Date.now() }, updatedAt: new Date() })
+            .where(eq(platformSettings.key, 'risk_threshold_last_notified'));
+        } else {
+          await db.insert(platformSettings).values({
+            key: 'risk_threshold_last_notified',
+            value: { timestamp: Date.now() },
+          });
+        }
+      }
+    }
+
+    return { exceeded, avgScore, threshold, count, criticalCount };
+  }),
 });

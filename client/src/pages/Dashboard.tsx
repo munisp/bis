@@ -176,6 +176,16 @@ export default function Dashboard() {
     { metric: "all", days: 7 },
     { refetchInterval: 30_000, refetchIntervalInBackground: false }
   );
+  const { data: thresholdConfig } = trpc.riskDashboard.getAlertThreshold.useQuery();
+  const checkThreshold = trpc.riskDashboard.checkThreshold.useMutation();
+  // Check threshold on each analytics refresh
+  const prevRiskDataRef = useRef<typeof riskAnalyticsData | null>(null);
+  useEffect(() => {
+    if (riskAnalyticsData && riskAnalyticsData !== prevRiskDataRef.current) {
+      prevRiskDataRef.current = riskAnalyticsData;
+      checkThreshold.mutate();
+    }
+  }, [riskAnalyticsData]);
 
   const recentInvestigations = recentInvData?.items ?? [];
   const criticalAlerts = (alertsData ?? []).filter((a: any) => a.severity === "critical" || a.severity === "high").slice(0, 4);
@@ -607,7 +617,17 @@ export default function Dashboard() {
           </h3>
           <span className="text-[10px] text-muted-foreground">7-day · refreshes every 30s</span>
         </div>
-        <p className="text-xs text-muted-foreground mb-3">Average daily risk score across all investigations</p>
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-xs text-muted-foreground">Average daily risk score across all investigations</p>
+          {checkThreshold.data?.exceeded && (
+            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 flex items-center gap-1">
+              <AlertTriangle size={9} /> Threshold exceeded ({checkThreshold.data.avgScore} ≥ {checkThreshold.data.threshold})
+            </span>
+          )}
+          {thresholdConfig && !checkThreshold.data?.exceeded && (
+            <span className="text-[10px] text-muted-foreground">Threshold: {thresholdConfig.threshold}</span>
+          )}
+        </div>
         {(!riskAnalyticsData || riskAnalyticsData.score_trend.length === 0) ? (
           <div className="h-[100px] flex items-center justify-center text-xs text-muted-foreground">
             No trend data yet
@@ -630,6 +650,10 @@ export default function Dashboard() {
                   formatter={(v: any, _: any, p: any) => [`${v} avg · ${p.payload.count} entities`, "Risk Score"]}
                 />
                 <Area type="monotone" dataKey="avg_score" stroke="#ef4444" strokeWidth={2} fill="url(#riskGrad)" dot={{ r: 2, fill: '#ef4444' }} />
+                {thresholdConfig && (
+                  <ReferenceLine y={thresholdConfig.threshold} stroke="#f97316" strokeDasharray="4 2" strokeWidth={1.5}
+                    label={{ value: `Threshold ${thresholdConfig.threshold}`, position: 'right', fontSize: 8, fill: '#f97316' }} />
+                )}
               </AreaChart>
             </ResponsiveContainer>
             {riskAnalyticsData.risk_distribution.length > 0 && (

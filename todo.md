@@ -2035,3 +2035,9 @@
 - [x] Stakeholder portal real-time polling — poll case-manager ListComments/ListDocuments every 30s; show live badge on new items; optimistic comment post
 - [x] Risk analytics dashboard widget — "Risk Trend" card on main dashboard polling trpc.riskDashboard.analytics every 30s; sparkline for score_trend; risk_distribution donut; top_flags list
 - [x] OpenClaw event replay endpoint — POST /api/openclaw/replay/:auditLogId admin route; re-processes stored auditLog event; idempotency guard; admin-only PBAC check
+
+## Next Steps Round 2 (May 13 2026)
+
+- [x] Stakeholder portal document upload — S3 upload via storagePut; file attachment on portalPostComment; file type/size validation; download link in comment feed
+- [x] Risk trend alert threshold — configurable threshold in riskDashboard.analytics; notifyOwner fires when 7-day avg score exceeds threshold; threshold stored in platform_settings
+- [x] OpenClaw replay audit trail UI — "Replay History" tab on webhook config page; lists openclaw.replay.* entries from auditLog; shows original event ID, replay timestamp, outcome

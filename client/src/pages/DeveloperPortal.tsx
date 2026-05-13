@@ -15,7 +15,7 @@ import { Slider } from "@/components/ui/slider";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
-import { Copy, Key, Plus, Trash2, BarChart3, AlertTriangle, Code2, RefreshCw, Shield, Zap, Globe, Play, Download, BookOpen, Terminal, ChevronRight } from "lucide-react";
+import { Copy, Key, Plus, Trash2, BarChart3, AlertTriangle, Code2, RefreshCw, Shield, Zap, Globe, Play, Download, BookOpen, Terminal, ChevronRight, History, Clock, CheckCircle2, XCircle } from "lucide-react";
 
 const SCOPE_GROUPS = [
   { label: "Investigations", scopes: ["investigations:read", "investigations:write"] },
@@ -647,7 +647,12 @@ export default function DeveloperPortal() {
   const { user } = useAuth();
   const utils = trpc.useUtils();
   const [createOpen, setCreateOpen] = useState(false);
-  const [activeSection, setActiveSection] = useState<"tokens" | "playground" | "docs" | "openclaw">("tokens");
+  const [activeSection, setActiveSection] = useState<"tokens" | "playground" | "docs" | "openclaw" | "replay">("tokens");
+  const [openclawTab, setOpenclawTab] = useState<"skills" | "history">("skills");
+  const { data: replayHistoryData, isLoading: replayLoading, refetch: refetchReplay } = trpc.audit.replayHistory.useQuery(
+    { limit: 50, offset: 0 },
+    { enabled: activeSection === "openclaw" && openclawTab === "history" }
+  );
 
   const { data: tokensData, isLoading } = trpc.apiTokens.list.useQuery({ limit: 50, offset: 0 });
   void user;
@@ -762,6 +767,105 @@ export default function DeveloperPortal() {
       {/* OpenClaw Managed Instance section */}
       {activeSection === "openclaw" && (
         <div className="space-y-6">
+          {/* OpenClaw sub-tab switcher */}
+          <div className="flex gap-1 bg-muted p-1 rounded-lg w-fit">
+            <button
+              onClick={() => setOpenclawTab("skills")}
+              className={`px-3 py-1.5 text-sm rounded-md transition-colors font-medium flex items-center gap-1.5 ${
+                openclawTab === "skills" ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <Zap className="h-3.5 w-3.5" /> Skills
+            </button>
+            <button
+              onClick={() => setOpenclawTab("history")}
+              className={`px-3 py-1.5 text-sm rounded-md transition-colors font-medium flex items-center gap-1.5 ${
+                openclawTab === "history" ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <History className="h-3.5 w-3.5" /> Replay History
+              {replayHistoryData && replayHistoryData.total > 0 && (
+                <span className="text-[10px] bg-violet-500/20 text-violet-400 px-1.5 py-0.5 rounded-full">{replayHistoryData.total}</span>
+              )}
+            </button>
+          </div>
+
+          {openclawTab === "history" && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="font-semibold">Replay History</h3>
+                  <p className="text-sm text-muted-foreground">All OpenClaw webhook events that have been replayed via the admin endpoint.</p>
+                </div>
+                <Button variant="outline" size="sm" onClick={() => refetchReplay()} className="gap-1.5">
+                  <RefreshCw className={`h-3.5 w-3.5 ${replayLoading ? 'animate-spin' : ''}`} /> Refresh
+                </Button>
+              </div>
+              {replayLoading ? (
+                <div className="flex items-center justify-center h-32 text-muted-foreground text-sm">
+                  <RefreshCw className="h-4 w-4 animate-spin mr-2" /> Loading replay history...
+                </div>
+              ) : !replayHistoryData || replayHistoryData.items.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-32 text-muted-foreground border border-dashed rounded-lg">
+                  <History className="h-8 w-8 mb-2 opacity-40" />
+                  <p className="text-sm">No replays yet</p>
+                  <p className="text-xs mt-1">Use <code className="font-mono text-xs">POST /api/v1/openclaw/replay/:id</code> to replay an event</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {replayHistoryData.items.map((entry) => {
+                    const detail = entry.detail as any;
+                    const originalId = detail?.originalAuditLogId;
+                    const event = detail?.event ?? entry.action.replace('openclaw.replay.', '');
+                    const actions = detail?.actionsPerformed ?? [];
+                    const isSuccess = entry.result === 'success';
+                    return (
+                      <div key={entry.id} className="flex items-start gap-3 p-3 rounded-lg border bg-card hover:bg-muted/30 transition-colors">
+                        <div className={`mt-0.5 shrink-0 ${isSuccess ? 'text-emerald-500' : 'text-red-500'}`}>
+                          {isSuccess ? <CheckCircle2 className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-mono text-xs font-medium text-foreground">{event}</span>
+                            {originalId && (
+                              <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">orig #{originalId}</span>
+                            )}
+                            {entry.targetRef && (
+                              <span className="text-[10px] font-mono text-violet-400">{entry.targetRef}</span>
+                            )}
+                          </div>
+                          {actions.length > 0 && (
+                            <div className="flex gap-1 mt-1 flex-wrap">
+                              {actions.map((a: string) => (
+                                <span key={a} className="text-[10px] bg-violet-500/10 text-violet-400 px-1.5 py-0.5 rounded">{a}</span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        <div className="shrink-0 text-right">
+                          <div className="text-[10px] text-muted-foreground flex items-center gap-1">
+                            <Clock className="h-3 w-3" />
+                            {new Date(entry.createdAt).toLocaleString()}
+                          </div>
+                          {entry.ipAddress && (
+                            <div className="text-[10px] text-muted-foreground mt-0.5">{entry.ipAddress}</div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {replayHistoryData.total > replayHistoryData.items.length && (
+                    <p className="text-xs text-center text-muted-foreground pt-2">
+                      Showing {replayHistoryData.items.length} of {replayHistoryData.total} replays
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {openclawTab === "skills" && (
+          <>
           <div className="flex items-center gap-3 p-4 rounded-lg bg-gradient-to-r from-violet-500/10 to-indigo-500/10 border border-violet-500/20">
             <div className="p-2 rounded-lg bg-violet-500/20">
               <Zap className="h-5 w-5 text-violet-400" />
@@ -816,6 +920,8 @@ export default function DeveloperPortal() {
               <Copy className="h-3.5 w-3.5" /> Copy skill.json
             </button>
           </div>
+          </>
+          )}
         </div>
       )}
 
