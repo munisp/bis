@@ -172,6 +172,10 @@ export default function Dashboard() {
   const { data: dataSourcesData } = trpc.dataSources.list.useQuery();
   const { data: recentTriggersData } = trpc.alertRules.recentTriggers.useQuery();
   const { data: caseActivityData } = trpc.cases.recentActivity.useQuery({ limit: 8 });
+  const { data: riskAnalyticsData, isFetching: riskAnalyticsFetching } = trpc.riskDashboard.analytics.useQuery(
+    { metric: "all", days: 7 },
+    { refetchInterval: 30_000, refetchIntervalInBackground: false }
+  );
 
   const recentInvestigations = recentInvData?.items ?? [];
   const criticalAlerts = (alertsData ?? []).filter((a: any) => a.severity === "critical" || a.severity === "high").slice(0, 4);
@@ -588,6 +592,65 @@ export default function Dashboard() {
               );
             })}
           </div>
+        )}
+      </div>
+
+      {/* ── Risk Trend Sparkline Widget ── */}
+      <div className="mt-4 rounded-lg border border-border bg-card p-4">
+        <div className="flex items-center justify-between mb-1">
+          <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+            <TrendingUp size={14} className="text-primary" />
+            Risk Score Trend
+            {riskAnalyticsFetching && (
+              <RefreshCw size={11} className="animate-spin text-muted-foreground" />
+            )}
+          </h3>
+          <span className="text-[10px] text-muted-foreground">7-day · refreshes every 30s</span>
+        </div>
+        <p className="text-xs text-muted-foreground mb-3">Average daily risk score across all investigations</p>
+        {(!riskAnalyticsData || riskAnalyticsData.score_trend.length === 0) ? (
+          <div className="h-[100px] flex items-center justify-center text-xs text-muted-foreground">
+            No trend data yet
+          </div>
+        ) : (
+          <>
+            <ResponsiveContainer width="100%" height={100}>
+              <AreaChart data={riskAnalyticsData.score_trend} margin={{ top: 4, right: 4, bottom: 0, left: -20 }}>
+                <defs>
+                  <linearGradient id="riskGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#ef4444" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke={chartGrid} vertical={false} />
+                <XAxis dataKey="date" tick={{ fontSize: 9, fill: chartTick }} tickFormatter={(v) => v.slice(5)} />
+                <YAxis domain={[0, 100]} tick={{ fontSize: 9, fill: chartTick }} />
+                <Tooltip
+                  contentStyle={{ background: chartBg, border: `1px solid ${chartBorder}`, borderRadius: 6, fontSize: 11 }}
+                  formatter={(v: any, _: any, p: any) => [`${v} avg · ${p.payload.count} entities`, "Risk Score"]}
+                />
+                <Area type="monotone" dataKey="avg_score" stroke="#ef4444" strokeWidth={2} fill="url(#riskGrad)" dot={{ r: 2, fill: '#ef4444' }} />
+              </AreaChart>
+            </ResponsiveContainer>
+            {riskAnalyticsData.risk_distribution.length > 0 && (
+              <div className="flex gap-2 mt-3 flex-wrap">
+                {(['critical','high','medium','low'] as const).map(bucket => {
+                  const item = riskAnalyticsData!.risk_distribution.find(r => r.bucket === bucket);
+                  const colors: Record<string, string> = {
+                    critical: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
+                    high: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400',
+                    medium: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
+                    low: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
+                  };
+                  return (
+                    <span key={bucket} className={`text-[10px] font-medium px-2 py-0.5 rounded-full capitalize ${colors[bucket]}`}>
+                      {bucket}: {item?.count ?? 0}
+                    </span>
+                  );
+                })}
+              </div>
+            )}
+          </>
         )}
       </div>
 

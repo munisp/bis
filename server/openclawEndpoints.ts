@@ -369,5 +369,149 @@ export function createOpenClawRouter(): Router {
     res.json({ status: "ok", version: "1.0.0", timestamp: new Date().toISOString() });
   });
 
+  /**
+   * POST /api/v1/openclaw/replay/:auditLogId
+   *
+   * Admin endpoint that re-processes a stored auditLog event by ID.
+   * Useful for recovering from downstream failures (e.g., Kafka down during
+   * initial delivery, DB write that partially failed).
+   *
+   * Requires a valid Bearer token (same as webhook).
+   * Returns { replayed: true, event, targetRef, actions } on success.
+   */
+  router.post("/api/v1/openclaw/replay/:auditLogId", async (req, res) => {
+    const token = validateBearerToken(req as Parameters<typeof validateBearerToken>[0]);
+    if (!token) {
+      return res.status(401).json({ code: "UNAUTHORIZED", message: "Invalid or missing Bearer token" });
+    }
+    const auditLogId = parseInt(req.params.auditLogId, 10);
+    if (!Number.isFinite(auditLogId) || auditLogId <= 0) {
+      return res.status(400).json({ code: "INVALID_ID", message: "auditLogId must be a positive integer" });
+    }
+    try {
+      const db = await getDb();
+      if (!db) return res.status(503).json({ code: "DB_UNAVAILABLE", message: "Database unavailable" });
+      // Validate token against apiTokens table
+      const [tokenRow] = await db.select().from(apiTokens)
+        .where(eq(apiTokens.tokenHash, token)).limit(1);
+      if (!tokenRow) {
+        return res.status(401).json({ code: "UNAUTHORIZED", message: "Token not found" });
+      }
+      if (!tokenRow.active) {
+        return res.status(401).json({ code: "TOKEN_REVOKED", message: "Token has been revoked or deactivated" });
+      }
+      if (tokenRow.expiresAt && tokenRow.expiresAt < new Date()) {
+        return res.status(401).json({ code: "TOKEN_EXPIRED", message: "Token has expired" });
+      }
+      // Fetch the stored audit log entry
+      const [entry] = await db.select().from(auditLog)
+        .where(eq(auditLog.id, auditLogId)).limit(1);
+      if (!entry) {
+        return res.status(404).json({ code: "NOT_FOUND", message: `Audit log entry ${auditLogId} not found` });
+      }
+      // Only replay openclaw webhook events
+      if (!entry.action?.startsWith("openclaw.webhook.")) {
+        return res.status(400).json({
+          code: "NOT_REPLAYABLE",
+          message: `Entry ${auditLogId} is not an openclaw webhook event (action: ${entry.action})`
+        });
+      }
+      const detail = entry.detail as Record<string, unknown> | null;
+      const event = typeof detail?.event === "string" ? detail.event : null;
+      const data = detail?.data as Record<string, unknown> | null;
+      const timestamp = typeof detail?.timestamp === "string" ? detail.timestamp : new Date().toISOString();
+      if (!event) {
+        return res.status(400).json({ code: "MISSING_EVENT", message: "Stored entry has no event field" });
+      }
+      const ref = entry.targetRef ?? null;
+      const actionsPerformed: string[] = [];
+      // Re-run the same downstream routing logic as the webhook handler
+      if (event === "investigation.closed" && ref) {
+        await db.update(investigations)
+          .set({ status: "completed", updatedAt: new Date() })
+          .where(eq(investigations.ref, ref));
+        actionsPerformed.push(`investigation.status → completed (ref=${ref})`);
+      } else if (event === "investigation.updated" && ref && typeof data?.status === "string") {
+        const statusMap: Record<string, string> = {
+          open: "pending", in_progress: "processing", closed: "completed",
+          flagged: "flagged", archived: "archived",
+        };
+        const newStatus = statusMap[data.status as string] ?? null;
+        if (newStatus) {
+          await db.update(investigations)
+            .set({ status: newStatus as any, updatedAt: new Date() })
+            .where(eq(investigations.ref, ref));
+          actionsPerformed.push(`investigation.status → ${newStatus} (ref=${ref})`);
+        }
+      } else if ((event === "kyc.completed" || event === "kyc.failed") && ref) {
+        const kycStatus = event === "kyc.completed" ? "passed" : "failed";
+        await db.update(kycRecords)
+          .set({ status: kycStatus as any, updatedAt: new Date() })
+          .where(eq(kycRecords.subjectRef, ref));
+        actionsPerformed.push(`kycRecord.status → ${kycStatus} (subjectRef=${ref})`);
+      } else if (event === "sar.acknowledged" && ref) {
+        await db.update(sarFilings)
+          .set({ status: "acknowledged", acknowledgedAt: new Date(), updatedAt: new Date() })
+          .where(eq(sarFilings.sarRef, ref));
+        actionsPerformed.push(`sarFiling.status → acknowledged (sarRef=${ref})`);
+      } else if (event === "sar.filed" && ref) {
+        await db.update(sarFilings)
+          .set({ status: "filed", filedAt: new Date(), updatedAt: new Date() })
+          .where(eq(sarFilings.sarRef, ref));
+        actionsPerformed.push(`sarFiling.status → filed (sarRef=${ref})`);
+      } else if (event === "alert.triggered") {
+        const severity = typeof data?.severity === "string" ? data.severity : "medium";
+        const title = typeof data?.title === "string" ? data.title : `Replayed alert: ${event}`;
+        const body = typeof data?.body === "string" ? data.body : `OpenClaw replay: ${event} at ${timestamp}`;
+        const validSeverities = ["critical", "high", "medium", "low", "info"];
+        await db.insert(alerts).values({
+          type: "sanctions" as any,
+          severity: (validSeverities.includes(severity) ? severity : "medium") as any,
+          title: `[REPLAY] ${title}`,
+          body,
+          subjectRef: ref ?? undefined,
+          sourceService: "openclaw-replay",
+        });
+        actionsPerformed.push(`alert.created (severity=${severity})`);
+      } else if (event === "alert.resolved" && ref) {
+        await db.update(alerts)
+          .set({ resolved: true, resolvedAt: new Date() })
+          .where(and(eq(alerts.subjectRef, ref), eq(alerts.resolved, false)));
+        actionsPerformed.push(`alerts.resolved (subjectRef=${ref})`);
+      } else if (event === "sanctions.hit" && ref) {
+        await db.insert(alerts).values({
+          type: "sanctions" as any,
+          severity: "high" as any,
+          title: `[REPLAY] Sanctions hit: ${ref}`,
+          body: `OpenClaw replay: sanctions match for subject ${ref} at ${timestamp}.`,
+          subjectRef: ref,
+          sourceService: "openclaw-replay",
+        });
+        actionsPerformed.push(`sanctions.alert.created (ref=${ref})`);
+      } else {
+        actionsPerformed.push(`no downstream action for event=${event}`);
+      }
+      // Write a replay audit log entry
+      await db.insert(auditLog).values({
+        category: "api",
+        action: `openclaw.replay.${event}`,
+        targetRef: ref ?? undefined,
+        result: "success",
+        detail: { originalAuditLogId: auditLogId, event, timestamp, actionsPerformed, source: "openclaw-replay" },
+      });
+      return res.json({
+        replayed: true,
+        auditLogId,
+        event,
+        targetRef: ref,
+        actionsPerformed,
+        replayedAt: new Date().toISOString(),
+      });
+    } catch (err) {
+      console.error("[OpenClaw Replay] Error:", err);
+      return res.status(500).json({ code: "INTERNAL_ERROR", message: "Replay failed" });
+    }
+  });
+
   return router;
 }

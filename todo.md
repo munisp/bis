@@ -2029,3 +2029,9 @@
 - [x] Node.js tests: 358/358 passing
 - [x] Go tests: case-manager all passing · payment-rails all passing
 - [x] Python tests: 31 risk-engine · 16 ml-enrichment · 21 biometric-engine — all passing
+
+## Next Steps Implementation (May 13 2026)
+
+- [x] Stakeholder portal real-time polling — poll case-manager ListComments/ListDocuments every 30s; show live badge on new items; optimistic comment post
+- [x] Risk analytics dashboard widget — "Risk Trend" card on main dashboard polling trpc.riskDashboard.analytics every 30s; sparkline for score_trend; risk_distribution donut; top_flags list
+- [x] OpenClaw event replay endpoint — POST /api/openclaw/replay/:auditLogId admin route; re-processes stored auditLog event; idempotency guard; admin-only PBAC check

@@ -3441,6 +3441,93 @@ ${timeline.map(e => `<tr><td>${new Date(e.createdAt).toLocaleDateString()}</td><
         })),
       };
     }),
+
+  // ─── Stakeholder Portal: real-time polling ────────────────────────────────
+  /**
+   * Public endpoint (token-gated) — returns only new comments and documents
+   * added after `since` (ISO timestamp). Used by the portal page to poll
+   * every 30 s without re-fetching the entire case.
+   */
+  portalPollUpdates: publicProcedure
+    .input(z.object({
+      token: z.string(),
+      since: z.string().datetime(), // ISO-8601 UTC timestamp of last poll
+    }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
+      const [stakeholder] = await db.select().from(caseStakeholders)
+        .where(eq(caseStakeholders.accessToken, input.token)).limit(1);
+      if (!stakeholder) throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Invalid access token' });
+      if (stakeholder.accessExpiresAt && stakeholder.accessExpiresAt < new Date()) {
+        throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Access token expired' });
+      }
+      const sinceDate = new Date(input.since);
+      const newComments = await db.select().from(caseComments)
+        .where(and(
+          eq(caseComments.caseId, stakeholder.caseId),
+          eq(caseComments.confidential, false),
+          eq(caseComments.deletedAt, null as any),
+          gte(caseComments.createdAt, sinceDate),
+        ))
+        .orderBy(asc(caseComments.createdAt));
+      const newDocuments = stakeholder.canViewDocuments
+        ? await db.select().from(caseDocuments)
+            .where(and(
+              eq(caseDocuments.caseId, stakeholder.caseId),
+              eq(caseDocuments.confidential, false),
+              gte(caseDocuments.createdAt, sinceDate),
+            ))
+            .orderBy(asc(caseDocuments.createdAt))
+        : [];
+      await db.update(caseStakeholders)
+        .set({ lastAccessedAt: new Date() })
+        .where(eq(caseStakeholders.id, stakeholder.id));
+      return {
+        newComments,
+        newDocuments,
+        pollTimestamp: new Date().toISOString(),
+      };
+    }),
+
+  /**
+   * Public endpoint (token-gated) — allows a stakeholder to post a comment
+   * if `canComment` is set on their stakeholder record.
+   */
+  portalPostComment: publicProcedure
+    .input(z.object({
+      token: z.string(),
+      content: z.string().min(1).max(2000),
+    }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
+      const [stakeholder] = await db.select().from(caseStakeholders)
+        .where(eq(caseStakeholders.accessToken, input.token)).limit(1);
+      if (!stakeholder) throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Invalid access token' });
+      if (stakeholder.accessExpiresAt && stakeholder.accessExpiresAt < new Date()) {
+        throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Access token expired' });
+      }
+      if (!stakeholder.canComment) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'You do not have permission to comment on this case' });
+      }
+      const [comment] = await db.insert(caseComments).values({
+        caseId: stakeholder.caseId,
+        content: input.content,
+        stakeholderId: stakeholder.id,
+        authorName: stakeholder.name,
+        authorRole: stakeholder.role ?? 'stakeholder',
+        confidential: false,
+      }).returning();
+      await db.insert(caseTimeline).values({
+        caseId: stakeholder.caseId,
+        eventType: 'comment_added',
+        title: `Stakeholder comment: ${input.content.slice(0, 80)}${input.content.length > 80 ? '…' : ''}`,
+        actorName: stakeholder.name,
+        actorRole: stakeholder.role ?? 'stakeholder',
+      });
+      return comment;
+    }),
 });
 // ─── Ollama Router ────────────────────────────────────────────────────────────
 

@@ -229,4 +229,68 @@ export const riskDashboardRouter = router({
       criticalCount: Number(r.criticalCount ?? 0),
     }));
   }),
+
+  /**
+   * Proxy to risk-engine /v1/analytics — returns Redis-backed
+   * risk_distribution, top_flags, and score_trend for the dashboard widget.
+   * Falls back to DB-computed values when the risk-engine is unavailable.
+   */
+  analytics: protectedProcedure
+    .input(z.object({
+      metric: z.enum(["risk_distribution", "top_flags", "score_trend", "all"]).default("all"),
+      days: z.number().min(1).max(90).default(7),
+    }))
+    .query(async ({ input }) => {
+      const RISK_ENGINE_URL = process.env.BIS_RISK_ENGINE_URL || "http://localhost:8082";
+      const GATEWAY_KEY = process.env.BIS_GATEWAY_KEY || "dev-gateway-key-change-in-prod";
+      try {
+        const res = await fetch(`${RISK_ENGINE_URL}/v1/analytics`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-BIS-Key": GATEWAY_KEY },
+          body: JSON.stringify({ metric: input.metric, days: input.days }),
+          signal: AbortSignal.timeout(5000),
+        });
+        if (res.ok) {
+          const json = await res.json();
+          return json as {
+            risk_distribution: { bucket: string; count: number }[];
+            top_flags: { flag: string; count: number }[];
+            score_trend: { date: string; avg_score: number; count: number }[];
+          };
+        }
+      } catch (_) {
+        // Risk engine unreachable — fall through to DB fallback
+      }
+      // DB fallback: compute from investigations table
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
+      const since = new Date(Date.now() - input.days * 86_400_000);
+      const [distRows, trendRows] = await Promise.all([
+        db.select({
+          bucket: sql<string>`CASE
+            WHEN ${investigations.riskScore} >= 80 THEN 'critical'
+            WHEN ${investigations.riskScore} >= 60 THEN 'high'
+            WHEN ${investigations.riskScore} >= 40 THEN 'medium'
+            ELSE 'low' END`,
+          count: sql<number>`COUNT(*)`,
+        }).from(investigations).groupBy(sql`1`),
+        db.select({
+          date: sql<string>`DATE(${investigations.createdAt})`,
+          avg_score: sql<number>`AVG(${investigations.riskScore})`,
+          count: sql<number>`COUNT(*)`,
+        }).from(investigations)
+          .where(gte(investigations.createdAt, since))
+          .groupBy(sql`DATE(${investigations.createdAt})`)
+          .orderBy(sql`DATE(${investigations.createdAt})`),
+      ]);
+      return {
+        risk_distribution: distRows.map(r => ({ bucket: r.bucket, count: Number(r.count) })),
+        top_flags: [],
+        score_trend: trendRows.map(r => ({
+          date: r.date,
+          avg_score: Math.round(Number(r.avg_score ?? 0)),
+          count: Number(r.count),
+        })),
+      };
+    }),
 });
