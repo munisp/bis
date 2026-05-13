@@ -19,6 +19,8 @@ from typing import Any, Dict, List, Optional
 import structlog
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy import text as sa_text
 
 log = structlog.get_logger(__name__)
 router = APIRouter()
@@ -46,23 +48,43 @@ class LakehouseQueryResponse(BaseModel):
 # ── Schema context for SQL generation ────────────────────────────────────────
 
 SCHEMA_CONTEXT = """
-BIS Platform MySQL Database Schema (key tables):
-- investigations(id, ref, title, status, priority, risk_score, subject_name, created_at, due_at)
-- alerts(id, ref, type, severity, status, message, source_service, created_at)
-- cases(id, ref, title, type, status, priority, risk_score, created_at, closed_at)
-- field_tasks(id, ref, title, status, priority, agent_id, investigation_id, created_at)
-- users(id, name, email, role, created_at)
-- tenants(id, name, plan, status, created_at)
-- screening_requests(id, ref, subject_name, status, risk_score, created_at)
-- kyc_verifications(id, ref, subject_name, status, provider, created_at)
-- audit_log(id, action, entity_type, entity_id, actor_id, created_at)
+BIS Platform MySQL/TiDB Database Schema (key tables, camelCase column names):
+
+investigations(id, ref, title, status, priority, riskScore, subjectName, createdAt, dueAt)
+  status values: open | in_progress | closed | archived
+  priority values: low | medium | high | critical
+
+alerts(id, ref, type, severity, status, message, sourceService, createdAt)
+  severity values: low | medium | high | critical
+  status values: open | acknowledged | resolved | false_positive
+
+cases(id, ref, title, type, status, priority, riskScore, createdAt, closedAt)
+  type values: fraud | aml | kyc | sanctions | general
+  status values: open | in_progress | closed | archived
+
+fieldTasks(id, ref, title, status, priority, agentId, investigationId, createdAt)
+  status values: pending | in_progress | completed | cancelled
+
+users(id, name, email, role, createdAt)
+  role values: admin | analyst | agent | viewer
+
+tenants(id, name, plan, status, createdAt)
+
+screeningRequests(id, ref, subjectName, status, riskScore, createdAt)
+
+kycRecords(id, ref, subjectName, status, provider, createdAt)
+  status values: pending | passed | failed | expired
+
+auditLog(id, action, entityType, entityId, actorId, createdAt)
 
 Rules:
-- Always use SELECT only (no INSERT/UPDATE/DELETE)
-- Use LIMIT to cap results (max 1000)
-- Use DATE_FORMAT or DATE() for date grouping
+- Always use SELECT only (no INSERT/UPDATE/DELETE/DROP/ALTER)
+- Use LIMIT to cap results (max 1000 rows)
+- Column names are camelCase — quote them with backticks: `riskScore`, `createdAt`
+- Use DATE() or DATE_FORMAT() for date grouping
 - Use COUNT(*), AVG(), SUM() for aggregations
-- Always include created_at in time-based queries
+- Always include createdAt in time-based queries
+- For date filtering use: WHERE `createdAt` >= DATE_SUB(NOW(), INTERVAL 30 DAY)
 """
 
 
@@ -77,6 +99,15 @@ def sanitize_sql(sql: str) -> str:
     return sql.strip().rstrip(";")
 
 
+def _make_async_url(db_url: str) -> str:
+    """Convert a sync database URL to an async one for SQLAlchemy."""
+    if db_url.startswith("mysql://"):
+        return db_url.replace("mysql://", "mysql+aiomysql://", 1)
+    if db_url.startswith("postgresql://"):
+        return db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    return db_url
+
+
 # ── Endpoint ──────────────────────────────────────────────────────────────────
 
 @router.post("/query", response_model=LakehouseQueryResponse)
@@ -86,7 +117,7 @@ async def lakehouse_query(req: LakehouseQueryRequest, request: Request) -> Lakeh
     settings = request.app.state.settings
     model = req.model or settings.ollama_default_model
 
-    # Step 1: Generate SQL
+    # Step 1: Generate SQL via Ollama
     sql_prompt = f"""
 {SCHEMA_CONTEXT}
 
@@ -109,20 +140,54 @@ Return ONLY the SQL query, no explanation, no markdown fences.
         log.error("lakehouse.sql_generation.failed", error=str(e))
         raise HTTPException(status_code=503, detail=f"SQL generation failed: {e}")
 
-    # Step 2: Execute SQL (placeholder — real implementation connects to DB)
-    # In production, use sqlalchemy async engine to execute generated_sql
+    # Step 2: Execute SQL against the BIS database
     rows: List[Dict[str, Any]] = []
     columns: List[str] = []
-    # TODO: connect to settings.database_url and execute generated_sql with LIMIT
+    try:
+        db_url = _make_async_url(settings.database_url)
+        engine = create_async_engine(
+            db_url,
+            pool_pre_ping=True,
+            pool_size=1,
+            max_overflow=0,
+            connect_args={"connect_timeout": 5},
+        )
+        # Enforce row limit in generated SQL
+        limited_sql = generated_sql
+        if "limit" not in limited_sql.lower():
+            limited_sql = f"{limited_sql} LIMIT {req.max_rows}"
 
-    # Step 3: Summarise result
+        async with engine.connect() as conn:
+            result = await conn.execute(sa_text(limited_sql))
+            columns = list(result.keys())
+            raw_rows = result.fetchall()
+            rows = [dict(zip(columns, row)) for row in raw_rows]
+
+        await engine.dispose()
+        log.info(
+            "lakehouse.sql_execution.ok",
+            question=req.question[:80],
+            rows=len(rows),
+            sql=limited_sql[:200],
+        )
+    except ValueError:
+        raise
+    except Exception as db_err:
+        log.error("lakehouse.sql_execution.failed", error=str(db_err), sql=generated_sql[:300])
+        raise HTTPException(
+            status_code=422,
+            detail=f"SQL execution failed: {db_err}",
+        )
+
+    # Step 3: Summarise result via Ollama
     answer_prompt = f"""
 Question: {req.question}
 SQL executed: {generated_sql}
 Result: {len(rows)} rows returned.
-{f'Sample data: {rows[:5]}' if rows else 'No data returned.'}
+{f'Sample data (first 5 rows): {rows[:5]}' if rows else 'No data returned for this query.'}
 
 Provide a clear, concise answer to the question based on the query result.
+Be specific — mention counts, percentages, or key values where relevant.
 """
     try:
         answer = await ollama.generate(

@@ -11,8 +11,8 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { invokeLLM } from "./_core/llm";
 import { getDb } from "./db";
-import { apiTokens } from "../drizzle/schema";
-import { eq } from "drizzle-orm";
+import { apiTokens, investigations, kycRecords, sarFilings, alerts, auditLog } from "../drizzle/schema";
+import { eq, and } from "drizzle-orm";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -285,7 +285,82 @@ export function createOpenClawRouter(): Router {
       return res.status(400).json({ code: "INVALID_EVENT", message: `Unknown event. Valid events: ${validEvents.join(", ")}` });
     }
     console.log(`[OpenClaw Webhook] event=${event} timestamp=${timestamp}`, data);
-    // In production: emit to Kafka bis.openclaw topic, trigger investigation updates
+    // Persist the webhook event and route to downstream DB updates
+    (async () => {
+      try {
+        const db = await getDb();
+        if (!db) return;
+        const d = data as Record<string, unknown> | null;
+        const ref = typeof d?.ref === "string" ? d.ref
+          : typeof d?.subject_ref === "string" ? d.subject_ref : null;
+        // 1. Persist to audit log for traceability
+        await db.insert(auditLog).values({
+          category: "api",
+          action: `openclaw.webhook.${event}`,
+          targetRef: ref ?? undefined,
+          result: "success",
+          detail: { event, timestamp, data, source: "openclaw" },
+        });
+        // 2. Route event to downstream DB state changes
+        if (event === "investigation.closed" && ref) {
+          await db.update(investigations)
+            .set({ status: "completed", updatedAt: new Date() })
+            .where(eq(investigations.ref, ref));
+        } else if (event === "investigation.updated" && ref && typeof d?.status === "string") {
+          const statusMap: Record<string, string> = {
+            open: "pending", in_progress: "processing", closed: "completed",
+            flagged: "flagged", archived: "archived",
+          };
+          const newStatus = statusMap[d.status as string] ?? null;
+          if (newStatus) {
+            await db.update(investigations)
+              .set({ status: newStatus as any, updatedAt: new Date() })
+              .where(eq(investigations.ref, ref));
+          }
+        } else if ((event === "kyc.completed" || event === "kyc.failed") && ref) {
+          const kycStatus = event === "kyc.completed" ? "passed" : "failed";
+          await db.update(kycRecords)
+            .set({ status: kycStatus as any, updatedAt: new Date() })
+            .where(eq(kycRecords.subjectRef, ref));
+        } else if (event === "sar.acknowledged" && ref) {
+          await db.update(sarFilings)
+            .set({ status: "acknowledged", acknowledgedAt: new Date(), updatedAt: new Date() })
+            .where(eq(sarFilings.sarRef, ref));
+        } else if (event === "sar.filed" && ref) {
+          await db.update(sarFilings)
+            .set({ status: "filed", filedAt: new Date(), updatedAt: new Date() })
+            .where(eq(sarFilings.sarRef, ref));
+        } else if (event === "alert.triggered") {
+          const severity = typeof d?.severity === "string" ? d.severity : "medium";
+          const title = typeof d?.title === "string" ? d.title : `External alert: ${event}`;
+          const body = typeof d?.body === "string" ? d.body : `OpenClaw webhook: ${event} at ${timestamp}`;
+          const validSeverities = ["critical", "high", "medium", "low", "info"];
+          await db.insert(alerts).values({
+            type: "sanctions" as any,
+            severity: (validSeverities.includes(severity) ? severity : "medium") as any,
+            title,
+            body,
+            subjectRef: ref ?? undefined,
+            sourceService: "openclaw",
+          });
+        } else if (event === "alert.resolved" && ref) {
+          await db.update(alerts)
+            .set({ resolved: true, resolvedAt: new Date() })
+            .where(and(eq(alerts.subjectRef, ref), eq(alerts.resolved, false)));
+        } else if (event === "sanctions.hit" && ref) {
+          await db.insert(alerts).values({
+            type: "sanctions" as any,
+            severity: "high" as any,
+            title: `Sanctions hit: ${ref}`,
+            body: `OpenClaw detected a sanctions match for subject ${ref} at ${timestamp}.`,
+            subjectRef: ref,
+            sourceService: "openclaw",
+          });
+        }
+      } catch (webhookErr) {
+        console.error("[OpenClaw Webhook] DB update failed:", webhookErr);
+      }
+    })();
     return res.json({ received: true, event });
   });
 

@@ -254,11 +254,24 @@ type GenericRepo struct {
 	table string
 }
 
+// DB returns the underlying *sql.DB for direct queries in handlers.
+func (r *GenericRepo) DB() *sql.DB { return r.db }
+
+// GetCaseIDByRef resolves a case ref to its numeric primary key.
+func GetCaseIDByRef(db *sql.DB, ref string) (int64, error) {
+	var id int64
+	err := db.QueryRow(`SELECT id FROM cases WHERE ref = $1 LIMIT 1`, ref).Scan(&id)
+	if err == sql.ErrNoRows {
+		return 0, fmt.Errorf("not_found")
+	}
+	return id, err
+}
+
 // InsertEvent inserts a timeline event for a case.
 func (r *GenericRepo) InsertEvent(ctx context.Context, caseID int64, eventType, title string, detail interface{}, actorID *int64, actorName string) error {
 	detailJSON, _ := json.Marshal(detail)
 	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO case_timeline (case_id, event_type, title, detail, actor_id, actor_name, created_at)
+		`INSERT INTO case_timeline ("caseId", "eventType", title, detail, "actorId", "actorName", "createdAt")
 		 VALUES ($1,$2,$3,$4,$5,$6,NOW())`,
 		caseID, eventType, title, detailJSON, actorID, actorName,
 	)

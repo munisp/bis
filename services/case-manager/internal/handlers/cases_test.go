@@ -142,57 +142,56 @@ func TestGetUserName_Set(t *testing.T) {
 	}
 }
 
-// ─── Stub handler tests (PartyHandler, DocumentHandler, etc.) ─────────────────
+// ─── Sub-entity handler tests (PartyHandler, DocumentHandler, etc.) ─────────────
+// These tests verify that the handlers respond correctly when no DB is configured
+// (repo == nil). In production, handlers are constructed with NewXxxHandler(db, ...).
+// When the repo is nil, handlers return 503 Service Unavailable — a safe degradation.
 
-func TestPartyHandler_ListParties(t *testing.T) {
+func TestPartyHandler_ListParties_NoDB(t *testing.T) {
 	r := gin.New()
-	h := &PartyHandler{}
+	h := &PartyHandler{} // no DB — simulates misconfigured deployment
 	r.GET("/api/v1/cases/:ref/parties", h.ListParties)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/cases/CASE-001/parties", nil)
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rr.Code)
-	}
-	var body map[string]interface{}
-	json.NewDecoder(rr.Body).Decode(&body)
-	if body["ref"] != "CASE-001" {
-		t.Errorf("expected ref=CASE-001, got %v", body["ref"])
+	// Without a DB the handler should return 503, not panic
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected 503 when no DB configured, got %d", rr.Code)
 	}
 }
 
-func TestDocumentHandler_ListDocuments(t *testing.T) {
+func TestDocumentHandler_ListDocuments_NoDB(t *testing.T) {
 	r := gin.New()
 	h := &DocumentHandler{}
 	r.GET("/api/v1/cases/:ref/documents", h.ListDocuments)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/cases/CASE-001/documents", nil)
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rr.Code)
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected 503 when no DB configured, got %d", rr.Code)
 	}
 }
 
-func TestStakeholderHandler_ListStakeholders(t *testing.T) {
+func TestStakeholderHandler_ListStakeholders_NoDB(t *testing.T) {
 	r := gin.New()
 	h := &StakeholderHandler{}
 	r.GET("/api/v1/cases/:ref/stakeholders", h.ListStakeholders)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/cases/CASE-001/stakeholders", nil)
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rr.Code)
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected 503 when no DB configured, got %d", rr.Code)
 	}
 }
 
-func TestCommentHandler_ListComments(t *testing.T) {
+func TestCommentHandler_ListComments_NoDB(t *testing.T) {
 	r := gin.New()
 	h := &CommentHandler{}
 	r.GET("/api/v1/cases/:ref/comments", h.ListComments)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/cases/CASE-001/comments", nil)
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rr.Code)
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected 503 when no DB configured, got %d", rr.Code)
 	}
 }

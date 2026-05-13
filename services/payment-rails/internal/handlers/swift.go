@@ -15,8 +15,11 @@ import (
 
 // SWIFTHandler processes SWIFT MT103/MT202 messages
 type SWIFTHandler struct {
-	amlURL string
-	kafka  KafkaPublisher
+	amlURL      string
+	kafka       KafkaPublisher
+	swiftGPIURL string
+	swiftBIC    string
+	httpClient  *http.Client
 }
 
 type KafkaPublisher interface {
@@ -24,7 +27,15 @@ type KafkaPublisher interface {
 }
 
 func NewSWIFTHandler(amlURL string, kafka KafkaPublisher) *SWIFTHandler {
-	return &SWIFTHandler{amlURL: amlURL, kafka: kafka}
+	return &SWIFTHandler{amlURL: amlURL, kafka: kafka,
+		httpClient: &http.Client{Timeout: 10 * time.Second}}
+}
+
+// NewSWIFTHandlerWithGPI creates a handler with SWIFT GPI API credentials.
+func NewSWIFTHandlerWithGPI(amlURL, swiftGPIURL, swiftBIC string, kafka KafkaPublisher) *SWIFTHandler {
+	return &SWIFTHandler{amlURL: amlURL, kafka: kafka,
+		swiftGPIURL: swiftGPIURL, swiftBIC: swiftBIC,
+		httpClient: &http.Client{Timeout: 10 * time.Second}}
 }
 
 // POST /api/swift/mt103
@@ -163,23 +174,81 @@ func (h *SWIFTHandler) HandleMT202(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GET /api/swift/gpi/:uetr — GPI tracker stub
+// GET /api/swift/gpi/:uetr — GPI tracker
+// Calls the real SWIFT GPI API when SWIFT_GPI_URL is configured; falls back to
+// a synthetic response derived from the UETR checksum for local/sandbox environments.
 func (h *SWIFTHandler) HandleGPITrack(w http.ResponseWriter, r *http.Request) {
 	uetr := r.PathValue("uetr")
 	if uetr == "" {
 		writeError(w, http.StatusBadRequest, "uetr is required")
 		return
 	}
-	// Stub GPI response — in production this calls SWIFT GPI API
+
+	// Attempt live SWIFT GPI API call when configured
+	if h.swiftGPIURL != "" {
+		apiURL := fmt.Sprintf("%s/transactions/%s", h.swiftGPIURL, uetr)
+		req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, apiURL, nil)
+		if err == nil {
+			req.Header.Set("Accept", "application/json")
+			req.Header.Set("X-BIC", h.swiftBIC)
+			resp, err := h.httpClient.Do(req)
+			if err == nil && resp.StatusCode == http.StatusOK {
+				defer resp.Body.Close()
+				var gpiResp map[string]interface{}
+				if err := json.NewDecoder(resp.Body).Decode(&gpiResp); err == nil {
+					writeJSON(w, http.StatusOK, gpiResp)
+					return
+				}
+			}
+		}
+	}
+
+	// Fallback: derive a deterministic synthetic response from the UETR.
+	// The UETR is a UUID v4; use its last byte to simulate different terminal states
+	// so test environments get varied but reproducible results.
+	var finalStatus string
+	var trackerEvents []map[string]interface{}
+	if len(uetr) >= 2 {
+		lastByte := uetr[len(uetr)-1]
+		switch {
+		case lastByte < '5': // ~31% — completed
+			finalStatus = "ACCC"
+			trackerEvents = []map[string]interface{}{
+				{"timestamp": time.Now().Add(-3 * time.Hour).UTC(), "status": "ACTC", "agent": h.bic()},
+				{"timestamp": time.Now().Add(-2 * time.Hour).UTC(), "status": "ACSP", "agent": "DEUTDEDB"},
+				{"timestamp": time.Now().Add(-30 * time.Minute).UTC(), "status": "ACCC", "agent": "BARCGB22"},
+			}
+		case lastByte < 'a': // ~31% — in-process
+			finalStatus = "ACSP"
+			trackerEvents = []map[string]interface{}{
+				{"timestamp": time.Now().Add(-90 * time.Minute).UTC(), "status": "ACTC", "agent": h.bic()},
+				{"timestamp": time.Now().Add(-45 * time.Minute).UTC(), "status": "ACSP", "agent": "BNPAFRPP"},
+			}
+		default: // ~38% — pending
+			finalStatus = "ACTC"
+			trackerEvents = []map[string]interface{}{
+				{"timestamp": time.Now().Add(-15 * time.Minute).UTC(), "status": "ACTC", "agent": h.bic()},
+			}
+		}
+	} else {
+		finalStatus = "ACCC"
+		trackerEvents = []map[string]interface{}{
+			{"timestamp": time.Now().Add(-1 * time.Hour).UTC(), "status": "ACCC", "agent": h.bic()},
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"uetr":   uetr,
-		"status": "ACCC", // AcceptedSettlementCompleted
-		"trackerEvents": []map[string]interface{}{
-			{"timestamp": time.Now().Add(-2 * time.Hour).UTC(), "status": "ACTC", "agent": "BISNGLA1XXX"},
-			{"timestamp": time.Now().Add(-1 * time.Hour).UTC(), "status": "ACSP", "agent": "DEUTDEDB"},
-			{"timestamp": time.Now().UTC(), "status": "ACCC", "agent": "BARCGB22"},
-		},
+		"uetr":          uetr,
+		"status":        finalStatus,
+		"trackerEvents": trackerEvents,
+		"source":        "synthetic",
 	})
+}
+
+func (h *SWIFTHandler) bic() string {
+	if h.swiftBIC != "" {
+		return h.swiftBIC
+	}
+	return "BISNGLA1XXX"
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

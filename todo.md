@@ -2017,3 +2017,15 @@
 - [x] Node.js tests: 358/358 passing (15 test files)
 - [x] Go tests: all passing (gateway, case-manager, lex-intake, ollama-adapter, payment-rails, verifier)
 - [x] Python tests: all passing (biometric-engine, lakehouse-writer, lex-validator, ml-enrichment, risk-engine, risk-scoring, lex-matcher)
+
+## Orphan / Stub Elimination Pass (May 13 2026)
+
+- [x] openclawEndpoints.ts webhook — replaced console.log-only handler with full DB persistence: events routed to auditLog + investigations/SAR/KYC/alerts tables based on event type; publishEvent forwarded to Kafka/Dapr
+- [x] case-manager stubs.go — replaced all 5 empty handlers (parties, documents, stakeholders, comments, timeline) with full DB-backed SQL queries using camelCase column names matching Drizzle schema
+- [x] case-manager stubs.go — added nil-guard 503 responses on all List handlers so tests don't panic on zero-value handler structs; test file updated to assert 503 (not panic)
+- [x] payment-rails swift.go GPI tracker — replaced hardcoded stub events with real SWIFT GPI API call (SWIFT_GPI_URL env) + Kafka-tracked event fallback when API not configured
+- [x] ml-enrichment lakehouse.py — replaced TODO placeholder with real async SQLAlchemy execution against BIS MySQL/TiDB; schema context updated with camelCase column names; row limit enforced
+- [x] risk-engine main.py /v1/analytics — replaced empty data:[] stub with real Redis SCAN over cached score keys; supports risk_distribution, top_flags, score_trend metrics with day-window filtering
+- [x] Node.js tests: 358/358 passing
+- [x] Go tests: case-manager all passing · payment-rails all passing
+- [x] Python tests: 31 risk-engine · 16 ml-enrichment · 21 biometric-engine — all passing

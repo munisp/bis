@@ -717,23 +717,128 @@ def score_subject_alias(req: RiskScoreRequest, background_tasks: BackgroundTasks
 
 @app.post("/v1/analytics", dependencies=[Depends(verify_key)])
 def get_analytics(req: AnalyticsRequest):
-    """Aggregated risk analytics — used by the Developer Portal and Dashboard."""
+    """Aggregated risk analytics built from cached score records in Redis.
+
+    Supported metrics:
+      risk_distribution  — count of subjects per risk tier (low/medium/high/critical)
+      top_flags          — most frequent risk flags across all cached scores
+      score_trend        — average composite score per day over the last N days
+    """
+    from datetime import timedelta
+    from collections import defaultdict
+
     cache_key = f"risk:analytics:{req.metric}:{req.tenant_id}:{req.days}"
     cached = cache_get(cache_key)
     if cached:
         return json.loads(cached)
 
-    # In production this would query the analytics DB / Lakehouse
-    # For now, return structured placeholder data clearly labelled
+    data: list = []
+    source = "redis_cache"
+
+    if redis_client is not None:
+        try:
+            # Scan all cached score keys: risk:score:<subject_id>:<tier>
+            pattern = "risk:score:*"
+            score_records = []
+            cursor = 0
+            while True:
+                cursor, keys = redis_client.scan(cursor, match=pattern, count=200)
+                for key in keys:
+                    raw = redis_client.get(key)
+                    if raw:
+                        try:
+                            record = json.loads(raw)
+                            score_records.append(record)
+                        except Exception:
+                            pass
+                if cursor == 0:
+                    break
+
+            # Filter by days window using scored_at timestamp
+            cutoff = datetime.now(timezone.utc) - timedelta(days=req.days)
+            filtered = []
+            for r in score_records:
+                try:
+                    scored_at = datetime.fromisoformat(
+                        r.get("scored_at", "").replace("Z", "+00:00")
+                    )
+                    if scored_at >= cutoff:
+                        filtered.append(r)
+                except Exception:
+                    filtered.append(r)  # include if timestamp unparseable
+
+            if req.metric == "risk_distribution":
+                tier_counts: dict = {"low": 0, "medium": 0, "high": 0, "critical": 0}
+                for r in filtered:
+                    tier = r.get("risk_tier") or r.get("tier", "medium")
+                    tier_counts[tier] = tier_counts.get(tier, 0) + 1
+                total = max(len(filtered), 1)
+                data = [
+                    {
+                        "tier": tier,
+                        "count": count,
+                        "pct": round(count / total * 100, 1),
+                    }
+                    for tier, count in tier_counts.items()
+                ]
+
+            elif req.metric == "top_flags":
+                flag_counts: dict = {}
+                for r in filtered:
+                    for flag in r.get("flags", []):
+                        flag_counts[flag] = flag_counts.get(flag, 0) + 1
+                sorted_flags = sorted(flag_counts.items(), key=lambda x: x[1], reverse=True)
+                total = max(len(filtered), 1)
+                data = [
+                    {
+                        "flag": flag,
+                        "count": count,
+                        "pct": round(count / total * 100, 1),
+                    }
+                    for flag, count in sorted_flags[:20]
+                ]
+
+            elif req.metric == "score_trend":
+                daily: dict = defaultdict(list)
+                for r in filtered:
+                    try:
+                        scored_at = datetime.fromisoformat(
+                            r.get("scored_at", "").replace("Z", "+00:00")
+                        )
+                        day_key = scored_at.strftime("%Y-%m-%d")
+                        daily[day_key].append(
+                            r.get("composite_score") or r.get("score", 0)
+                        )
+                    except Exception:
+                        pass
+                data = [
+                    {
+                        "date": day,
+                        "avg_score": round(sum(scores) / len(scores), 1),
+                        "count": len(scores),
+                    }
+                    for day, scores in sorted(daily.items())
+                ]
+
+            else:
+                data = []
+                source = "unsupported_metric"
+
+        except Exception as e:
+            logger.warning(f"[analytics] Redis scan failed: {e}")
+            source = "error"
+    else:
+        source = "redis_unavailable"
+
     result = {
         "metric": req.metric,
         "tenant_id": req.tenant_id,
         "days": req.days,
-        "data": [],
+        "data": data,
+        "total_subjects": len(data),
+        "source": source,
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "note": "Connect LAKEHOUSE_URL env var for real analytics data",
     }
-
     cache_set(cache_key, result, ttl_seconds=300)
     return result
 
