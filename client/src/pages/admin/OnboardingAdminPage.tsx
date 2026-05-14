@@ -179,6 +179,13 @@ export default function OnboardingAdminPage() {
     return acc;
   }, {} as Record<string, number>);
 
+  // SLA breached applications banner
+  const { data: slaBreachedData } = trpc.onboarding.slaBreached.useQuery(
+    { slaDays: 5 },
+    { enabled: isAdmin, refetchInterval: 5 * 60 * 1000 },
+  );
+  const slaBreachedCount = slaBreachedData?.length ?? 0;
+
   // Show loading state while auth resolves
   if (authLoading) {
     return (
@@ -207,6 +214,29 @@ export default function OnboardingAdminPage() {
 
   return (
     <BISLayout title="Onboarding Applications" subtitle="Review and manage stakeholder onboarding submissions">
+      {/* ── SLA Breach Banner ── */}
+      {slaBreachedCount > 0 && (
+        <div className="flex items-center gap-3 mb-4 px-4 py-3 rounded-lg bg-red-50 border border-red-200 dark:bg-red-950/30 dark:border-red-800">
+          <Clock className="w-5 h-5 text-red-600 dark:text-red-400 shrink-0" />
+          <div className="flex-1">
+            <span className="font-semibold text-red-700 dark:text-red-300">
+              {slaBreachedCount} application{slaBreachedCount > 1 ? 's' : ''} past SLA deadline
+            </span>
+            <span className="text-red-600 dark:text-red-400 text-sm ml-2">
+              — review and action required
+            </span>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="border-red-300 text-red-700 hover:bg-red-100 dark:border-red-700 dark:text-red-300"
+            onClick={() => setStatusFilter("under_review")}
+          >
+            View
+          </Button>
+        </div>
+      )}
+
       {/* ── Toolbar ── */}
       <div className="flex flex-col sm:flex-row gap-3 mb-6">
         <div className="relative flex-1">
@@ -268,6 +298,7 @@ export default function OnboardingAdminPage() {
                   <th className="text-left px-4 py-3 font-medium text-muted-foreground">Category</th>
                   <th className="text-left px-4 py-3 font-medium text-muted-foreground">Status</th>
                   <th className="text-left px-4 py-3 font-medium text-muted-foreground">Submitted</th>
+                  <th className="text-left px-4 py-3 font-medium text-muted-foreground">SLA</th>
                   <th className="text-right px-4 py-3 font-medium text-muted-foreground">Actions</th>
                 </tr>
               </thead>
@@ -295,6 +326,34 @@ export default function OnboardingAdminPage() {
                     </td>
                     <td className="px-4 py-3 text-muted-foreground text-xs">
                       {new Date(app.createdAt).toLocaleDateString()}
+                    </td>
+                    <td className="px-4 py-3">
+                      {(() => {
+                        if (app.status === 'approved' || app.status === 'rejected') {
+                          return <span className="text-xs text-muted-foreground">—</span>;
+                        }
+                        const SLA_DAYS = 5;
+                        const msElapsed = Date.now() - new Date(app.createdAt).getTime();
+                        const daysElapsed = msElapsed / (1000 * 60 * 60 * 24);
+                        const daysLeft = Math.ceil(SLA_DAYS - daysElapsed);
+                        if (daysLeft <= 0) {
+                          return (
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-bold bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400">
+                              <Clock className="w-3 h-3" /> Breached
+                            </span>
+                          );
+                        }
+                        const cls = daysLeft <= 1
+                          ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
+                          : daysLeft <= 3
+                          ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
+                          : 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400';
+                        return (
+                          <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium ${cls}`}>
+                            <Clock className="w-3 h-3" /> {daysLeft}d left
+                          </span>
+                        );
+                      })()}
                     </td>
                     <td className="px-4 py-3 text-right">
                       <Button

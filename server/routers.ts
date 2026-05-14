@@ -2232,6 +2232,25 @@ const onboardingRouter = router({
       await writeAuditLog(db, { userId: ctx.user!.id, category: "system", action: `Reviewer log entry added`, targetRef: app.referenceId });
       return { success: true, entry };
     }),
+
+  slaBreached: adminProcedure
+    .input(z.object({ slaDays: z.number().min(1).max(90).default(5) }).optional())
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return [];
+      const slaDays = input?.slaDays ?? 5;
+      const cutoff = new Date(Date.now() - slaDays * 24 * 60 * 60 * 1000);
+      // Return applications that are not yet resolved and were created before the SLA cutoff
+      return db.select().from(onboardingApplications)
+        .where(
+          and(
+            sql`${onboardingApplications.status} NOT IN ('approved', 'rejected')`,
+            sql`${onboardingApplications.createdAt} < ${cutoff.toISOString()}`,
+          )
+        )
+        .orderBy(onboardingApplications.createdAt)
+        .limit(100);
+    }),
 });
 
 // ─── Alert Rules Router ──────────────────────────────────────────────────────────────────

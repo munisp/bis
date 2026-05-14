@@ -239,6 +239,20 @@
       "when": 1778760140712,
       "tag": "0033_clumsy_killmonger",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1778761851777,
+      "tag": "0034_stale_leader",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1778762025727,
+      "tag": "0035_clean_toad_men",
+      "breakpoints": true
     }
   ]
 }

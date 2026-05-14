@@ -2112,3 +2112,14 @@
 - [x] Accessibility: Add aria-label to key icon-only buttons across DataSourcesPage, KYCVerificationPage, OnboardingAdminPage
 - [x] tRPC error surface: Ensure all isError states show toast or inline error message
 - [x] Round 9 tests in server/next-steps.test.ts (553 total tests pass)
+
+## Round 11 — KYC Batch Re-run, Onboarding SLA, DataSources Health Scheduler (May 14 2026)
+- [x] KYC: "Re-run Pipeline" button in History detail panel pre-fills Full Pipeline form with selected record's NIN/BVN/DOB
+- [x] Onboarding: slaDeadline column + Days Remaining badge in admin table + onboarding.slaBreached query
+- [x] DataSources: Periodic health scheduler (15-min heartbeat) auto-updates status + lastCheckedAt for all enabled sources
+- [x] Round 11 tests in server/next-steps.test.ts (560 total tests pass)
+
+## Round 12 — SLA Banner, DataSources Health Display (May 14 2026)
+- [x] Onboarding: SLA breached banner in admin page using onboarding.slaBreached query (red alert with count + View button)
+- [x] DataSources: lastCheckedAt timestamp display in card metrics (shows time of last health probe)
+- [x] Final production audit: 0 stubs, 0 console.log, 0 TS errors, 560/560 tests pass

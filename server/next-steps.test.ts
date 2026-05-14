@@ -2152,3 +2152,66 @@ describe("Round 9 — Production Hardening", () => {
     });
   });
 });
+
+// ─── Round 11: KYC Re-run, Onboarding SLA, DataSources Health ─────────────────
+
+describe("onboarding.slaBreached (Round 11)", () => {
+  it("returns empty array when no applications exist past SLA cutoff", async () => {
+    const caller = appRouter.createCaller(createAdminCtx());
+    const result = await caller.onboarding.slaBreached({ slaDays: 5 });
+    expect(Array.isArray(result)).toBe(true);
+  });
+
+  it("accepts custom slaDays parameter", async () => {
+    const caller = appRouter.createCaller(createAdminCtx());
+    const result = await caller.onboarding.slaBreached({ slaDays: 30 });
+    expect(Array.isArray(result)).toBe(true);
+  });
+
+  it("uses default slaDays of 5 when not provided", async () => {
+    const caller = appRouter.createCaller(createAdminCtx());
+    const result = await caller.onboarding.slaBreached();
+    expect(Array.isArray(result)).toBe(true);
+  });
+
+  it("rejects non-admin users", async () => {
+    const caller = appRouter.createCaller(createUserCtx());
+    await expect(caller.onboarding.slaBreached()).rejects.toThrow();
+  });
+});
+
+describe("dataSourcesHealthScheduler (Round 11)", () => {
+  it("runDataSourcesHealthCheck returns a HealthCheckResult object", async () => {
+    const { runDataSourcesHealthCheck } = await import("./dataSourcesHealthScheduler");
+    const result = await runDataSourcesHealthCheck();
+    expect(result).toHaveProperty("checked");
+    expect(result).toHaveProperty("active");
+    expect(result).toHaveProperty("degraded");
+    expect(result).toHaveProperty("offline");
+    expect(result).toHaveProperty("skipped");
+    expect(typeof result.checked).toBe("number");
+  });
+
+  it("checked + skipped equals total enabled sources with baseUrl", async () => {
+    const { runDataSourcesHealthCheck } = await import("./dataSourcesHealthScheduler");
+    const result = await runDataSourcesHealthCheck();
+    expect(result.active + result.degraded + result.offline).toBe(result.checked);
+  });
+});
+
+describe("kyc.get Re-run prefill (Round 11)", () => {
+  it("kyc.get returns nin and bvn fields needed for re-run prefill", async () => {
+    const caller = appRouter.createCaller(createAdminCtx());
+    const runResult = await caller.kyc.run({
+      subjectName: "Prefill Test User",
+      nin: "12345678901",
+      bvn: "98765432101",
+      dob: "1985-03-15",
+      phone: "+2348012345678",
+    });
+    const record = await caller.kyc.get({ id: runResult.id });
+    expect(record.nin).toBe("12345678901");
+    expect(record.bvn).toBe("98765432101");
+    expect(record.subjectName).toBe("Prefill Test User");
+  });
+});

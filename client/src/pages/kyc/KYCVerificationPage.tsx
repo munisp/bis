@@ -897,7 +897,7 @@ const STATUS_BADGE: Record<string, { label: string; cls: string }> = {
   processing: { label: 'PROCESSING', cls: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' },
 };
 
-function KYCDetailPanel({ id, onClose }: { id: number; onClose: () => void }) {
+function KYCDetailPanel({ id, onClose, onRerun }: { id: number; onClose: () => void; onRerun?: (prefill: { subjectName: string; nin?: string; bvn?: string; dob?: string; phone?: string }) => void }) {
   const { data: rec, isLoading } = trpc.kyc.get.useQuery({ id });
 
   const renderCheck = (label: string, result: any) => {
@@ -973,12 +973,33 @@ function KYCDetailPanel({ id, onClose }: { id: number; onClose: () => void }) {
             </div>
           </div>
         )}
+        {rec && onRerun && (
+          <div className="mt-4 pt-4 border-t border-border">
+            <Button
+              size="sm"
+              variant="outline"
+              className="w-full gap-1.5 text-xs"
+              onClick={() => {
+                onRerun({
+                  subjectName: rec.subjectName ?? '',
+                  nin: rec.nin ?? undefined,
+                  bvn: rec.bvn ?? undefined,
+                  dob: rec.dob ?? undefined,
+                  phone: rec.phone ?? undefined,
+                });
+                onClose();
+              }}
+            >
+              <RefreshCw className="w-3.5 h-3.5" /> Re-run Pipeline
+            </Button>
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );
 }
 
-function KYCHistoryTab() {
+function KYCHistoryTab({ onRerun }: { onRerun?: (prefill: { subjectName: string; nin?: string; bvn?: string; dob?: string; phone?: string }) => void }) {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [cursor, setCursor] = useState<number | undefined>(undefined);
   const [allItems, setAllItems] = useState<any[]>([]);
@@ -1113,7 +1134,7 @@ function KYCHistoryTab() {
       )}
 
       {/* KYC Detail Panel */}
-      {detailId && <KYCDetailPanel id={detailId} onClose={() => setDetailId(null)} />}
+      {detailId && <KYCDetailPanel id={detailId} onClose={() => setDetailId(null)} onRerun={onRerun} />}
 
       {/* Load more */}
       {data?.nextCursor && (
@@ -1136,8 +1157,23 @@ function KYCHistoryTab() {
 
 // ─── Full Pipeline Form ───────────────────────────────────────────────────────
 
-function KYCRunPipelineForm() {
+function KYCRunPipelineForm({ prefill, onPrefillConsumed }: { prefill?: { subjectName: string; nin?: string; bvn?: string; dob?: string; phone?: string } | null; onPrefillConsumed?: () => void }) {
   const [form, setForm] = useState({ subjectName: '', nin: '', bvn: '', dob: '', phone: '' });
+
+  // Apply prefill when it changes (triggered by Re-run from History)
+  useEffect(() => {
+    if (prefill) {
+      setForm({
+        subjectName: prefill.subjectName ?? '',
+        nin: prefill.nin ?? '',
+        bvn: prefill.bvn ?? '',
+        dob: prefill.dob ?? '',
+        phone: prefill.phone ?? '',
+      });
+      setResult(null);
+      onPrefillConsumed?.();
+    }
+  }, [prefill]);
   const [result, setResult] = useState<null | {
     status: string; riskScore: number;
     nin: unknown; bvn: unknown; sanctions: unknown; pep: unknown; credit: unknown;
@@ -1264,6 +1300,14 @@ function KYCRunPipelineForm() {
 
 export default function KYCVerificationPage() {
   const [batchOpen, setBatchOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState('pipeline');
+  const [rerunPrefill, setRerunPrefill] = useState<{ subjectName: string; nin?: string; bvn?: string; dob?: string; phone?: string } | null>(null);
+
+  const handleRerun = (prefill: { subjectName: string; nin?: string; bvn?: string; dob?: string; phone?: string }) => {
+    setRerunPrefill(prefill);
+    setActiveTab('pipeline');
+  };
+
   return (
     <BISLayout
       title="KYC / KYB Verification"
@@ -1274,7 +1318,7 @@ export default function KYCVerificationPage() {
         </Button>
       }
     >
-      <Tabs defaultValue="pipeline" className="w-full">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList className="mb-6">
           <TabsTrigger value="pipeline" className="gap-1.5">
             <ShieldCheck size={14} /> Full Pipeline
@@ -1287,13 +1331,13 @@ export default function KYCVerificationPage() {
           </TabsTrigger>
         </TabsList>
         <TabsContent value="pipeline">
-          <KYCRunPipelineForm />
+          <KYCRunPipelineForm prefill={rerunPrefill} onPrefillConsumed={() => setRerunPrefill(null)} />
         </TabsContent>
         <TabsContent value="biometric">
           <KYCVerificationPageInner />
         </TabsContent>
         <TabsContent value="history">
-          <KYCHistoryTab />
+          <KYCHistoryTab onRerun={handleRerun} />
         </TabsContent>
       </Tabs>
       <KYCBatchUploadModal open={batchOpen} onClose={() => setBatchOpen(false)} />

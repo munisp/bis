@@ -314,6 +314,7 @@ export const dataSources = pgTable("data_sources", {
   requestsTotal: integer("requestsTotal").default(0),
   enabled: boolean("enabled").notNull().default(true),
   config: json("config"),
+  lastCheckedAt: timestamp("lastCheckedAt"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
 });
@@ -477,6 +478,7 @@ export const onboardingApplications = pgTable("onboarding_applications", {
   createdBy: varchar("createdBy", { length: 255 }),
   adminNotes: text("adminNotes"),
   reviewerLog: json("reviewerLog").$type<Array<{ authorId: number; authorName: string; note: string; createdAt: string }>>().default([]),
+  slaDeadline: timestamp("slaDeadline"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
 },

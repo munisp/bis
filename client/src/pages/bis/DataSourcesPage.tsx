@@ -722,7 +722,7 @@ export default function DataSourcesPage() {
 
                 {/* Metrics */}
                 {src.status === 'active' && (
-                  <div className="grid grid-cols-3 gap-2 mb-3">
+                  <div className="grid grid-cols-3 gap-2 mb-2">
                     <div className="text-center">
                       <div className="text-[10px] text-slate-600 font-mono">LATENCY</div>
                       <div className="text-xs font-mono text-emerald-400">{src.avgResponseMs}ms</div>
@@ -735,6 +735,12 @@ export default function DataSourcesPage() {
                       <div className="text-[10px] text-slate-600 font-mono">QUERIES</div>
                       <div className="text-xs font-mono text-blue-400">{(src.requestsTotal ?? 0).toLocaleString()}</div>
                     </div>
+                  </div>
+                )}
+                {/* Last checked timestamp from health scheduler */}
+                {(src as any).lastCheckedAt && (
+                  <div className="text-[10px] text-slate-600 font-mono mb-2">
+                    CHECKED {new Date((src as any).lastCheckedAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
                   </div>
                 )}
 

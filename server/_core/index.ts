@@ -30,6 +30,7 @@ import swaggerUi from "swagger-ui-express";
 import { readFileSync } from "fs";
 import { load as yamlLoad } from "js-yaml";
 import { startSlaBreachScheduler } from "../slaBreachChecker";
+import { startDataSourcesHealthScheduler } from "../dataSourcesHealthScheduler";
 import { startArchivalScheduler } from "../archivalScheduler";
 import { startKycExpiryDigestScheduler } from "../kycExpiryDigest";
 import { startRiskThresholdDigestScheduler } from "../riskThresholdDigest";
@@ -866,6 +867,7 @@ startServer()
     startArchivalScheduler(); // Nightly hot→warm→cold archival at 02:00 UTC
     startKycExpiryDigestScheduler(); // Daily KYC expiry digest at 08:00 WAT
     startRiskThresholdDigestScheduler(); // Daily risk threshold digest at 09:00 WAT
+    startDataSourcesHealthScheduler(); // 15-min health probe for all enabled data sources
     return srv;
   })
   .catch((err) => {

@@ -1,0 +1,1 @@
+ALTER TABLE "onboarding_applications" ADD COLUMN "slaDeadline" timestamp;
