@@ -13,6 +13,7 @@
 import { getDb } from "./db";
 import { dataSources, dataSourceHealthLogs } from "../drizzle/schema";
 import { eq } from "drizzle-orm";
+import { notifyOwner } from "./_core/notification";
 
 const INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
 const PROBE_TIMEOUT_MS = 8_000;      // 8 second timeout per probe
@@ -133,6 +134,14 @@ export async function runDataSourcesHealthCheck(): Promise<HealthCheckResult> {
           responseMs: probe.responseMs,
           checkedAt,
         }).catch(() => {}); // non-fatal
+
+        // Notify owner when a source transitions to offline
+        if (probe.status === "offline" && source.status !== "offline") {
+          notifyOwner({
+            title: `Data Source Offline: ${source.name}`,
+            content: `The data source "${source.name}" (${source.baseUrl}) is now OFFLINE. Last response time: ${probe.responseMs}ms. Uptime dropped to ${newUptimePct}%.`,
+          }).catch(() => {}); // non-fatal
+        }
 
         result[probe.status]++;
       })

@@ -2136,3 +2136,56 @@
 - [x] KYC: kyc.listScheduledReruns UI tab in KYCVerificationPage (show pending/completed/failed reruns)
 - [x] DataSources: Expand sparkline on card click — show full 24h chart in a dialog
 - [x] Round 14 tests in server/next-steps.test.ts (571 total tests pass)
+
+## Comprehensive Production Hardening (Rounds 15–22)
+
+### Phase 1 — Complete Suggested Next Steps
+- [ ] DataSources: notifyOwner when health scheduler marks source as offline
+- [ ] KYC: Post-rerun email digest via SMTP after executor batch fires
+- [ ] Onboarding: File upload field in drawer + S3 storage + enable Verify Documents on real files
+
+### Phase 2 — Deep Audit & Gap Closure
+- [ ] Audit all orphan server files not imported anywhere
+- [ ] Audit all DB tables for missing CRUD procedures
+- [ ] Replace all remaining mock/setTimeout stubs with real implementations
+- [ ] Add domain business logic to generic CRUD-only routers
+- [ ] Seed data: ensure all tables have realistic seeded data
+
+### Phase 3 — Security Hardening
+- [ ] Rate limiting on all public and auth endpoints (express-rate-limit)
+- [ ] CSRF protection on all mutation endpoints
+- [ ] Input sanitization / SQL injection prevention audit
+- [ ] Security headers (CSP, HSTS, X-Frame-Options, X-Content-Type-Options)
+- [ ] JWT rotation and refresh token security
+- [ ] Helmet.js integration
+- [ ] Vulnerability scoring and remediation report
+
+### Phase 4 — Resilience
+- [ ] Service Worker / offline support for PWA (workbox)
+- [ ] Optimistic UI with offline queue for mutations
+- [ ] WebSocket/SSE fallback to polling for low-bandwidth environments
+- [ ] Retry logic with exponential backoff on all tRPC calls
+- [ ] Connection status indicator in UI
+
+### Phase 5 — Middleware Wiring Verification
+- [ ] Verify Temporal workflow integration end-to-end
+- [ ] Verify Keycloak SSO integration
+- [ ] Verify Redis caching layer
+- [ ] Verify Permify PBAC policy enforcement
+- [ ] Verify TigerBeetle ledger integration
+- [ ] Verify Lakehouse query integration
+
+### Phase 6 — Full UI/UX Audit
+- [ ] Audit every nav link in DashboardLayout sidebar
+- [ ] Audit every page for complete CRUD (list, create, edit, delete, search)
+- [ ] Audit every button, dropdown, and search field for functionality
+- [ ] Ensure all forms have validation and error messages
+- [ ] Ensure all tables have sorting, filtering, and pagination
+
+### Phase 7 — Final Tests & Smoke Tests
+- [ ] All unit tests pass (target: 600+)
+- [ ] TypeScript: 0 errors
+- [ ] Smoke test script for all major flows
+
+### Phase 8 — Archive
+- [ ] Comprehensive tar.gz archive with manifest of changes

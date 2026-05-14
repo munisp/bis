@@ -13,6 +13,56 @@
 import { and, eq, lte } from "drizzle-orm";
 import { getDb } from "./db";
 import { kycRecords, kycScheduledReruns } from "../drizzle/schema";
+import { notifyOwner } from "./_core/notification";
+import nodemailer from "nodemailer";
+
+// ─── Email digest helper ──────────────────────────────────────────────────────
+
+interface RerunDigestEntry {
+  subjectName: string;
+  status: string;
+  riskScore: number;
+  rerunId: number;
+}
+
+async function sendRerunDigest(entries: RerunDigestEntry[]): Promise<void> {
+  if (entries.length === 0) return;
+  const smtpHost = process.env.SMTP_HOST;
+  const smtpPort = parseInt(process.env.SMTP_PORT || "587", 10);
+  const smtpUser = process.env.SMTP_USER;
+  const smtpPass = process.env.SMTP_PASS;
+  const smtpFrom = process.env.SMTP_FROM || smtpUser;
+
+  if (!smtpHost || !smtpUser || !smtpPass) {
+    // Fall back to notifyOwner if SMTP not configured
+    const summary = entries.map(e =>
+      `• ${e.subjectName}: ${e.status.toUpperCase()} (risk score: ${e.riskScore})`
+    ).join("\n");
+    await notifyOwner({
+      title: `KYC Scheduled Re-run Digest — ${entries.length} completed`,
+      content: `The following KYC re-runs completed:\n\n${summary}`,
+    }).catch(() => {});
+    return;
+  }
+
+  const transporter = nodemailer.createTransport({
+    host: smtpHost,
+    port: smtpPort,
+    secure: smtpPort === 465,
+    auth: { user: smtpUser, pass: smtpPass },
+  });
+
+  const rows = entries.map(e =>
+    `<tr><td style="padding:4px 8px">${e.subjectName}</td><td style="padding:4px 8px">${e.status.toUpperCase()}</td><td style="padding:4px 8px">${e.riskScore}</td></tr>`
+  ).join("");
+
+  await transporter.sendMail({
+    from: smtpFrom,
+    to: smtpUser,
+    subject: `BIS KYC Re-run Digest — ${entries.length} completed`,
+    html: `<h2>KYC Scheduled Re-run Digest</h2><p>${entries.length} re-runs completed in this cycle.</p><table border="1" cellspacing="0" style="border-collapse:collapse"><thead><tr><th style="padding:4px 8px">Subject</th><th style="padding:4px 8px">Status</th><th style="padding:4px 8px">Risk Score</th></tr></thead><tbody>${rows}</tbody></table>`,
+  }).catch((err: unknown) => console.error("[kycScheduledRerunExecutor] Email digest failed:", err));
+}
 
 // ─── Inline helpers (mirrors routers.ts implementations) ─────────────────────
 
@@ -83,6 +133,7 @@ export async function runPendingKycReruns(): Promise<{ processed: number; failed
 
   let processed = 0;
   let failed = 0;
+  const digestEntries: RerunDigestEntry[] = [];
 
   for (const rerun of pending) {
     try {
@@ -182,6 +233,12 @@ export async function runPendingKycReruns(): Promise<{ processed: number; failed
         { status, score: scoreResult.composite_score, rerunId: rerun.id }
       ).catch(() => {});
 
+      digestEntries.push({
+        subjectName: rerun.subjectName,
+        status,
+        riskScore: scoreResult.composite_score,
+        rerunId: rerun.id,
+      });
       processed++;
     } catch (err) {
       console.error(`[kycScheduledRerunExecutor] Failed to process rerun ${rerun.id}:`, err);
@@ -197,6 +254,8 @@ export async function runPendingKycReruns(): Promise<{ processed: number; failed
 
   if (processed > 0 || failed > 0) {
     console.log(`[kycScheduledRerunExecutor] Cycle complete: ${processed} processed, ${failed} failed`);
+    // Send email digest for completed reruns
+    await sendRerunDigest(digestEntries).catch(() => {});
   }
 
   return { processed, failed };

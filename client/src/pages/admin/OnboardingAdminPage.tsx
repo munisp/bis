@@ -158,6 +158,44 @@ export default function OnboardingAdminPage() {
     appendNoteMutation.mutate({ id: selectedId, note: logDraft.trim() });
   };
 
+  // Document upload state
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadProgress, setUploadProgress] = useState(false);
+
+  const uploadDocMutation = trpc.onboarding.uploadDocument.useMutation({
+    onSuccess: () => {
+      toast.success('Document uploaded successfully');
+      setUploadFile(null);
+      setUploadProgress(false);
+      utils.onboarding.get.invalidate({ id: selectedId! });
+      utils.onboarding.list.invalidate();
+    },
+    onError: (e) => {
+      toast.error(`Upload failed: ${e.message}`);
+      setUploadProgress(false);
+    },
+  });
+
+  const handleDocUpload = (file: File) => {
+    if (!selectedId) return;
+    if (file.size > 20 * 1024 * 1024) {
+      toast.error('File too large — maximum 20 MB');
+      return;
+    }
+    setUploadProgress(true);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const base64 = (e.target?.result as string).split(',')[1];
+      uploadDocMutation.mutate({
+        applicationId: selectedId,
+        fileName: file.name,
+        fileDataUri: base64,
+        mimeType: file.type || 'application/octet-stream',
+      });
+    };
+    reader.readAsDataURL(file);
+  };
+
   const verifyDocsMutation = trpc.onboarding.verifyDocuments.useMutation({
     onSuccess: (result) => {
       if (result.allClean) {
@@ -474,14 +512,53 @@ export default function OnboardingAdminPage() {
                   </div>
                 </div>
 
-                {/* Uploaded Documents */}
-                {Array.isArray(selected.documentUrls) && selected.documentUrls.length > 0 && (
-                  <>
-                    <Separator />
-                    <div>
-                      <h4 className="text-sm font-semibold text-foreground mb-2 flex items-center gap-1.5">
-                        <FileText className="w-4 h-4" /> Uploaded Documents ({selected.documentUrls.length})
-                      </h4>
+                {/* Uploaded Documents + Upload UI */}
+                <>
+                  <Separator />
+                  <div>
+                    <h4 className="text-sm font-semibold text-foreground mb-2 flex items-center gap-1.5">
+                      <FileText className="w-4 h-4" /> Uploaded Documents
+                      {Array.isArray(selected.documentUrls) && selected.documentUrls.length > 0 && (
+                        <span className="text-xs text-muted-foreground">({selected.documentUrls.length})</span>
+                      )}
+                    </h4>
+                    {/* Upload drop zone */}
+                    <label
+                      className={`flex flex-col items-center justify-center border-2 border-dashed rounded-lg p-4 mb-3 cursor-pointer transition-colors ${
+                        uploadProgress ? 'opacity-50 pointer-events-none' : 'hover:border-primary/60 hover:bg-primary/5'
+                      } border-border`}
+                      onDragOver={(e) => e.preventDefault()}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        const f = e.dataTransfer.files[0];
+                        if (f) handleDocUpload(f);
+                      }}
+                    >
+                      <input
+                        type="file"
+                        className="sr-only"
+                        accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (f) handleDocUpload(f);
+                          e.target.value = '';
+                        }}
+                        disabled={uploadProgress}
+                      />
+                      {uploadProgress ? (
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <Loader2 className="w-4 h-4 animate-spin" /> Uploading...
+                        </div>
+                      ) : (
+                        <div className="flex flex-col items-center gap-1 text-sm text-muted-foreground">
+                          <Download className="w-5 h-5 rotate-180" />
+                          <span>Drop file here or <span className="text-primary font-medium">browse</span></span>
+                          <span className="text-xs">PDF, JPG, PNG, DOC — max 20 MB</span>
+                        </div>
+                      )}
+                    </label>
+                    {/* Existing documents list */}
+                    {Array.isArray(selected.documentUrls) && selected.documentUrls.length > 0 && (
                       <div className="space-y-1.5">
                         {selected.documentUrls.map((doc, i) => (
                           <div key={i} className="flex items-center justify-between bg-muted/30 rounded px-3 py-2 text-sm">
@@ -503,9 +580,9 @@ export default function OnboardingAdminPage() {
                           </div>
                         ))}
                       </div>
-                    </div>
-                  </>
-                )}
+                    )}
+                  </div>
+                </>
 
                 {/* Stakeholders */}
                 {Array.isArray(selected.stakeholders) && (selected.stakeholders as unknown[]).length > 0 && (
