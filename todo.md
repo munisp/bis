@@ -2093,3 +2093,8 @@
 - [x] KYC: Add "Run Full Pipeline" form calling kyc.run (NIN/BVN/DOB/phone fields)
 - [x] Onboarding: Wire onboarding.get to detail drawer for fresh server-side data fetch
 - [x] Round 6 tests in server/next-steps.test.ts (510 total tests pass)
+## Round 7 — DataSources Edit, KYC History, Onboarding Notes (May 14 2026)
+- [x] DataSources: Edit button + pre-filled edit dialog wired to dataSources.update
+- [x] KYC: "History" tab listing past kyc.run records (status badge, risk score, date)
+- [x] Onboarding: adminNotes column in schema + onboarding.addNote procedure + drawer textarea
+- [x] Round 7 tests in server/next-steps.test.ts (529 total tests pass)

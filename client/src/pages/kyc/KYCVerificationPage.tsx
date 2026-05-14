@@ -22,7 +22,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Upload, PlayCircle, Loader2, CheckCircle2, XCircle, AlertTriangle, ShieldCheck } from 'lucide-react';
+import { Upload, PlayCircle, Loader2, CheckCircle2, XCircle, AlertTriangle, ShieldCheck, History, RefreshCw, ChevronDown } from 'lucide-react';
 import { trpc } from '@/lib/trpc';
 import { toast } from 'sonner';
 
@@ -885,6 +885,168 @@ function KYCVerificationPageInner() {
 }
 
 
+// ─── KYC History Tab ──────────────────────────────────────────────────────────────────
+
+const STATUS_BADGE: Record<string, { label: string; cls: string }> = {
+  passed:     { label: 'PASSED',     cls: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' },
+  failed:     { label: 'FAILED',     cls: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400' },
+  review:     { label: 'REVIEW',     cls: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' },
+  pending:    { label: 'PENDING',    cls: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400' },
+  processing: { label: 'PROCESSING', cls: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' },
+};
+
+function KYCHistoryTab() {
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [cursor, setCursor] = useState<number | undefined>(undefined);
+  const [allItems, setAllItems] = useState<any[]>([]);
+
+  const { data, isLoading, refetch } = trpc.kyc.list.useQuery(
+    {
+      limit: 20,
+      cursor,
+      status: statusFilter !== 'all' ? (statusFilter as any) : undefined,
+    },
+    { keepPreviousData: true } as any,
+  );
+
+  // Accumulate pages
+  useEffect(() => {
+    if (data?.items) {
+      if (!cursor) {
+        setAllItems(data.items);
+      } else {
+        setAllItems(prev => [...prev, ...data.items]);
+      }
+    }
+  }, [data]);
+
+  const handleFilterChange = (f: string) => {
+    setStatusFilter(f);
+    setCursor(undefined);
+    setAllItems([]);
+  };
+
+  const handleLoadMore = () => {
+    if (data?.nextCursor) setCursor(data.nextCursor);
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <History className="w-4 h-4 text-muted-foreground" />
+          <h3 className="text-sm font-semibold text-foreground">Verification History</h3>
+          {data && <span className="text-xs text-muted-foreground">({data.total} total)</span>}
+        </div>
+        <div className="flex items-center gap-2">
+          {/* Status filter */}
+          <div className="flex gap-1">
+            {['all', 'passed', 'review', 'failed'].map(s => (
+              <button
+                key={s}
+                onClick={() => handleFilterChange(s)}
+                className={`px-2 py-0.5 rounded text-xs font-medium transition-colors ${
+                  statusFilter === s
+                    ? 'bg-primary text-primary-foreground'
+                    : 'bg-muted text-muted-foreground hover:bg-muted/80'
+                }`}
+              >
+                {s.toUpperCase()}
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={() => { setCursor(undefined); setAllItems([]); refetch(); }}
+            className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            title="Refresh"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      </div>
+
+      {/* Table */}
+      {isLoading && allItems.length === 0 ? (
+        <div className="flex items-center justify-center h-32 text-muted-foreground">
+          <Loader2 className="w-4 h-4 animate-spin mr-2" /> Loading history…
+        </div>
+      ) : allItems.length === 0 ? (
+        <div className="flex flex-col items-center justify-center h-32 text-muted-foreground gap-2">
+          <History className="w-8 h-8 opacity-30" />
+          <p className="text-sm">No verification records yet.</p>
+          <p className="text-xs">Run a pipeline or biometric check to see results here.</p>
+        </div>
+      ) : (
+        <div className="overflow-x-auto rounded-xl border border-border">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border bg-muted/30">
+                <th className="text-left px-4 py-2.5 text-xs font-semibold text-muted-foreground">ID</th>
+                <th className="text-left px-4 py-2.5 text-xs font-semibold text-muted-foreground">SUBJECT</th>
+                <th className="text-left px-4 py-2.5 text-xs font-semibold text-muted-foreground">STATUS</th>
+                <th className="text-left px-4 py-2.5 text-xs font-semibold text-muted-foreground">RISK SCORE</th>
+                <th className="text-left px-4 py-2.5 text-xs font-semibold text-muted-foreground">DATE</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {allItems.map((rec: any) => {
+                const badge = STATUS_BADGE[rec.status] ?? STATUS_BADGE.pending;
+                const score = rec.riskScore ?? 0;
+                return (
+                  <tr key={rec.id} className="hover:bg-muted/20 transition-colors">
+                    <td className="px-4 py-2.5 font-mono text-xs text-muted-foreground">#{rec.id}</td>
+                    <td className="px-4 py-2.5 font-medium text-foreground max-w-[180px] truncate">{rec.subjectName}</td>
+                    <td className="px-4 py-2.5">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${badge.cls}`}>
+                        {badge.label}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <div className="flex items-center gap-2">
+                        <div className="w-16 bg-muted rounded-full h-1.5">
+                          <div
+                            className={`h-1.5 rounded-full ${
+                              score >= 70 ? 'bg-green-500' : score >= 40 ? 'bg-yellow-500' : 'bg-red-500'
+                            }`}
+                            style={{ width: `${score}%` }}
+                          />
+                        </div>
+                        <span className={`text-xs font-mono font-bold ${
+                          score >= 70 ? 'text-green-600' : score >= 40 ? 'text-yellow-600' : 'text-red-600'
+                        }`}>{score}</span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-2.5 text-xs text-muted-foreground">
+                      {new Date(rec.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Load more */}
+      {data?.nextCursor && (
+        <div className="flex justify-center">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleLoadMore}
+            disabled={isLoading}
+            className="gap-1.5 text-xs"
+          >
+            {isLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ChevronDown className="w-3.5 h-3.5" />}
+            Load More
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Full Pipeline Form ───────────────────────────────────────────────────────
 
 function KYCRunPipelineForm() {
@@ -1033,12 +1195,18 @@ export default function KYCVerificationPage() {
           <TabsTrigger value="biometric" className="gap-1.5">
             <PlayCircle size={14} /> Biometric Flow
           </TabsTrigger>
+          <TabsTrigger value="history" className="gap-1.5">
+            <History size={14} /> History
+          </TabsTrigger>
         </TabsList>
         <TabsContent value="pipeline">
           <KYCRunPipelineForm />
         </TabsContent>
         <TabsContent value="biometric">
           <KYCVerificationPageInner />
+        </TabsContent>
+        <TabsContent value="history">
+          <KYCHistoryTab />
         </TabsContent>
       </Tabs>
       <KYCBatchUploadModal open={batchOpen} onClose={() => setBatchOpen(false)} />

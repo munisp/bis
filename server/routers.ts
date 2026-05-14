@@ -2181,9 +2181,26 @@ const onboardingRouter = router({
       }
       return { success: true };
     }),
+
+  addNote: adminProcedure
+    .input(z.object({
+      id: z.number(),
+      notes: z.string().max(4000),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      const [app] = await db.select().from(onboardingApplications).where(eq(onboardingApplications.id, input.id)).limit(1);
+      if (!app) throw new TRPCError({ code: "NOT_FOUND" });
+      await db.update(onboardingApplications)
+        .set({ adminNotes: input.notes.trim() || null, updatedAt: new Date() })
+        .where(eq(onboardingApplications.id, input.id));
+      await writeAuditLog(db, { userId: ctx.user!.id, category: "system", action: `Admin notes updated`, targetRef: app.referenceId });
+      return { success: true };
+    }),
 });
 
-// ─── Alert Rules Router ─────────────────────────────────────────────────────
+// ─── Alert Rules Router ──────────────────────────────────────────────────────────────────
 
 const alertRulesRouter = router({
   list: protectedProcedure

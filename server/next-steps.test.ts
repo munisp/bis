@@ -1638,3 +1638,241 @@ describe("onboarding.get (Round 6)", () => {
     expect(fetched.agreedToTerms).toBe(true);
   });
 });
+
+// ─── Round 7 Tests ────────────────────────────────────────────────────────────
+
+describe("dataSources.update (Round 7)", () => {
+  it("creates a source then updates its name and description", async () => {
+    const caller = appRouter.createCaller(createUserCtx());
+    const created = await caller.dataSources.create({
+      code: `r7_edit_${Date.now()}`,
+      name: "Original Name R7",
+      category: "identity",
+    });
+    expect(created.id).toBeDefined();
+
+    const updated = await caller.dataSources.update({
+      id: created.id,
+      name: "Updated Name R7",
+      description: "Updated description for R7 test",
+    });
+    expect(updated).toBeDefined();
+    expect(updated.name).toBe("Updated Name R7");
+    expect(updated.description).toBe("Updated description for R7 test");
+  });
+
+  it("updates status to maintenance", async () => {
+    const caller = appRouter.createCaller(createUserCtx());
+    const created = await caller.dataSources.create({
+      code: `r7_status_${Date.now()}`,
+      name: "Status Test R7",
+      category: "financial",
+    });
+    const updated = await caller.dataSources.update({
+      id: created.id,
+      status: "maintenance",
+    });
+    expect(updated.status).toBe("maintenance");
+  });
+
+  it("disables a source via enabled=false", async () => {
+    const caller = appRouter.createCaller(createUserCtx());
+    const created = await caller.dataSources.create({
+      code: `r7_disable_${Date.now()}`,
+      name: "Disable Test R7",
+      category: "biometric",
+      enabled: true,
+    });
+    const updated = await caller.dataSources.update({
+      id: created.id,
+      enabled: false,
+    });
+    expect(updated.enabled).toBe(false);
+  });
+
+  it("updates uptimePct and avgResponseMs", async () => {
+    const caller = appRouter.createCaller(createUserCtx());
+    const created = await caller.dataSources.create({
+      code: `r7_metrics_${Date.now()}`,
+      name: "Metrics Test R7",
+      category: "commercial",
+    });
+    const updated = await caller.dataSources.update({
+      id: created.id,
+      uptimePct: 98.5,
+      avgResponseMs: 120,
+    });
+    expect(updated.uptimePct).toBe(98.5);
+    expect(updated.avgResponseMs).toBe(120);
+  });
+
+  it("unauthenticated user cannot update a data source", async () => {
+    const caller = appRouter.createCaller(createAnonCtx());
+    await expect(
+      caller.dataSources.update({ id: 1, name: "Anon Update" })
+    ).rejects.toBeDefined();
+  });
+});
+
+describe("kyc.list (Round 7)", () => {
+  it("returns items and total fields", async () => {
+    const caller = appRouter.createCaller(createUserCtx());
+    const result = await caller.kyc.list({ limit: 10 });
+    expect(result).toHaveProperty("items");
+    expect(result).toHaveProperty("total");
+    expect(Array.isArray(result.items)).toBe(true);
+    expect(typeof result.total).toBe("number");
+  });
+
+  it("respects limit parameter", async () => {
+    const caller = appRouter.createCaller(createUserCtx());
+    const result = await caller.kyc.list({ limit: 3 });
+    expect(result.items.length).toBeLessThanOrEqual(3);
+  });
+
+  it("filters by status=passed", async () => {
+    const caller = appRouter.createCaller(createUserCtx());
+    const result = await caller.kyc.list({ limit: 50, status: "passed" });
+    for (const item of result.items) {
+      expect(item.status).toBe("passed");
+    }
+  });
+
+  it("filters by status=failed", async () => {
+    const caller = appRouter.createCaller(createUserCtx());
+    const result = await caller.kyc.list({ limit: 50, status: "failed" });
+    for (const item of result.items) {
+      expect(item.status).toBe("failed");
+    }
+  });
+
+  it("returns nextCursor=null when no more pages", async () => {
+    const caller = appRouter.createCaller(createUserCtx());
+    const result = await caller.kyc.list({ limit: 200 });
+    // With a small test DB, 200 limit should exhaust all records
+    if (result.items.length < 200) {
+      expect(result.nextCursor).toBeNull();
+    }
+  });
+
+  it("unauthenticated user is rejected", async () => {
+    const caller = appRouter.createCaller(createAnonCtx());
+    await expect(caller.kyc.list({ limit: 10 })).rejects.toBeDefined();
+  });
+
+  it("each item has subjectName, status, riskScore, createdAt", async () => {
+    const caller = appRouter.createCaller(createUserCtx());
+    // Create a record first to ensure at least one exists
+    await caller.kyc.run({ subjectName: "R7 List Test Subject" });
+    const result = await caller.kyc.list({ limit: 5 });
+    if (result.items.length > 0) {
+      const item = result.items[0]!;
+      expect(item).toHaveProperty("subjectName");
+      expect(item).toHaveProperty("status");
+      expect(item).toHaveProperty("riskScore");
+      expect(item).toHaveProperty("createdAt");
+    }
+  });
+});
+
+describe("onboarding.addNote (Round 7)", () => {
+  it("creates an application then adds reviewer notes", async () => {
+    const userCaller = appRouter.createCaller(createUserCtx());
+    const created = await userCaller.onboarding.create({
+      entityType: "individual",
+      legalName: "Notes Test Entity R7",
+      contactName: "Notes Tester",
+      contactEmail: "notes@r7.example.com",
+    });
+    expect(created.id).toBeDefined();
+
+    const adminCaller = appRouter.createCaller(createAdminCtx());
+    const result = await adminCaller.onboarding.addNote({
+      id: created.id,
+      notes: "This applicant appears legitimate. Documents verified.",
+    });
+    expect(result).toEqual({ success: true });
+
+    // Verify notes are persisted via onboarding.get
+    const fetched = await adminCaller.onboarding.get({ id: created.id });
+    expect(fetched.adminNotes).toBe("This applicant appears legitimate. Documents verified.");
+  });
+
+  it("overwrites existing notes with new content", async () => {
+    const userCaller = appRouter.createCaller(createUserCtx());
+    const created = await userCaller.onboarding.create({
+      entityType: "corporate",
+      legalName: "Overwrite Notes Corp R7",
+      contactName: "Overwrite Tester",
+      contactEmail: "overwrite@r7.example.com",
+    });
+
+    const adminCaller = appRouter.createCaller(createAdminCtx());
+    await adminCaller.onboarding.addNote({ id: created.id, notes: "First note" });
+    await adminCaller.onboarding.addNote({ id: created.id, notes: "Second note — overwrites first" });
+
+    const fetched = await adminCaller.onboarding.get({ id: created.id });
+    expect(fetched.adminNotes).toBe("Second note — overwrites first");
+  });
+
+  it("clears notes when empty string is provided", async () => {
+    const userCaller = appRouter.createCaller(createUserCtx());
+    const created = await userCaller.onboarding.create({
+      entityType: "individual",
+      legalName: "Clear Notes Entity R7",
+      contactName: "Clear Tester",
+      contactEmail: "clear@r7.example.com",
+    });
+
+    const adminCaller = appRouter.createCaller(createAdminCtx());
+    await adminCaller.onboarding.addNote({ id: created.id, notes: "Some note" });
+    await adminCaller.onboarding.addNote({ id: created.id, notes: "" });
+
+    const fetched = await adminCaller.onboarding.get({ id: created.id });
+    expect(fetched.adminNotes).toBeNull();
+  });
+
+  it("throws NOT_FOUND for non-existent application", async () => {
+    const adminCaller = appRouter.createCaller(createAdminCtx());
+    await expect(
+      adminCaller.onboarding.addNote({ id: 999999999, notes: "Ghost note" })
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("rejects notes longer than 4000 characters", async () => {
+    const userCaller = appRouter.createCaller(createUserCtx());
+    const created = await userCaller.onboarding.create({
+      entityType: "individual",
+      legalName: "Long Notes Entity R7",
+      contactName: "Long Tester",
+      contactEmail: "long@r7.example.com",
+    });
+
+    const adminCaller = appRouter.createCaller(createAdminCtx());
+    const tooLong = "x".repeat(4001);
+    await expect(
+      adminCaller.onboarding.addNote({ id: created.id, notes: tooLong })
+    ).rejects.toBeDefined();
+  });
+
+  it("non-admin user cannot add notes", async () => {
+    const userCaller = appRouter.createCaller(createUserCtx());
+    const created = await userCaller.onboarding.create({
+      entityType: "individual",
+      legalName: "Forbidden Notes R7",
+      contactName: "Forbidden Tester",
+      contactEmail: "forbidden@r7.example.com",
+    });
+
+    await expect(
+      userCaller.onboarding.addNote({ id: created.id, notes: "Unauthorized note" })
+    ).rejects.toBeDefined();
+  });
+
+  it("unauthenticated user cannot add notes", async () => {
+    const anonCaller = appRouter.createCaller(createAnonCtx());
+    await expect(
+      anonCaller.onboarding.addNote({ id: 1, notes: "Anon note" })
+    ).rejects.toBeDefined();
+  });
+});

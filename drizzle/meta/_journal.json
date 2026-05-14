@@ -225,6 +225,13 @@
       "when": 1778719489543,
       "tag": "0031_breezy_fantastic_four",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1778759381434,
+      "tag": "0032_unique_richard_fisk",
+      "breakpoints": true
     }
   ]
 }

@@ -5,7 +5,7 @@
  * detail drawer, and approve/reject actions wired to trpc.onboarding.updateStatus.
  */
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
 import BISLayout from "@/components/BISLayout";
@@ -16,10 +16,12 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Separator } from "@/components/ui/separator";
+import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import {
   CheckCircle2, XCircle, Clock, Eye, Search, RefreshCw,
-  Building2, User, Globe, Phone, Mail, FileText, Loader2, Download, Maximize2, X as XIcon
+  Building2, User, Globe, Phone, Mail, FileText, Loader2, Download, Maximize2, X as XIcon,
+  StickyNote, Save,
 } from "lucide-react";
 
 type OnboardingStatus = "draft" | "submitted" | "awaiting_documents" | "under_review" | "approved" | "rejected";
@@ -68,6 +70,7 @@ type Application = {
   stakeholders?: unknown;
   documentUrls?: Array<{ name: string; url: string; key: string; uploadedAt: string }> | null;
   createdBy?: string | null;
+  adminNotes?: string | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -80,6 +83,7 @@ export default function OnboardingAdminPage() {
   // selectedId drives the onboarding.get query; selected is the resolved record
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
+  const [notesDraft, setNotesDraft] = useState<string>('');
 
   const isAdmin = user?.role === "admin";
 
@@ -93,6 +97,15 @@ export default function OnboardingAdminPage() {
     { id: selectedId! },
     { enabled: !!selectedId && isAdmin },
   );
+
+  // Sync notesDraft whenever the selected record changes
+  useEffect(() => {
+    if (selectedRecord) {
+      setNotesDraft((selectedRecord as any).adminNotes ?? '');
+    } else if (!selectedId) {
+      setNotesDraft('');
+    }
+  }, [selectedId, (selectedRecord as any)?.adminNotes]);
 
   // Merge list row (for instant open) with fresh server data when available
   const listItems = (data?.items ?? []) as Application[];
@@ -112,6 +125,22 @@ export default function OnboardingAdminPage() {
       setActionLoading(false);
     },
   });
+
+  const utils = trpc.useUtils();
+
+  const addNoteMutation = trpc.onboarding.addNote.useMutation({
+    onSuccess: () => {
+      toast.success('Admin notes saved');
+      utils.onboarding.get.invalidate({ id: selectedId! });
+      utils.onboarding.list.invalidate();
+    },
+    onError: (e) => toast.error(`Failed to save notes: ${e.message}`),
+  });
+
+  const handleSaveNotes = () => {
+    if (!selectedId) return;
+    addNoteMutation.mutate({ id: selectedId, notes: notesDraft });
+  };
 
   const handleAction = (id: number, status: OnboardingStatus) => {
     setActionLoading(true);
@@ -408,7 +437,37 @@ export default function OnboardingAdminPage() {
                 )}
               </div>
 
-              {/* Loading overlay while fetching fresh data */}
+                {/* Admin Notes */}
+                <Separator />
+                <div>
+                  <h4 className="text-sm font-semibold text-foreground mb-2 flex items-center gap-1.5">
+                    <StickyNote className="w-4 h-4" /> Reviewer Notes
+                  </h4>
+                  <Textarea
+                    value={notesDraft}
+                    onChange={e => setNotesDraft(e.target.value)}
+                    placeholder="Add internal reviewer notes visible only to admins…"
+                    className="text-sm resize-none min-h-[80px]"
+                    maxLength={4000}
+                  />
+                  <div className="flex items-center justify-between mt-1.5">
+                    <span className="text-xs text-muted-foreground">{notesDraft.length}/4000</span>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={handleSaveNotes}
+                      disabled={addNoteMutation.isPending}
+                      className="gap-1.5 text-xs"
+                    >
+                      {addNoteMutation.isPending
+                        ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        : <Save className="w-3.5 h-3.5" />}
+                      Save Notes
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Loading overlay while fetching fresh data */}
               {detailLoading && !selectedRecord && (
                 <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
                   <Loader2 className="w-3.5 h-3.5 animate-spin" /> Fetching latest data…

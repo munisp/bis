@@ -24,7 +24,7 @@ import { toast } from 'sonner';
 import { trpc } from '@/lib/trpc';
 import {
   Database, CheckCircle2, Clock, XCircle, AlertTriangle, Globe, Shield,
-  Building2, Search, RefreshCw, Loader2, Wifi, WifiOff, Activity, Plus,
+  Building2, Search, RefreshCw, Loader2, Wifi, WifiOff, Activity, Plus, Pencil,
 } from 'lucide-react';
 
 // ─── Config ───────────────────────────────────────────────────────────────────
@@ -57,6 +57,166 @@ const CATEGORY_LABELS: Record<string, string> = {
 };
 
 const CATEGORIES = ['All', 'identity', 'financial', 'legal', 'commercial', 'government', 'social', 'biometric'];
+
+// ─── Edit Dialog ─────────────────────────────────────────────────────────────
+
+interface DataSourceRow {
+  id: number;
+  name: string;
+  description?: string | null;
+  status: string;
+  enabled: boolean;
+  provider?: string | null;
+  baseUrl?: string | null;
+}
+
+interface EditDialogProps {
+  source: DataSourceRow | null;
+  onClose: () => void;
+  onUpdated: () => void;
+}
+
+function EditDataSourceDialog({ source, onClose, onUpdated }: EditDialogProps) {
+  const [form, setForm] = useState({
+    name: '',
+    description: '',
+    status: 'active' as 'active' | 'degraded' | 'offline' | 'maintenance',
+    enabled: true,
+  });
+
+  // Pre-fill form whenever a new source is opened
+  useEffect(() => {
+    if (source) {
+      setForm({
+        name: source.name,
+        description: source.description ?? '',
+        status: (source.status as typeof form.status) ?? 'active',
+        enabled: source.enabled,
+      });
+    }
+  }, [source]);
+
+  const utils = trpc.useUtils();
+
+  const updateMutation = trpc.dataSources.update.useMutation({
+    onSuccess: () => {
+      toast.success(`Data source "${form.name}" updated`);
+      utils.dataSources.list.invalidate();
+      onUpdated();
+      onClose();
+    },
+    onError: (e) => toast.error(`Update failed: ${e.message}`),
+  });
+
+  const handleSave = () => {
+    if (!source) return;
+    if (!form.name.trim() || form.name.trim().length < 2) {
+      toast.error('Name must be at least 2 characters');
+      return;
+    }
+    updateMutation.mutate({
+      id: source.id,
+      name: form.name.trim(),
+      description: form.description.trim() || undefined,
+      status: form.status,
+      enabled: form.enabled,
+    });
+  };
+
+  return (
+    <Dialog open={!!source} onOpenChange={v => { if (!v) onClose(); }}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 font-mono text-sm">
+            <Pencil size={14} className="text-blue-400" />
+            EDIT DATA SOURCE
+          </DialogTitle>
+          <DialogDescription className="text-xs font-mono text-slate-500">
+            {source?.name} · ID {source?.id}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4 mt-2">
+          {/* Name */}
+          <div className="space-y-1.5">
+            <Label className="text-xs font-mono text-slate-400">DISPLAY NAME *</Label>
+            <Input
+              value={form.name}
+              onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+              className="font-mono text-xs bg-slate-900/60 border-slate-700 text-slate-200"
+            />
+          </div>
+
+          {/* Description */}
+          <div className="space-y-1.5">
+            <Label className="text-xs font-mono text-slate-400">DESCRIPTION</Label>
+            <Textarea
+              value={form.description}
+              onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+              className="font-mono text-xs bg-slate-900/60 border-slate-700 text-slate-200 resize-none"
+              rows={2}
+            />
+          </div>
+
+          {/* Status */}
+          <div className="space-y-1.5">
+            <Label className="text-xs font-mono text-slate-400">STATUS</Label>
+            <Select
+              value={form.status}
+              onValueChange={v => setForm(f => ({ ...f, status: v as typeof form.status }))}
+            >
+              <SelectTrigger className="font-mono text-xs bg-slate-900/60 border-slate-700 text-slate-200">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {(['active', 'maintenance', 'degraded', 'offline'] as const).map(s => (
+                  <SelectItem key={s} value={s} className="font-mono text-xs">
+                    {STATUS_CONFIG[s]?.label ?? s.toUpperCase()}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Enabled toggle */}
+          <div className="flex items-center justify-between bg-slate-900/40 rounded-lg px-3 py-2.5 border border-slate-700/50">
+            <div>
+              <div className="text-xs font-mono text-slate-300">ENABLED</div>
+              <div className="text-[10px] font-mono text-slate-600">Active in the registry</div>
+            </div>
+            <Switch
+              checked={form.enabled}
+              onCheckedChange={v => setForm(f => ({ ...f, enabled: v }))}
+            />
+          </div>
+        </div>
+
+        <DialogFooter className="mt-4 gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onClose}
+            className="font-mono text-xs border-slate-700 text-slate-400 hover:bg-slate-800"
+          >
+            CANCEL
+          </Button>
+          <Button
+            size="sm"
+            onClick={handleSave}
+            disabled={updateMutation.isPending}
+            className="font-mono text-xs bg-blue-600 hover:bg-blue-700 text-white"
+          >
+            {updateMutation.isPending ? (
+              <><Loader2 size={12} className="animate-spin mr-1.5" />SAVING...</>
+            ) : (
+              <><Pencil size={12} className="mr-1.5" />SAVE CHANGES</>
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 // ─── Register Dialog ──────────────────────────────────────────────────────────
 
@@ -259,6 +419,7 @@ export default function DataSourcesPage() {
   const [testing, setTesting] = useState<number | null>(null);
   const [seeded, setSeeded] = useState(false);
   const [showRegister, setShowRegister] = useState(false);
+  const [editSource, setEditSource] = useState<DataSourceRow | null>(null);
 
   const utils = trpc.useUtils();
 
@@ -358,6 +519,13 @@ export default function DataSourcesPage() {
         open={showRegister}
         onClose={() => setShowRegister(false)}
         onCreated={() => refetch()}
+      />
+
+      {/* Edit Dialog */}
+      <EditDataSourceDialog
+        source={editSource}
+        onClose={() => setEditSource(null)}
+        onUpdated={() => refetch()}
       />
 
       {/* KPI Row */}
@@ -502,6 +670,15 @@ export default function DataSourcesPage() {
                   >
                     {isTesting ? <Loader2 size={10} className="animate-spin mr-1" /> : <Wifi size={10} className="mr-1" />}
                     {isTesting ? 'TESTING...' : 'TEST'}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-6 text-[10px] font-mono border-slate-700 text-blue-400 hover:bg-blue-500/10 px-2"
+                    onClick={() => setEditSource(src)}
+                    title="Edit data source"
+                  >
+                    <Pencil size={10} />
                   </Button>
                   <Button
                     size="sm"
