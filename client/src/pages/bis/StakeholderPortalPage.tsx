@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { trpc } from "@/lib/trpc";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -9,8 +9,11 @@ import { Label } from "@/components/ui/label";
 import {
   Shield, Clock, FileText, AlertTriangle, MessageSquare,
   RefreshCw, Send, Bell, Upload, Paperclip, X, Download, Eye, ChevronDown, ChevronUp,
+  Wifi, WifiOff,
 } from "lucide-react";
 import { toast } from "sonner";
+import { usePortalEventStream } from "@/hooks/usePortalEventStream";
+import type { PortalComment, PortalDocument } from "@/hooks/usePortalEventStream";
 
 const STATUS_COLORS: Record<string, string> = {
   draft: "bg-slate-100 text-slate-700",
@@ -31,7 +34,8 @@ const ALLOWED_TYPES: Record<string, string> = {
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
 };
 
-const POLL_INTERVAL_MS = 30_000; // 30 seconds
+/** Polling fallback interval — only used when SSE is unavailable */
+const POLL_FALLBACK_INTERVAL_MS = 30_000;
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -51,7 +55,7 @@ export default function StakeholderPortalPage() {
     { enabled: !!token }
   );
 
-  // ── Real-time polling state ──────────────────────────────────────────────
+  // ── Real-time state ──────────────────────────────────────────────────────
   const [lastPollAt, setLastPollAt] = useState<string>(() => new Date().toISOString());
   const [newBadge, setNewBadge] = useState(0);
   const [allComments, setAllComments] = useState<any[]>([]);
@@ -66,11 +70,44 @@ export default function StakeholderPortalPage() {
     }
   }, [data]);
 
+  // ── SSE — primary real-time channel ─────────────────────────────────────
+  const handleSseComment = useCallback((comment: PortalComment) => {
+    setAllComments((prev) => {
+      const existingIds = new Set(prev.map((c: any) => c.id));
+      if (existingIds.has(comment.id)) return prev;
+      return [...prev, comment];
+    });
+    setNewBadge((n) => n + 1);
+    toast.success("New comment", { description: `${comment.authorName ?? "Someone"} posted a comment.` });
+  }, []);
+
+  const handleSseDocument = useCallback((doc: PortalDocument) => {
+    setAllDocuments((prev) => {
+      const existingIds = new Set(prev.map((d: any) => d.id));
+      if (existingIds.has(doc.id)) return prev;
+      return [...prev, { ...doc, category: "stakeholder_submission", createdAt: new Date(doc.createdAt) }];
+    });
+    setNewBadge((n) => n + 1);
+    toast.success("New document", { description: `${doc.filename} was uploaded.` });
+  }, []);
+
+  const { connected: sseConnected, reconnectCount, sseSupported } = usePortalEventStream({
+    token,
+    onComment: handleSseComment,
+    onDocument: handleSseDocument,
+    enabled: !!token && !!data,
+  });
+
+  // ── Polling fallback — only active when SSE is unavailable ───────────────
+  // SSE is considered "working" if it's supported and has connected at least once
+  // (reconnectCount === 0 means it connected successfully at some point).
+  const useFallbackPolling = !sseSupported || (reconnectCount > 3);
+
   const pollQuery = trpc.cases.portalPollUpdates.useQuery(
     { token: token ?? "", since: lastPollAt },
     {
-      enabled: !!token && !!data,
-      refetchInterval: POLL_INTERVAL_MS,
+      enabled: !!token && !!data && useFallbackPolling,
+      refetchInterval: useFallbackPolling ? POLL_FALLBACK_INTERVAL_MS : false,
       refetchIntervalInBackground: false,
     }
   );
@@ -153,7 +190,6 @@ export default function StakeholderPortalPage() {
     const reader = new FileReader();
     reader.onload = (e) => {
       const dataUrl = e.target?.result as string;
-      // Strip the data:mime/type;base64, prefix
       const base64 = dataUrl.split(",")[1] ?? "";
       uploadDocument.mutate({
         token,
@@ -232,6 +268,31 @@ export default function StakeholderPortalPage() {
             </div>
           </div>
           <div className="flex items-center gap-3">
+            {/* SSE connection indicator */}
+            <div
+              className={`flex items-center gap-1 text-xs px-2 py-1 rounded-full ${
+                sseConnected
+                  ? "bg-green-100 text-green-700"
+                  : useFallbackPolling
+                  ? "bg-amber-100 text-amber-700"
+                  : "bg-muted text-muted-foreground"
+              }`}
+              title={
+                sseConnected
+                  ? "Live updates active"
+                  : useFallbackPolling
+                  ? "Polling fallback active (30s)"
+                  : "Connecting…"
+              }
+            >
+              {sseConnected ? (
+                <Wifi className="w-3 h-3" />
+              ) : (
+                <WifiOff className="w-3 h-3" />
+              )}
+              {sseConnected ? "Live" : useFallbackPolling ? "Polling" : "Connecting"}
+            </div>
+
             {newBadge > 0 && (
               <button
                 onClick={() => setNewBadge(0)}
@@ -265,7 +326,7 @@ export default function StakeholderPortalPage() {
           </CardHeader>
           <CardContent>
             {c.summary && <p className="text-muted-foreground text-sm mb-4">{c.summary}</p>}
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
               {[
                 { label: "Type", value: c.type?.replace("_", " ") },
                 { label: "Priority", value: c.priority },
@@ -321,7 +382,7 @@ export default function StakeholderPortalPage() {
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
                 <FileText className="w-4 h-4" /> Documents
-                {pollQuery.isFetching && (
+                {useFallbackPolling && pollQuery.isFetching && (
                   <RefreshCw className="w-3 h-3 animate-spin text-muted-foreground ml-auto" />
                 )}
               </CardTitle>
@@ -396,13 +457,12 @@ export default function StakeholderPortalPage() {
                 <p className="text-sm text-muted-foreground">No documents shared yet.</p>
               )}
 
-              {/* File upload — shown to all stakeholders who can view documents */}
+              {/* File upload */}
               <div className="pt-3 border-t space-y-3">
                 <p className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
                   <Upload className="w-3.5 h-3.5" /> Submit a Document
                 </p>
 
-                {/* Hidden file input */}
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -480,7 +540,7 @@ export default function StakeholderPortalPage() {
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2">
               <MessageSquare className="w-4 h-4" /> Comments
-              {pollQuery.isFetching && (
+              {useFallbackPolling && pollQuery.isFetching && (
                 <RefreshCw className="w-3 h-3 animate-spin text-muted-foreground ml-auto" />
               )}
             </CardTitle>
@@ -544,7 +604,10 @@ export default function StakeholderPortalPage() {
           {stakeholder.accessExpiresAt
             ? new Date(stakeholder.accessExpiresAt).toLocaleDateString()
             : "—"}
-          . All access and uploads are logged and audited. Auto-refreshes every 30 seconds.
+          . All access and uploads are logged and audited.{" "}
+          {sseConnected
+            ? "Real-time updates active via SSE."
+            : "Updates via 30-second polling fallback."}
         </p>
       </div>
     </div>

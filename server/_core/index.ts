@@ -32,6 +32,7 @@ import { load as yamlLoad } from "js-yaml";
 import { startSlaBreachScheduler } from "../slaBreachChecker";
 import { startArchivalScheduler } from "../archivalScheduler";
 import { startKycExpiryDigestScheduler } from "../kycExpiryDigest";
+import { startRiskThresholdDigestScheduler } from "../riskThresholdDigest";
 import { validateEnv } from "../envValidation";
 
 // ── Structured logger ─────────────────────────────────────────────────────────
@@ -524,6 +525,67 @@ async function startServer() {
     }
   });
 
+  // ── Stakeholder Portal SSE stream ────────────────────────────────────────────
+  // Provides real-time push notifications to stakeholder portal sessions.
+  // Auth: token query param (portal access token, no session cookie required).
+  // Events: PORTAL_COMMENT, PORTAL_DOCUMENT
+  // Client usage: new EventSource('/api/v1/portal/stream?token=<token>')
+  app.get("/api/v1/portal/stream", async (req: Request, res: Response) => {
+    const token = req.query.token as string | undefined;
+    if (!token) {
+      res.status(401).json({ error: "Missing portal token" });
+      return;
+    }
+    // Validate the portal token against DB
+    const { getDb } = await import("../db");
+    const db = await getDb();
+    if (!db) {
+      res.status(503).json({ error: "Database unavailable" });
+      return;
+    }
+    const { caseStakeholders } = await import("../../drizzle/schema");
+    const { eq, and, gt } = await import("drizzle-orm");
+    const [sh] = await db
+      .select({ id: caseStakeholders.id, caseId: caseStakeholders.caseId, accessExpiresAt: caseStakeholders.accessExpiresAt })
+      .from(caseStakeholders)
+      .where(eq(caseStakeholders.accessToken, token))
+      .limit(1);
+    if (!sh) {
+      res.status(401).json({ error: "Invalid portal token" });
+      return;
+    }
+    if (sh.accessExpiresAt && sh.accessExpiresAt < new Date()) {
+      res.status(401).json({ error: "Portal token expired" });
+      return;
+    }
+
+    // Set SSE headers
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.setHeader("Connection", "keep-alive");
+    res.flushHeaders();
+
+    // Register this connection in the portal SSE manager
+    const { portalSseManager } = await import("../portalSse");
+    const clientId = portalSseManager.register(sh.caseId, res);
+
+    // Send initial heartbeat
+    res.write(`event: connected\ndata: ${JSON.stringify({ caseId: sh.caseId, ts: new Date().toISOString() })}\n\n`);
+
+    // Heartbeat every 25s to keep connection alive through proxies
+    const heartbeat = setInterval(() => {
+      if (!res.writableEnded) {
+        res.write(`:heartbeat\n\n`);
+      }
+    }, 25_000);
+
+    req.on("close", () => {
+      clearInterval(heartbeat);
+      portalSseManager.unregister(clientId);
+    });
+  });
+
   // ── Scheduled task endpoint — alert rules evaluation ──────────────────────
   // Called by Manus scheduled task every 15 min via:
   //   curl -X POST $SCHEDULED_TASK_ENDPOINT_BASE/api/scheduled/alert-rules \
@@ -803,6 +865,7 @@ startServer()
     startSlaBreachScheduler();
     startArchivalScheduler(); // Nightly hot→warm→cold archival at 02:00 UTC
     startKycExpiryDigestScheduler(); // Daily KYC expiry digest at 08:00 WAT
+    startRiskThresholdDigestScheduler(); // Daily risk threshold digest at 09:00 WAT
     return srv;
   })
   .catch((err) => {

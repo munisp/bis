@@ -2046,3 +2046,8 @@
 - [x] Threshold configuration UI — slider + toggle card in Risk Trend widget wired to trpc.riskDashboard.setAlertThreshold; shows current threshold and notification status
 - [x] Portal document viewer — inline PDF/image preview in stakeholder portal comment feed using presigned S3 URL; iframe for PDF, img for images; fallback download link
 - [x] Replay history pagination — limit/offset controls in Replay History tab; page size selector; total count display; prev/next navigation
+
+## Next Steps Round 4 (May 13 2026)
+- [x] SSE-based stakeholder portal notifications — replace 30s polling with SSE endpoint /api/v1/portal/stream/:token; usePortalEventStream hook with exponential backoff; update StakeholderPortalPage to use SSE; keep polling as fallback
+- [x] Risk threshold email digest — daily scheduler (09:00 WAT / 08:00 UTC) that queries checkThreshold, sends HTML email digest via notifyOwner listing top-flagged entities, creates in-app alert; deduplicated per day
+- [x] Replay History search/filter — event type dropdown + date range pickers above Replay History table; extend audit.replayHistory with optional eventType and dateFrom/dateTo Zod params; WHERE clause filters in DB query

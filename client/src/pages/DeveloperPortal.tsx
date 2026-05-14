@@ -651,8 +651,17 @@ export default function DeveloperPortal() {
   const [openclawTab, setOpenclawTab] = useState<"skills" | "history">("skills");
   const REPLAY_PAGE_SIZE = 20;
   const [replayPage, setReplayPage] = useState(0);
+  const [replayEventTypeFilter, setReplayEventTypeFilter] = useState<string>("");
+  const [replayDateFrom, setReplayDateFrom] = useState("");
+  const [replayDateTo, setReplayDateTo] = useState("");
   const { data: replayHistoryData, isLoading: replayLoading, refetch: refetchReplay } = trpc.audit.replayHistory.useQuery(
-    { limit: REPLAY_PAGE_SIZE, offset: replayPage * REPLAY_PAGE_SIZE },
+    {
+      limit: REPLAY_PAGE_SIZE,
+      offset: replayPage * REPLAY_PAGE_SIZE,
+      eventType: replayEventTypeFilter || undefined,
+      dateFrom: replayDateFrom || undefined,
+      dateTo: replayDateTo || undefined,
+    },
     { enabled: activeSection === "openclaw" && openclawTab === "history" }
   );
 
@@ -802,6 +811,63 @@ export default function DeveloperPortal() {
                 <Button variant="outline" size="sm" onClick={() => refetchReplay()} className="gap-1.5">
                   <RefreshCw className={`h-3.5 w-3.5 ${replayLoading ? 'animate-spin' : ''}`} /> Refresh
                 </Button>
+              </div>
+
+              {/* Filter bar */}
+              <div className="flex flex-wrap gap-3 p-3 bg-muted/40 rounded-lg border">
+                {/* Event type dropdown */}
+                <div className="flex flex-col gap-1 min-w-[180px]">
+                  <label className="text-xs text-muted-foreground font-medium">Event Type</label>
+                  <select
+                    value={replayEventTypeFilter}
+                    onChange={(e) => { setReplayEventTypeFilter(e.target.value); setReplayPage(0); }}
+                    className="h-8 rounded-md border border-input bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+                  >
+                    <option value="">All event types</option>
+                    {(replayHistoryData?.eventTypes ?? []).map((et) => (
+                      <option key={et} value={et}>{et.replace('openclaw.replay.', '')}</option>
+                    ))}
+                  </select>
+                </div>
+                {/* Date from */}
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs text-muted-foreground font-medium">From</label>
+                  <input
+                    type="date"
+                    value={replayDateFrom}
+                    onChange={(e) => { setReplayDateFrom(e.target.value); setReplayPage(0); }}
+                    className="h-8 rounded-md border border-input bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+                  />
+                </div>
+                {/* Date to */}
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs text-muted-foreground font-medium">To</label>
+                  <input
+                    type="date"
+                    value={replayDateTo}
+                    onChange={(e) => { setReplayDateTo(e.target.value); setReplayPage(0); }}
+                    className="h-8 rounded-md border border-input bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+                  />
+                </div>
+                {/* Clear filters */}
+                {(replayEventTypeFilter || replayDateFrom || replayDateTo) && (
+                  <div className="flex flex-col justify-end">
+                    <button
+                      onClick={() => { setReplayEventTypeFilter(""); setReplayDateFrom(""); setReplayDateTo(""); setReplayPage(0); }}
+                      className="h-8 px-3 text-xs rounded-md border border-border hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
+                    >
+                      Clear filters
+                    </button>
+                  </div>
+                )}
+                {/* Result count */}
+                {replayHistoryData && (
+                  <div className="flex flex-col justify-end ml-auto">
+                    <span className="text-xs text-muted-foreground">
+                      {replayHistoryData.total.toLocaleString()} result{replayHistoryData.total !== 1 ? "s" : ""}
+                    </span>
+                  </div>
+                )}
               </div>
               {replayLoading ? (
                 <div className="flex items-center justify-center h-32 text-muted-foreground text-sm">

@@ -1372,22 +1372,59 @@ const auditRouter = router({
    */
   replayHistory: adminProcedure
     .input(z.object({
-      limit: z.number().min(1).max(200).default(50),
+      limit: z.number().min(1).max(200).default(20),
       offset: z.number().default(0),
+      /** Optional filter: exact action suffix, e.g. "openclaw.replay.started" */
+      eventType: z.string().max(100).optional(),
+      /** ISO date string — include only records on or after this date */
+      dateFrom: z.string().optional(),
+      /** ISO date string — include only records on or before this date */
+      dateTo: z.string().optional(),
     }))
     .query(async ({ input }) => {
       const db = await getDb();
-      if (!db) return { items: [], total: 0 };
-      const [items, countResult] = await Promise.all([
+      if (!db) return { items: [], total: 0, eventTypes: [] };
+
+      // Build WHERE conditions
+      const conditions: ReturnType<typeof sql>[] = [
+        sql`${auditLog.action} LIKE 'openclaw.replay.%'`,
+      ];
+      if (input.eventType) {
+        conditions.push(sql`${auditLog.action} = ${input.eventType}`);
+      }
+      if (input.dateFrom) {
+        const from = new Date(input.dateFrom);
+        if (!isNaN(from.getTime())) conditions.push(gte(auditLog.createdAt, from));
+      }
+      if (input.dateTo) {
+        const to = new Date(input.dateTo);
+        if (!isNaN(to.getTime())) {
+          // Include the full day by advancing to end-of-day
+          to.setUTCHours(23, 59, 59, 999);
+          conditions.push(lte(auditLog.createdAt, to));
+        }
+      }
+      const whereClause = conditions.length > 1 ? and(...conditions) : conditions[0];
+
+      // Fetch distinct event types for the filter dropdown (always from full replay set)
+      const [items, countResult, eventTypesResult] = await Promise.all([
         db.select().from(auditLog)
-          .where(sql`${auditLog.action} LIKE 'openclaw.replay.%'`)
+          .where(whereClause)
           .orderBy(desc(auditLog.createdAt))
           .limit(input.limit)
           .offset(input.offset),
         db.select({ count: sql<number>`count(*)` }).from(auditLog)
-          .where(sql`${auditLog.action} LIKE 'openclaw.replay.%'`),
+          .where(whereClause),
+        db.selectDistinct({ action: auditLog.action }).from(auditLog)
+          .where(sql`${auditLog.action} LIKE 'openclaw.replay.%'`)
+          .orderBy(auditLog.action),
       ]);
-      return { items, total: Number(countResult[0]?.count ?? 0) };
+
+      return {
+        items,
+        total: Number(countResult[0]?.count ?? 0),
+        eventTypes: eventTypesResult.map(r => r.action).filter(Boolean) as string[],
+      };
     }),
 });
 // ─── Field Tasks Router ────────────────────────────────────────────────────────
@@ -3549,6 +3586,21 @@ ${timeline.map(e => `<tr><td>${new Date(e.createdAt).toLocaleDateString()}</td><
         actorName: stakeholder.name,
         actorRole: stakeholder.role ?? 'stakeholder',
       });
+      // Push SSE notification to all connected portal clients for this case
+      try {
+        const { portalSseManager } = await import('./portalSse');
+        portalSseManager.push(stakeholder.caseId, {
+          type: 'PORTAL_COMMENT',
+          payload: {
+            id: comment.id,
+            content: comment.content,
+            authorName: comment.authorName,
+            authorRole: comment.authorRole,
+            createdAt: comment.createdAt?.toISOString(),
+          },
+          ts: new Date().toISOString(),
+        });
+      } catch { /* SSE push is best-effort */ }
       return comment;
     }),
 
@@ -3649,6 +3701,23 @@ ${timeline.map(e => `<tr><td>${new Date(e.createdAt).toLocaleDateString()}</td><
         });
       }
 
+      // Push SSE notification to all connected portal clients for this case
+      try {
+        const { portalSseManager } = await import('./portalSse');
+        portalSseManager.push(stakeholder.caseId, {
+          type: 'PORTAL_DOCUMENT',
+          payload: {
+            id: doc.id,
+            filename: input.filename,
+            mimeType: input.mimeType,
+            url,
+            sizeBytes: buffer.length,
+            uploadedBy: stakeholder.name,
+            createdAt: new Date().toISOString(),
+          },
+          ts: new Date().toISOString(),
+        });
+      } catch { /* SSE push is best-effort */ }
       return { id: doc.id, url, filename: input.filename, sizeBytes: buffer.length };
     }),
 });
