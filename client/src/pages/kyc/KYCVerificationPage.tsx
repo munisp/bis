@@ -22,7 +22,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Upload, PlayCircle, Loader2, CheckCircle2, XCircle, AlertTriangle, ShieldCheck, History, RefreshCw, ChevronDown, Eye, X as XIcon } from 'lucide-react';
+import { Upload, PlayCircle, Loader2, CheckCircle2, XCircle, AlertTriangle, ShieldCheck, History, RefreshCw, ChevronDown, Eye, X as XIcon, Clock } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Separator } from '@/components/ui/separator';
 import { trpc } from '@/lib/trpc';
@@ -899,6 +899,18 @@ const STATUS_BADGE: Record<string, { label: string; cls: string }> = {
 
 function KYCDetailPanel({ id, onClose, onRerun }: { id: number; onClose: () => void; onRerun?: (prefill: { subjectName: string; nin?: string; bvn?: string; dob?: string; phone?: string }) => void }) {
   const { data: rec, isLoading } = trpc.kyc.get.useQuery({ id });
+  const [showSchedule, setShowSchedule] = useState(false);
+  const [scheduleDate, setScheduleDate] = useState('');
+  const utils = trpc.useUtils();
+  const scheduleRerunMutation = trpc.kyc.scheduleRerun.useMutation({
+    onSuccess: () => {
+      toast.success('Re-verification scheduled');
+      setShowSchedule(false);
+      setScheduleDate('');
+      utils.kyc.listScheduledReruns.invalidate();
+    },
+    onError: (e) => toast.error(`Failed to schedule: ${e.message}`),
+  });
 
   const renderCheck = (label: string, result: any) => {
     if (!result) return null;
@@ -992,10 +1004,154 @@ function KYCDetailPanel({ id, onClose, onRerun }: { id: number; onClose: () => v
             >
               <RefreshCw className="w-3.5 h-3.5" /> Re-run Pipeline
             </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="w-full gap-1.5 text-xs mt-1"
+              onClick={() => setShowSchedule(true)}
+            >
+              <Clock className="w-3.5 h-3.5" /> Schedule Re-verification
+            </Button>
+          </div>
+        )}
+        {/* Schedule Re-run sub-dialog */}
+        {showSchedule && rec && (
+          <div className="mt-4 p-3 border rounded-lg bg-muted/40 space-y-3">
+            <p className="text-sm font-medium">Schedule Re-verification for <span className="font-bold">{rec.subjectName}</span></p>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Re-run Date &amp; Time</label>
+              <input
+                type="datetime-local"
+                className="w-full text-sm border rounded px-2 py-1 bg-background"
+                value={scheduleDate}
+                min={new Date().toISOString().slice(0, 16)}
+                onChange={e => setScheduleDate(e.target.value)}
+              />
+            </div>
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                className="flex-1 text-xs"
+                disabled={!scheduleDate || scheduleRerunMutation.isPending}
+                onClick={() => {
+                  if (!scheduleDate) return;
+                  scheduleRerunMutation.mutate({
+                    kycRecordId: id,
+                    subjectName: rec.subjectName ?? '',
+                    nin: rec.nin ?? undefined,
+                    bvn: rec.bvn ?? undefined,
+                    dob: rec.dob ?? undefined,
+                    phone: rec.phone ?? undefined,
+                    scheduledAt: new Date(scheduleDate),
+                  });
+                }}
+              >
+                {scheduleRerunMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}
+                Confirm Schedule
+              </Button>
+              <Button size="sm" variant="ghost" className="text-xs" onClick={() => setShowSchedule(false)}>Cancel</Button>
+            </div>
           </div>
         )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+// ─── Scheduled Reruns Tab ────────────────────────────────────────────────────
+
+function KYCScheduledRerunsTab() {
+  const [statusFilter, setStatusFilter] = useState<'pending' | 'running' | 'completed' | 'failed' | undefined>(undefined);
+  const { data: reruns, isLoading, isError, refetch } = trpc.kyc.listScheduledReruns.useQuery(
+    statusFilter ? { status: statusFilter } : {}
+  );
+
+  const statusColors: Record<string, string> = {
+    pending: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300',
+    running: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
+    completed: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
+    failed: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300',
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="flex gap-2">
+          {(['all', 'pending', 'running', 'completed', 'failed'] as const).map(s => (
+            <button
+              key={s}
+              onClick={() => setStatusFilter(s === 'all' ? undefined : s)}
+              className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                (s === 'all' && !statusFilter) || statusFilter === s
+                  ? 'bg-primary text-primary-foreground'
+                  : 'bg-muted text-muted-foreground hover:bg-muted/80'
+              }`}
+            >
+              {s.charAt(0).toUpperCase() + s.slice(1)}
+            </button>
+          ))}
+        </div>
+        <Button variant="ghost" size="sm" onClick={() => refetch()} className="gap-1.5">
+          <RefreshCw size={13} /> Refresh
+        </Button>
+      </div>
+
+      {isError && (
+        <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
+          Failed to load scheduled re-runs.
+          <Button variant="link" size="sm" className="ml-2 h-auto p-0" onClick={() => refetch()}>Retry</Button>
+        </div>
+      )}
+
+      {isLoading ? (
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="animate-spin text-muted-foreground" size={24} />
+        </div>
+      ) : !reruns?.length ? (
+        <div className="flex flex-col items-center justify-center py-16 text-muted-foreground gap-2">
+          <Clock size={32} className="opacity-40" />
+          <p className="text-sm">No scheduled re-runs found.</p>
+          <p className="text-xs opacity-60">Schedule a re-run from the KYC History tab.</p>
+        </div>
+      ) : (
+        <div className="rounded-lg border overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/50">
+              <tr>
+                <th className="text-left px-4 py-3 font-medium text-muted-foreground">Subject</th>
+                <th className="text-left px-4 py-3 font-medium text-muted-foreground">Scheduled At</th>
+                <th className="text-left px-4 py-3 font-medium text-muted-foreground">Status</th>
+                <th className="text-left px-4 py-3 font-medium text-muted-foreground">Result ID</th>
+                <th className="text-left px-4 py-3 font-medium text-muted-foreground">Created</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {reruns.map(r => (
+                <tr key={r.id} className="hover:bg-muted/30 transition-colors">
+                  <td className="px-4 py-3 font-medium">{r.subjectName}</td>
+                  <td className="px-4 py-3 text-muted-foreground">
+                    {new Date(r.scheduledAt).toLocaleString()}
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${statusColors[r.status] ?? 'bg-muted text-muted-foreground'}`}>
+                      {r.status}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-muted-foreground">
+                    {r.resultKycRecordId ? (
+                      <span className="font-mono text-xs bg-muted px-1.5 py-0.5 rounded">#{r.resultKycRecordId}</span>
+                    ) : '—'}
+                  </td>
+                  <td className="px-4 py-3 text-muted-foreground text-xs">
+                    {new Date(r.createdAt).toLocaleString()}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -1329,6 +1485,9 @@ export default function KYCVerificationPage() {
           <TabsTrigger value="history" className="gap-1.5">
             <History size={14} /> History
           </TabsTrigger>
+          <TabsTrigger value="scheduled" className="gap-1.5">
+            <Clock size={14} /> Scheduled
+          </TabsTrigger>
         </TabsList>
         <TabsContent value="pipeline">
           <KYCRunPipelineForm prefill={rerunPrefill} onPrefillConsumed={() => setRerunPrefill(null)} />
@@ -1338,6 +1497,9 @@ export default function KYCVerificationPage() {
         </TabsContent>
         <TabsContent value="history">
           <KYCHistoryTab onRerun={handleRerun} />
+        </TabsContent>
+        <TabsContent value="scheduled">
+          <KYCScheduledRerunsTab />
         </TabsContent>
       </Tabs>
       <KYCBatchUploadModal open={batchOpen} onClose={() => setBatchOpen(false)} />

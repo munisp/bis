@@ -1610,3 +1610,44 @@ export const nigerianDataBundleRuns = pgTable("nigerian_data_bundle_runs", {
     bundle_runs_bvn_idx: index("bundle_runs_bvn_idx").on(table.bvn),
   }));
 export type NigerianDataBundleRun = typeof nigerianDataBundleRuns.$inferSelect;
+
+// ── Data Source Health Logs ────────────────────────────────────────────────────
+export const dataSourceHealthLogs = pgTable("data_source_health_logs", {
+  id: serial("id").primaryKey(),
+  dataSourceId: integer("dataSourceId").notNull().references(() => dataSources.id, { onDelete: "cascade" }),
+  status: dataSourceStatusEnum("status").notNull(),
+  responseMs: integer("responseMs").notNull().default(0),
+  httpStatus: integer("httpStatus"),
+  error: text("error"),
+  checkedAt: timestamp("checkedAt").defaultNow().notNull(),
+},
+  (table) => ({
+    health_logs_ds_idx: index("health_logs_ds_idx").on(table.dataSourceId),
+    health_logs_checked_at_idx: index("health_logs_checked_at_idx").on(table.checkedAt),
+  }));
+export type DataSourceHealthLog = typeof dataSourceHealthLogs.$inferSelect;
+export type InsertDataSourceHealthLog = typeof dataSourceHealthLogs.$inferInsert;
+
+// ── KYC Scheduled Re-runs ─────────────────────────────────────────────────────
+export const kycScheduledReruns = pgTable("kyc_scheduled_reruns", {
+  id: serial("id").primaryKey(),
+  kycRecordId: integer("kycRecordId").notNull().references(() => kycRecords.id, { onDelete: "cascade" }),
+  subjectName: varchar("subjectName", { length: 255 }).notNull(),
+  nin: varchar("nin", { length: 20 }),
+  bvn: varchar("bvn", { length: 22 }),
+  dob: varchar("dob", { length: 20 }),
+  phone: varchar("phone", { length: 20 }),
+  scheduledAt: timestamp("scheduledAt").notNull(),
+  status: varchar("status", { length: 32 }).notNull().default("pending"), // pending | running | completed | failed
+  resultKycRecordId: integer("resultKycRecordId"),
+  createdBy: integer("createdBy").references(() => users.id),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+},
+  (table) => ({
+    kyc_reruns_status_idx: index("kyc_reruns_status_idx").on(table.status),
+    kyc_reruns_scheduled_at_idx: index("kyc_reruns_scheduled_at_idx").on(table.scheduledAt),
+    kyc_reruns_kyc_record_idx: index("kyc_reruns_kyc_record_idx").on(table.kycRecordId),
+  }));
+export type KycScheduledRerun = typeof kycScheduledReruns.$inferSelect;
+export type InsertKycScheduledRerun = typeof kycScheduledReruns.$inferInsert;

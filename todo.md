@@ -2123,3 +2123,16 @@
 - [x] Onboarding: SLA breached banner in admin page using onboarding.slaBreached query (red alert with count + View button)
 - [x] DataSources: lastCheckedAt timestamp display in card metrics (shows time of last health probe)
 - [x] Final production audit: 0 stubs, 0 console.log, 0 TS errors, 560/560 tests pass
+
+## Round 13 — Health History Chart, Document Verification, KYC Scheduled Re-run (May 14 2026)
+- [x] DataSources: dataSourceHealthLogs table + dataSources.healthHistory procedure + sparkline on card
+- [x] Onboarding: onboarding.verifyDocuments procedure (OCR + tamper-detection via kyc.extractDocument/detectTampering) + Verify Documents button in drawer
+- [x] KYC: kycScheduledReruns table + kyc.scheduleRerun procedure + scheduler integration + Schedule Re-run UI in KYC History detail panel
+- [x] Round 13 tests in server/next-steps.test.ts (567 total tests pass)
+
+## Round 14 — KYC Rerun Executor, Scheduled Reruns UI, Health Sparkline Expand (May 14 2026)
+- [x] KYC: kycScheduledRerunExecutor.ts — polls every 5 min, fires pending reruns whose scheduledAt has passed
+- [x] KYC: Wire kycScheduledRerunExecutor into server/_core/index.ts
+- [x] KYC: kyc.listScheduledReruns UI tab in KYCVerificationPage (show pending/completed/failed reruns)
+- [x] DataSources: Expand sparkline on card click — show full 24h chart in a dialog
+- [x] Round 14 tests in server/next-steps.test.ts (571 total tests pass)

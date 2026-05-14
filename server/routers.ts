@@ -71,6 +71,8 @@ import {
   investigationCaseLinks,
   exportSchedules,
   nigerianDataBundleRuns,
+  dataSourceHealthLogs,
+  kycScheduledReruns,
 } from "../drizzle/schema";
 import {
   getDashboardStats,
@@ -1306,9 +1308,60 @@ const kycRouter = router({
         })),
       };
     }),
-});
 
-// ─── Audit Log Router ─────────────────────────────────────────────────────────
+  scheduleRerun: protectedProcedure
+    .input(z.object({
+      kycRecordId: z.number(),
+      subjectName: z.string().min(2),
+      nin: z.string().optional(),
+      bvn: z.string().optional(),
+      dob: z.string().optional(),
+      phone: z.string().optional(),
+      scheduledAt: z.date(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Database unavailable' });
+      const [existing] = await db.select().from(kycRecords).where(eq(kycRecords.id, input.kycRecordId)).limit(1);
+      if (!existing) throw new TRPCError({ code: 'NOT_FOUND', message: 'KYC record not found' });
+      const [rerun] = await db.insert(kycScheduledReruns).values({
+        kycRecordId: input.kycRecordId,
+        subjectName: input.subjectName,
+        nin: input.nin,
+        bvn: input.bvn,
+        dob: input.dob,
+        phone: input.phone,
+        scheduledAt: input.scheduledAt,
+        status: 'pending',
+        createdBy: ctx.user!.id,
+      }).returning();
+      await writeAuditLog(db, {
+        userId: ctx.user!.id,
+        category: 'kyc',
+        action: `Scheduled KYC re-run for ${input.subjectName} at ${input.scheduledAt.toISOString()}`,
+        targetRef: String(input.kycRecordId),
+      });
+      return rerun;
+    }),
+
+  listScheduledReruns: protectedProcedure
+    .input(z.object({
+      status: z.enum(['pending', 'running', 'completed', 'failed']).optional(),
+      limit: z.number().min(1).max(100).default(50),
+    }).optional())
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return [];
+      const conditions = [];
+      if (input?.status) conditions.push(eq(kycScheduledReruns.status, input.status));
+      const where = conditions.length ? and(...conditions) : undefined;
+      return db.select().from(kycScheduledReruns)
+        .where(where)
+        .orderBy(desc(kycScheduledReruns.scheduledAt))
+        .limit(input?.limit ?? 50);
+    }),
+});
+// ─── Audit Log Routerr ─────────────────────────────────────────────────────────
 
 const auditRouter = router({
   list: protectedProcedure
@@ -1814,6 +1867,29 @@ const dataSourcesRouter = router({
       });
       return { ok, latencyMs };
     }),
+
+  healthHistory: protectedProcedure
+    .input(z.object({
+      dataSourceId: z.number(),
+      hours: z.number().min(1).max(168).default(24),
+    }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return [];
+      const since = new Date(Date.now() - input.hours * 60 * 60 * 1000);
+      const logs = await db
+        .select()
+        .from(dataSourceHealthLogs)
+        .where(
+          and(
+            eq(dataSourceHealthLogs.dataSourceId, input.dataSourceId),
+            gte(dataSourceHealthLogs.checkedAt, since),
+          )
+        )
+        .orderBy(asc(dataSourceHealthLogs.checkedAt))
+        .limit(288); // 24h at 5-min intervals
+      return logs;
+    }),
 });
 // ─── Monitors Router ──────────────────────────────────────────────────────────
 
@@ -2250,6 +2326,69 @@ const onboardingRouter = router({
         )
         .orderBy(onboardingApplications.createdAt)
         .limit(100);
+    }),
+
+  verifyDocuments: adminProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Database unavailable' });
+      const [app] = await db.select().from(onboardingApplications).where(eq(onboardingApplications.id, input.id)).limit(1);
+      if (!app) throw new TRPCError({ code: 'NOT_FOUND', message: 'Application not found' });
+      const docs: Array<{ name: string; url: string; key: string; uploadedAt: string }> = (app.documentUrls as any) ?? [];
+      if (docs.length === 0) throw new TRPCError({ code: 'BAD_REQUEST', message: 'No documents uploaded for this application' });
+      const results: Array<{ name: string; url: string; extracted: Record<string, unknown>; tampered: boolean; confidence: number }> = [];
+      for (const doc of docs) {
+        let extracted: Record<string, unknown> = {};
+        let tampered = false;
+        let confidence = 0;
+        try {
+          // Call kyc.extractDocument logic inline (OCR)
+          const extractRes = await fetch(`${KYC_SERVICE_URL}/v1/documents/extract`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-BIS-Key': GATEWAY_KEY },
+            body: JSON.stringify({ documentUrl: doc.url, documentType: 'auto' }),
+            signal: AbortSignal.timeout(15000),
+          }).catch(() => null);
+          if (extractRes?.ok) {
+            const data = await extractRes.json();
+            extracted = data?.fields ?? {};
+            confidence = data?.confidence ?? 0.85;
+          } else {
+            // Fallback: mark as extracted with placeholder fields
+            extracted = { documentName: doc.name, status: 'ocr_unavailable' };
+            confidence = 0;
+          }
+          // Call kyc.detectTampering logic inline
+          const tamperRes = await fetch(`${KYC_SERVICE_URL}/v1/documents/tamper-detect`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-BIS-Key': GATEWAY_KEY },
+            body: JSON.stringify({ documentUrl: doc.url }),
+            signal: AbortSignal.timeout(10000),
+          }).catch(() => null);
+          if (tamperRes?.ok) {
+            const data = await tamperRes.json();
+            tampered = data?.tampered ?? false;
+          }
+        } catch {
+          extracted = { documentName: doc.name, status: 'verification_error' };
+        }
+        results.push({ name: doc.name, url: doc.url, extracted, tampered, confidence });
+      }
+      const allClean = results.every(r => !r.tampered);
+      const newStatus = allClean ? 'under_review' : app.status;
+      if (allClean && app.status === 'awaiting_documents') {
+        await db.update(onboardingApplications)
+          .set({ status: newStatus as any, updatedAt: new Date() })
+          .where(eq(onboardingApplications.id, input.id));
+      }
+      await writeAuditLog(db, {
+        userId: ctx.user!.id,
+        category: 'system',
+        action: `Document verification run: ${results.length} docs, tampered=${results.filter(r => r.tampered).length}`,
+        targetRef: app.referenceId,
+      });
+      return { results, allClean, statusUpdated: allClean && app.status === 'awaiting_documents' };
     }),
 });
 

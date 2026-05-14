@@ -31,6 +31,7 @@ import { readFileSync } from "fs";
 import { load as yamlLoad } from "js-yaml";
 import { startSlaBreachScheduler } from "../slaBreachChecker";
 import { startDataSourcesHealthScheduler } from "../dataSourcesHealthScheduler";
+import { startKycScheduledRerunExecutor } from "../kycScheduledRerunExecutor";
 import { startArchivalScheduler } from "../archivalScheduler";
 import { startKycExpiryDigestScheduler } from "../kycExpiryDigest";
 import { startRiskThresholdDigestScheduler } from "../riskThresholdDigest";
@@ -868,6 +869,7 @@ startServer()
     startKycExpiryDigestScheduler(); // Daily KYC expiry digest at 08:00 WAT
     startRiskThresholdDigestScheduler(); // Daily risk threshold digest at 09:00 WAT
     startDataSourcesHealthScheduler(); // 15-min health probe for all enabled data sources
+    startKycScheduledRerunExecutor(); // 5-min poll for pending KYC scheduled re-runs
     return srv;
   })
   .catch((err) => {

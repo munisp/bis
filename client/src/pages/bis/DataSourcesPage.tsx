@@ -412,7 +412,185 @@ function RegisterDataSourceDialog({ open, onClose, onCreated }: RegisterDialogPr
   );
 }
 
-// ─── Component ────────────────────────────────────────────────────────────────
+// ─── Health Sparkline ─────────────────────────────────────────────────────────────────
+
+function HealthSparkline({ dataSourceId }: { dataSourceId: number }) {
+  const { data: logs, isLoading } = trpc.dataSources.healthHistory.useQuery(
+    { dataSourceId, hours: 24 },
+    { refetchInterval: 5 * 60 * 1000 },
+  );
+
+  if (isLoading) {
+    return (
+      <div className="h-12 flex items-center justify-center text-[10px] text-slate-600 font-mono mb-2">
+        <Loader2 size={10} className="animate-spin mr-1" /> LOADING...
+      </div>
+    );
+  }
+
+  if (!logs || logs.length === 0) {
+    return (
+      <div className="h-12 flex items-center justify-center text-[10px] text-slate-600 font-mono mb-2">
+        NO HISTORY YET
+      </div>
+    );
+  }
+
+  // Build SVG sparkline from responseMs values
+  const values = logs.map(l => l.responseMs);
+  const maxVal = Math.max(...values, 1);
+  const W = 200;
+  const H = 32;
+  const pts = values.map((v, i) => {
+    const x = (i / Math.max(values.length - 1, 1)) * W;
+    const y = H - (v / maxVal) * H;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+
+  const statusColors: Record<string, string> = {
+    active: '#34d399',
+    degraded: '#fbbf24',
+    offline: '#f87171',
+  };
+  const lastStatus = logs[logs.length - 1]?.status ?? 'active';
+  const lineColor = statusColors[lastStatus] ?? '#34d399';
+
+  return (
+    <div className="mb-2">
+      <div className="text-[10px] text-slate-600 font-mono mb-1">24H RESPONSE TIME</div>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: 32 }}>
+        <polyline
+          points={pts}
+          fill="none"
+          stroke={lineColor}
+          strokeWidth="1.5"
+          strokeLinejoin="round"
+          strokeLinecap="round"
+        />
+      </svg>
+      <div className="flex justify-between text-[9px] text-slate-600 font-mono mt-0.5">
+        <span>{new Date(logs[0].checkedAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</span>
+        <span>{maxVal}ms peak</span>
+        <span>{new Date(logs[logs.length - 1].checkedAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</span>
+      </div>
+    </div>
+  );
+}
+
+// ─── Health History Dialog ──────────────────────────────────────────────────
+
+function HealthHistoryDialog({ dataSourceId, dataSourceName, open, onClose }: {
+  dataSourceId: number;
+  dataSourceName: string;
+  open: boolean;
+  onClose: () => void;
+}) {
+  const { data: logs, isLoading } = trpc.dataSources.healthHistory.useQuery(
+    { dataSourceId, hours: 24 },
+    { enabled: open }
+  );
+
+  const statusColors: Record<string, string> = {
+    active: '#34d399',
+    degraded: '#fbbf24',
+    offline: '#f87171',
+  };
+
+  const values = logs?.map(l => l.responseMs) ?? [];
+  const maxVal = Math.max(...values, 1);
+  const W = 600;
+  const H = 80;
+  const pts = values.map((v, i) => {
+    const x = (i / Math.max(values.length - 1, 1)) * W;
+    const y = H - (v / maxVal) * H;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  const lastStatus = logs?.[logs.length - 1]?.status ?? 'active';
+  const lineColor = statusColors[lastStatus] ?? '#34d399';
+  const avgMs = values.length ? Math.round(values.reduce((a, b) => a + b, 0) / values.length) : 0;
+  const p95 = values.length ? values.slice().sort((a, b) => a - b)[Math.floor(values.length * 0.95)] ?? 0 : 0;
+
+  return (
+    <Dialog open={open} onOpenChange={v => !v && onClose()}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle className="font-mono text-sm">24H HEALTH HISTORY — {dataSourceName}</DialogTitle>
+        </DialogHeader>
+        {isLoading ? (
+          <div className="flex items-center justify-center py-16">
+            <Loader2 className="animate-spin text-muted-foreground" size={24} />
+          </div>
+        ) : !logs?.length ? (
+          <div className="flex flex-col items-center justify-center py-16 text-muted-foreground gap-2">
+            <p className="text-sm">No health data recorded yet.</p>
+            <p className="text-xs opacity-60">The scheduler probes every 15 minutes.</p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div className="grid grid-cols-3 gap-3">
+              <div className="rounded-lg border p-3 text-center">
+                <div className="text-xs text-muted-foreground font-mono mb-1">AVG RESPONSE</div>
+                <div className="text-xl font-bold font-mono">{avgMs}ms</div>
+              </div>
+              <div className="rounded-lg border p-3 text-center">
+                <div className="text-xs text-muted-foreground font-mono mb-1">P95 RESPONSE</div>
+                <div className="text-xl font-bold font-mono">{p95}ms</div>
+              </div>
+              <div className="rounded-lg border p-3 text-center">
+                <div className="text-xs text-muted-foreground font-mono mb-1">DATA POINTS</div>
+                <div className="text-xl font-bold font-mono">{logs.length}</div>
+              </div>
+            </div>
+            <div>
+              <div className="text-[10px] text-muted-foreground font-mono mb-2">RESPONSE TIME (ms)</div>
+              <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: 80 }}>
+                {/* Grid lines */}
+                {[0.25, 0.5, 0.75].map(f => (
+                  <line key={f} x1="0" y1={H * f} x2={W} y2={H * f}
+                    stroke="currentColor" strokeOpacity="0.1" strokeWidth="1" />
+                ))}
+                <polyline points={pts} fill="none" stroke={lineColor}
+                  strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+              </svg>
+              <div className="flex justify-between text-[9px] text-muted-foreground font-mono mt-1">
+                <span>{new Date(logs[0].checkedAt).toLocaleString()}</span>
+                <span>{new Date(logs[logs.length - 1].checkedAt).toLocaleString()}</span>
+              </div>
+            </div>
+            <div className="rounded-lg border overflow-hidden">
+              <table className="w-full text-xs">
+                <thead className="bg-muted/50">
+                  <tr>
+                    <th className="text-left px-3 py-2 font-medium text-muted-foreground">Time</th>
+                    <th className="text-left px-3 py-2 font-medium text-muted-foreground">Status</th>
+                    <th className="text-right px-3 py-2 font-medium text-muted-foreground">Response (ms)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {logs.slice(-20).reverse().map((l, i) => (
+                    <tr key={i} className="hover:bg-muted/30">
+                      <td className="px-3 py-1.5 font-mono text-muted-foreground">
+                        {new Date(l.checkedAt).toLocaleTimeString()}
+                      </td>
+                      <td className="px-3 py-1.5">
+                        <span className={`inline-block w-2 h-2 rounded-full mr-1.5`}
+                          style={{ backgroundColor: statusColors[l.status] ?? '#34d399' }} />
+                        {l.status}
+                      </td>
+                      <td className="px-3 py-1.5 text-right font-mono">{l.responseMs}ms</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── Component ───────────────────────────────────────────────────────────────────────────────
 
 export default function DataSourcesPage() {
   const [search, setSearch] = useState('');
@@ -424,6 +602,8 @@ export default function DataSourcesPage() {
   const [editSource, setEditSource] = useState<DataSourceRow | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [bulkLoading, setBulkLoading] = useState(false);
+  const [expandedCardId, setExpandedCardId] = useState<number | null>(null);
+  const [healthHistorySource, setHealthHistorySource] = useState<{ id: number; name: string } | null>(null);
 
   const toggleSelect = (id: number) => {
     setSelectedIds(prev => {
@@ -562,6 +742,16 @@ export default function DataSourcesPage() {
         onClose={() => setEditSource(null)}
         onUpdated={() => refetch()}
       />
+
+      {/* Health History Dialog */}
+      {healthHistorySource && (
+        <HealthHistoryDialog
+          dataSourceId={healthHistorySource.id}
+          dataSourceName={healthHistorySource.name}
+          open={!!healthHistorySource}
+          onClose={() => setHealthHistorySource(null)}
+        />
+      )}
 
       {/* KPI Row */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
@@ -737,11 +927,32 @@ export default function DataSourcesPage() {
                     </div>
                   </div>
                 )}
-                {/* Last checked timestamp from health scheduler */}
-                {(src as any).lastCheckedAt && (
-                  <div className="text-[10px] text-slate-600 font-mono mb-2">
-                    CHECKED {new Date((src as any).lastCheckedAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+                {/* Last checked timestamp + sparkline toggle */}
+                <div className="flex items-center justify-between mb-2">
+                  {(src as any).lastCheckedAt && (
+                    <div className="text-[10px] text-slate-600 font-mono">
+                      CHECKED {new Date((src as any).lastCheckedAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+                    </div>
+                  )}
+                  <div className="flex gap-2 ml-auto">
+                    <button
+                      className="text-[10px] font-mono text-slate-500 hover:text-blue-400"
+                      onClick={() => setExpandedCardId(expandedCardId === src.id ? null : src.id)}
+                    >
+                      {expandedCardId === src.id ? '▲ HIDE' : '▼ HISTORY'}
+                    </button>
+                    <button
+                      className="text-[10px] font-mono text-slate-500 hover:text-emerald-400"
+                      aria-label="Open full 24h health chart"
+                      onClick={() => setHealthHistorySource({ id: src.id, name: src.name })}
+                    >
+                      ⤢ CHART
+                    </button>
                   </div>
+                </div>
+                {/* Inline health sparkline */}
+                {expandedCardId === src.id && (
+                  <HealthSparkline dataSourceId={src.id} />
                 )}
 
                 {/* Actions */}

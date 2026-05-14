@@ -158,6 +158,20 @@ export default function OnboardingAdminPage() {
     appendNoteMutation.mutate({ id: selectedId, note: logDraft.trim() });
   };
 
+  const verifyDocsMutation = trpc.onboarding.verifyDocuments.useMutation({
+    onSuccess: (result) => {
+      if (result.allClean) {
+        toast.success(`${result.results.length} document(s) verified — all clean${result.statusUpdated ? ', status updated to Under Review' : ''}`);
+      } else {
+        const tampered = result.results.filter(r => r.tampered);
+        toast.error(`Tampering detected in ${tampered.length} document(s): ${tampered.map(r => r.name).join(', ')}`);
+      }
+      utils.onboarding.get.invalidate({ id: selectedId! });
+      utils.onboarding.list.invalidate();
+    },
+    onError: (e) => toast.error(`Document verification failed: ${e.message}`),
+  });
+
   const handleAction = (id: number, status: OnboardingStatus) => {
     setActionLoading(true);
     updateStatus.mutate({ id, status });
@@ -640,6 +654,17 @@ export default function OnboardingAdminPage() {
                     Reject
                   </Button>
                 )}
+                <Button
+                  variant="outline"
+                  className="text-blue-600 border-blue-200 hover:bg-blue-50 dark:hover:bg-blue-900/20"
+                  disabled={verifyDocsMutation.isPending}
+                  onClick={() => selectedId && verifyDocsMutation.mutate({ id: selectedId })}
+                >
+                  {verifyDocsMutation.isPending
+                    ? <Loader2 className="w-4 h-4 animate-spin mr-1" />
+                    : <FileText className="w-4 h-4 mr-1" />}
+                  Verify Documents
+                </Button>
                 <Button variant="ghost" onClick={() => setSelectedId(null)}>Close</Button>
               </DialogFooter>
             </>

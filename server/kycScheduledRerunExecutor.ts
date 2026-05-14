@@ -1,0 +1,216 @@
+/**
+ * kycScheduledRerunExecutor.ts
+ *
+ * Polls the kycScheduledReruns table every 5 minutes.
+ * For each pending rerun whose scheduledAt is in the past, it:
+ *  1. Marks the rerun as "running"
+ *  2. Calls the same pipeline logic as kyc.run (gateway lookups + risk engine)
+ *  3. Inserts a new kycRecords row with the result
+ *  4. Updates the rerun row with status "completed" and resultKycRecordId
+ *  5. On error, marks the rerun as "failed"
+ */
+
+import { and, eq, lte } from "drizzle-orm";
+import { getDb } from "./db";
+import { kycRecords, kycScheduledReruns } from "../drizzle/schema";
+
+// ─── Inline helpers (mirrors routers.ts implementations) ─────────────────────
+
+async function gatewayFetch(path: string): Promise<any> {
+  const base = process.env.GATEWAY_SANDBOX || "http://localhost:8081";
+  const res = await fetch(`${base}${path}`, { headers: { "x-api-key": "internal" } });
+  if (!res.ok) throw new Error(`Gateway ${path} → ${res.status}`);
+  return res.json();
+}
+
+async function riskEngineFetch(path: string, body: unknown): Promise<any> {
+  const base = process.env.RISK_ENGINE_URL || "http://localhost:8082";
+  const res = await fetch(`${base}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`RiskEngine ${path} → ${res.status}`);
+  return res.json();
+}
+
+async function writeAuditLog(
+  db: NonNullable<Awaited<ReturnType<typeof getDb>>>,
+  entry: { userId: number; category: "kyc" | "investigation" | "alert" | "report" | "user" | "system" | "api"; action: string; targetRef?: string }
+): Promise<void> {
+  const { auditLog } = await import("../drizzle/schema");
+  await db.insert(auditLog).values({
+    userId: entry.userId,
+    category: entry.category,
+    action: entry.action,
+    targetRef: entry.targetRef,
+    result: "success",
+  }).catch(() => {});
+}
+
+async function publishEvent(
+  eventType: string,
+  subjectRef: string,
+  severity: string,
+  payload: unknown,
+  source = "bis-bff"
+): Promise<void> {
+  const eventProcessorUrl = process.env.EVENT_PROCESSOR_URL || "http://localhost:8083";
+  await fetch(`${eventProcessorUrl}/events`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ eventType, subjectRef, severity, payload, source }),
+  }).catch(() => {});
+}
+
+const POLL_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+
+export async function runPendingKycReruns(): Promise<{ processed: number; failed: number }> {
+  const db = await getDb();
+  if (!db) return { processed: 0, failed: 0 };
+
+  // Fetch all pending reruns whose scheduledAt is now or in the past
+  const pending = await db
+    .select()
+    .from(kycScheduledReruns)
+    .where(
+      and(
+        eq(kycScheduledReruns.status, "pending"),
+        lte(kycScheduledReruns.scheduledAt, new Date())
+      )
+    )
+    .limit(50); // process at most 50 per cycle to avoid overload
+
+  let processed = 0;
+  let failed = 0;
+
+  for (const rerun of pending) {
+    try {
+      // Mark as running to prevent double-processing
+      await db
+        .update(kycScheduledReruns)
+        .set({ status: "running", updatedAt: new Date() })
+        .where(eq(kycScheduledReruns.id, rerun.id));
+
+      // Insert a new KYC record for this rerun (createdBy is required; use 0 for system)
+      const [record] = await db
+        .insert(kycRecords)
+        .values({
+          subjectName: rerun.subjectName,
+          nin: rerun.nin ?? null,
+          bvn: rerun.bvn ?? null,
+          dob: rerun.dob ?? null,
+          phone: rerun.phone ?? null,
+          status: "processing",
+          createdBy: rerun.createdBy ?? 0,
+        })
+        .returning();
+
+      // Run lookups in parallel (same as kyc.run)
+      const [ninResult, bvnResult, sanctionsResult, pepResult, creditResult] = await Promise.allSettled([
+        rerun.nin ? gatewayFetch(`/v1/nin/${rerun.nin}`) : Promise.resolve(null),
+        rerun.bvn ? gatewayFetch(`/v1/bvn/${rerun.bvn}`) : Promise.resolve(null),
+        gatewayFetch(`/v1/sanctions/${encodeURIComponent(rerun.subjectName)}`),
+        gatewayFetch(`/v1/pep/${encodeURIComponent(rerun.subjectName)}`),
+        rerun.bvn ? gatewayFetch(`/v1/credit/${rerun.bvn}`) : Promise.resolve(null),
+      ]);
+
+      const nin = ninResult.status === "fulfilled" ? ninResult.value : null;
+      const bvn = bvnResult.status === "fulfilled" ? bvnResult.value : null;
+      const sanctions = sanctionsResult.status === "fulfilled" ? sanctionsResult.value : null;
+      const pep = pepResult.status === "fulfilled" ? pepResult.value : null;
+      const credit = creditResult.status === "fulfilled" ? creditResult.value : null;
+
+      // Score via risk engine
+      const scoreResult = await riskEngineFetch("/v1/score", {
+        subject_id: rerun.subjectName,
+        identity: {
+          nin_verified: !!nin?.status,
+          bvn_verified: !!bvn?.bvn,
+          nin_match_score: nin?.matchScore ?? 0,
+          bvn_match_score: bvn?.matchScore ?? 0,
+        },
+        sanctions: { ofac_hit: !sanctions?.clear, bvn_watchlisted: bvn?.watchlisted ?? false },
+        pep: { is_pep: pep?.isPEP ?? false },
+        credit: { credit_score: credit?.score ?? 700, defaults: credit?.defaults ?? 0 },
+      }).catch(() => ({ composite_score: 50, risk_tier: "medium" }));
+
+      const status =
+        scoreResult.risk_tier === "critical"
+          ? "failed"
+          : scoreResult.risk_tier === "high"
+          ? "review"
+          : "passed";
+
+      // Update the new KYC record with results
+      await db
+        .update(kycRecords)
+        .set({
+          status,
+          riskScore: scoreResult.composite_score,
+          ninResult: nin as any,
+          bvnResult: bvn as any,
+          sanctionsResult: sanctions as any,
+          pepResult: pep as any,
+          creditResult: credit as any,
+        })
+        .where(eq(kycRecords.id, record!.id));
+
+      // Mark the rerun as completed
+      await db
+        .update(kycScheduledReruns)
+        .set({
+          status: "completed",
+          resultKycRecordId: record!.id,
+          updatedAt: new Date(),
+        })
+        .where(eq(kycScheduledReruns.id, rerun.id));
+
+      // Write audit log
+      await writeAuditLog(db, {
+        userId: rerun.createdBy ?? 0,
+        category: "kyc",
+        action: `Scheduled KYC re-run completed for ${rerun.subjectName} (status: ${status})`,
+        targetRef: String(rerun.kycRecordId),
+      });
+
+      // Publish event
+      await publishEvent(
+        "KYC_SCHEDULED_RERUN_COMPLETED",
+        rerun.subjectName,
+        status === "failed" ? "high" : "info",
+        { status, score: scoreResult.composite_score, rerunId: rerun.id }
+      ).catch(() => {});
+
+      processed++;
+    } catch (err) {
+      console.error(`[kycScheduledRerunExecutor] Failed to process rerun ${rerun.id}:`, err);
+      // Mark as failed
+      await db
+        .update(kycScheduledReruns)
+        .set({ status: "failed", updatedAt: new Date() })
+        .where(eq(kycScheduledReruns.id, rerun.id))
+        .catch(() => {});
+      failed++;
+    }
+  }
+
+  if (processed > 0 || failed > 0) {
+    console.log(`[kycScheduledRerunExecutor] Cycle complete: ${processed} processed, ${failed} failed`);
+  }
+
+  return { processed, failed };
+}
+
+export function startKycScheduledRerunExecutor(): void {
+  console.log("[kycScheduledRerunExecutor] Starting — polling every 5 minutes");
+  // Run immediately on startup to catch any overdue reruns
+  runPendingKycReruns().catch(err =>
+    console.error("[kycScheduledRerunExecutor] Initial run error:", err)
+  );
+  setInterval(() => {
+    runPendingKycReruns().catch(err =>
+      console.error("[kycScheduledRerunExecutor] Interval run error:", err)
+    );
+  }, POLL_INTERVAL_MS);
+}

@@ -11,7 +11,7 @@
  */
 
 import { getDb } from "./db";
-import { dataSources } from "../drizzle/schema";
+import { dataSources, dataSourceHealthLogs } from "../drizzle/schema";
 import { eq } from "drizzle-orm";
 
 const INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
@@ -115,15 +115,24 @@ export async function runDataSourcesHealthCheck(): Promise<HealthCheckResult> {
           ? probe.responseMs
           : Math.round(0.3 * probe.responseMs + 0.7 * prevAvg);
 
+        const checkedAt = new Date();
         await db
           .update(dataSources)
           .set({
             status: probe.status,
             avgResponseMs: newAvgMs,
             uptimePct: newUptimePct,
-            lastCheckedAt: new Date(),
+            lastCheckedAt: checkedAt,
           })
           .where(eq(dataSources.id, source.id));
+
+        // Write a health log entry for the sparkline chart
+        await db.insert(dataSourceHealthLogs).values({
+          dataSourceId: source.id,
+          status: probe.status,
+          responseMs: probe.responseMs,
+          checkedAt,
+        }).catch(() => {}); // non-fatal
 
         result[probe.status]++;
       })
