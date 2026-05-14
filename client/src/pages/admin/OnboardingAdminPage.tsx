@@ -77,7 +77,8 @@ export default function OnboardingAdminPage() {
   const [docPreview, setDocPreview] = useState<DocPreview | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
-  const [selected, setSelected] = useState<Application | null>(null);
+  // selectedId drives the onboarding.get query; selected is the resolved record
+  const [selectedId, setSelectedId] = useState<number | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
 
   const isAdmin = user?.role === "admin";
@@ -87,11 +88,23 @@ export default function OnboardingAdminPage() {
     { enabled: isAdmin },
   );
 
+  // Fetch full application detail via onboarding.get when a row is clicked
+  const { data: selectedRecord, isLoading: detailLoading } = trpc.onboarding.get.useQuery(
+    { id: selectedId! },
+    { enabled: !!selectedId && isAdmin },
+  );
+
+  // Merge list row (for instant open) with fresh server data when available
+  const listItems = (data?.items ?? []) as Application[];
+  const selected: Application | null = selectedId
+    ? ((selectedRecord as Application | undefined) ?? listItems.find(a => a.id === selectedId) ?? null)
+    : null;
+
   const updateStatus = trpc.onboarding.updateStatus.useMutation({
     onSuccess: (_, vars) => {
       toast.success(`Application status updated to "${vars.status}"`);
       setActionLoading(false);
-      setSelected(null);
+      setSelectedId(null);
       refetch();
     },
     onError: (e) => {
@@ -105,8 +118,7 @@ export default function OnboardingAdminPage() {
     updateStatus.mutate({ id, status });
   };
 
-  const items = (data?.items ?? []) as Application[];
-  const filtered = items.filter(app => {
+  const filtered = listItems.filter(app => {
     const matchesStatus = statusFilter === "all" || app.status === statusFilter;
     const q = search.toLowerCase();
     const matchesSearch = !q ||
@@ -117,7 +129,7 @@ export default function OnboardingAdminPage() {
     return matchesStatus && matchesSearch;
   });
 
-  const counts = items.reduce((acc, app) => {
+  const counts = listItems.reduce((acc, app) => {
     acc[app.status] = (acc[app.status] ?? 0) + 1;
     return acc;
   }, {} as Record<string, number>);
@@ -166,7 +178,7 @@ export default function OnboardingAdminPage() {
             <SelectValue placeholder="Filter by status" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All Statuses ({items.length})</SelectItem>
+            <SelectItem value="all">All Statuses ({listItems.length})</SelectItem>
             {(Object.keys(STATUS_CONFIG) as OnboardingStatus[]).map(s => (
               <SelectItem key={s} value={s}>
                 {STATUS_CONFIG[s].label} {counts[s] ? `(${counts[s]})` : ""}
@@ -243,7 +255,7 @@ export default function OnboardingAdminPage() {
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => setSelected(app)}
+                        onClick={() => setSelectedId(app.id)}
                         className="text-xs"
                       >
                         <Eye className="w-3 h-3 mr-1" /> Review
@@ -258,7 +270,7 @@ export default function OnboardingAdminPage() {
       </div>
 
       {/* ── Detail / Action Dialog ── */}
-      <Dialog open={!!selected} onOpenChange={open => { if (!open) setSelected(null); }}>
+      <Dialog open={!!selectedId} onOpenChange={open => { if (!open) setSelectedId(null); }}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           {selected && (
             <>
@@ -396,6 +408,13 @@ export default function OnboardingAdminPage() {
                 )}
               </div>
 
+              {/* Loading overlay while fetching fresh data */}
+              {detailLoading && !selectedRecord && (
+                <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" /> Fetching latest data…
+                </div>
+              )}
+
               <DialogFooter className="mt-4 flex flex-wrap gap-2">
                 {selected.status !== "approved" && (
                   <Button
@@ -437,7 +456,7 @@ export default function OnboardingAdminPage() {
                     Reject
                   </Button>
                 )}
-                <Button variant="ghost" onClick={() => setSelected(null)}>Close</Button>
+                <Button variant="ghost" onClick={() => setSelectedId(null)}>Close</Button>
               </DialogFooter>
             </>
           )}

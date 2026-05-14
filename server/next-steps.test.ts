@@ -1451,3 +1451,190 @@ describe("biometric.list", () => {
     await expect(caller.biometric.list({ limit: 10, offset: 0 })).rejects.toBeDefined();
   });
 });
+
+// ─── Round 6 Tests ────────────────────────────────────────────────────────────
+
+describe("dataSources.create (Round 6)", () => {
+  it("creates a new data source and returns it", async () => {
+    const caller = appRouter.createCaller(createUserCtx());
+    const result = await caller.dataSources.create({
+      code: `test_src_${Date.now()}`,
+      name: "Test Custom Source",
+      category: "government",
+      provider: "Test Provider",
+      baseUrl: "https://api.test.gov.ng/v1",
+      description: "A test data source",
+      enabled: true,
+    });
+    expect(result).toBeDefined();
+    expect(result.name).toBe("Test Custom Source");
+    expect(result.category).toBe("government");
+    expect(result.enabled).toBe(true);
+  });
+
+  it("rejects code shorter than 2 characters", async () => {
+    const caller = appRouter.createCaller(createUserCtx());
+    await expect(
+      caller.dataSources.create({ code: "x", name: "Too Short", category: "government" })
+    ).rejects.toBeDefined();
+  });
+
+  it("rejects name shorter than 2 characters", async () => {
+    const caller = appRouter.createCaller(createUserCtx());
+    await expect(
+      caller.dataSources.create({ code: "valid_code", name: "X", category: "government" })
+    ).rejects.toBeDefined();
+  });
+
+  it("unauthenticated user is rejected", async () => {
+    const caller = appRouter.createCaller(createAnonCtx());
+    await expect(
+      caller.dataSources.create({ code: "anon_src", name: "Anon Source", category: "government" })
+    ).rejects.toBeDefined();
+  });
+
+  it("accepts all valid category values", async () => {
+    const caller = appRouter.createCaller(createUserCtx());
+    const categories = ["identity", "financial", "legal", "social", "biometric", "government", "commercial"] as const;
+    for (const category of categories) {
+      const result = await caller.dataSources.create({
+        code: `test_${category}_${Date.now()}`,
+        name: `Test ${category} Source`,
+        category,
+      });
+      expect(result.category).toBe(category);
+    }
+  });
+
+  it("creates source with enabled=false", async () => {
+    const caller = appRouter.createCaller(createUserCtx());
+    const result = await caller.dataSources.create({
+      code: `disabled_src_${Date.now()}`,
+      name: "Disabled Source",
+      category: "financial",
+      enabled: false,
+    });
+    expect(result.enabled).toBe(false);
+  });
+});
+
+describe("kyc.run (Round 6)", () => {
+  it("runs the full KYC pipeline and returns status + riskScore", async () => {
+    const caller = appRouter.createCaller(createUserCtx());
+    const result = await caller.kyc.run({
+      subjectName: "Adaeze Okonkwo",
+      nin: "12345678901",
+      bvn: "22345678901",
+      dob: "1990-05-15",
+      phone: "+2348012345678",
+    });
+    expect(result).toBeDefined();
+    expect(result).toHaveProperty("status");
+    expect(result).toHaveProperty("riskScore");
+    expect(["passed", "review", "failed"]).toContain(result.status);
+    expect(typeof result.riskScore).toBe("number");
+    expect(result.riskScore).toBeGreaterThanOrEqual(0);
+    expect(result.riskScore).toBeLessThanOrEqual(100);
+  });
+
+  it("runs pipeline with only subjectName (no NIN/BVN)", async () => {
+    const caller = appRouter.createCaller(createUserCtx());
+    const result = await caller.kyc.run({ subjectName: "Emeka Nwosu" });
+    expect(result).toHaveProperty("status");
+    expect(result).toHaveProperty("riskScore");
+  });
+
+  it("rejects subjectName shorter than 2 characters", async () => {
+    const caller = appRouter.createCaller(createUserCtx());
+    await expect(caller.kyc.run({ subjectName: "X" })).rejects.toBeDefined();
+  });
+
+  it("unauthenticated user is rejected", async () => {
+    const caller = appRouter.createCaller(createAnonCtx());
+    await expect(caller.kyc.run({ subjectName: "Anon Subject" })).rejects.toBeDefined();
+  });
+
+  it("returns nin, bvn, sanctions, pep, credit fields in result", async () => {
+    const caller = appRouter.createCaller(createUserCtx());
+    const result = await caller.kyc.run({ subjectName: "Chukwuemeka Obi", nin: "98765432101" });
+    expect(result).toHaveProperty("nin");
+    expect(result).toHaveProperty("bvn");
+    expect(result).toHaveProperty("sanctions");
+    expect(result).toHaveProperty("pep");
+    expect(result).toHaveProperty("credit");
+  });
+
+  it("accepts investigationId for linking to an investigation", async () => {
+    const caller = appRouter.createCaller(createUserCtx());
+    const result = await caller.kyc.run({
+      subjectName: "Fatima Abubakar",
+      investigationId: 999999,
+    });
+    expect(result).toHaveProperty("status");
+  });
+});
+
+describe("onboarding.get (Round 6)", () => {
+  it("throws NOT_FOUND for non-existent application id", async () => {
+    const caller = appRouter.createCaller(createAdminCtx());
+    await expect(caller.onboarding.get({ id: 999999999 })).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("non-admin user is rejected", async () => {
+    const caller = appRouter.createCaller(createUserCtx());
+    await expect(caller.onboarding.get({ id: 1 })).rejects.toBeDefined();
+  });
+
+  it("unauthenticated user is rejected", async () => {
+    const caller = appRouter.createCaller(createAnonCtx());
+    await expect(caller.onboarding.get({ id: 1 })).rejects.toBeDefined();
+  });
+
+  it("creates an application then retrieves it by id", async () => {
+    const userCaller = appRouter.createCaller(createUserCtx());
+    const created = await userCaller.onboarding.create({
+      entityType: "individual",
+      legalName: "Round Six Test Entity",
+      contactName: "Test Contact",
+      contactEmail: "test@round6.example.com",
+      useCase: "AML compliance testing",
+    });
+    expect(created).toBeDefined();
+    expect(created.id).toBeDefined();
+
+    const adminCaller = appRouter.createCaller(createAdminCtx());
+    const fetched = await adminCaller.onboarding.get({ id: created.id });
+    expect(fetched).toBeDefined();
+    expect(fetched.id).toBe(created.id);
+    expect(fetched.legalName).toBe("Round Six Test Entity");
+    expect(fetched.contactEmail).toBe("test@round6.example.com");
+    expect(fetched.status).toBe("submitted");
+  });
+
+  it("returns all expected fields from onboarding.get", async () => {
+    const userCaller = appRouter.createCaller(createUserCtx());
+    const created = await userCaller.onboarding.create({
+      entityType: "corporate",
+      legalName: "Field Check Corp",
+      tradingName: "FC Corp",
+      countryCode: "NG",
+      stateProvince: "Lagos",
+      city: "Lagos Island",
+      businessCategory: "fintech",
+      contactName: "Jane Doe",
+      contactEmail: "jane@fccorp.ng",
+      contactPhone: "+2348099887766",
+      pepDeclaration: false,
+      agreedToTerms: true,
+    });
+
+    const adminCaller = appRouter.createCaller(createAdminCtx());
+    const fetched = await adminCaller.onboarding.get({ id: created.id });
+    expect(fetched.referenceId).toMatch(/^OB-/);
+    expect(fetched.entityType).toBe("corporate");
+    expect(fetched.tradingName).toBe("FC Corp");
+    expect(fetched.countryCode).toBe("NG");
+    expect(fetched.pepDeclaration).toBe(false);
+    expect(fetched.agreedToTerms).toBe(true);
+  });
+});

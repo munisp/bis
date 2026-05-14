@@ -19,7 +19,10 @@ import Webcam from 'react-webcam';
 import BISLayout from '@/components/BISLayout';
 import KYCBatchUploadModal from '@/components/KYCBatchUploadModal';
 import { Button } from '@/components/ui/button';
-import { Upload } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Upload, PlayCircle, Loader2, CheckCircle2, XCircle, AlertTriangle, ShieldCheck } from 'lucide-react';
 import { trpc } from '@/lib/trpc';
 import { toast } from 'sonner';
 
@@ -464,6 +467,44 @@ function KYCVerificationPageInner() {
     await getFinalDecision();
   };
 
+  // kyc.run — full pipeline (NIN + BVN + sanctions + PEP + credit)
+  const kycRunMutation = trpc.kyc.run.useMutation({
+    onSuccess: (result) => {
+      const riskScore = result.riskScore ?? 50;
+      const riskLevel: 'low' | 'medium' | 'high' =
+        riskScore < 30 ? 'low' : riskScore < 60 ? 'medium' : 'high';
+      setDecision({
+        status: result.status === 'passed' ? 'approved' : result.status === 'failed' ? 'rejected' : 'manual_review',
+        riskScore,
+        riskLevel,
+        reasons: [],
+        referenceId: `KYC-${Date.now().toString(36).toUpperCase()}`,
+        verifiedFields: [
+          ...(result.nin ? ['nin'] : []),
+          ...(result.bvn ? ['bvn'] : []),
+          ...(result.sanctions?.clear ? ['sanctions_clear'] : []),
+          ...(!result.pep?.isPEP ? ['pep_clear'] : []),
+        ],
+      });
+      setLoading(false);
+      setStep('decision');
+    },
+    onError: (e) => {
+      toast.error(`KYC pipeline failed: ${e.message}`);
+      setDecision({
+        status: 'manual_review',
+        riskScore: 50,
+        riskLevel: 'medium',
+        reasons: ['Verification service unavailable'],
+        referenceId: `KYC-${Date.now().toString(36).toUpperCase()}`,
+        verifiedFields: [],
+      });
+      setLoading(false);
+      setStep('decision');
+    },
+  });
+
+  // kyc.create — biometric-only decision (used by the document+liveness flow)
   const kycCreate = trpc.kyc.create.useMutation({
     onSuccess: (record) => {
       const riskScore = record.riskScore ?? 50;
@@ -844,6 +885,134 @@ function KYCVerificationPageInner() {
 }
 
 
+// ─── Full Pipeline Form ───────────────────────────────────────────────────────
+
+function KYCRunPipelineForm() {
+  const [form, setForm] = useState({ subjectName: '', nin: '', bvn: '', dob: '', phone: '' });
+  const [result, setResult] = useState<null | {
+    status: string; riskScore: number;
+    nin: unknown; bvn: unknown; sanctions: unknown; pep: unknown; credit: unknown;
+  }>(null);
+
+  const runMutation = trpc.kyc.run.useMutation({
+    onSuccess: (data) => {
+      setResult(data);
+      toast.success(`KYC pipeline complete — status: ${data.status}`);
+    },
+    onError: (e) => toast.error(`Pipeline failed: ${e.message}`),
+  });
+
+  const handleRun = () => {
+    if (!form.subjectName.trim()) { toast.error('Subject name is required'); return; }
+    runMutation.mutate({
+      subjectName: form.subjectName.trim(),
+      nin: form.nin.trim() || undefined,
+      bvn: form.bvn.trim() || undefined,
+      dob: form.dob || undefined,
+      phone: form.phone.trim() || undefined,
+    });
+  };
+
+  const statusColor = result?.status === 'passed' ? 'text-green-600' : result?.status === 'failed' ? 'text-red-600' : 'text-yellow-600';
+  const statusIcon = result?.status === 'passed' ? <CheckCircle2 className="w-5 h-5 text-green-600" /> : result?.status === 'failed' ? <XCircle className="w-5 h-5 text-red-600" /> : <AlertTriangle className="w-5 h-5 text-yellow-600" />;
+
+  return (
+    <div className="space-y-6">
+      {/* Input Form */}
+      <div className="bg-card border border-border rounded-xl p-5 space-y-4">
+        <div className="flex items-center gap-2 mb-1">
+          <ShieldCheck className="w-4 h-4 text-primary" />
+          <h3 className="text-sm font-semibold text-foreground">Full Verification Pipeline</h3>
+        </div>
+        <p className="text-xs text-muted-foreground">Runs NIMC NIN lookup, NIBSS BVN check, OFAC/UN sanctions screening, PEP check, and credit bureau query in parallel, then computes a composite risk score.</p>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="sm:col-span-2 space-y-1.5">
+            <Label className="text-xs">Subject Name *</Label>
+            <Input value={form.subjectName} onChange={e => setForm(f => ({ ...f, subjectName: e.target.value }))} placeholder="Full legal name" className="text-sm" />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">NIN (11 digits)</Label>
+            <Input value={form.nin} onChange={e => setForm(f => ({ ...f, nin: e.target.value }))} placeholder="12345678901" maxLength={11} className="text-sm font-mono" />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">BVN (11 digits)</Label>
+            <Input value={form.bvn} onChange={e => setForm(f => ({ ...f, bvn: e.target.value }))} placeholder="22345678901" maxLength={11} className="text-sm font-mono" />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">Date of Birth</Label>
+            <Input type="date" value={form.dob} onChange={e => setForm(f => ({ ...f, dob: e.target.value }))} className="text-sm" />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">Phone Number</Label>
+            <Input value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} placeholder="+2348012345678" className="text-sm font-mono" />
+          </div>
+        </div>
+
+        <Button onClick={handleRun} disabled={runMutation.isPending} className="w-full gap-2">
+          {runMutation.isPending ? (
+            <><Loader2 className="w-4 h-4 animate-spin" /> Running Pipeline...</>
+          ) : (
+            <><PlayCircle className="w-4 h-4" /> Run Full KYC Pipeline</>
+          )}
+        </Button>
+      </div>
+
+      {/* Results */}
+      {result && (
+        <div className="bg-card border border-border rounded-xl p-5 space-y-4">
+          <div className="flex items-center gap-2">
+            {statusIcon}
+            <h3 className="text-sm font-semibold text-foreground">Pipeline Results</h3>
+            <span className={`ml-auto text-sm font-bold uppercase ${statusColor}`}>{result.status}</span>
+          </div>
+
+          {/* Risk Score Bar */}
+          <div className="space-y-1">
+            <div className="flex justify-between text-xs text-muted-foreground">
+              <span>Composite Risk Score</span>
+              <span className={`font-bold ${result.riskScore >= 70 ? 'text-green-600' : result.riskScore >= 40 ? 'text-yellow-600' : 'text-red-600'}`}>
+                {result.riskScore}/100
+              </span>
+            </div>
+            <div className="w-full bg-muted rounded-full h-2">
+              <div
+                className={`h-2 rounded-full transition-all ${result.riskScore >= 70 ? 'bg-green-500' : result.riskScore >= 40 ? 'bg-yellow-500' : 'bg-red-500'}`}
+                style={{ width: `${result.riskScore}%` }}
+              />
+            </div>
+          </div>
+
+          {/* Check Results Grid */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            {[
+              { label: 'NIN', ok: !!(result.nin as any)?.status, detail: (result.nin as any)?.matchScore ? `${(result.nin as any).matchScore}% match` : undefined },
+              { label: 'BVN', ok: !!(result.bvn as any)?.bvn, detail: (result.bvn as any)?.matchScore ? `${(result.bvn as any).matchScore}% match` : undefined },
+              { label: 'Sanctions', ok: !!(result.sanctions as any)?.clear, detail: (result.sanctions as any)?.clear ? 'Clear' : 'HIT' },
+              { label: 'PEP', ok: !(result.pep as any)?.isPEP, detail: (result.pep as any)?.isPEP ? 'PEP Detected' : 'Not PEP' },
+              { label: 'Credit', ok: ((result.credit as any)?.score ?? 700) >= 600, detail: (result.credit as any)?.score ? `Score: ${(result.credit as any).score}` : 'N/A' },
+            ].map(check => (
+              <div key={check.label} className={`flex items-center gap-2 p-2.5 rounded-lg border text-xs ${
+                check.ok ? 'bg-green-50 border-green-200 dark:bg-green-900/20 dark:border-green-800' : 'bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800'
+              }`}>
+                {check.ok ? <CheckCircle2 className="w-3.5 h-3.5 text-green-600 shrink-0" /> : <XCircle className="w-3.5 h-3.5 text-red-600 shrink-0" />}
+                <div>
+                  <div className="font-medium text-foreground">{check.label}</div>
+                  {check.detail && <div className="text-muted-foreground">{check.detail}</div>}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <Button variant="outline" size="sm" className="w-full text-xs" onClick={() => { setResult(null); setForm({ subjectName: '', nin: '', bvn: '', dob: '', phone: '' }); }}>
+            Run Another Check
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function KYCVerificationPage() {
   const [batchOpen, setBatchOpen] = useState(false);
   return (
@@ -856,7 +1025,22 @@ export default function KYCVerificationPage() {
         </Button>
       }
     >
-      <KYCVerificationPageInner />
+      <Tabs defaultValue="pipeline" className="w-full">
+        <TabsList className="mb-6">
+          <TabsTrigger value="pipeline" className="gap-1.5">
+            <ShieldCheck size={14} /> Full Pipeline
+          </TabsTrigger>
+          <TabsTrigger value="biometric" className="gap-1.5">
+            <PlayCircle size={14} /> Biometric Flow
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent value="pipeline">
+          <KYCRunPipelineForm />
+        </TabsContent>
+        <TabsContent value="biometric">
+          <KYCVerificationPageInner />
+        </TabsContent>
+      </Tabs>
       <KYCBatchUploadModal open={batchOpen} onClose={() => setBatchOpen(false)} />
     </BISLayout>
   );

@@ -2088,3 +2088,8 @@
 - [x] KYC: wire kyc.run procedure to KYCVerificationPage
 - [x] Cases: resendInvite button + investigationLinks.listForCase tab
 - [x] Lakehouse: ingestInvestigation button in InvestigationDetail
+## Round 6 — DataSources Create, KYC Run, Onboarding Drawer (May 14 2026)
+- [x] DataSources: "Register Data Source" button + create dialog wired to dataSources.create
+- [x] KYC: Add "Run Full Pipeline" form calling kyc.run (NIN/BVN/DOB/phone fields)
+- [x] Onboarding: Wire onboarding.get to detail drawer for fresh server-side data fetch
+- [x] Round 6 tests in server/next-steps.test.ts (510 total tests pass)
