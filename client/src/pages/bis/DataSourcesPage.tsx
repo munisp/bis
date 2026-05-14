@@ -22,9 +22,11 @@ import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { trpc } from '@/lib/trpc';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Database, CheckCircle2, Clock, XCircle, AlertTriangle, Globe, Shield,
   Building2, Search, RefreshCw, Loader2, Wifi, WifiOff, Activity, Plus, Pencil,
+  ToggleLeft, ToggleRight, X as XIcon,
 } from 'lucide-react';
 
 // ─── Config ───────────────────────────────────────────────────────────────────
@@ -420,6 +422,39 @@ export default function DataSourcesPage() {
   const [seeded, setSeeded] = useState(false);
   const [showRegister, setShowRegister] = useState(false);
   const [editSource, setEditSource] = useState<DataSourceRow | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [bulkLoading, setBulkLoading] = useState(false);
+
+  const toggleSelect = (id: number) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === filtered.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filtered.map(s => s.id)));
+    }
+  };
+
+  const handleBulkToggle = async (enable: boolean) => {
+    setBulkLoading(true);
+    const ids = Array.from(selectedIds);
+    try {
+      await Promise.all(ids.map(id => updateMutation.mutateAsync({ id, enabled: enable })));
+      toast.success(`${ids.length} source${ids.length > 1 ? 's' : ''} ${enable ? 'enabled' : 'disabled'}`);
+      setSelectedIds(new Set());
+      utils.dataSources.list.invalidate();
+    } catch (e: any) {
+      toast.error(`Bulk action failed: ${e.message}`);
+    } finally {
+      setBulkLoading(false);
+    }
+  };
 
   const utils = trpc.useUtils();
 
@@ -591,6 +626,43 @@ export default function DataSourcesPage() {
         </div>
       </div>
 
+      {/* Bulk Action Toolbar */}
+      {selectedIds.size > 0 && (
+        <div className="flex items-center gap-3 mb-4 px-3 py-2 bg-blue-500/10 border border-blue-500/30 rounded-lg">
+          <span className="text-xs font-mono text-blue-300">{selectedIds.size} selected</span>
+          <div className="flex gap-2 ml-auto">
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-6 text-[10px] font-mono border-emerald-600/50 text-emerald-400 hover:bg-emerald-500/10"
+              onClick={() => handleBulkToggle(true)}
+              disabled={bulkLoading}
+            >
+              {bulkLoading ? <Loader2 size={10} className="animate-spin mr-1" /> : <ToggleRight size={10} className="mr-1" />}
+              ENABLE ALL
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-6 text-[10px] font-mono border-amber-600/50 text-amber-400 hover:bg-amber-500/10"
+              onClick={() => handleBulkToggle(false)}
+              disabled={bulkLoading}
+            >
+              {bulkLoading ? <Loader2 size={10} className="animate-spin mr-1" /> : <ToggleLeft size={10} className="mr-1" />}
+              DISABLE ALL
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-6 text-[10px] font-mono text-slate-400"
+              onClick={() => setSelectedIds(new Set())}
+            >
+              <XIcon size={10} className="mr-1" /> CLEAR
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Data Sources Grid */}
       {isLoading || !seeded ? (
         <div className="flex items-center justify-center h-48 text-slate-500 font-mono text-sm">
@@ -615,17 +687,24 @@ export default function DataSourcesPage() {
           {filtered.map(src => {
             const statusCfg = STATUS_CONFIG[src.status] ?? STATUS_CONFIG.offline;
             const isTesting = testing === src.id;
+            const isSelected = selectedIds.has(src.id);
             return (
               <div
                 key={src.id}
                 className={cn(
                   'bg-slate-900/60 border rounded-lg p-4 transition-all',
+                  isSelected ? 'border-blue-500/50 ring-1 ring-blue-500/30' :
                   src.status === 'active' ? 'border-slate-700/50' : 'border-slate-700/30 opacity-75'
                 )}
               >
                 {/* Header */}
                 <div className="flex items-start justify-between mb-2">
                   <div className="flex items-center gap-2 min-w-0">
+                    <Checkbox
+                      checked={isSelected}
+                      onCheckedChange={() => toggleSelect(src.id)}
+                      className="shrink-0 border-slate-600 data-[state=checked]:bg-blue-500 data-[state=checked]:border-blue-500"
+                    />
                     <div className="text-slate-500">{CATEGORY_ICONS[src.category] ?? <Globe size={12} />}</div>
                     <div className="min-w-0">
                       <div className="text-xs font-mono font-bold text-slate-200 truncate">{src.name}</div>
@@ -677,6 +756,7 @@ export default function DataSourcesPage() {
                     className="h-6 text-[10px] font-mono border-slate-700 text-blue-400 hover:bg-blue-500/10 px-2"
                     onClick={() => setEditSource(src)}
                     title="Edit data source"
+                    aria-label={`Edit ${src.name}`}
                   >
                     <Pencil size={10} />
                   </Button>

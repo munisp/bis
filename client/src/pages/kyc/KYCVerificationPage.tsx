@@ -22,7 +22,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Upload, PlayCircle, Loader2, CheckCircle2, XCircle, AlertTriangle, ShieldCheck, History, RefreshCw, ChevronDown } from 'lucide-react';
+import { Upload, PlayCircle, Loader2, CheckCircle2, XCircle, AlertTriangle, ShieldCheck, History, RefreshCw, ChevronDown, Eye, X as XIcon } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Separator } from '@/components/ui/separator';
 import { trpc } from '@/lib/trpc';
 import { toast } from 'sonner';
 
@@ -895,10 +897,92 @@ const STATUS_BADGE: Record<string, { label: string; cls: string }> = {
   processing: { label: 'PROCESSING', cls: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' },
 };
 
+function KYCDetailPanel({ id, onClose }: { id: number; onClose: () => void }) {
+  const { data: rec, isLoading } = trpc.kyc.get.useQuery({ id });
+
+  const renderCheck = (label: string, result: any) => {
+    if (!result) return null;
+    const passed = result?.status === 'passed' || result?.match === true || result?.verified === true;
+    const failed = result?.status === 'failed' || result?.match === false || result?.verified === false;
+    return (
+      <div className="flex items-start gap-3 py-2">
+        <div className={`mt-0.5 w-4 h-4 rounded-full flex items-center justify-center shrink-0 ${
+          passed ? 'bg-green-100 text-green-600' : failed ? 'bg-red-100 text-red-600' : 'bg-yellow-100 text-yellow-600'
+        }`}>
+          {passed ? <CheckCircle2 className="w-3 h-3" /> : failed ? <XCircle className="w-3 h-3" /> : <AlertTriangle className="w-3 h-3" />}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-medium text-foreground">{label}</span>
+            <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${
+              passed ? 'bg-green-100 text-green-700' : failed ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'
+            }`}>{passed ? 'PASS' : failed ? 'FAIL' : 'REVIEW'}</span>
+          </div>
+          {result?.message && <p className="text-xs text-muted-foreground mt-0.5 truncate">{result.message}</p>}
+          {result?.score != null && <p className="text-xs text-muted-foreground">Score: {result.score}</p>}
+          {result?.matchScore != null && <p className="text-xs text-muted-foreground">Match: {result.matchScore}%</p>}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <Dialog open onOpenChange={open => { if (!open) onClose(); }}>
+      <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <ShieldCheck className="w-5 h-5 text-primary" />
+            KYC Record #{id}
+          </DialogTitle>
+        </DialogHeader>
+        {isLoading ? (
+          <div className="flex items-center justify-center h-32 text-muted-foreground">
+            <Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading record…
+          </div>
+        ) : !rec ? (
+          <p className="text-sm text-muted-foreground text-center py-8">Record not found.</p>
+        ) : (
+          <div className="space-y-4 mt-2">
+            {/* Summary */}
+            <div className="grid grid-cols-2 gap-2 text-sm">
+              <div><span className="text-muted-foreground">Subject:</span> <span className="font-medium">{rec.subjectName}</span></div>
+              <div><span className="text-muted-foreground">Status:</span> <span className={`font-bold uppercase text-xs px-1.5 py-0.5 rounded ${
+                rec.status === 'passed' ? 'bg-green-100 text-green-700' :
+                rec.status === 'failed' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'
+              }`}>{rec.status}</span></div>
+              <div><span className="text-muted-foreground">Risk Score:</span> <span className={`font-bold ${
+                (rec.riskScore ?? 0) >= 70 ? 'text-green-600' : (rec.riskScore ?? 0) >= 40 ? 'text-yellow-600' : 'text-red-600'
+              }`}>{rec.riskScore ?? 0}</span></div>
+              <div><span className="text-muted-foreground">Date:</span> {new Date(rec.createdAt).toLocaleDateString()}</div>
+              {rec.nin && <div><span className="text-muted-foreground">NIN:</span> <span className="font-mono">{rec.nin}</span></div>}
+              {rec.bvn && <div><span className="text-muted-foreground">BVN:</span> <span className="font-mono">{rec.bvn}</span></div>}
+              {rec.phone && <div><span className="text-muted-foreground">Phone:</span> {rec.phone}</div>}
+              {rec.dob && <div><span className="text-muted-foreground">DOB:</span> {rec.dob}</div>}
+            </div>
+            <Separator />
+            {/* Per-check breakdown */}
+            <div>
+              <h4 className="text-xs font-semibold uppercase text-muted-foreground mb-2">Check Results</h4>
+              <div className="divide-y divide-border">
+                {renderCheck('NIN Verification', rec.ninResult)}
+                {renderCheck('BVN Verification', rec.bvnResult)}
+                {renderCheck('Sanctions Screening', rec.sanctionsResult)}
+                {renderCheck('PEP Screening', rec.pepResult)}
+                {renderCheck('Credit Check', rec.creditResult)}
+              </div>
+            </div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function KYCHistoryTab() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [cursor, setCursor] = useState<number | undefined>(undefined);
   const [allItems, setAllItems] = useState<any[]>([]);
+  const [detailId, setDetailId] = useState<number | null>(null);
 
   const { data, isLoading, refetch } = trpc.kyc.list.useQuery(
     {
@@ -994,7 +1078,7 @@ function KYCHistoryTab() {
                 const badge = STATUS_BADGE[rec.status] ?? STATUS_BADGE.pending;
                 const score = rec.riskScore ?? 0;
                 return (
-                  <tr key={rec.id} className="hover:bg-muted/20 transition-colors">
+                  <tr key={rec.id} className="hover:bg-muted/20 transition-colors cursor-pointer" onClick={() => setDetailId(rec.id)}>
                     <td className="px-4 py-2.5 font-mono text-xs text-muted-foreground">#{rec.id}</td>
                     <td className="px-4 py-2.5 font-medium text-foreground max-w-[180px] truncate">{rec.subjectName}</td>
                     <td className="px-4 py-2.5">
@@ -1027,6 +1111,9 @@ function KYCHistoryTab() {
           </table>
         </div>
       )}
+
+      {/* KYC Detail Panel */}
+      {detailId && <KYCDetailPanel id={detailId} onClose={() => setDetailId(null)} />}
 
       {/* Load more */}
       {data?.nextCursor && (

@@ -1037,6 +1037,16 @@ const kycRouter = router({
       return { items: page, total: Number(countResult[0]?.count ?? 0), nextCursor };
     }),
 
+  get: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      const [record] = await db.select().from(kycRecords).where(eq(kycRecords.id, input.id)).limit(1);
+      if (!record) throw new TRPCError({ code: "NOT_FOUND" });
+      return record;
+    }),
+
   // ── AI Proxy Procedures (server-side, API key never exposed to browser) ──────
 
   extractDocument: writeProcedure
@@ -1195,11 +1205,10 @@ const kycRouter = router({
       }).where(eq(kycRecords.id, record!.id));
       await writeAuditLog(db, { userId: ctx.user!.id, category: "kyc", action: `KYC ${status}`, targetRef: input.subjectName });
       await publishEvent("KYC_COMPLETED", input.subjectName, status === "failed" ? "high" : "info", { status, score: scoreResult.composite_score });
-      return { status, riskScore: scoreResult.composite_score, nin, bvn, sanctions, pep, credit };
+      return { id: record!.id, status, riskScore: scoreResult.composite_score, nin, bvn, sanctions, pep, credit };
     }),
-
   /**
-   * verify: alias for `run` — used by KYCRecordsPage for re-verification.
+   * verify: alias for `run`` — used by KYCRecordsPage for re-verification.
    * Accepts the same input as `run` and returns the same output.
    */
   verify: writeProcedure
@@ -2197,6 +2206,31 @@ const onboardingRouter = router({
         .where(eq(onboardingApplications.id, input.id));
       await writeAuditLog(db, { userId: ctx.user!.id, category: "system", action: `Admin notes updated`, targetRef: app.referenceId });
       return { success: true };
+    }),
+
+  appendNote: adminProcedure
+    .input(z.object({
+      id: z.number(),
+      note: z.string().min(1).max(2000),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      const [app] = await db.select().from(onboardingApplications).where(eq(onboardingApplications.id, input.id)).limit(1);
+      if (!app) throw new TRPCError({ code: "NOT_FOUND" });
+      const existing = (app.reviewerLog as any[] ?? []);
+      const entry = {
+        authorId: ctx.user!.id,
+        authorName: ctx.user!.name ?? ctx.user!.email ?? `User #${ctx.user!.id}`,
+        note: input.note.trim(),
+        createdAt: new Date().toISOString(),
+      };
+      const updated = [...existing, entry];
+      await db.update(onboardingApplications)
+        .set({ reviewerLog: updated as any, updatedAt: new Date() })
+        .where(eq(onboardingApplications.id, input.id));
+      await writeAuditLog(db, { userId: ctx.user!.id, category: "system", action: `Reviewer log entry added`, targetRef: app.referenceId });
+      return { success: true, entry };
     }),
 });
 

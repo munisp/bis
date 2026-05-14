@@ -58,9 +58,10 @@ export default function RiskDashboardPage() {
   const [minScore, setMinScore] = useState(0);
   const [trendDays, setTrendDays] = useState(30);
 
-  const { data: heatmap, isLoading, refetch } = trpc.riskDashboard.getHeatmapData.useQuery({ days, minScore });
-  const { data: trend } = trpc.riskDashboard.getRiskTrend.useQuery({ days: trendDays });
-  const { data: countryRisk } = trpc.riskDashboard.getCountryRisk.useQuery();
+  const { data: heatmap, isLoading, isError, refetch } = trpc.riskDashboard.getHeatmapData.useQuery({ days, minScore });
+  const { data: trend, isError: trendError } = trpc.riskDashboard.getRiskTrend.useQuery({ days: trendDays });
+  const { data: countryRisk, isError: countryError } = trpc.riskDashboard.getCountryRisk.useQuery();
+  const hasError = isError || trendError || countryError;
 
   // Transform bubbles into scatter chart data
   const scatterData = useMemo(() => {
@@ -113,6 +114,12 @@ export default function RiskDashboardPage() {
   return (
     <BISLayout>
       <div className="p-6 space-y-6">
+        {hasError && (
+          <div className="flex items-center gap-2 p-3 rounded-lg bg-destructive/10 border border-destructive/30 text-destructive text-sm">
+            <span>Some data failed to load. Charts may be incomplete.</span>
+            <button className="ml-auto underline text-xs" onClick={() => refetch()}>Retry</button>
+          </div>
+        )}
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>

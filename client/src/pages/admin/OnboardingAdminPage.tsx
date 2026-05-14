@@ -21,7 +21,7 @@ import { toast } from "sonner";
 import {
   CheckCircle2, XCircle, Clock, Eye, Search, RefreshCw,
   Building2, User, Globe, Phone, Mail, FileText, Loader2, Download, Maximize2, X as XIcon,
-  StickyNote, Save,
+  StickyNote, Save, MessageSquare, Send,
 } from "lucide-react";
 
 type OnboardingStatus = "draft" | "submitted" | "awaiting_documents" | "under_review" | "approved" | "rejected";
@@ -71,6 +71,7 @@ type Application = {
   documentUrls?: Array<{ name: string; url: string; key: string; uploadedAt: string }> | null;
   createdBy?: string | null;
   adminNotes?: string | null;
+  reviewerLog?: Array<{ authorId: number; authorName: string; note: string; createdAt: string }> | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -84,6 +85,7 @@ export default function OnboardingAdminPage() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [notesDraft, setNotesDraft] = useState<string>('');
+  const [logDraft, setLogDraft] = useState<string>('');  // for append-only reviewer log
 
   const isAdmin = user?.role === "admin";
 
@@ -137,9 +139,23 @@ export default function OnboardingAdminPage() {
     onError: (e) => toast.error(`Failed to save notes: ${e.message}`),
   });
 
+  const appendNoteMutation = trpc.onboarding.appendNote.useMutation({
+    onSuccess: () => {
+      toast.success('Log entry added');
+      setLogDraft('');
+      utils.onboarding.get.invalidate({ id: selectedId! });
+    },
+    onError: (e) => toast.error(`Failed to add log entry: ${e.message}`),
+  });
+
   const handleSaveNotes = () => {
     if (!selectedId) return;
     addNoteMutation.mutate({ id: selectedId, notes: notesDraft });
+  };
+
+  const handleAppendLog = () => {
+    if (!selectedId || !logDraft.trim()) return;
+    appendNoteMutation.mutate({ id: selectedId, note: logDraft.trim() });
   };
 
   const handleAction = (id: number, status: OnboardingStatus) => {
@@ -215,7 +231,7 @@ export default function OnboardingAdminPage() {
             ))}
           </SelectContent>
         </Select>
-        <Button variant="outline" size="icon" onClick={() => refetch()} title="Refresh">
+        <Button variant="outline" size="icon" onClick={() => refetch()} title="Refresh" aria-label="Refresh applications">
           <RefreshCw className="w-4 h-4" />
         </Button>
       </div>
@@ -463,6 +479,56 @@ export default function OnboardingAdminPage() {
                         ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
                         : <Save className="w-3.5 h-3.5" />}
                       Save Notes
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Reviewer Log — append-only audit trail */}
+                <Separator />
+                <div>
+                  <h4 className="text-sm font-semibold text-foreground mb-2 flex items-center gap-1.5">
+                    <MessageSquare className="w-4 h-4" /> Reviewer Log
+                    <span className="text-xs text-muted-foreground font-normal">(append-only)</span>
+                  </h4>
+                  {/* Existing entries */}
+                  {Array.isArray(selected.reviewerLog) && selected.reviewerLog.length > 0 ? (
+                    <div className="space-y-2 mb-3 max-h-40 overflow-y-auto pr-1">
+                      {[...(selected.reviewerLog ?? [])].reverse().map((entry, i) => (
+                        <div key={i} className="bg-muted/30 rounded-lg px-3 py-2 text-sm">
+                          <div className="flex items-center justify-between mb-0.5">
+                            <span className="font-medium text-foreground text-xs">{entry.authorName}</span>
+                            <span className="text-[10px] text-muted-foreground">
+                              {new Date(entry.createdAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </div>
+                          <p className="text-muted-foreground text-xs leading-relaxed">{entry.note}</p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground mb-3">No log entries yet.</p>
+                  )}
+                  {/* New entry input */}
+                  <div className="flex gap-2">
+                    <Textarea
+                      value={logDraft}
+                      onChange={e => setLogDraft(e.target.value)}
+                      placeholder="Add a log entry…"
+                      className="text-sm resize-none min-h-[60px] flex-1"
+                      maxLength={2000}
+                      onKeyDown={e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) handleAppendLog(); }}
+                    />
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={handleAppendLog}
+                      disabled={appendNoteMutation.isPending || !logDraft.trim()}
+                      className="self-end gap-1.5 text-xs"
+                      title="Add log entry (Ctrl+Enter)"
+                    >
+                      {appendNoteMutation.isPending
+                        ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        : <Send className="w-3.5 h-3.5" />}
                     </Button>
                   </div>
                 </div>

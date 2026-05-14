@@ -20,7 +20,7 @@ export default function ReconciliationReportPage() {
   const [date, setDate] = useState(yesterday);
   const [queryDate, setQueryDate] = useState(yesterday);
 
-  const { data, isLoading, refetch } = trpc.paymentRails.getReconciliationReport.useQuery(
+  const { data, isLoading, isError, refetch } = trpc.paymentRails.getReconciliationReport.useQuery(
     { date: queryDate },
     { retry: false }
   );
@@ -92,6 +92,14 @@ export default function ReconciliationReportPage() {
             </div>
           </CardContent>
         </Card>
+
+        {isError && (
+          <div className="flex items-center gap-2 p-3 rounded-lg bg-destructive/10 border border-destructive/30 text-destructive text-sm">
+            <AlertTriangle className="w-4 h-4 shrink-0" />
+            <span>Failed to load reconciliation report for {queryDate}. The payment rails service may be unavailable.</span>
+            <button className="ml-auto underline text-xs" onClick={() => refetch()}>Retry</button>
+          </div>
+        )}
 
         {data && (
           <>

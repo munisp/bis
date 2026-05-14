@@ -476,6 +476,7 @@ export const onboardingApplications = pgTable("onboarding_applications", {
   documentUrls: json("documentUrls").$type<{ name: string; url: string; key: string; uploadedAt: string }[]>().default([]),
   createdBy: varchar("createdBy", { length: 255 }),
   adminNotes: text("adminNotes"),
+  reviewerLog: json("reviewerLog").$type<Array<{ authorId: number; authorName: string; note: string; createdAt: string }>>().default([]),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
 },

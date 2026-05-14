@@ -232,6 +232,13 @@
       "when": 1778759381434,
       "tag": "0032_unique_richard_fisk",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1778760140712,
+      "tag": "0033_clumsy_killmonger",
+      "breakpoints": true
     }
   ]
 }

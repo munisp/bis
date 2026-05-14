@@ -52,7 +52,7 @@ export default function ScreeningRecordsPage() {
   const [offset, setOffset] = useState(0);
   const LIMIT = 50;
 
-  const { data, isLoading, refetch } = trpc.screening.list.useQuery({
+  const { data, isLoading, isError, refetch } = trpc.screening.list.useQuery({
     type: typeFilter !== "all" ? typeFilter : undefined,
     status: statusFilter !== "all" ? statusFilter : undefined,
     limit: LIMIT,
@@ -157,7 +157,11 @@ export default function ScreeningRecordsPage() {
 
       {/* Table */}
       <div className="flex-1 overflow-auto px-6">
-        {isLoading && records.length === 0 ? (
+        {isError ? (
+          <div className="flex items-center justify-center h-48 text-destructive gap-2 text-sm">
+            <span>Failed to load screening records. <button className="underline" onClick={() => refetch()}>Retry</button></span>
+          </div>
+        ) : isLoading && records.length === 0 ? (
           <div className="flex items-center justify-center h-48 text-muted-foreground text-sm">Loading screening records...</div>
         ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-48 text-muted-foreground">

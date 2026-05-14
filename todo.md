@@ -2098,3 +2098,17 @@
 - [x] KYC: "History" tab listing past kyc.run records (status badge, risk score, date)
 - [x] Onboarding: adminNotes column in schema + onboarding.addNote procedure + drawer textarea
 - [x] Round 7 tests in server/next-steps.test.ts (529 total tests pass)
+## Round 8 — Bulk Toggle, KYC Detail, Reviewer Log, kyc.get (May 14 2026)
+- [x] DataSources: Multi-select checkboxes + bulk enable/disable toolbar via dataSources.update loop
+- [x] KYC: Add kyc.get procedure (fetch single record by id with all JSON fields)
+- [x] KYC: History row click opens detail side panel showing per-check breakdown
+- [x] Onboarding: Replace adminNotes single field with reviewerLog JSON array (append-only audit trail)
+- [x] Round 8 tests in server/next-steps.test.ts (542 total tests pass)
+## Round 9 — Production Hardening (May 14 2026)
+- [x] Error handling: Add isError banners to LexAnalyticsPage, ScreeningRecordsPage, RiskDashboardPage, ReconciliationReportPage
+- [x] Loading state: Add Loader2 spinner to LexAnalyticsPage (missing despite useQuery calls)
+- [x] Console.log cleanup: Remove debug console.log from ComponentShowcase.tsx
+- [x] Global error boundary: Wrap each lazy-loaded route in App.tsx with per-route ErrorBoundary
+- [x] Accessibility: Add aria-label to key icon-only buttons across DataSourcesPage, KYCVerificationPage, OnboardingAdminPage
+- [x] tRPC error surface: Ensure all isError states show toast or inline error message
+- [x] Round 9 tests in server/next-steps.test.ts (553 total tests pass)

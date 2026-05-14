@@ -8,7 +8,7 @@ import {
   PieChart, Pie, Cell, LineChart, Line, Legend,
 } from "recharts";
 import { MapView } from "@/components/Map";
-import { BarChart3, MapPin, Building2, TrendingUp, FileText, CheckCircle2, XCircle, Clock } from "lucide-react";
+import { BarChart3, MapPin, Building2, TrendingUp, FileText, CheckCircle2, XCircle, Clock, Loader2, AlertCircle } from "lucide-react";
 
 const NIGERIAN_STATES = [
   { code: "AB", name: "Abia" }, { code: "AD", name: "Adamawa" }, { code: "AK", name: "Akwa Ibom" },
@@ -81,14 +81,17 @@ export default function LexAnalyticsPage() {
   const [mapReady, setMapReady] = useState(false);
   const [mapRef, setMapRef] = useState<google.maps.Map | null>(null);
 
-  const { data: stateStats } = trpc.lex.stateStats.useQuery();
-  const { data: agencyStats } = trpc.lex.agencyStats.useQuery();
-  const { data: incidentStats } = trpc.lex.incidentTypeStats.useQuery(
+  const { data: stateStats, isLoading: stateLoading, isError: stateError } = trpc.lex.stateStats.useQuery();
+  const { data: agencyStats, isLoading: agencyLoading, isError: agencyError } = trpc.lex.agencyStats.useQuery();
+  const { data: incidentStats, isLoading: incidentLoading, isError: incidentError } = trpc.lex.incidentTypeStats.useQuery(
     stateFilter ? { state: stateFilter } : undefined
   );
-  const { data: monthlyTrend } = trpc.lex.monthlyTrend.useQuery(
+  const { data: monthlyTrend, isLoading: trendLoading } = trpc.lex.monthlyTrend.useQuery(
     stateFilter ? { state: stateFilter } : undefined
   );
+
+  const isLoading = stateLoading || agencyLoading || incidentLoading || trendLoading;
+  const hasError = stateError || agencyError || incidentError;
 
   // Aggregate totals
   const totals = useMemo(() => {
@@ -171,6 +174,24 @@ export default function LexAnalyticsPage() {
     Validated: m.validated,
     Rejected: m.rejected,
   }));
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-64 text-muted-foreground">
+        <Loader2 className="w-6 h-6 animate-spin mr-2" />
+        Loading LEX analytics…
+      </div>
+    );
+  }
+
+  if (hasError) {
+    return (
+      <div className="flex items-center justify-center h-64 text-destructive gap-2">
+        <AlertCircle className="w-5 h-5" />
+        <span className="text-sm">Failed to load analytics data. Please refresh the page.</span>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">

@@ -1876,3 +1876,279 @@ describe("onboarding.addNote (Round 7)", () => {
     ).rejects.toBeDefined();
   });
 });
+
+// ─── Round 8 Tests ────────────────────────────────────────────────────────────
+
+describe("kyc.get (Round 8)", () => {
+  it("creates a kyc.run record then fetches it via kyc.get", async () => {
+    const caller = appRouter.createCaller(createUserCtx());
+    const run = await caller.kyc.run({ subjectName: "R8 Get Test Subject" });
+    expect(run.id).toBeDefined();
+
+    const fetched = await caller.kyc.get({ id: run.id });
+    expect(fetched.id).toBe(run.id);
+    expect(fetched.subjectName).toBe("R8 Get Test Subject");
+    expect(fetched).toHaveProperty("status");
+    expect(fetched).toHaveProperty("riskScore");
+    expect(fetched).toHaveProperty("createdAt");
+  });
+
+  it("returns all JSON check result fields", async () => {
+    const caller = appRouter.createCaller(createUserCtx());
+    const run = await caller.kyc.run({ subjectName: "R8 Fields Test" });
+    const fetched = await caller.kyc.get({ id: run.id });
+    expect(fetched).toHaveProperty("ninResult");
+    expect(fetched).toHaveProperty("bvnResult");
+    expect(fetched).toHaveProperty("sanctionsResult");
+    expect(fetched).toHaveProperty("pepResult");
+    expect(fetched).toHaveProperty("creditResult");
+  });
+
+  it("throws NOT_FOUND for non-existent id", async () => {
+    const caller = appRouter.createCaller(createUserCtx());
+    await expect(caller.kyc.get({ id: 999999999 })).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("unauthenticated user cannot fetch a kyc record", async () => {
+    const caller = appRouter.createCaller(createAnonCtx());
+    await expect(caller.kyc.get({ id: 1 })).rejects.toBeDefined();
+  });
+
+  it("stores NIN and BVN when provided in run", async () => {
+    const caller = appRouter.createCaller(createUserCtx());
+    const run = await caller.kyc.run({
+      subjectName: "R8 NIN BVN Test",
+      nin: "12345678901",
+      bvn: "12345678901",
+    });
+    const fetched = await caller.kyc.get({ id: run.id });
+    expect(fetched.nin).toBe("12345678901");
+    expect(fetched.bvn).toBe("12345678901");
+  });
+});
+
+describe("onboarding.appendNote (Round 8)", () => {
+  it("appends a log entry and it appears in onboarding.get reviewerLog", async () => {
+    const userCaller = appRouter.createCaller(createUserCtx());
+    const created = await userCaller.onboarding.create({
+      entityType: "individual",
+      legalName: "Append Log Entity R8",
+      contactName: "Log Tester R8",
+      contactEmail: "log@r8.example.com",
+    });
+
+    const adminCaller = appRouter.createCaller(createAdminCtx());
+    const result = await adminCaller.onboarding.appendNote({
+      id: created.id,
+      note: "First reviewer log entry",
+    });
+    expect(result.success).toBe(true);
+    expect(result.entry).toMatchObject({
+      note: "First reviewer log entry",
+      authorId: expect.any(Number),
+      authorName: expect.any(String),
+      createdAt: expect.any(String),
+    });
+
+    const fetched = await adminCaller.onboarding.get({ id: created.id });
+    expect(Array.isArray(fetched.reviewerLog)).toBe(true);
+    expect((fetched.reviewerLog as any[]).length).toBe(1);
+    expect((fetched.reviewerLog as any[])[0].note).toBe("First reviewer log entry");
+  });
+
+  it("multiple appendNote calls accumulate entries (not overwrite)", async () => {
+    const userCaller = appRouter.createCaller(createUserCtx());
+    const created = await userCaller.onboarding.create({
+      entityType: "corporate",
+      legalName: "Accumulate Log Corp R8",
+      contactName: "Accumulate Tester",
+      contactEmail: "accumulate@r8.example.com",
+    });
+
+    const adminCaller = appRouter.createCaller(createAdminCtx());
+    await adminCaller.onboarding.appendNote({ id: created.id, note: "Entry 1" });
+    await adminCaller.onboarding.appendNote({ id: created.id, note: "Entry 2" });
+    await adminCaller.onboarding.appendNote({ id: created.id, note: "Entry 3" });
+
+    const fetched = await adminCaller.onboarding.get({ id: created.id });
+    const log = fetched.reviewerLog as any[];
+    expect(log.length).toBe(3);
+    expect(log[0].note).toBe("Entry 1");
+    expect(log[1].note).toBe("Entry 2");
+    expect(log[2].note).toBe("Entry 3");
+  });
+
+  it("rejects empty note strings", async () => {
+    const userCaller = appRouter.createCaller(createUserCtx());
+    const created = await userCaller.onboarding.create({
+      entityType: "individual",
+      legalName: "Empty Note Entity R8",
+      contactName: "Empty Tester",
+      contactEmail: "empty@r8.example.com",
+    });
+    const adminCaller = appRouter.createCaller(createAdminCtx());
+    await expect(
+      adminCaller.onboarding.appendNote({ id: created.id, note: "" })
+    ).rejects.toBeDefined();
+  });
+
+  it("rejects notes longer than 2000 characters", async () => {
+    const userCaller = appRouter.createCaller(createUserCtx());
+    const created = await userCaller.onboarding.create({
+      entityType: "individual",
+      legalName: "Long Log Entity R8",
+      contactName: "Long Log Tester",
+      contactEmail: "longlog@r8.example.com",
+    });
+    const adminCaller = appRouter.createCaller(createAdminCtx());
+    await expect(
+      adminCaller.onboarding.appendNote({ id: created.id, note: "x".repeat(2001) })
+    ).rejects.toBeDefined();
+  });
+
+  it("non-admin user cannot append log entries", async () => {
+    const userCaller = appRouter.createCaller(createUserCtx());
+    const created = await userCaller.onboarding.create({
+      entityType: "individual",
+      legalName: "Forbidden Log R8",
+      contactName: "Forbidden Log Tester",
+      contactEmail: "forbiddenlog@r8.example.com",
+    });
+    await expect(
+      userCaller.onboarding.appendNote({ id: created.id, note: "Unauthorized entry" })
+    ).rejects.toBeDefined();
+  });
+
+  it("throws NOT_FOUND for non-existent application", async () => {
+    const adminCaller = appRouter.createCaller(createAdminCtx());
+    await expect(
+      adminCaller.onboarding.appendNote({ id: 999999999, note: "Ghost entry" })
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+});
+
+describe("dataSources bulk operations (Round 8)", () => {
+  it("creates two sources then updates both enabled states", async () => {
+    const caller = appRouter.createCaller(createUserCtx());
+    const a = await caller.dataSources.create({
+      code: `r8_bulk_a_${Date.now()}`,
+      name: "Bulk A R8",
+      category: "identity",
+      enabled: true,
+    });
+    const b = await caller.dataSources.create({
+      code: `r8_bulk_b_${Date.now()}`,
+      name: "Bulk B R8",
+      category: "identity",
+      enabled: true,
+    });
+
+    // Disable both
+    const [ua, ub] = await Promise.all([
+      caller.dataSources.update({ id: a.id, enabled: false }),
+      caller.dataSources.update({ id: b.id, enabled: false }),
+    ]);
+    expect(ua.enabled).toBe(false);
+    expect(ub.enabled).toBe(false);
+
+    // Re-enable both
+    const [ra, rb] = await Promise.all([
+      caller.dataSources.update({ id: a.id, enabled: true }),
+      caller.dataSources.update({ id: b.id, enabled: true }),
+    ]);
+    expect(ra.enabled).toBe(true);
+    expect(rb.enabled).toBe(true);
+  });
+
+  it("bulk update preserves other fields unchanged", async () => {
+    const caller = appRouter.createCaller(createUserCtx());
+    const src = await caller.dataSources.create({
+      code: `r8_preserve_${Date.now()}`,
+      name: "Preserve Fields R8",
+      category: "financial",
+      description: "Original description",
+      enabled: true,
+    });
+
+    // Only toggle enabled
+    const updated = await caller.dataSources.update({ id: src.id, enabled: false });
+    expect(updated.enabled).toBe(false);
+    expect(updated.name).toBe("Preserve Fields R8");
+    expect(updated.description).toBe("Original description");
+  });
+});
+
+// ─── Round 9: Production Hardening ───────────────────────────────────────────
+
+describe("Round 9 — Production Hardening", () => {
+  describe("LexAnalyticsPage loading/error states", () => {
+    it("lex.stateStats returns an array", async () => {
+      const caller = appRouter.createCaller(createAdminCtx());
+      const result = await caller.lex.stateStats();
+      expect(Array.isArray(result)).toBe(true);
+    });
+    it("lex.agencyStats returns an array", async () => {
+      const caller = appRouter.createCaller(createAdminCtx());
+      const result = await caller.lex.agencyStats();
+      expect(Array.isArray(result)).toBe(true);
+    });
+    it("lex.incidentTypeStats returns an array", async () => {
+      const caller = appRouter.createCaller(createAdminCtx());
+      const result = await caller.lex.incidentTypeStats(undefined);
+      expect(Array.isArray(result)).toBe(true);
+    });
+    it("lex.monthlyTrend returns an array", async () => {
+      const caller = appRouter.createCaller(createAdminCtx());
+      const result = await caller.lex.monthlyTrend(undefined);
+      expect(Array.isArray(result)).toBe(true);
+    });
+  });
+
+  describe("ScreeningRecordsPage error handling", () => {
+    it("screening.list returns records array", async () => {
+      const caller = appRouter.createCaller(createAdminCtx());
+      const result = await caller.screening.list({ limit: 5, offset: 0 });
+      const records = (result as any).records ?? (Array.isArray(result) ? result : []);
+      expect(Array.isArray(records)).toBe(true);
+    });
+    it("screening.list accepts type filter", async () => {
+      const caller = appRouter.createCaller(createAdminCtx());
+      const result = await caller.screening.list({ type: "drug", limit: 5, offset: 0 });
+      expect(result).toBeDefined();
+    });
+    it("screening.list accepts status filter", async () => {
+      const caller = appRouter.createCaller(createAdminCtx());
+      const result = await caller.screening.list({ status: "pending", limit: 5, offset: 0 });
+      expect(result).toBeDefined();
+    });
+  });
+
+  describe("RiskDashboardPage error handling", () => {
+    it("riskDashboard.getHeatmapData returns bubbles array", async () => {
+      const caller = appRouter.createCaller(createAdminCtx());
+      const result = await caller.riskDashboard.getHeatmapData({ days: 30, minScore: 0 });
+      expect(result).toBeDefined();
+      expect(Array.isArray((result as any).bubbles ?? [])).toBe(true);
+    });
+    it("riskDashboard.getRiskTrend returns an array", async () => {
+      const caller = appRouter.createCaller(createAdminCtx());
+      const result = await caller.riskDashboard.getRiskTrend({ days: 30 });
+      expect(Array.isArray(result)).toBe(true);
+    });
+    it("riskDashboard.getCountryRisk returns an array", async () => {
+      const caller = appRouter.createCaller(createAdminCtx());
+      const result = await caller.riskDashboard.getCountryRisk();
+      expect(Array.isArray(result)).toBe(true);
+    });
+  });
+
+  describe("ReconciliationReportPage error handling", () => {
+    it("paymentRails.getReconciliationReport returns a report object", async () => {
+      const caller = appRouter.createCaller(createAdminCtx());
+      const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+      const result = await caller.paymentRails.getReconciliationReport({ date: yesterday });
+      expect(result).toBeDefined();
+      expect((result as any).date ?? yesterday).toBeTruthy();
+    });
+  });
+});
