@@ -108,6 +108,11 @@ export default function Alerts() {
 
   const { data: fieldAgents = [] } = trpc.fieldAgents.list.useQuery({ status: "active", limit: 100 });
 
+  const markAllReadMutation = trpc.alerts.markAllRead.useMutation({
+    onSuccess: () => { toast.success("All alerts marked as read"); utils.alerts.list.invalidate(); },
+    onError: (e: any) => toast.error(e.message),
+  });
+
   const escalateMutation = trpc.alerts.escalate.useMutation({
     onSuccess: () => {
       toast.success("Alert escalated", { description: "Critical field task dispatched and owner notified." });
@@ -189,6 +194,17 @@ export default function Alerts() {
           <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => refetch()}>
             <RefreshCw size={11} className={isLoading ? "animate-spin" : ""} /> Refresh
           </Button>
+          {unread > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 text-xs gap-1"
+              onClick={() => markAllReadMutation.mutate()}
+              disabled={markAllReadMutation.isPending}
+            >
+              <BellOff size={11} /> Mark All Read ({unread})
+            </Button>
+          )}
           <Link href="/alert-rules">
             <Button variant="outline" size="sm" className="h-7 text-xs gap-1">
               <Bell size={11} /> Configure Rules

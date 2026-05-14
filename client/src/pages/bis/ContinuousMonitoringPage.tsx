@@ -95,6 +95,16 @@ function ContinuousMonitoringPageInner() {
     onError: (e) => toast.error('Enrollment failed', { description: e.message }),
   });
 
+  const updateMonitorMutation = trpc.monitors.update.useMutation({
+    onSuccess: () => utils.monitors.list.invalidate(),
+    onError: (e) => toast.error('Failed to update monitor', { description: e.message }),
+  });
+
+  const toggleMonitorStatus = (id: number, currentStatus: string) => {
+    const newStatus = currentStatus === 'active' ? 'paused' : 'active';
+    updateMonitorMutation.mutate({ id, status: newStatus as any });
+  };
+
   const acknowledgeMutation = trpc.alerts.acknowledge.useMutation({
     onSuccess: () => utils.alerts.list.invalidate(),
     onError: (e) => toast.error('Failed to acknowledge', { description: e.message }),
@@ -227,12 +237,19 @@ function ContinuousMonitoringPageInner() {
                           {m.alertCount} alert{m.alertCount > 1 ? "s" : ""} →
                         </button>
                       )}
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                        m.status === 'active' ? 'bg-emerald-100 text-emerald-700' :
-                        m.status === 'paused' ? 'bg-amber-100 text-amber-700' :
-                        m.status === 'triggered' ? 'bg-red-100 text-red-700' :
-                        'bg-muted text-muted-foreground'
-                      }`}>{m.status}</span>
+                      <button
+                        onClick={e => { e.stopPropagation(); toggleMonitorStatus(m.id, m.status); }}
+                        disabled={updateMonitorMutation.isPending}
+                        className={`text-xs px-2 py-0.5 rounded-full font-medium transition-colors ${
+                          m.status === 'active' ? 'bg-emerald-100 text-emerald-700 hover:bg-amber-100 hover:text-amber-700' :
+                          m.status === 'paused' ? 'bg-amber-100 text-amber-700 hover:bg-emerald-100 hover:text-emerald-700' :
+                          m.status === 'triggered' ? 'bg-red-100 text-red-700' :
+                          'bg-muted text-muted-foreground'
+                        }`}
+                        title={m.status === 'active' ? 'Click to pause' : m.status === 'paused' ? 'Click to resume' : undefined}
+                      >
+                        {m.status === 'active' ? 'active ⏸' : m.status === 'paused' ? 'paused ▶' : m.status}
+                      </button>
                     </div>
                   </div>
                 ))}

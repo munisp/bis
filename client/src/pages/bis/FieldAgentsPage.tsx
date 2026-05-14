@@ -263,7 +263,14 @@ export default function FieldAgentsPage() {
   });
 
   const [locatingAgentId, setLocatingAgentId] = useState<number | null>(null);
+  const [editAgent, setEditAgent] = useState<any | null>(null);
+  const [editForm, setEditForm] = useState({ name: '', phone: '', state: '', lga: '', status: 'active', tier: 'junior', notes: '' });
   const utils = trpc.useUtils();
+
+  const updateAgentMutation = trpc.fieldAgents.update.useMutation({
+    onSuccess: () => { refetch(); setEditAgent(null); toast.success('Agent profile updated'); },
+    onError: (e: any) => toast.error(e.message),
+  });
 
   const updateLocationMutation = trpc.fieldAgents.updateLocation.useMutation({
     onSuccess: (result, variables) => {
@@ -621,6 +628,15 @@ export default function FieldAgentsPage() {
                               ? <Loader2 size={9} className="animate-spin" />
                               : <Navigation size={9} />}
                           </Button>
+                          <Button size="sm" variant="ghost"
+                            onClick={() => {
+                              setEditAgent(agent);
+                              setEditForm({ name: agent.name, phone: agent.phone ?? '', state: agent.state ?? '', lga: agent.lga ?? '', status: agent.status ?? 'active', tier: agent.tier ?? 'junior', notes: agent.notes ?? '' });
+                            }}
+                            className="h-6 text-[10px] font-mono gap-1 whitespace-nowrap text-muted-foreground hover:text-primary"
+                            title="Edit agent profile">
+                            <Shield size={9} />
+                          </Button>
                         </div>
                       </td>
                     </tr>
@@ -757,6 +773,86 @@ export default function FieldAgentsPage() {
                 <Button type="button" variant="outline" className="flex-1 text-xs font-mono" onClick={() => setRecruitOpen(false)}>Cancel</Button>
                 <Button type="submit" className="flex-1 text-xs font-mono gap-1.5" disabled={recruitMutation.isPending}>
                   {recruitMutation.isPending ? <><Loader2 size={11} className="animate-spin" /> Recruiting…</> : <><Plus size={11} /> Add Agent</>}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </>
+      )}
+      {/* Edit Agent Sheet */}
+      {editAgent && (
+        <>
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40" onClick={() => setEditAgent(null)} />
+          <div className="fixed right-0 top-0 h-full w-full max-w-md z-50 bg-popover border-l border-border shadow-2xl flex flex-col">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border flex-shrink-0">
+              <div>
+                <p className="text-sm font-mono font-semibold text-foreground flex items-center gap-2">
+                  <Shield size={13} className="text-primary" /> Edit Agent Profile
+                </p>
+                <p className="text-[10px] font-mono text-muted-foreground mt-0.5">{editAgent.agentCode} — {editAgent.name}</p>
+              </div>
+              <button onClick={() => setEditAgent(null)} className="text-muted-foreground hover:text-foreground"><X size={16} /></button>
+            </div>
+            <form
+              className="flex-1 overflow-y-auto px-5 py-4 space-y-4"
+              onSubmit={e => {
+                e.preventDefault();
+                updateAgentMutation.mutate({
+                  id: editAgent.id,
+                  name: editForm.name || undefined,
+                  phone: editForm.phone || undefined,
+                  state: editForm.state || undefined,
+                  lga: editForm.lga || undefined,
+                  status: editForm.status as any,
+                  tier: editForm.tier as any,
+                  notes: editForm.notes || undefined,
+                });
+              }}
+            >
+              {([{ k: 'name', label: 'Full Name' }, { k: 'phone', label: 'Phone' }, { k: 'lga', label: 'LGA' }] as any[]).map(f => (
+                <div key={f.k}>
+                  <label className="text-[9px] font-mono text-muted-foreground uppercase tracking-wider mb-1 block">{f.label}</label>
+                  <Input className="h-8 text-xs font-mono bg-background border-border" value={(editForm as any)[f.k]}
+                    onChange={e => setEditForm(prev => ({ ...prev, [f.k]: e.target.value }))} />
+                </div>
+              ))}
+              <div>
+                <label className="text-[9px] font-mono text-muted-foreground uppercase tracking-wider mb-1 block">State</label>
+                <select value={editForm.state} onChange={e => setEditForm(prev => ({ ...prev, state: e.target.value }))}
+                  className="w-full h-8 px-3 rounded-md border border-border bg-background text-xs font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-primary">
+                  <option value="">Select state…</option>
+                  {NIGERIAN_STATES.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-[9px] font-mono text-muted-foreground uppercase tracking-wider mb-1 block">Status</label>
+                <select value={editForm.status} onChange={e => setEditForm(prev => ({ ...prev, status: e.target.value }))}
+                  className="w-full h-8 px-3 rounded-md border border-border bg-background text-xs font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-primary">
+                  {['active','inactive','suspended','training'].map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-[9px] font-mono text-muted-foreground uppercase tracking-wider mb-1 block">Tier</label>
+                <div className="flex gap-2">
+                  {(['junior','senior','lead','specialist'] as const).map(t => (
+                    <button key={t} type="button"
+                      onClick={() => setEditForm(prev => ({ ...prev, tier: t }))}
+                      className={cn('flex-1 py-1.5 rounded-md border text-[10px] font-mono font-semibold transition-all capitalize',
+                        editForm.tier === t ? `${TIER_CONFIG[t].bg} ${TIER_CONFIG[t].color}` : 'border-border text-muted-foreground')}>
+                      {t}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="text-[9px] font-mono text-muted-foreground uppercase tracking-wider mb-1 block">Notes</label>
+                <textarea className="w-full h-20 px-3 py-2 rounded-md border border-border bg-background text-xs font-mono text-foreground resize-none focus:outline-none focus:ring-1 focus:ring-primary"
+                  value={editForm.notes} onChange={e => setEditForm(prev => ({ ...prev, notes: e.target.value }))} />
+              </div>
+              <div className="flex gap-2 pt-2">
+                <Button type="button" variant="outline" className="flex-1 text-xs font-mono" onClick={() => setEditAgent(null)}>Cancel</Button>
+                <Button type="submit" className="flex-1 text-xs font-mono gap-1.5" disabled={updateAgentMutation.isPending}>
+                  {updateAgentMutation.isPending ? <><Loader2 size={11} className="animate-spin" /> Saving…</> : 'Save Changes'}
                 </Button>
               </div>
             </form>

@@ -101,6 +101,9 @@ function MessagingChannelsPageInner() {
   const [selectedReport, setSelectedReport] = useState<any | null>(null);
   const [filterChannel, setFilterChannel] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('all');
+  const [showCreateChannel, setShowCreateChannel] = useState(false);
+  const [editingChannel, setEditingChannel] = useState<any | null>(null);
+  const [newChannel, setNewChannel] = useState({ channelType: 'whatsapp' as const, name: '', identifier: '', webhookUrl: '', apiKey: '' });
 
   // ── Queries ──
   const { data: channelsData, isLoading: channelsLoading } = trpc.messaging.listChannels.useQuery();
@@ -118,6 +121,26 @@ function MessagingChannelsPageInner() {
   // ── Mutations ──
   const updateStatus = trpc.messaging.updateReportStatus.useMutation({
     onSuccess: () => { utils.messaging.listReports.invalidate(); utils.messaging.stats.invalidate(); setSelectedReport(null); },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const createChannelMutation = trpc.messaging.createChannel.useMutation({
+    onSuccess: () => { utils.messaging.listChannels.invalidate(); setShowCreateChannel(false); setNewChannel({ channelType: 'whatsapp', name: '', identifier: '', webhookUrl: '', apiKey: '' }); toast.success('Channel created'); },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const updateChannelMutation = trpc.messaging.updateChannel.useMutation({
+    onSuccess: () => { utils.messaging.listChannels.invalidate(); setEditingChannel(null); toast.success('Channel updated'); },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const deleteChannelMutation = trpc.messaging.deleteChannel.useMutation({
+    onSuccess: () => { utils.messaging.listChannels.invalidate(); toast.success('Channel deleted'); },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const toggleChannelMutation = trpc.messaging.toggleChannel.useMutation({
+    onSuccess: () => utils.messaging.listChannels.invalidate(),
     onError: (e) => toast.error(e.message),
   });
 
@@ -381,30 +404,129 @@ function MessagingChannelsPageInner() {
       {/* ── Config Tab ── */}
       {activeTab === 'config' && (
         <div className="space-y-4">
-          {Object.entries(CHANNEL_CONFIG).map(([key, cfg]) => (
-            <div key={key} className={cn("bis-card p-5 border", cfg.border)}>
-              <div className="flex items-center gap-3 mb-4">
-                <div className={cn("w-9 h-9 rounded-lg border flex items-center justify-center", cfg.color, cfg.border, cfg.textColor)}>
-                  {cfg.icon}
+          {/* Add Channel button (admin only) */}
+          {user?.role === 'admin' && (
+            <div className="flex justify-end">
+              <Button size="sm" onClick={() => setShowCreateChannel(true)} className="gap-1 text-xs">
+                + Add Channel
+              </Button>
+            </div>
+          )}
+
+          {/* Create channel form */}
+          {showCreateChannel && (
+            <div className="bis-card p-4 border border-primary/30 space-y-3">
+              <p className="text-xs font-mono font-semibold text-primary uppercase tracking-wider">New Channel</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[10px] text-muted-foreground uppercase">Type</label>
+                  <select value={newChannel.channelType} onChange={e => setNewChannel(p => ({ ...p, channelType: e.target.value as any }))} className="w-full mt-1 bg-background border border-border rounded px-2 py-1 text-xs text-foreground">
+                    {['whatsapp','telegram','ussd','sms','email'].map(t => <option key={t} value={t}>{t.toUpperCase()}</option>)}
+                  </select>
                 </div>
-                <div className="flex-1">
-                  <p className="text-sm font-mono font-semibold text-foreground">{cfg.label}</p>
-                  <p className="text-[10px] text-muted-foreground">{cfg.description}</p>
+                <div>
+                  <label className="text-[10px] text-muted-foreground uppercase">Name</label>
+                  <input value={newChannel.name} onChange={e => setNewChannel(p => ({ ...p, name: e.target.value }))} placeholder="e.g. WhatsApp Business" className="w-full mt-1 bg-background border border-border rounded px-2 py-1 text-xs text-foreground" />
                 </div>
-                <span className="text-[9px] font-mono text-emerald-400 border border-emerald-400/30 rounded px-2 py-0.5">ACTIVE</span>
+                <div>
+                  <label className="text-[10px] text-muted-foreground uppercase">Identifier (number/handle)</label>
+                  <input value={newChannel.identifier} onChange={e => setNewChannel(p => ({ ...p, identifier: e.target.value }))} placeholder="e.g. +2348012345678" className="w-full mt-1 bg-background border border-border rounded px-2 py-1 text-xs text-foreground" />
+                </div>
+                <div>
+                  <label className="text-[10px] text-muted-foreground uppercase">Webhook URL (optional)</label>
+                  <input value={newChannel.webhookUrl} onChange={e => setNewChannel(p => ({ ...p, webhookUrl: e.target.value }))} placeholder="https://..." className="w-full mt-1 bg-background border border-border rounded px-2 py-1 text-xs text-foreground" />
+                </div>
               </div>
-              <div className="grid grid-cols-2 gap-3 text-xs font-mono">
-                <div className="space-y-1">
-                  <p className="text-muted-foreground uppercase tracking-wider text-[9px]">Endpoint</p>
-                  <p className="text-foreground/80">api.bis.ng/webhooks/{key}</p>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-muted-foreground uppercase tracking-wider text-[9px]">Auth Token</p>
-                  <p className="text-foreground/80 font-mono">••••••••••••••••</p>
-                </div>
+              <div className="flex gap-2 justify-end">
+                <Button size="sm" variant="outline" onClick={() => setShowCreateChannel(false)}>Cancel</Button>
+                <Button size="sm" disabled={createChannelMutation.isPending || !newChannel.name || !newChannel.identifier} onClick={() => createChannelMutation.mutate({ ...newChannel, webhookUrl: newChannel.webhookUrl || undefined, apiKey: newChannel.apiKey || undefined })}>
+                  {createChannelMutation.isPending ? 'Creating…' : 'Create'}
+                </Button>
               </div>
             </div>
-          ))}
+          )}
+
+          {/* Live channel list */}
+          {channelsLoading ? (
+            <div className="flex items-center gap-2 text-muted-foreground text-xs"><Loader2 size={12} className="animate-spin" /> Loading channels…</div>
+          ) : channels.length === 0 ? (
+            <p className="text-xs text-muted-foreground">No channels configured. Add one above.</p>
+          ) : (
+            channels.map((ch: any) => {
+              const cfg = CHANNEL_CONFIG[ch.channelType as Channel] ?? { label: ch.channelType, shortCode: ch.channelType.slice(0,2).toUpperCase(), color: 'bg-muted', textColor: 'text-muted-foreground', border: 'border-border', icon: null, description: '' };
+              const isEditing = editingChannel?.id === ch.id;
+              return (
+                <div key={ch.id} className={cn('bis-card p-5 border', cfg.border)}>
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className={cn('w-9 h-9 rounded-lg border flex items-center justify-center', cfg.color, cfg.border, cfg.textColor)}>
+                      {cfg.icon}
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-sm font-mono font-semibold text-foreground">{ch.name}</p>
+                      <p className="text-[10px] text-muted-foreground font-mono">{ch.identifier}</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => toggleChannelMutation.mutate({ id: ch.id, active: ch.status !== 'active' })}
+                        disabled={toggleChannelMutation.isPending}
+                        className={cn('text-[9px] font-mono px-2 py-0.5 rounded border transition-colors', ch.status === 'active' ? 'text-emerald-400 border-emerald-400/30 hover:bg-emerald-400/10' : 'text-red-400 border-red-400/30 hover:bg-red-400/10')}
+                      >
+                        {ch.status === 'active' ? 'ACTIVE' : ch.status?.toUpperCase() ?? 'INACTIVE'}
+                      </button>
+                      {user?.role === 'admin' && (
+                        <>
+                          <Button size="sm" variant="outline" className="h-6 text-[10px] px-2" onClick={() => setEditingChannel(isEditing ? null : ch)}>
+                            {isEditing ? 'Cancel' : 'Edit'}
+                          </Button>
+                          <Button size="sm" variant="outline" className="h-6 text-[10px] px-2 text-red-400 border-red-400/30" onClick={() => { if (confirm('Delete this channel?')) deleteChannelMutation.mutate({ id: ch.id }); }}>
+                            Delete
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  {isEditing && (
+                    <div className="space-y-2 border-t border-border pt-3">
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="text-[10px] text-muted-foreground uppercase">Name</label>
+                          <input defaultValue={ch.name} id={`edit-name-${ch.id}`} className="w-full mt-1 bg-background border border-border rounded px-2 py-1 text-xs text-foreground" />
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-muted-foreground uppercase">Identifier</label>
+                          <input defaultValue={ch.identifier} id={`edit-ident-${ch.id}`} className="w-full mt-1 bg-background border border-border rounded px-2 py-1 text-xs text-foreground" />
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-muted-foreground uppercase">Webhook URL</label>
+                          <input defaultValue={ch.webhookUrl ?? ''} id={`edit-webhook-${ch.id}`} className="w-full mt-1 bg-background border border-border rounded px-2 py-1 text-xs text-foreground" />
+                        </div>
+                      </div>
+                      <div className="flex justify-end gap-2">
+                        <Button size="sm" disabled={updateChannelMutation.isPending} onClick={() => {
+                          const name = (document.getElementById(`edit-name-${ch.id}`) as HTMLInputElement)?.value;
+                          const identifier = (document.getElementById(`edit-ident-${ch.id}`) as HTMLInputElement)?.value;
+                          const webhookUrl = (document.getElementById(`edit-webhook-${ch.id}`) as HTMLInputElement)?.value;
+                          updateChannelMutation.mutate({ id: ch.id, name: name || undefined, identifier: identifier || undefined, webhookUrl: webhookUrl || undefined });
+                        }}>
+                          {updateChannelMutation.isPending ? 'Saving…' : 'Save'}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                  <div className="grid grid-cols-2 gap-3 text-xs font-mono mt-2">
+                    <div className="space-y-1">
+                      <p className="text-muted-foreground uppercase tracking-wider text-[9px]">Endpoint</p>
+                      <p className="text-foreground/80">api.bis.ng/webhooks/{ch.channelType}</p>
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-muted-foreground uppercase tracking-wider text-[9px]">Webhook</p>
+                      <p className="text-foreground/80 font-mono truncate">{ch.webhookUrl ?? '—'}</p>
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          )}
         </div>
       )}
 

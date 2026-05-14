@@ -1107,10 +1107,64 @@ function BiometricEnrollmentPageInner() {
   );
 }
 
+function BiometricEnrollmentHistory() {
+  const utils = trpc.useUtils();
+  const { data: enrollmentList, isLoading: listLoading } = trpc.biometric.list.useQuery({ page: 1, limit: 20 });
+  const deleteMutation = trpc.biometric.delete.useMutation({
+    onSuccess: () => { toast.success('Enrollment revoked'); utils.biometric.list.invalidate(); },
+    onError: (e) => toast.error(`Revoke failed: ${e.message}`),
+  });
+  const records = enrollmentList?.data ?? [];
+  if (listLoading) return <div className="text-xs text-muted-foreground p-4">Loading enrollment records...</div>;
+  if (records.length === 0) return null;
+  return (
+    <Card className="mt-6">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base flex items-center gap-2">
+          Enrolled Subjects
+          <Badge variant="outline" className="text-xs ml-auto">{enrollmentList?.total ?? records.length} total</Badge>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="p-0">
+        <div className="divide-y divide-border">
+          {records.map((rec) => (
+            <div key={rec.id} className="flex items-center gap-3 px-4 py-3">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium truncate">{rec.subjectName ?? rec.subjectId}</span>
+                  <Badge variant="outline" className="text-xs text-emerald-600 border-emerald-300">Enrolled</Badge>
+                </div>
+                <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
+                  <span className="capitalize">{rec.modality}</span>
+                  {rec.qualityScore != null && <><span>&middot;</span><span>Quality: {rec.qualityScore}</span></>}
+                  <span>&middot;</span>
+                  <span>{rec.enrolledAt ? new Date(rec.enrolledAt).toLocaleDateString() : '—'}</span>
+                </div>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-red-500 hover:text-red-600 h-7 px-2 text-xs"
+                disabled={deleteMutation.isPending}
+                onClick={() => deleteMutation.mutate({ id: rec.id })}
+              >
+                Revoke
+              </Button>
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function BiometricEnrollmentPage() {
   return (
     <BISLayout>
-      <BiometricEnrollmentPageInner />
+      <div className="max-w-4xl mx-auto px-4 pb-8 space-y-0">
+        <BiometricEnrollmentPageInner />
+        <BiometricEnrollmentHistory />
+      </div>
     </BISLayout>
   );
 }

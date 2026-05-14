@@ -614,10 +614,81 @@ function NigerianDataBundlePageInner() {
 }
 
 
+function BundleHistorySection() {
+  const [historyPage, setHistoryPage] = useState(0);
+  const HIST_LIMIT = 10;
+  const { data: histData, isLoading } = trpc.lookup.nigerianDataBundleHistory.useQuery(
+    { limit: HIST_LIMIT, offset: historyPage * HIST_LIMIT },
+    { staleTime: 30_000 }
+  );
+  const totalPages = Math.ceil((histData?.total ?? 0) / HIST_LIMIT);
+  return (
+    <div className="space-y-4 p-4">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-foreground">Bundle Run History</h3>
+        <span className="text-xs text-muted-foreground">{histData?.total ?? 0} total runs</span>
+      </div>
+      {isLoading ? (
+        <div className="text-sm text-muted-foreground p-6 text-center">Loading history...</div>
+      ) : !histData?.items.length ? (
+        <div className="text-sm text-muted-foreground p-8 text-center">No bundle runs yet. Run a check to see history here.</div>
+      ) : (
+        <div className="divide-y divide-border rounded-xl border border-border overflow-hidden">
+          {histData.items.map((run) => (
+            <div key={run.id} className="flex items-center gap-4 px-4 py-3 bg-card/40 hover:bg-muted/10 transition-colors">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs font-mono font-semibold text-primary">{run.runRef}</span>
+                  {run.fullName && <span className="text-sm font-medium text-foreground truncate max-w-[160px]">{run.fullName}</span>}
+                  {run.nin && <span className="text-[10px] font-mono text-muted-foreground bg-muted/30 px-1.5 py-0.5 rounded">NIN: {run.nin}</span>}
+                  {run.bvn && <span className="text-[10px] font-mono text-muted-foreground bg-muted/30 px-1.5 py-0.5 rounded">BVN: {run.bvn}</span>}
+                </div>
+                <div className="text-xs text-muted-foreground mt-0.5">
+                  {run.selectedSources.length} source{run.selectedSources.length !== 1 ? 's' : ''} checked
+                  {' · '}{run.verifiedCount} verified{run.errorCount > 0 ? ` · ${run.errorCount} errors` : ''}
+                  {' · '}{new Date(run.createdAt).toLocaleString()}
+                </div>
+              </div>
+              <div className={`text-lg font-mono font-bold ${
+                run.overallScore >= 80 ? 'text-emerald-400' : run.overallScore >= 50 ? 'text-amber-400' : 'text-red-400'
+              }`}>
+                {run.overallScore}%
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between text-xs text-muted-foreground pt-2">
+          <button onClick={() => setHistoryPage(p => Math.max(0, p - 1))} disabled={historyPage === 0} className="px-3 py-1.5 rounded border border-border disabled:opacity-40 hover:bg-muted/20">← Prev</button>
+          <span>Page {historyPage + 1} of {totalPages}</span>
+          <button onClick={() => setHistoryPage(p => Math.min(totalPages - 1, p + 1))} disabled={historyPage >= totalPages - 1} className="px-3 py-1.5 rounded border border-border disabled:opacity-40 hover:bg-muted/20">Next →</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function NigerianDataBundlePage() {
+  const [activeTab, setActiveTab] = useState<'check' | 'history'>('check');
   return (
     <BISLayout>
-      <NigerianDataBundlePageInner />
+      <div className="max-w-4xl mx-auto space-y-0">
+        <div className="flex gap-1 border-b border-border px-4 pt-2">
+          {(['check', 'history'] as const).map(tab => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`px-4 py-2 text-sm font-medium capitalize transition-colors border-b-2 -mb-px ${
+                activeTab === tab ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              {tab === 'check' ? 'Run Check' : 'History'}
+            </button>
+          ))}
+        </div>
+        {activeTab === 'check' ? <NigerianDataBundlePageInner /> : <BundleHistorySection />}
+      </div>
     </BISLayout>
   );
 }

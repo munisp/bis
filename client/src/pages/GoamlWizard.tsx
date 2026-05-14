@@ -390,6 +390,20 @@ export default function GoamlWizard() {
     { id: selectedId! },
     { enabled: selectedId !== null }
   );
+  const { data: filingDetail } = trpc.goaml.get.useQuery(
+    { id: selectedId! },
+    { enabled: selectedId !== null, staleTime: 10_000 }
+  );
+  const [selectedDraftIds, setSelectedDraftIds] = useState<number[]>([]);
+  const bulkSubmitMutation = trpc.goaml.bulkSubmit.useMutation({
+    onSuccess: (result) => {
+      toast.success(`Bulk submitted ${result.submittedCount} filing${result.submittedCount !== 1 ? 's' : ''} to NFIU${result.skippedCount > 0 ? ` (${result.skippedCount} skipped)` : ''}`);
+      utils.goaml.list.invalidate();
+      utils.goaml.stats.invalidate();
+      setSelectedDraftIds([]);
+    },
+    onError: (e) => toast.error(e.message),
+  });
 
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
@@ -485,6 +499,17 @@ export default function GoamlWizard() {
         </Select>
       </div>
 
+      {/* Bulk submit bar */}
+      {selectedDraftIds.length > 0 && (
+        <div className="flex items-center gap-3 rounded-lg border border-blue-500/30 bg-blue-500/10 px-4 py-2">
+          <span className="text-sm text-blue-300 font-medium">{selectedDraftIds.length} draft{selectedDraftIds.length !== 1 ? 's' : ''} selected</span>
+          <Button size="sm" className="gap-1 ml-auto" onClick={() => bulkSubmitMutation.mutate({ ids: selectedDraftIds })} disabled={bulkSubmitMutation.isPending}>
+            <Send size={12} /> {bulkSubmitMutation.isPending ? 'Submitting...' : 'Submit All to NFIU'}
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setSelectedDraftIds([])} className="text-muted-foreground">Clear</Button>
+        </div>
+      )}
+
       {/* Filings table */}
       <Card>
         <CardHeader className="pb-3">
@@ -502,6 +527,14 @@ export default function GoamlWizard() {
             <div className="divide-y divide-border">
               {filings.map(f => (
                 <div key={f.id} className="flex items-center gap-4 px-4 py-3 hover:bg-muted/10 transition-colors">
+                  {f.status === 'draft' && (
+                    <input
+                      type="checkbox"
+                      className="w-3.5 h-3.5 accent-blue-500 shrink-0"
+                      checked={selectedDraftIds.includes(f.id)}
+                      onChange={(e) => setSelectedDraftIds(prev => e.target.checked ? [...prev, f.id] : prev.filter(id => id !== f.id))}
+                    />
+                  )}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-mono font-semibold text-primary">{f.filingRef}</span>
@@ -560,6 +593,32 @@ export default function GoamlWizard() {
           )}
         </CardContent>
       </Card>
+
+      {/* Filing Detail Panel */}
+      {selectedId !== null && filingDetail && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-mono flex items-center gap-2">
+              Filing Detail — {filingDetail.filingRef}
+              <StatusBadge status={filingDetail.status} />
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="grid grid-cols-2 gap-3 text-xs">
+            <div><span className="text-muted-foreground">Subject: </span><span className="font-medium">{filingDetail.subjectName}</span></div>
+            <div><span className="text-muted-foreground">Report Type: </span><span className="font-mono">{filingDetail.reportType}</span></div>
+            {filingDetail.subjectBvn && <div><span className="text-muted-foreground">BVN: </span><span className="font-mono">{filingDetail.subjectBvn}</span></div>}
+            {filingDetail.subjectNin && <div><span className="text-muted-foreground">NIN: </span><span className="font-mono">{filingDetail.subjectNin}</span></div>}
+            {filingDetail.subjectAccountNumber && <div><span className="text-muted-foreground">Account: </span><span className="font-mono">{filingDetail.subjectAccountNumber}</span></div>}
+            {filingDetail.subjectBank && <div><span className="text-muted-foreground">Bank: </span>{filingDetail.subjectBank}</div>}
+            {filingDetail.transactionAmount != null && <div><span className="text-muted-foreground">Amount: </span><span className="font-mono">{filingDetail.transactionCurrency} {Number(filingDetail.transactionAmount).toLocaleString()}</span></div>}
+            {filingDetail.transactionDate && <div><span className="text-muted-foreground">Txn Date: </span>{new Date(filingDetail.transactionDate).toLocaleDateString()}</div>}
+            {filingDetail.goamlReferenceNumber && <div className="col-span-2"><span className="text-muted-foreground">NFIU Ref: </span><span className="font-mono text-emerald-400">{filingDetail.goamlReferenceNumber}</span></div>}
+            {filingDetail.investigationRef && <div className="col-span-2"><span className="text-muted-foreground">Investigation Ref: </span><span className="font-mono">{filingDetail.investigationRef}</span></div>}
+            <div className="col-span-2"><span className="text-muted-foreground block mb-1">Suspicious Activity:</span><p className="bg-muted/20 rounded p-2 leading-relaxed">{filingDetail.suspiciousActivity}</p></div>
+            {filingDetail.narrativeDetails && <div className="col-span-2"><span className="text-muted-foreground block mb-1">Narrative:</span><p className="bg-muted/20 rounded p-2 leading-relaxed">{filingDetail.narrativeDetails}</p></div>}
+          </CardContent>
+        </Card>
+      )}
 
       {/* XML Preview */}
       {selectedId !== null && xmlData && (

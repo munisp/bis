@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { CheckCircle2, XCircle, AlertTriangle, MapPin, FileText, User, Calendar, Building2, BarChart3, Link2, Sparkles, ExternalLink, Download } from "lucide-react";
+import { CheckCircle2, XCircle, AlertTriangle, MapPin, FileText, User, Calendar, Building2, BarChart3, Link2, Sparkles, ExternalLink, Download, Bell } from "lucide-react";
 
 const NIGERIAN_STATES = [
   { code: "AB", name: "Abia" }, { code: "AD", name: "Adamawa" }, { code: "AK", name: "Akwa Ibom" },
@@ -94,6 +94,27 @@ export default function LexReviewPage() {
     },
     onError: (e) => toast.error(e.message),
   });
+
+  const generatePdfMutation = trpc.lex.generateLex01Pdf.useMutation({
+    onSuccess: (result) => {
+      window.open(result.url, '_blank');
+      toast.success('LEX-01 PDF generated');
+    },
+    onError: (e) => toast.error(`PDF generation failed: ${e.message}`),
+  });
+
+  const sendSmsMutation = trpc.lex.sendSmsConfirmation.useMutation({
+    onSuccess: (result) => {
+      if (result.ok) toast.success('SMS confirmation sent');
+      else toast.error(`SMS not sent: ${result.reason}`);
+    },
+    onError: (e) => toast.error(`SMS failed: ${e.message}`),
+  });
+
+  const { data: deepMatches, isLoading: deepMatchesLoading } = trpc.lex.findMatchingCases.useQuery(
+    { submissionId: selectedId! },
+    { enabled: !!selectedId }
+  );
 
   const reviewMutation = trpc.lex.reviewSubmission.useMutation({
     onSuccess: () => {
@@ -372,6 +393,40 @@ export default function LexReviewPage() {
                       </a>
                     </div>
                   )}
+                  {/* Document Actions */}
+                  <div className="flex flex-col gap-2 pt-2 border-t">
+                    <Button size="sm" variant="outline" className="text-xs gap-1"
+                      onClick={() => generatePdfMutation.mutate({ submissionId: detail.submission.id })}
+                      disabled={generatePdfMutation.isPending}>
+                      <FileText className="w-3 h-3" />
+                      {generatePdfMutation.isPending ? 'Generating…' : 'Generate LEX-01 PDF'}
+                    </Button>
+                    <Button size="sm" variant="outline" className="text-xs gap-1"
+                      onClick={() => sendSmsMutation.mutate({ submissionId: detail.submission.id })}
+                      disabled={sendSmsMutation.isPending}>
+                      <Bell className="w-3 h-3" />
+                      {sendSmsMutation.isPending ? 'Sending…' : 'Send SMS Confirmation'}
+                    </Button>
+                  </div>
+
+                  {/* Deep Case Matches */}
+                  {deepMatches && deepMatches.matches.length > 0 && (
+                    <div className="pt-2 border-t">
+                      <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider mb-2">Deep Case Matches ({deepMatches.matches.length})</p>
+                      <div className="space-y-1.5">
+                        {deepMatches.matches.map((m: any) => (
+                          <div key={m.caseId} className="flex items-center justify-between bg-muted/30 rounded px-2 py-1.5 text-xs">
+                            <div>
+                              <span className="font-mono font-semibold text-primary">{m.caseRef}</span>
+                              <span className="text-muted-foreground ml-1">{m.matchType}</span>
+                            </div>
+                            <span className="text-[10px] font-mono text-emerald-400">{m.confidence}%</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Review Actions */}
                   {(detail.submission.status === "pending" || detail.submission.status === "under_review") && (
                     <div className="flex flex-col gap-2 pt-2 border-t">

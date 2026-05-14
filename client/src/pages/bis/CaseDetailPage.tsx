@@ -132,6 +132,10 @@ export default function CaseDetailPage() {
   const { data: caseData, isLoading } = trpc.cases.get.useQuery({ ref: caseRef }, { enabled: !!caseRef });
   const { data: comments, refetch: refetchComments } = trpc.cases.listComments.useQuery({ caseRef }, { enabled: !!caseRef });
   const { data: analysts } = trpc.users.list.useQuery({ role: "analyst" }, { enabled: assignOpen });
+  const { data: linkedInvestigations } = trpc.investigationLinks.listForCase.useQuery(
+    { caseId: (caseData as any)?.id ?? 0 },
+    { enabled: !!(caseData as any)?.id }
+  );
 
   // Mutations
   const updateCase = trpc.cases.update.useMutation({
@@ -163,6 +167,14 @@ export default function CaseDetailPage() {
   const deleteDocument = trpc.cases.deleteDocument.useMutation({
     onSuccess: () => { utils.cases.get.invalidate({ ref: caseRef }); setDeleteDocId(null); toast.success("Document deleted"); },
     onError: (e) => { toast.error(e.message); setDeleteDocId(null); },
+  });
+  const resendInvite = trpc.cases.resendInvite.useMutation({
+    onSuccess: () => toast.success("Invite re-sent to stakeholder"),
+    onError: (e) => toast.error(e.message),
+  });
+  const addTimelineEvent = trpc.cases.addTimelineEvent.useMutation({
+    onSuccess: () => { utils.cases.get.invalidate({ ref: caseRef }); toast.success("Timeline event added"); },
+    onError: (e) => toast.error(e.message),
   });
   const exportCasePdf = trpc.cases.exportCasePdf.useMutation({
     onSuccess: (result) => {
@@ -313,6 +325,9 @@ export default function CaseDetailPage() {
           </TabsTrigger>
           <TabsTrigger value="stakeholders">
             <Shield className="w-4 h-4 mr-1" /> Stakeholders ({c.stakeholders?.length ?? 0})
+          </TabsTrigger>
+          <TabsTrigger value="investigations">
+            <ExternalLink className="w-4 h-4 mr-1" /> Linked Investigations ({linkedInvestigations?.length ?? 0})
           </TabsTrigger>
         </TabsList>
 
@@ -535,17 +550,74 @@ export default function CaseDetailPage() {
                       <p className="text-xs text-muted-foreground">{s.email} {s.organisation && `· ${s.organisation}`}</p>
                       {s.accessExpiresAt && <p className="text-xs text-muted-foreground">Expires: {new Date(s.accessExpiresAt).toLocaleDateString()}</p>}
                     </div>
-                    {s.accessToken && (
-                      <Button variant="ghost" size="sm" onClick={() => copyPortalLink(s.accessToken)} title="Copy portal link">
-                        <Copy className="w-3.5 h-3.5" />
+                    <div className="flex items-center gap-1">
+                      {s.accessToken && (
+                        <Button variant="ghost" size="sm" onClick={() => copyPortalLink(s.accessToken)} title="Copy portal link">
+                          <Copy className="w-3.5 h-3.5" />
+                        </Button>
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-xs text-muted-foreground hover:text-foreground"
+                        onClick={() => resendInvite.mutate({ stakeholderId: s.id, origin: window.location.origin })}
+                        disabled={resendInvite.isPending}
+                        title="Resend portal invite"
+                      >
+                        {resendInvite.isPending ? "Sending…" : "Resend"}
                       </Button>
-                    )}
+                    </div>
                   </div>
                 </CardContent>
               </Card>
             ))}
             {(c.stakeholders ?? []).length === 0 && <p className="text-sm text-muted-foreground text-center py-8">No stakeholders invited yet.</p>}
           </div>
+        </TabsContent>
+
+        {/* Linked Investigations Tab */}
+        <TabsContent value="investigations" className="mt-4">
+          {!linkedInvestigations?.length ? (
+            <Card>
+              <CardContent className="py-10 text-center text-muted-foreground">
+                <ExternalLink className="h-8 w-8 mx-auto mb-3 opacity-30" />
+                <p className="font-medium">No linked investigations</p>
+                <p className="text-sm mt-1">Link investigations to this case from the Investigation Case Links page.</p>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="space-y-2">
+              {(linkedInvestigations as any[]).map((link) => (
+                <Card key={link.id}>
+                  <CardContent className="flex items-center justify-between py-3 px-4">
+                    <div className="flex items-center gap-3">
+                      <ExternalLink className="w-4 h-4 text-primary" />
+                      <div>
+                        <div className="font-medium text-sm">
+                          Investigation #{link.investigationId}
+                          {link.investigation?.ref && (
+                            <span className="text-muted-foreground ml-2 font-normal">{link.investigation.ref}</span>
+                          )}
+                        </div>
+                        {link.notes && <p className="text-xs text-muted-foreground mt-0.5">{link.notes}</p>}
+                        <p className="text-xs text-muted-foreground">
+                          Linked {new Date(link.createdAt).toLocaleDateString()}
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-muted-foreground hover:text-foreground"
+                      onClick={() => navigate(`/investigations/${link.investigationId}`)}
+                    >
+                      View
+                    </Button>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
         </TabsContent>
       </Tabs>
 

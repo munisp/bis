@@ -386,6 +386,10 @@ export default function BISLayout({ children, title, subtitle, actions }: BISLay
     { unreadOnly: true, limit: 20 },
     { refetchInterval: 30_000, staleTime: 15_000 }
   );
+  const { data: notifUnreadData } = trpc.notifications.unreadCount.useQuery(undefined, {
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  });
 
   // Sync live alerts into notification state
   useEffect(() => {
@@ -469,6 +473,9 @@ export default function BISLayout({ children, title, subtitle, actions }: BISLay
       }
       if (item.href === '/continuous-monitoring' && stats?.activeMonitors) {
         return { ...item, badge: stats.activeMonitors };
+      }
+      if (item.href === '/notifications' && notifUnreadData?.count) {
+        return { ...item, badge: notifUnreadData.count };
       }
       return item;
     }),

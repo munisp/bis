@@ -1582,3 +1582,27 @@ export const frozenAccounts = pgTable("frozen_accounts", {
   }));
 export type FrozenAccount = typeof frozenAccounts.$inferSelect;
 export type InsertFrozenAccount = typeof frozenAccounts.$inferInsert;
+
+// ── Nigerian Data Bundle Runs (Lookup History) ─────────────────────────────────
+export const nigerianDataBundleRuns = pgTable("nigerian_data_bundle_runs", {
+  id: serial("id").primaryKey(),
+  runRef: varchar("runRef", { length: 32 }).notNull().unique(),
+  fullName: varchar("fullName", { length: 255 }),
+  nin: varchar("nin", { length: 20 }),
+  bvn: varchar("bvn", { length: 22 }),
+  phone: varchar("phone", { length: 20 }),
+  dateOfBirth: varchar("dateOfBirth", { length: 20 }),
+  selectedSources: json("selectedSources").$type<string[]>().notNull(),
+  results: json("results").$type<Record<string, unknown>[]>().notNull(),
+  overallScore: integer("overallScore").notNull().default(0),
+  verifiedCount: integer("verifiedCount").notNull().default(0),
+  errorCount: integer("errorCount").notNull().default(0),
+  createdBy: integer("createdBy").references(() => users.id),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+},
+  (table) => ({
+    bundle_runs_created_at_idx: index("bundle_runs_created_at_idx").on(table.createdAt),
+    bundle_runs_nin_idx: index("bundle_runs_nin_idx").on(table.nin),
+    bundle_runs_bvn_idx: index("bundle_runs_bvn_idx").on(table.bvn),
+  }));
+export type NigerianDataBundleRun = typeof nigerianDataBundleRuns.$inferSelect;

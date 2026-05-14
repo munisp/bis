@@ -2051,3 +2051,40 @@
 - [x] SSE-based stakeholder portal notifications — replace 30s polling with SSE endpoint /api/v1/portal/stream/:token; usePortalEventStream hook with exponential backoff; update StakeholderPortalPage to use SSE; keep polling as fallback
 - [x] Risk threshold email digest — daily scheduler (09:00 WAT / 08:00 UTC) that queries checkThreshold, sends HTML email digest via notifyOwner listing top-flagged entities, creates in-app alert; deduplicated per day
 - [x] Replay History search/filter — event type dropdown + date range pickers above Replay History table; extend audit.replayHistory with optional eventType and dateFrom/dateTo Zod params; WHERE clause filters in DB query
+
+## Orphan/Stub Elimination — Batch 1 (Core Workflows, May 13 2026)
+
+- [x] QuickCheck history tab — wire trpc.quickcheck.history.useQuery below the form; paginated table with verdict badge, subject name, tier, date
+- [x] Biometric enrollment history + status — wire biometric.list and biometric.getStatus in BiometricEnrollmentPage; enrollment records table with delete action
+- [x] SAR detail drawer + actions — wire sar.get, sar.update, sar.withdraw, sar.acknowledge, sar.delete in SARFilingPage; detail side-drawer with status action buttons
+- [x] GoAML record detail + bulk submit — wire goaml.get, goaml.update, goaml.bulkSubmit in GoamlWizard; record detail dialog and bulk-select submit
+- [x] Cases: listDocuments tab + addTimelineEvent + resendInvite — wire three missing procedures in CaseDetailPage
+- [x] DocumentVault: custody chain panel + investigation filter + edit dialog — wire getCustodyChain, listByInvestigation, update
+- [x] Investigations: score badge + updateStatus + updateDueAt + SLA warning — wire four missing procedures
+- [x] MVR + Drug screening: remove mock fallbacks — replace mock result construction with real DB result or LLM-generated result
+
+## Orphan/Stub Elimination — Batch 2 (Management UIs, May 13 2026)
+
+- [x] Playbooks admin create dialog — wire playbooks.create in FieldAgentPlaybooksPage for admin users
+- [x] Messaging channel management — wire createChannel, deleteChannel, toggleChannel, updateChannel in MessagingPage
+- [x] Monitors edit dialog — wire monitors.update in ContinuousMonitoringPage
+- [x] FieldAgents detail drawer + edit form — wire fieldAgents.get and fieldAgents.update
+- [x] CorrespondentBanking + TradeFinance + RegulatoryReports detail drawers — wire .get procedures
+- [x] SocialMonitoring monitor detail + edit + manual mention — wire getMonitor, updateMonitor, createMention
+- [x] Sessions admin view — wire sessions.adminList for admin users in SessionsPage
+- [x] Notifications: unread count badge + broadcast + delete — wire missing notification procedures
+- [x] Evidence detail drawer — wire evidence.get in EvidencePage
+
+## Orphan/Stub Elimination — Batch 3 (Infrastructure & Lookups, May 13 2026)
+
+- [x] SystemHealthDashboard: eventProcessorHealth + riskEngineHealth service cards
+- [x] AuditLog: eventProcessorLog tab + verifyIntegrity action
+- [x] PaymentRails: export schedules UI + reverseTransfer action
+- [x] Lex: PDF export button + SMS confirmation + findMatchingCases panel
+- [x] DataSources: create new data source dialog
+- [x] Tenants: update + updateWebhook wired to TenantBrandingPage
+- [x] Onboarding admin detail drawer — wire onboarding.get
+- [x] Alerts: getById detail panel + markAllRead button
+- [x] KYC: wire kyc.run procedure to KYCVerificationPage
+- [x] Cases: resendInvite button + investigationLinks.listForCase tab
+- [x] Lakehouse: ingestInvestigation button in InvestigationDetail

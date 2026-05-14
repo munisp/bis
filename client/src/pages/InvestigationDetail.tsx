@@ -221,6 +221,18 @@ export default function InvestigationDetail() {
     cancelled:  { label: 'Cancelled',  color: 'text-muted-foreground', transitions: ['pending'] },
   };
 
+  const updateStatusMutation = trpc.investigations.updateStatus.useMutation({
+    onError: (e) => toast.error(`Status update failed: ${e.message}`),
+  });
+  const updateDueAtMutation = trpc.investigations.updateDueAt.useMutation({
+    onSuccess: () => toast.success("SLA due date saved"),
+    onError: (e) => toast.error(`Due date update failed: ${e.message}`),
+  });
+  const rescoreMutation = trpc.investigations.score.useMutation({
+    onSuccess: (result: any) => toast.success(`Risk score updated: ${result.composite_score}/100 (${result.risk_tier})`),
+    onError: (e) => toast.error(`Rescore failed: ${e.message}`),
+  });
+
   const handleStatusChange = (newStatus: string) => {
     const prev = currentStatus;
     setCurrentStatus(newStatus);
@@ -229,10 +241,11 @@ export default function InvestigationDetail() {
       type: 'analyst_note',
       timestamp: new Date().toISOString(),
       title: `Status changed: ${STATUS_FLOW[prev]?.label ?? prev} → ${STATUS_FLOW[newStatus]?.label ?? newStatus}`,
-      body: `Investigation status updated from "${STATUS_FLOW[prev]?.label ?? prev}" to "${STATUS_FLOW[newStatus]?.label ?? newStatus}" by analyst@bis.io`,
-      linkedBy: 'analyst@bis.io',
+      body: `Investigation status updated from "${STATUS_FLOW[prev]?.label ?? prev}" to "${STATUS_FLOW[newStatus]?.label ?? newStatus}"`,
+      linkedBy: 'you',
     };
     setEvidenceItems(p => [statusNote, ...p]);
+    if (params.id) updateStatusMutation.mutate({ ref: params.id, status: newStatus as any });
     toast.success(`Status updated to ${STATUS_FLOW[newStatus]?.label ?? newStatus}`);
   };
 
@@ -559,6 +572,30 @@ export default function InvestigationDetail() {
           </Button>
           <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={handleRerun}>
             <RefreshCw size={11} /> Re-run
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-xs gap-1 border-blue-500/40 text-blue-400 hover:bg-blue-500/10"
+            onClick={() => rescoreMutation.mutate({ ref: params.id ?? "" })}
+            disabled={rescoreMutation.isPending}
+          >
+            {rescoreMutation.isPending ? <Loader2 size={11} className="animate-spin" /> : <Activity size={11} />}
+            Rescore
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-xs gap-1"
+            onClick={() => {
+              const d = prompt("Set SLA due date (YYYY-MM-DD):", (liveInv as any)?.dueAt ? new Date((liveInv as any).dueAt).toISOString().slice(0,10) : "");
+              if (d === null) return;
+              const parsed = d ? new Date(d) : null;
+              updateDueAtMutation.mutate({ ref: params.id ?? "", dueAt: parsed });
+            }}
+            disabled={updateDueAtMutation.isPending}
+          >
+            <Clock size={11} /> Set Due Date
           </Button>
           <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={handleDownloadReport}>
             <Download size={11} /> Report

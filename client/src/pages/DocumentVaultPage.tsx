@@ -84,6 +84,11 @@ export default function DocumentVaultPage() {
   const [detailDoc, setDetailDoc] = useState<number | null>(null);
   const [deleteDocId, setDeleteDocId] = useState<number | null>(null);
   const [deleteReason, setDeleteReason] = useState("");
+  // Edit dialog state
+  const [editDocId, setEditDocId] = useState<number | null>(null);
+  const [editDescription, setEditDescription] = useState("");
+  const [editCategory, setEditCategory] = useState<string>("other");
+  const [editConfidential, setEditConfidential] = useState(false);
 
   const utils = trpc.useUtils();
 
@@ -122,6 +127,15 @@ export default function DocumentVaultPage() {
       utils.documentVault.stats.invalidate();
     },
     onError: (e) => toast.error(`Delete failed: ${e.message}`),
+  });
+  const updateMutation = trpc.documentVault.update.useMutation({
+    onSuccess: () => {
+      toast.success("Document updated");
+      setEditDocId(null);
+      utils.documentVault.list.invalidate();
+      if (detailDoc) utils.documentVault.get.invalidate({ id: detailDoc });
+    },
+    onError: (e) => toast.error(`Update failed: ${e.message}`),
   });
 
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -597,9 +611,74 @@ export default function DocumentVaultPage() {
                     Download Document
                   </Button>
                 </a>
+                <Button
+                  variant="outline"
+                  className="border-slate-600 text-slate-300"
+                  onClick={() => {
+                    setEditDocId(detailData.document.id);
+                    setEditDescription(detailData.document.description ?? "");
+                    setEditCategory(detailData.document.category ?? "other");
+                    setEditConfidential(!!detailData.document.confidential);
+                    setDetailDoc(null);
+                  }}
+                >
+                  Edit Metadata
+                </Button>
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Metadata Dialog */}
+      <Dialog open={editDocId !== null} onOpenChange={() => setEditDocId(null)}>
+        <DialogContent className="bg-slate-800 border-slate-700 text-white">
+          <DialogHeader>
+            <DialogTitle>Edit Document Metadata</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-1">
+              <Label className="text-slate-300 text-xs">Category</Label>
+              <Select value={editCategory} onValueChange={setEditCategory}>
+                <SelectTrigger className="bg-slate-700 border-slate-600 text-white">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="bg-slate-800 border-slate-700">
+                  {CATEGORIES.map(c => (
+                    <SelectItem key={c.value} value={c.value} className="text-white hover:bg-slate-700">{c.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-slate-300 text-xs">Description</Label>
+              <Textarea
+                value={editDescription}
+                onChange={e => setEditDescription(e.target.value)}
+                placeholder="Document description…"
+                className="bg-slate-700 border-slate-600 text-white placeholder:text-slate-400"
+                rows={3}
+              />
+            </div>
+            <div className="flex items-center gap-3">
+              <Switch
+                id="edit-confidential"
+                checked={editConfidential}
+                onCheckedChange={setEditConfidential}
+              />
+              <Label htmlFor="edit-confidential" className="text-slate-300 text-sm cursor-pointer">Mark as Confidential</Label>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditDocId(null)} className="border-slate-600 text-slate-300">Cancel</Button>
+            <Button
+              onClick={() => editDocId && updateMutation.mutate({ id: editDocId, description: editDescription || undefined, category: editCategory as any, confidential: editConfidential })}
+              disabled={updateMutation.isPending}
+              className="bg-blue-600 hover:bg-blue-700"
+            >
+              {updateMutation.isPending ? "Saving…" : "Save Changes"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

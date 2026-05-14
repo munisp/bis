@@ -134,6 +134,19 @@ interface TransferDetailDrawerProps {
 }
 
 function TransferDetailDrawer({ txRef, open, onClose }: TransferDetailDrawerProps) {
+  const utils = trpc.useUtils();
+  const [reverseReason, setReverseReason] = useState('');
+  const [showReverseForm, setShowReverseForm] = useState(false);
+  const reverseTransferMut = trpc.paymentRails.reverseTransfer.useMutation({
+    onSuccess: (r) => {
+      toast.success(`Reversal created — ${r.reversalRef}`);
+      setShowReverseForm(false);
+      setReverseReason('');
+      utils.paymentRails.getTransfer.invalidate({ txRef: txRef! });
+      utils.paymentRails.listTransfers.invalidate();
+    },
+    onError: (e) => toast.error(e.message),
+  });
   const { data, isLoading, error } = trpc.paymentRails.getTransfer.useQuery(
     { txRef: txRef! },
     { enabled: !!txRef && open }
@@ -264,6 +277,37 @@ function TransferDetailDrawer({ txRef, open, onClose }: TransferDetailDrawerProp
                   <div className="bg-slate-800/40 rounded px-3 py-2">
                     <p className="text-xs text-slate-300">{data.narration}</p>
                   </div>
+                </div>
+              </>
+            )}
+
+            {/* Reverse Transfer */}
+            {mapStatus(data.status ?? '') === 'posted' && (
+              <>
+                <Separator className="bg-slate-800" />
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Admin Actions</p>
+                  {!showReverseForm ? (
+                    <Button size="sm" variant="outline" className="text-xs border-red-700 text-red-400 hover:bg-red-900/20 w-full"
+                      onClick={() => setShowReverseForm(true)}>
+                      Reverse Transfer
+                    </Button>
+                  ) : (
+                    <div className="space-y-2 bg-red-900/10 border border-red-700/30 rounded p-3">
+                      <p className="text-[10px] text-red-400 font-semibold">Confirm Reversal</p>
+                      <input className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-200 placeholder:text-slate-600"
+                        placeholder="Reason for reversal (required)"
+                        value={reverseReason} onChange={e => setReverseReason(e.target.value)} />
+                      <div className="flex gap-2">
+                        <Button size="sm" variant="outline" className="flex-1 text-xs" onClick={() => { setShowReverseForm(false); setReverseReason(''); }}>Cancel</Button>
+                        <Button size="sm" className="flex-1 text-xs bg-red-700 hover:bg-red-600"
+                          disabled={!reverseReason.trim() || reverseTransferMut.isPending}
+                          onClick={() => reverseTransferMut.mutate({ txRef: data.txRef!, reason: reverseReason })}>
+                          {reverseTransferMut.isPending ? 'Reversing…' : 'Confirm Reversal'}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </>
             )}
@@ -790,6 +834,15 @@ export default function PaymentRailsPage() {
     },
     onError: (err: any) => toast.error(err.message),
   });
+  // Export Schedules
+  const [showScheduleForm, setShowScheduleForm] = useState(false);
+  const [scheduleForm, setScheduleForm] = useState({ name: '', schedule: 'daily' as 'daily' | 'weekly' | 'monthly' });
+  const { data: exportSchedulesList = [], refetch: refetchSchedules } = trpc.paymentRails.listExportSchedules.useQuery(undefined, { refetchOnWindowFocus: false });
+  const createScheduleMut = trpc.paymentRails.createExportSchedule.useMutation({
+    onSuccess: () => { toast.success('Export schedule created'); setShowScheduleForm(false); setScheduleForm({ name: '', schedule: 'daily' }); refetchSchedules(); },
+    onError: (e) => toast.error(e.message),
+  });
+
   const runArchival = trpc.archival.runArchival.useMutation({
     onMutate: () => {
       toast.loading("Running archival job…", { id: "archival-job" });
@@ -1041,6 +1094,67 @@ export default function PaymentRailsPage() {
 
       {/* Transfer ledger */}
       <TransferList />
+
+      {/* Export Schedules */}
+      <div className="bg-slate-900 border border-slate-700 rounded-xl p-5">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-200">Export Schedules</h3>
+            <p className="text-xs text-slate-500 mt-0.5">Recurring CSV exports of transfer data</p>
+          </div>
+          <Button size="sm" variant="outline" className="text-xs border-slate-600 text-slate-300 h-7 gap-1"
+            onClick={() => setShowScheduleForm(v => !v)}>
+            <Plus size={11} /> New Schedule
+          </Button>
+        </div>
+
+        {showScheduleForm && (
+          <div className="mb-4 p-3 bg-slate-800/60 border border-slate-700 rounded-lg space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-1">Schedule Name</p>
+                <input className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-200 placeholder:text-slate-600"
+                  placeholder="e.g. Daily Compliance Export"
+                  value={scheduleForm.name} onChange={e => setScheduleForm(f => ({ ...f, name: e.target.value }))} />
+              </div>
+              <div>
+                <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-1">Frequency</p>
+                <select className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-200"
+                  value={scheduleForm.schedule} onChange={e => setScheduleForm(f => ({ ...f, schedule: e.target.value as any }))}>
+                  <option value="daily">Daily (02:00 UTC)</option>
+                  <option value="weekly">Weekly (Mon 02:00 UTC)</option>
+                  <option value="monthly">Monthly (1st 02:00 UTC)</option>
+                </select>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <Button size="sm" variant="outline" className="text-xs flex-1" onClick={() => setShowScheduleForm(false)}>Cancel</Button>
+              <Button size="sm" className="text-xs flex-1" disabled={!scheduleForm.name.trim() || createScheduleMut.isPending}
+                onClick={() => createScheduleMut.mutate(scheduleForm)}>
+                {createScheduleMut.isPending ? 'Creating…' : 'Create Schedule'}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {exportSchedulesList.length === 0 ? (
+          <p className="text-xs text-slate-600 italic text-center py-4">No export schedules configured</p>
+        ) : (
+          <div className="space-y-2">
+            {exportSchedulesList.map((s: any) => (
+              <div key={s.id} className="flex items-center justify-between bg-slate-800/40 rounded-lg px-3 py-2.5">
+                <div>
+                  <p className="text-xs text-slate-200 font-medium">{s.name}</p>
+                  <p className="text-[10px] text-slate-500 font-mono mt-0.5">{s.cronExpression} · {s.format?.toUpperCase() ?? 'CSV'}</p>
+                </div>
+                <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full border ${
+                  s.enabled ? 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10' : 'text-slate-500 border-slate-600 bg-slate-800'
+                }`}>{s.enabled ? 'Enabled' : 'Disabled'}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

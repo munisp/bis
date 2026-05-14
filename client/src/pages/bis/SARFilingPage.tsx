@@ -133,6 +133,24 @@ export default function SARFilingPage() {
     onError: (e: any) => toast.error(e.message),
   });
 
+  const withdrawMutation = trpc.sar.withdraw.useMutation({
+    onSuccess: () => { toast.success('SAR withdrawn'); utils.sar.list.invalidate(); setSelectedSar(null); },
+    onError: (e: any) => toast.error(`Withdraw failed: ${e.message}`),
+  });
+  const acknowledgeMutation = trpc.sar.acknowledge.useMutation({
+    onSuccess: () => { toast.success('SAR acknowledged by NFIU'); utils.sar.list.invalidate(); setSelectedSar(null); },
+    onError: (e: any) => toast.error(`Acknowledge failed: ${e.message}`),
+  });
+  const sarDeleteMutation = trpc.sar.delete.useMutation({
+    onSuccess: () => { toast.success('SAR deleted'); utils.sar.list.invalidate(); utils.sar.stats.invalidate(); setSelectedSar(null); },
+    onError: (e: any) => toast.error(`Delete failed: ${e.message}`),
+  });
+  const { data: sarDetail } = trpc.sar.get.useQuery(
+    { id: selectedSar?.id ?? 0 },
+    { enabled: !!selectedSar?.id, staleTime: 10_000 }
+  );
+  const activeSar = sarDetail ?? selectedSar;
+
   const totalPages = Math.ceil((sarData?.total ?? 0) / limit);
 
   return (
@@ -436,49 +454,59 @@ export default function SARFilingPage() {
               </div>
               {/* Workflow actions */}
               <div className="flex flex-wrap gap-2 pt-2">
-                {selectedSar.status === "draft" && (
-                  <Button size="sm" onClick={() => submitMutation.mutate({ id: selectedSar.id })} disabled={submitMutation.isPending}>
+                {activeSar.status === "draft" && (
+                  <Button size="sm" onClick={() => submitMutation.mutate({ id: activeSar.id })} disabled={submitMutation.isPending}>
                     Submit for Review
                   </Button>
                 )}
-                {selectedSar.status === "under_review" && (
+                {activeSar.status === "under_review" && (
                   <>
-                    <Button size="sm" onClick={() => approveMutation.mutate({ id: selectedSar.id })} disabled={approveMutation.isPending}>
+                    <Button size="sm" onClick={() => approveMutation.mutate({ id: activeSar.id })} disabled={approveMutation.isPending}>
                       Approve
                     </Button>
-                    <Button size="sm" variant="destructive" onClick={() => rejectMutation.mutate({ id: selectedSar.id, notes: "Rejected by reviewer — does not meet SAR threshold" })} disabled={rejectMutation.isPending}>
+                    <Button size="sm" variant="destructive" onClick={() => rejectMutation.mutate({ id: activeSar.id, notes: "Rejected by reviewer — does not meet SAR threshold" })} disabled={rejectMutation.isPending}>
                       Reject
                     </Button>
                   </>
                 )}
-                {selectedSar.status === "approved" && (
-                  <Button
-                    size="sm"
-                    className="gap-2"
-                    onClick={() => fileMutation.mutate({ id: selectedSar.id, filedWith: "NFIU" })}
-                    disabled={fileMutation.isPending}
-                  >
+                {activeSar.status === "approved" && (
+                  <Button size="sm" className="gap-2" onClick={() => fileMutation.mutate({ id: activeSar.id, filedWith: "NFIU" })} disabled={fileMutation.isPending}>
                     <Send className="w-3 h-3" />
                     File with NFIU
                   </Button>
                 )}
-                {selectedSar.status === "filed" && (
-                  <div className="flex items-center gap-2 text-green-400">
-                    <CheckCircle className="w-4 h-4" />
-                    <span className="text-sm">Filed — Ref: {selectedSar.filingReference}</span>
-                  </div>
+                {activeSar.status === "filed" && (
+                  <>
+                    <div className="flex items-center gap-2 text-green-400">
+                      <CheckCircle className="w-4 h-4" />
+                      <span className="text-sm">Filed — Ref: {activeSar.filingReference}</span>
+                    </div>
+                    <Button size="sm" variant="outline" className="text-teal-600 border-teal-400" onClick={() => acknowledgeMutation.mutate({ id: activeSar.id })} disabled={acknowledgeMutation.isPending}>
+                      Mark Acknowledged
+                    </Button>
+                  </>
                 )}
-                {selectedSar.status === "acknowledged" && (
+                {activeSar.status === "acknowledged" && (
                   <div className="flex items-center gap-2 text-teal-400">
                     <CheckCircle className="w-4 h-4" />
-                    <span className="text-sm">Acknowledged by NFIU — Ref: {selectedSar.filingReference}</span>
+                    <span className="text-sm">Acknowledged by NFIU — Ref: {activeSar.filingReference}</span>
                   </div>
                 )}
-                {selectedSar.status === "rejected" && (
+                {activeSar.status === "rejected" && (
                   <div className="flex items-center gap-2 text-red-400">
                     <XCircle className="w-4 h-4" />
-                    <span className="text-sm">Rejected — {selectedSar.reviewNotes ?? "No notes"}</span>
+                    <span className="text-sm">Rejected — {activeSar.reviewNotes ?? "No notes"}</span>
                   </div>
+                )}
+                {(activeSar.status === "draft" || activeSar.status === "under_review") && (
+                  <Button size="sm" variant="outline" className="text-amber-600 border-amber-400" onClick={() => withdrawMutation.mutate({ id: activeSar.id })} disabled={withdrawMutation.isPending}>
+                    Withdraw
+                  </Button>
+                )}
+                {(activeSar.status === "draft" || activeSar.status === "rejected" || activeSar.status === "withdrawn") && (
+                  <Button size="sm" variant="destructive" onClick={() => { if (confirm('Delete this SAR permanently?')) sarDeleteMutation.mutate({ id: activeSar.id }); }} disabled={sarDeleteMutation.isPending}>
+                    Delete
+                  </Button>
                 )}
                 <Button
                   variant="outline"

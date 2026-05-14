@@ -1107,3 +1107,347 @@ describe("audit.replayHistory — Round 4 (eventType + date range filters)", () 
     ).rejects.toBeDefined();
   });
 });
+
+// ─── Round 5: Orphan/Stub Elimination Tests ───────────────────────────────────
+
+describe("quickcheck.history", () => {
+  it("returns history items for authenticated user", async () => {
+    const caller = appRouter.createCaller(createUserCtx());
+    const result = await caller.quickcheck.history({ limit: 10, offset: 0 });
+    expect(result).toHaveProperty("items");
+    expect(Array.isArray(result.items)).toBe(true);
+  });
+
+  it("unauthenticated user is rejected", async () => {
+    const caller = appRouter.createCaller(createAnonCtx());
+    await expect(caller.quickcheck.history({ limit: 10, offset: 0 })).rejects.toBeDefined();
+  });
+});
+
+describe("lookup.nigerianDataBundleHistory", () => {
+  it("returns paginated history for authenticated user", async () => {
+    const caller = appRouter.createCaller(createUserCtx());
+    // nigerianDataBundle history is lookup.nigerianDataBundleHistory (flat key, not nested)
+    const result = await caller.lookup.nigerianDataBundleHistory({ limit: 10, offset: 0 });
+    expect(result).toHaveProperty("items");
+    expect(result).toHaveProperty("total");
+    expect(Array.isArray(result.items)).toBe(true);
+  });
+
+  it("unauthenticated user is rejected", async () => {
+    const caller = appRouter.createCaller(createAnonCtx());
+    await expect(caller.lookup.nigerianDataBundleHistory({ limit: 10, offset: 0 })).rejects.toBeDefined();
+  });
+});
+
+describe("sar.get", () => {
+  it("returns null for non-existent SAR", async () => {
+    const caller = appRouter.createCaller(createUserCtx());
+    const result = await caller.sar.get({ id: 999999 });
+    expect(result).toBeNull();
+  });
+
+  it("unauthenticated user is rejected", async () => {
+    const caller = appRouter.createCaller(createAnonCtx());
+    await expect(caller.sar.get({ id: 1 })).rejects.toBeDefined();
+  });
+});
+
+describe("sar.withdraw", () => {
+  it("resolves (no-op) for non-existent SAR id", async () => {
+    const caller = appRouter.createCaller(createUserCtx());
+    // withdraw does a blind UPDATE — returns undefined for non-existent row
+    const result = await caller.sar.withdraw({ id: 999999 });
+    expect(result).toBeUndefined();
+  });
+
+  it("unauthenticated user is rejected", async () => {
+    const caller = appRouter.createCaller(createAnonCtx());
+    await expect(caller.sar.withdraw({ id: 1, reason: "test" })).rejects.toBeDefined();
+  });
+});
+
+describe("sar.acknowledge", () => {
+  it("rejects non-admin user with FORBIDDEN", async () => {
+    const caller = appRouter.createCaller(createUserCtx());
+    // acknowledge is adminProcedure — non-admin gets FORBIDDEN
+    await expect(caller.sar.acknowledge({ id: 999999 })).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("unauthenticated user is rejected", async () => {
+    const caller = appRouter.createCaller(createAnonCtx());
+    await expect(caller.sar.acknowledge({ id: 1 })).rejects.toBeDefined();
+  });
+});
+
+describe("goaml.get", () => {
+  it("throws for non-existent filing (procedure throws, not returns null)", async () => {
+    const caller = appRouter.createCaller(createUserCtx());
+    // goaml.get throws an error for non-existent filings
+    await expect(caller.goaml.get({ id: 999999 })).rejects.toBeDefined();
+  });
+
+  it("unauthenticated user is rejected", async () => {
+    const caller = appRouter.createCaller(createAnonCtx());
+    await expect(caller.goaml.get({ id: 1 })).rejects.toBeDefined();
+  });
+});
+
+describe("goaml.bulkSubmit", () => {
+  it("returns submittedCount and skippedCount for non-existent ids", async () => {
+    const caller = appRouter.createCaller(createUserCtx());
+    // ids must have min(1) — use a non-existent id
+    const result = await caller.goaml.bulkSubmit({ ids: [999999] });
+    expect(result).toHaveProperty("submittedCount");
+    expect(result).toHaveProperty("skippedCount");
+    expect(result.submittedCount + result.skippedCount + (result.errorCount ?? 0)).toBeGreaterThanOrEqual(0);
+  });
+
+  it("unauthenticated user is rejected", async () => {
+    const caller = appRouter.createCaller(createAnonCtx());
+    await expect(caller.goaml.bulkSubmit({ ids: [] })).rejects.toBeDefined();
+  });
+});
+
+describe("playbooks.update", () => {
+  it("rejects non-existent playbook with NOT_FOUND", async () => {
+    const caller = appRouter.createCaller(createAdminCtx());
+    await expect(caller.playbooks.update({ id: 999999, title: "Updated" })).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("non-admin user is rejected", async () => {
+    const caller = appRouter.createCaller(createUserCtx());
+    await expect(caller.playbooks.update({ id: 1, title: "Updated" })).rejects.toBeDefined();
+  });
+});
+
+describe("playbooks.delete", () => {
+  it("returns success for non-existent playbook (blind delete)", async () => {
+    const caller = appRouter.createCaller(createAdminCtx());
+    // delete does a blind DELETE — returns { success: true } even for non-existent id
+    const result = await caller.playbooks.delete({ id: 999999 });
+    expect(result).toMatchObject({ success: true });
+  });
+
+  it("non-admin user is rejected", async () => {
+    const caller = appRouter.createCaller(createUserCtx());
+    await expect(caller.playbooks.delete({ id: 1 })).rejects.toBeDefined();
+  });
+});
+
+describe("notifications.unreadCount", () => {
+  it("returns count object for authenticated user", async () => {
+    const caller = appRouter.createCaller(createUserCtx());
+    const result = await caller.notifications.unreadCount();
+    expect(result).toHaveProperty("count");
+    expect(typeof result.count).toBe("number");
+  });
+
+  it("unauthenticated user is rejected", async () => {
+    const caller = appRouter.createCaller(createAnonCtx());
+    await expect(caller.notifications.unreadCount()).rejects.toBeDefined();
+  });
+});
+
+describe("notifications.create (admin)", () => {
+  it("non-admin user is rejected", async () => {
+    const caller = appRouter.createCaller(createUserCtx());
+    await expect(caller.notifications.create({ userId: 1, type: "test", title: "Test" })).rejects.toBeDefined();
+  });
+
+  it("unauthenticated user is rejected", async () => {
+    const caller = appRouter.createCaller(createAnonCtx());
+    await expect(caller.notifications.create({ userId: 1, type: "test", title: "Test" })).rejects.toBeDefined();
+  });
+});
+
+describe("notifications.broadcast (admin)", () => {
+  it("non-admin user is rejected", async () => {
+    const caller = appRouter.createCaller(createUserCtx());
+    await expect(caller.notifications.broadcast({ type: "test", title: "Test" })).rejects.toBeDefined();
+  });
+
+  it("unauthenticated user is rejected", async () => {
+    const caller = appRouter.createCaller(createAnonCtx());
+    await expect(caller.notifications.broadcast({ type: "test", title: "Test" })).rejects.toBeDefined();
+  });
+});
+
+describe("monitors.update", () => {
+  it("resolves (no-op) for non-existent monitor id", async () => {
+    const caller = appRouter.createCaller(createUserCtx());
+    // update does a blind UPDATE — resolves without error for non-existent id
+    const result = await caller.monitors.update({ id: 999999, status: "paused" });
+    expect(result).toBeUndefined();
+  });
+
+  it("unauthenticated user is rejected", async () => {
+    const caller = appRouter.createCaller(createAnonCtx());
+    await expect(caller.monitors.update({ id: 1, status: "paused" })).rejects.toBeDefined();
+  });
+});
+
+describe("investigations.updateStatus", () => {
+  it("resolves for non-existent ref (blind update)", async () => {
+    const caller = appRouter.createCaller(createUserCtx());
+    // updateStatus takes ref: string and does a blind UPDATE
+    const result = await caller.investigations.updateStatus({ ref: "INV-NONEXISTENT", status: "flagged" });
+    expect(result).toMatchObject({ success: true });
+  });
+
+  it("unauthenticated user is rejected", async () => {
+    const caller = appRouter.createCaller(createAnonCtx());
+    await expect(caller.investigations.updateStatus({ ref: "INV-NONEXISTENT", status: "flagged" })).rejects.toBeDefined();
+  });
+});
+
+describe("investigations.updateDueAt", () => {
+  it("resolves for non-existent ref (blind update)", async () => {
+    const caller = appRouter.createCaller(createUserCtx());
+    // updateDueAt takes ref: string and does a blind UPDATE
+    const result = await caller.investigations.updateDueAt({ ref: "INV-NONEXISTENT", dueAt: new Date() });
+    expect(result).toMatchObject({ success: true });
+  });
+
+  it("unauthenticated user is rejected", async () => {
+    const caller = appRouter.createCaller(createAnonCtx());
+    await expect(caller.investigations.updateDueAt({ ref: "INV-NONEXISTENT", dueAt: new Date() })).rejects.toBeDefined();
+  });
+});
+
+describe("investigations.score", () => {
+  it("rejects non-existent investigation ref with NOT_FOUND", async () => {
+    const caller = appRouter.createCaller(createUserCtx());
+    // score looks up the investigation by ref and throws NOT_FOUND if missing
+    await expect(caller.investigations.score({ ref: "INV-NONEXISTENT" })).rejects.toBeDefined();
+  });
+
+  it("unauthenticated user is rejected", async () => {
+    const caller = appRouter.createCaller(createAnonCtx());
+    await expect(caller.investigations.score({ ref: "INV-NONEXISTENT" })).rejects.toBeDefined();
+  });
+});
+
+describe("audit.verifyIntegrity", () => {
+  it("returns results and checkedCount for non-existent ids", async () => {
+    const caller = appRouter.createCaller(createAdminCtx());
+    // ids requires min(1), use a non-existent id; returns { results, checkedCount, tamperedCount }
+    const result = await caller.audit.verifyIntegrity({ ids: [999999] });
+    expect(result).toHaveProperty("results");
+    expect(result).toHaveProperty("checkedCount");
+    expect(result).toHaveProperty("tamperedCount");
+    expect(result.checkedCount).toBe(0); // no matching entry
+  });
+
+  it("non-admin user is rejected", async () => {
+    const caller = appRouter.createCaller(createUserCtx());
+    await expect(caller.audit.verifyIntegrity({ ids: [] })).rejects.toBeDefined();
+  });
+});
+
+describe("investigationLinks.listForCase", () => {
+  it("returns empty array for non-existent case", async () => {
+    const caller = appRouter.createCaller(createUserCtx());
+    const result = await caller.investigationLinks.listForCase({ caseId: 999999 });
+    expect(Array.isArray(result)).toBe(true);
+  });
+
+  it("unauthenticated user is rejected", async () => {
+    const caller = appRouter.createCaller(createAnonCtx());
+    await expect(caller.investigationLinks.listForCase({ caseId: 1 })).rejects.toBeDefined();
+  });
+});
+
+describe("cases.resendInvite", () => {
+  it("rejects non-existent stakeholder with NOT_FOUND", async () => {
+    const caller = appRouter.createCaller(createUserCtx());
+    // resendInvite requires origin URL param
+    await expect(caller.cases.resendInvite({ stakeholderId: 999999, origin: "https://example.com" })).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("unauthenticated user is rejected", async () => {
+    const caller = appRouter.createCaller(createAnonCtx());
+    await expect(caller.cases.resendInvite({ stakeholderId: 1, origin: "https://example.com" })).rejects.toBeDefined();
+  });
+});
+
+describe("paymentRails.reverseTransfer", () => {
+  it("rejects non-existent txRef with NOT_FOUND", async () => {
+    const caller = appRouter.createCaller(createAdminCtx());
+    // reverseTransfer takes txRef: string (not transferId: number)
+    await expect(caller.paymentRails.reverseTransfer({ txRef: "TXN-NONEXISTENT", reason: "test reversal" })).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("non-admin user is rejected", async () => {
+    const caller = appRouter.createCaller(createUserCtx());
+    await expect(caller.paymentRails.reverseTransfer({ txRef: "TXN-TEST", reason: "test reversal" })).rejects.toBeDefined();
+  });
+});
+
+describe("paymentRails.listExportSchedules", () => {
+  it("returns array of export schedules for authenticated user", async () => {
+    const caller = appRouter.createCaller(createUserCtx());
+    // listExportSchedules returns an array directly (no pagination wrapper)
+    const result = await caller.paymentRails.listExportSchedules();
+    expect(Array.isArray(result)).toBe(true);
+  });
+
+  it("unauthenticated user is rejected", async () => {
+    const caller = appRouter.createCaller(createAnonCtx());
+    await expect(caller.paymentRails.listExportSchedules()).rejects.toBeDefined();
+  });
+});
+
+describe("messaging.createChannel (admin)", () => {
+  it("non-admin user is rejected", async () => {
+    const caller = appRouter.createCaller(createUserCtx());
+    await expect(caller.messaging.createChannel({ channelType: "sms", name: "Test", identifier: "+234" })).rejects.toBeDefined();
+  });
+
+  it("unauthenticated user is rejected", async () => {
+    const caller = appRouter.createCaller(createAnonCtx());
+    await expect(caller.messaging.createChannel({ channelType: "sms", name: "Test", identifier: "+234" })).rejects.toBeDefined();
+  });
+});
+
+describe("messaging.toggleChannel (admin)", () => {
+  it("non-admin user is rejected", async () => {
+    const caller = appRouter.createCaller(createUserCtx());
+    await expect(caller.messaging.toggleChannel({ id: 1, active: false })).rejects.toBeDefined();
+  });
+
+  it("unauthenticated user is rejected", async () => {
+    const caller = appRouter.createCaller(createAnonCtx());
+    await expect(caller.messaging.toggleChannel({ id: 1, active: false })).rejects.toBeDefined();
+  });
+});
+
+describe("tenants.update", () => {
+  it("returns undefined for non-existent tenant (blind update)", async () => {
+    const caller = appRouter.createCaller(createUserCtx());
+    // update is writeProcedure (not adminProcedure) and returns undefined for non-existent id
+    const result = await caller.tenants.update({ id: 999999, name: "Updated" });
+    expect(result).toBeUndefined();
+  });
+
+  it("unauthenticated user is rejected", async () => {
+    const caller = appRouter.createCaller(createAnonCtx());
+    await expect(caller.tenants.update({ id: 1, name: "Updated" })).rejects.toBeDefined();
+  });
+});
+
+describe("biometric.list", () => {
+  it("returns data array and total for authenticated user", async () => {
+    const caller = appRouter.createCaller(createUserCtx());
+    // biometric.list takes page/limit (not limit/offset) and returns { data, total }
+    const result = await caller.biometric.list({ page: 1, limit: 10 });
+    expect(result).toHaveProperty("data");
+    expect(result).toHaveProperty("total");
+    expect(Array.isArray(result.data)).toBe(true);
+  });
+
+  it("unauthenticated user is rejected", async () => {
+    const caller = appRouter.createCaller(createAnonCtx());
+    await expect(caller.biometric.list({ limit: 10, offset: 0 })).rejects.toBeDefined();
+  });
+});

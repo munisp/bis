@@ -70,6 +70,7 @@ import {
   notifications,
   investigationCaseLinks,
   exportSchedules,
+  nigerianDataBundleRuns,
 } from "../drizzle/schema";
 import {
   getDashboardStats,
@@ -786,9 +787,10 @@ const lookupRouter = router({
       dateOfBirth: z.string().optional(),
       selectedSources: z.array(z.string()).min(1),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
       // Run checks against gateway for each selected source
-      const results = await Promise.allSettled(
+      const settled = await Promise.allSettled(
         input.selectedSources.map(async (sourceId) => {
           try {
             let endpoint = '';
@@ -806,9 +808,53 @@ const lookupRouter = router({
           }
         })
       );
-      return {
-        results: results.map(r => r.status === 'fulfilled' ? r.value : { sourceId: 'unknown', status: 'error', data: {}, checkedAt: new Date().toISOString() }),
-      };
+      const results = settled.map(r => r.status === 'fulfilled' ? r.value : { sourceId: 'unknown', status: 'error', data: {}, checkedAt: new Date().toISOString() });
+      const verifiedCount = results.filter((r: any) => r.status === 'verified').length;
+      const errorCount = results.filter((r: any) => r.status === 'error').length;
+      const overallScore = Math.round((verifiedCount / Math.max(results.length, 1)) * 100);
+      // Persist run to DB for history
+      if (db) {
+        const runRef = generateRef('NBR');
+        try {
+          await db.insert(nigerianDataBundleRuns).values({
+            runRef,
+            fullName: input.fullName,
+            nin: input.nin,
+            bvn: input.bvn,
+            phone: input.phone,
+            dateOfBirth: input.dateOfBirth,
+            selectedSources: input.selectedSources,
+            results: results as any,
+            overallScore,
+            verifiedCount,
+            errorCount,
+            createdBy: ctx.user?.id,
+          });
+        } catch (e) {
+          console.warn('[NigerianDataBundle] Failed to persist run:', e);
+        }
+      }
+      return { results, overallScore, verifiedCount, errorCount };
+    }),
+  nigerianDataBundleHistory: protectedProcedure
+    .input(z.object({
+      limit: z.number().min(1).max(100).default(20),
+      offset: z.number().default(0),
+      nin: z.string().optional(),
+      bvn: z.string().optional(),
+    }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return { items: [], total: 0 };
+      const conditions: any[] = [];
+      if (input.nin) conditions.push(eq(nigerianDataBundleRuns.nin, input.nin));
+      if (input.bvn) conditions.push(eq(nigerianDataBundleRuns.bvn, input.bvn));
+      const where = conditions.length ? and(...conditions) : undefined;
+      const [items, countResult] = await Promise.all([
+        db.select().from(nigerianDataBundleRuns).where(where).orderBy(desc(nigerianDataBundleRuns.createdAt)).limit(input.limit).offset(input.offset),
+        db.select({ count: sql<number>`count(*)` }).from(nigerianDataBundleRuns).where(where),
+      ]);
+      return { items, total: Number(countResult[0]?.count ?? 0) };
     }),
 });
 
@@ -2521,6 +2567,37 @@ const playbooksRouter = router({
       if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
       const [row] = await db.insert(fieldAgentPlaybooks).values(input).returning();
       return row;
+    }),
+  update: adminProcedure
+    .input(z.object({
+      id: z.number(),
+      title: z.string().min(3).max(200).optional(),
+      category: z.enum(["kyc_physical", "kyb_premises", "asset_verification", "surveillance", "address_verification", "interview", "evidence_collection", "emergency"]).optional(),
+      description: z.string().optional(),
+      estimatedHours: z.number().min(1).max(200).optional(),
+      requiredTier: z.enum(["junior", "senior", "lead", "specialist"]).optional(),
+      steps: z.string().optional(),
+      dataToCollect: z.string().optional(),
+      safetyNotes: z.string().optional(),
+      legalNotes: z.string().optional(),
+      nigeriaContext: z.string().optional(),
+      isActive: z.boolean().optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
+      const { id, ...updates } = input;
+      const [row] = await db.update(fieldAgentPlaybooks).set(updates as any).where(eq(fieldAgentPlaybooks.id, id)).returning();
+      if (!row) throw new TRPCError({ code: 'NOT_FOUND', message: 'Playbook not found' });
+      return row;
+    }),
+  delete: adminProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
+      await db.delete(fieldAgentPlaybooks).where(eq(fieldAgentPlaybooks.id, input.id));
+      return { success: true };
     }),
 });
 

@@ -135,6 +135,22 @@ export default function Tenants() {
     onError: (e) => toast.error(e.message),
   });
 
+  const [editTenant, setEditTenant] = useState<any | null>(null);
+  const [editTenantForm, setEditTenantForm] = useState({ name: '', contactEmail: '', plan: 'starter' });
+  const [editWebhook, setEditWebhook] = useState<any | null>(null);
+  const [editWebhookUrl, setEditWebhookUrl] = useState('');
+  const [editWebhookEvents, setEditWebhookEvents] = useState<Set<string>>(new Set());
+
+  const updateTenantMut = trpc.tenants.update.useMutation({
+    onSuccess: () => { toast.success('Tenant updated'); setEditTenant(null); utils.tenants.list.invalidate(); },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const updateWebhookMut = trpc.tenants.updateWebhook.useMutation({
+    onSuccess: () => { toast.success('Webhook updated'); setEditWebhook(null); utils.tenants.listWebhooks.invalidate(); },
+    onError: (e) => toast.error(e.message),
+  });
+
   // ── Filtered list ──
   const filtered = useMemo(() =>
     tenantRows.filter(t =>
@@ -323,6 +339,8 @@ export default function Tenants() {
               onToggle={() => setExpandedId(isExpanded ? null : tenant.id)}
               onSuspend={() => suspendMut.mutate({ id: tenant.id })}
               onReactivate={() => reactivateMut.mutate({ id: tenant.id })}
+              onEdit={() => { setEditTenant(tenant); setEditTenantForm({ name: tenant.name, contactEmail: tenant.contactEmail ?? '', plan: tenant.plan }); }}
+              onEditWebhook={(wh: any) => { setEditWebhook(wh); setEditWebhookUrl(wh.url); setEditWebhookEvents(new Set(wh.events ?? [])); }}
               getTab={getTab}
               setExpandedTab={setExpandedTab}
               // Keys
@@ -347,13 +365,81 @@ export default function Tenants() {
           );
         })}
       </div>
+      {/* Edit Tenant Dialog */}
+      {editTenant && (
+        <Dialog open onOpenChange={() => setEditTenant(null)}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader><DialogTitle>Edit Tenant — {editTenant.name}</DialogTitle></DialogHeader>
+            <div className="space-y-4 pt-2">
+              <div className="space-y-1.5">
+                <Label>Organization Name</Label>
+                <Input value={editTenantForm.name} onChange={e => setEditTenantForm(p => ({ ...p, name: e.target.value }))} />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Contact Email</Label>
+                <Input type="email" value={editTenantForm.contactEmail} onChange={e => setEditTenantForm(p => ({ ...p, contactEmail: e.target.value }))} />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Plan</Label>
+                <Select value={editTenantForm.plan} onValueChange={v => setEditTenantForm(p => ({ ...p, plan: v }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(PLAN_CONFIG).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex gap-2 pt-2">
+                <Button variant="outline" className="flex-1" onClick={() => setEditTenant(null)}>Cancel</Button>
+                <Button className="flex-1" disabled={updateTenantMut.isPending}
+                  onClick={() => updateTenantMut.mutate({ id: editTenant.id, name: editTenantForm.name || undefined, contactEmail: editTenantForm.contactEmail || undefined, plan: editTenantForm.plan as any })}>
+                  {updateTenantMut.isPending ? <Loader2 size={13} className="animate-spin" /> : 'Save Changes'}
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* Edit Webhook Dialog */}
+      {editWebhook && (
+        <Dialog open onOpenChange={() => setEditWebhook(null)}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader><DialogTitle>Edit Webhook</DialogTitle></DialogHeader>
+            <div className="space-y-4 pt-2">
+              <div className="space-y-1.5">
+                <Label>URL</Label>
+                <Input value={editWebhookUrl} onChange={e => setEditWebhookUrl(e.target.value)} placeholder="https://" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Events</Label>
+                <div className="grid grid-cols-2 gap-1">
+                  {ALL_EVENTS.map(ev => (
+                    <label key={ev} className="flex items-center gap-1.5 text-xs cursor-pointer">
+                      <input type="checkbox" className="accent-primary" checked={editWebhookEvents.has(ev)}
+                        onChange={e => setEditWebhookEvents(prev => { const s = new Set(prev); e.target.checked ? s.add(ev) : s.delete(ev); return s; })} />
+                      {ev}
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div className="flex gap-2 pt-2">
+                <Button variant="outline" className="flex-1" onClick={() => setEditWebhook(null)}>Cancel</Button>
+                <Button className="flex-1" disabled={updateWebhookMut.isPending}
+                  onClick={() => updateWebhookMut.mutate({ id: editWebhook.id, url: editWebhookUrl || undefined, events: Array.from(editWebhookEvents) })}>
+                  {updateWebhookMut.isPending ? <Loader2 size={13} className="animate-spin" /> : 'Save'}
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
     </BISLayout>
   );
 }
 
 // ─── TenantCard sub-component ─────────────────────────────────────────────────
 
-function TenantCard({ tenant, pc, sc, usagePct, isExpanded, onToggle, onSuspend, onReactivate, getTab, setExpandedTab, visibleKeys, toggleKeyVisible, newKeyName, onNewKeyNameChange, onGenerateKey, onRevokeKey, onRotateKey, rotatingKeyId, newWebhookUrl, onWebhookUrlChange, newWebhookEvents, onToggleWebhookEvent, onAddWebhook, onDeleteWebhook, onTestWebhook, testingWebhookId }: any) {
+function TenantCard({ tenant, pc, sc, usagePct, isExpanded, onToggle, onSuspend, onReactivate, onEdit, onEditWebhook, getTab, setExpandedTab, visibleKeys, toggleKeyVisible, newKeyName, onNewKeyNameChange, onGenerateKey, onRevokeKey, onRotateKey, rotatingKeyId, newWebhookUrl, onWebhookUrlChange, newWebhookEvents, onToggleWebhookEvent, onAddWebhook, onDeleteWebhook, onTestWebhook, testingWebhookId }: any) {
   const utils = trpc.useUtils();
   const { data: keys = [], isLoading: keysLoading } = trpc.tenants.listKeys.useQuery(
     { tenantId: tenant.id }, { enabled: isExpanded && getTab(tenant.id) === 'keys' }
@@ -429,6 +515,7 @@ function TenantCard({ tenant, pc, sc, usagePct, isExpanded, onToggle, onSuspend,
         </div>
 
         <div className="flex items-center gap-1 shrink-0">
+          <Button variant="outline" size="sm" className="h-6 text-[10px] px-2" onClick={e => { e.stopPropagation(); onEdit(); }}>Edit</Button>
           {tenant.status === "suspended"
             ? <Button variant="outline" size="sm" className="h-6 text-[10px] px-2" onClick={e => { e.stopPropagation(); onReactivate(); }}>Activate</Button>
             : <Button variant="outline" size="sm" className="h-6 text-[10px] px-2" onClick={e => { e.stopPropagation(); onSuspend(); }}>Suspend</Button>
@@ -603,6 +690,10 @@ function TenantCard({ tenant, pc, sc, usagePct, isExpanded, onToggle, onSuspend,
                       </div>
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
+                      <Button variant="outline" size="sm" className="h-6 text-[10px] px-2 gap-1"
+                        onClick={() => onEditWebhook(wh)}>
+                        Edit
+                      </Button>
                       <Button variant="outline" size="sm" className="h-6 text-[10px] px-2 gap-1"
                         disabled={testingWebhookId === wh.id} onClick={() => onTestWebhook(wh.id)}>
                         {testingWebhookId === wh.id ? <Loader2 size={9} className="animate-spin" /> : <Send size={9} />}

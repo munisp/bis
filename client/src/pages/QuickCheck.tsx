@@ -14,7 +14,7 @@ import { toast } from "sonner";
 import {
   CheckCircle2, XCircle, AlertTriangle, Search, User, Car, Baby,
   Shield, Wrench, UtensilsCrossed, HardHat, Sparkles, ChevronRight,
-  FileText, Clock, Zap, Star, RotateCcw
+  FileText, Clock, Zap, Star, RotateCcw, History, ChevronLeft
 } from "lucide-react";
 
 const WORKER_CATEGORIES = [
@@ -201,10 +201,18 @@ export default function QuickCheck() {
   const [tier, setTier] = useState<"basic" | "standard" | "premium">("standard");
   const [employerNote, setEmployerNote] = useState("");
 
+  const { data: historyData, refetch: refetchHistory } = trpc.quickcheck.history.useQuery({ limit: 20 });
+  const [historyPage, setHistoryPage] = useState(0);
+  const HISTORY_PAGE_SIZE = 5;
+  const historyItems = historyData?.items ?? [];
+  const historyTotalPages = Math.ceil(historyItems.length / HISTORY_PAGE_SIZE);
+  const historySlice = historyItems.slice(historyPage * HISTORY_PAGE_SIZE, (historyPage + 1) * HISTORY_PAGE_SIZE);
+
   const run = trpc.quickcheck.run.useMutation({
     onSuccess: (data) => {
       setResult(data as CheckResult);
       setStep("result");
+      refetchHistory();
     },
     onError: (err) => toast.error("Check failed: " + err.message),
   });
@@ -401,6 +409,67 @@ export default function QuickCheck() {
             Check Another Person
           </Button>
         </div>
+      )}
+
+      {/* Recent Checks History */}
+      {historyItems.length > 0 && (
+        <Card className="mt-2">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <History className="h-4 w-4 text-muted-foreground" />
+              Recent Checks
+              <Badge variant="outline" className="text-xs ml-auto">{historyItems.length} total</Badge>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="divide-y divide-border">
+              {historySlice.map((item) => {
+                const rd = item.requestData as any;
+                const verdict = rd?.verdict as string | undefined;
+                const verdictColor = verdict === "clear" ? "text-emerald-500" : verdict === "flagged" ? "text-amber-500" : verdict === "fail" ? "text-red-500" : "text-muted-foreground";
+                const verdictLabel = verdict === "clear" ? "Clear" : verdict === "flagged" ? "Flagged" : verdict === "fail" ? "Fail" : item.status;
+                return (
+                  <div key={item.id} className="flex items-center gap-3 px-4 py-3">
+                    <div className={`shrink-0 ${verdictColor}`}>
+                      {verdict === "clear" ? <CheckCircle2 className="h-4 w-4" /> : verdict === "flagged" ? <AlertTriangle className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium truncate">{item.subjectName}</span>
+                        <Badge variant="outline" className={`text-xs shrink-0 ${verdictColor} border-current`}>{verdictLabel}</Badge>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
+                        <span className="capitalize">{(rd?.tier ?? item.type ?? "").replace(/_/g, " ")}</span>
+                        <span>&middot;</span>
+                        <span className="font-mono">{item.requestRef}</span>
+                        <span>&middot;</span>
+                        <span>{item.createdAt ? new Date(item.createdAt).toLocaleDateString() : "—"}</span>
+                      </div>
+                    </div>
+                    {item.riskScore !== null && item.riskScore !== undefined && (
+                      <div className={`text-sm font-bold font-mono shrink-0 ${
+                        item.riskScore < 30 ? "text-emerald-500" : item.riskScore < 60 ? "text-amber-500" : "text-red-500"
+                      }`}>{item.riskScore}</div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            {historyTotalPages > 1 && (
+              <div className="flex items-center justify-between px-4 py-2 border-t border-border">
+                <span className="text-xs text-muted-foreground">Page {historyPage + 1} of {historyTotalPages}</span>
+                <div className="flex gap-1">
+                  <Button variant="outline" size="sm" className="h-6 w-6 p-0" disabled={historyPage === 0} onClick={() => setHistoryPage(p => p - 1)}>
+                    <ChevronLeft className="h-3 w-3" />
+                  </Button>
+                  <Button variant="outline" size="sm" className="h-6 w-6 p-0" disabled={historyPage >= historyTotalPages - 1} onClick={() => setHistoryPage(p => p + 1)}>
+                    <ChevronRight className="h-3 w-3" />
+                  </Button>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
       )}
     </div>
   );

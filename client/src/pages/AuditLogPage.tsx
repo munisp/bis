@@ -60,6 +60,19 @@ export default function AuditLogPage() {
 
   const utils = trpc.useUtils();
 
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const verifyIntegrityMutation = trpc.audit.verifyIntegrity.useMutation({
+    onSuccess: (result) => {
+      if (result.tamperedCount === 0) {
+        toast.success(`Integrity verified — ${result.checkedCount} entries checked, all valid`);
+      } else {
+        toast.error(`Integrity check failed — ${result.tamperedCount}/${result.checkedCount} entries tampered!`);
+      }
+      setSelectedIds([]);
+    },
+    onError: (e) => toast.error(`Integrity check failed: ${e.message}`),
+  });
+
   const exportMutation = trpc.audit.export.useMutation({
     onSuccess: (data) => {
       toast.success(`Exported ${data.count} entries`, {
@@ -139,6 +152,18 @@ export default function AuditLogPage() {
           <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => refetch()}>
             <RefreshCw size={11} className={isLoading ? "animate-spin" : ""} /> Refresh
           </Button>
+          {selectedIds.length > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 text-xs gap-1 border-amber-500/40 text-amber-400 hover:bg-amber-500/10"
+              onClick={() => verifyIntegrityMutation.mutate({ ids: selectedIds })}
+              disabled={verifyIntegrityMutation.isPending}
+            >
+              {verifyIntegrityMutation.isPending ? <RefreshCw size={11} className="animate-spin" /> : <Shield size={11} />}
+              Verify {selectedIds.length} Selected
+            </Button>
+          )}
           <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => handleServerExport("csv")} disabled={exportMutation.isPending}>
             <Download size={11} /> {exportMutation.isPending ? "Exporting..." : "Export CSV"}
           </Button>
@@ -212,6 +237,9 @@ export default function AuditLogPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border">
+                  <th className="px-4 py-3 w-8">
+                    <input type="checkbox" className="w-3 h-3 accent-primary" checked={selectedIds.length === filtered.length && filtered.length > 0} onChange={e => setSelectedIds(e.target.checked ? filtered.map((r: any) => r.id) : [])} />
+                  </th>
                   {["Timestamp", "Category", "Action", "Target Ref", "Result", ""].map(h => (
                     <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">{h}</th>
                   ))}
@@ -229,6 +257,9 @@ export default function AuditLogPage() {
                         className="border-b border-border/50 hover:bg-muted/20 transition-colors cursor-pointer"
                         onClick={() => setExpandedId(isExpanded ? null : e.id)}
                       >
+                        <td className="px-4 py-3" onClick={ev => ev.stopPropagation()}>
+                          <input type="checkbox" className="w-3 h-3 accent-primary" checked={selectedIds.includes(e.id)} onChange={ev => setSelectedIds(prev => ev.target.checked ? [...prev, e.id] : prev.filter(id => id !== e.id))} />
+                        </td>
                         <td className="px-4 py-3">
                           <span className="text-xs font-mono text-muted-foreground">{formatDateTime(e.createdAt)}</span>
                         </td>
@@ -252,7 +283,7 @@ export default function AuditLogPage() {
                       </tr>
                       {isExpanded && (
                         <tr key={`${e.id}-detail`} className="border-b border-border/50 bg-muted/10">
-                          <td colSpan={6} className="px-6 py-3">
+                          <td colSpan={7} className="px-6 py-3">
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-[10px] font-mono">
                               <div>
                                 <p className="text-muted-foreground uppercase tracking-wider mb-0.5">Event ID</p>
