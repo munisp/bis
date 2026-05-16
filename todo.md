@@ -2227,3 +2227,9 @@
 - [x] Retention days slider/input in Archival Status card (like spoof alert threshold)
 - [x] KYC biometric re-enrollment button in KYC detail drawer biometric tab
 - [x] Re-enrollment opens BiometricCaptureModal pre-seeded with kycRecordId
+
+## Sprint v9 — Next Steps
+
+- [x] Archival audit log: write audit_log entry on triggerArchival (who, rows archived, errors)
+- [x] Re-enrollment owner notification: call notifyOwner after successful biometric.enroll
+- [x] Archive Now confirmation dialog: require typing "ARCHIVE" before executing manual archival

@@ -18,6 +18,9 @@ import { kycRecords, biometricSessionLogs, platformSettings } from "../drizzle/s
 import { and, eq, gte, desc } from "drizzle-orm";
 import { storagePut } from "./storage";
 import { invokeLLM } from "./_core/llm";
+import { notifyOwner } from "./_core/notification";
+import { auditLog } from "../drizzle/schema";
+import * as crypto from "crypto";
 
 const EVENT_PROCESSOR_URL = process.env.EVENT_PROCESSOR_URL || "http://localhost:8083";
 
@@ -206,6 +209,19 @@ export const biometricRouter = router({
         } catch (e) {
           console.warn("[Biometric] Failed to update KYC record:", e);
         }
+
+        // Send owner notification for re-enrollment events (non-blocking)
+        notifyOwner({
+          title: "Biometric Re-enrollment Completed",
+          content: [
+            `Subject: ${input.subjectRef}`,
+            `KYC Record ID: #${input.kycRecordId}`,
+            `Face ID: ${enrollResult.faceId ?? "assigned"}`,
+            `Sandbox mode: ${enrollResult.sandbox ? "yes" : "no"}`,
+            `Enrolled at: ${new Date().toISOString()}`,
+            `Enrolled by: ${ctx.user?.name ?? ctx.user?.email ?? `User #${ctx.user?.id}`}`,
+          ].join("\n"),
+        }).catch(() => {});
       }
 
       return enrollResult;
@@ -1074,19 +1090,95 @@ export const biometricRouter = router({
 
   // ── On-Demand Archival Trigger ───────────────────────────────────────────────
   // Allows admins to trigger an immediate archival run outside the weekly schedule.
-  triggerArchival: adminProcedure.mutation(async () => {
+  triggerArchival: adminProcedure.mutation(async ({ ctx }) => {
+    const ranAt = new Date();
     try {
       const { runBiometricSessionLogArchival } = await import("./biometricSessionLogArchiver");
       const result = await runBiometricSessionLogArchival();
+
+      // Write audit log entry (non-blocking — failure must not break the response)
+      try {
+        const db = await getDb();
+        if (db) {
+          const AUDIT_HMAC_SECRET = process.env.AUDIT_HMAC_SECRET ?? process.env.JWT_SECRET ?? "bis-audit-hmac-dev";
+          const category = "system" as const;
+          const action = `Manual biometric archival triggered: ${result.archived} archived, ${result.deleted} deleted, ${result.errors?.length ?? 0} errors`;
+          const targetRef = "biometric-archive";
+          const resultStatus = (result.errors?.length ?? 0) > 0 ? "warning" : "success";
+          const createdAt = ranAt;
+          const payload = [
+            String(ctx.user?.id ?? ""),
+            category,
+            action,
+            targetRef,
+            resultStatus,
+            createdAt.toISOString(),
+          ].join("|");
+          const integrityHash = crypto.createHmac("sha256", AUDIT_HMAC_SECRET).update(payload).digest("hex");
+          await db.insert(auditLog).values({
+            userId: ctx.user?.id,
+            userEmail: ctx.user?.email ?? undefined,
+            category,
+            action,
+            targetRef,
+            result: resultStatus as "success" | "warning" | "failure",
+            detail: {
+              archived: result.archived,
+              deleted: result.deleted,
+              skipped: result.skipped,
+              errors: result.errors,
+              ranAt: ranAt.toISOString(),
+            },
+            integrityHash,
+            createdAt,
+          });
+        }
+      } catch (auditErr) {
+        console.warn("[Biometric] Failed to write archival audit log:", auditErr);
+      }
+
       return {
         success: true,
         archived: result.archived,
         deleted: result.deleted,
         skipped: result.skipped,
         errors: result.errors,
-        ranAt: new Date(),
+        ranAt,
       };
     } catch (err) {
+      // Write failure audit log entry
+      try {
+        const db = await getDb();
+        if (db) {
+          const AUDIT_HMAC_SECRET = process.env.AUDIT_HMAC_SECRET ?? process.env.JWT_SECRET ?? "bis-audit-hmac-dev";
+          const category = "system" as const;
+          const action = `Manual biometric archival FAILED: ${err instanceof Error ? err.message : String(err)}`;
+          const targetRef = "biometric-archive";
+          const resultStatus = "failure" as const;
+          const createdAt = ranAt;
+          const payload = [
+            String(ctx.user?.id ?? ""),
+            category,
+            action,
+            targetRef,
+            resultStatus,
+            createdAt.toISOString(),
+          ].join("|");
+          const integrityHash = crypto.createHmac("sha256", AUDIT_HMAC_SECRET).update(payload).digest("hex");
+          await db.insert(auditLog).values({
+            userId: ctx.user?.id,
+            userEmail: ctx.user?.email ?? undefined,
+            category,
+            action,
+            targetRef,
+            result: resultStatus,
+            detail: { error: err instanceof Error ? err.message : String(err), ranAt: ranAt.toISOString() },
+            integrityHash,
+            createdAt,
+          });
+        }
+      } catch { /* ignore secondary audit failure */ }
+
       throw new TRPCError({
         code: "INTERNAL_SERVER_ERROR",
         message: `Archival run failed: ${err instanceof Error ? err.message : String(err)}`,

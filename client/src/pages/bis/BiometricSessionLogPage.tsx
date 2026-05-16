@@ -53,6 +53,16 @@ import {
 } from 'recharts';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Slider } from '@/components/ui/slider';
 import { toast } from 'sonner';
 import { useAuth } from '@/_core/hooks/useAuth';
@@ -213,6 +223,8 @@ export default function BiometricSessionLogPage() {
   const [showRetentionEdit, setShowRetentionEdit] = useState(false);
   const [localRetentionDays, setLocalRetentionDays] = useState(90);
   const [isTriggeringArchival, setIsTriggeringArchival] = useState(false);
+  const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
+  const [archiveConfirmText, setArchiveConfirmText] = useState('');
 
   const setRetentionMutation = trpc.biometric.setRetentionDays.useMutation({
     onSuccess: (data: any) => {
@@ -524,8 +536,8 @@ export default function BiometricSessionLogPage() {
                   size="sm"
                   disabled={isTriggeringArchival || triggerArchivalMutation.isPending}
                   onClick={() => {
-                    setIsTriggeringArchival(true);
-                    triggerArchivalMutation.mutate();
+                    setArchiveConfirmText('');
+                    setShowArchiveConfirm(true);
                   }}
                 >
                   {(isTriggeringArchival || triggerArchivalMutation.isPending)
@@ -913,6 +925,68 @@ export default function BiometricSessionLogPage() {
           )}
         </SheetContent>
       </Sheet>
+
+      {/* Archive Now Confirmation Dialog */}
+      <AlertDialog open={showArchiveConfirm} onOpenChange={setShowArchiveConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <Archive size={16} className="text-destructive" />
+              Confirm Manual Archival Run
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3">
+                <p>
+                  This will immediately move all biometric session logs older than{' '}
+                  <strong>{archivalStatusQuery.data?.retentionDays ?? 90} days</strong> from the hot
+                  table to cold storage.
+                </p>
+                <div className="rounded-md bg-muted p-3 text-sm space-y-1">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Eligible rows:</span>
+                    <span className="font-semibold tabular-nums">
+                      {archivalStatusQuery.data?.eligibleRows ?? 0}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Cold storage prefix:</span>
+                    <span className="font-mono text-xs">
+                      {archivalStatusQuery.data?.coldStoragePrefix ?? 'biometric-archive/'}
+                    </span>
+                  </div>
+                </div>
+                <p className="text-sm">
+                  To confirm, type <strong className="font-mono">ARCHIVE</strong> below:
+                </p>
+                <Input
+                  value={archiveConfirmText}
+                  onChange={e => setArchiveConfirmText(e.target.value)}
+                  placeholder="Type ARCHIVE to confirm"
+                  className="font-mono"
+                  autoFocus
+                />
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setArchiveConfirmText('')}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={archiveConfirmText !== 'ARCHIVE' || isTriggeringArchival || triggerArchivalMutation.isPending}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                setShowArchiveConfirm(false);
+                setArchiveConfirmText('');
+                setIsTriggeringArchival(true);
+                triggerArchivalMutation.mutate();
+              }}
+            >
+              {(isTriggeringArchival || triggerArchivalMutation.isPending)
+                ? <><Loader2 size={12} className="mr-1 animate-spin" /> Archiving…</>
+                : <><Play size={12} className="mr-1" /> Archive Now</>}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </BISLayout>
   );
 }
