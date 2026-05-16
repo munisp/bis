@@ -176,6 +176,7 @@ function ZeroFootprintPageInner() {
   };
 
   const [osintReport, setOsintReport] = useState<string | null>(null);
+  const [osintRecordId, setOsintRecordId] = useState<number | null>(null);
 
   const zeroFootprintMutation = trpc.screening.zeroFootprint.useMutation({
     onSuccess: (data) => {
@@ -213,6 +214,7 @@ function ZeroFootprintPageInner() {
         checklist,
       };
       setOsintReport(data.result);
+      setOsintRecordId(data.id ?? null);
       setInvestigation(inv);
       setLoading(false);
       setView("active");
@@ -220,8 +222,38 @@ function ZeroFootprintPageInner() {
     onError: (e) => { toast.error(`OSINT search failed: ${e.message}`); setLoading(false); },
   });
 
+  const exportPdfMutation = trpc.screening.exportOsintPdf.useMutation({
+    onSuccess: (data) => {
+      const a = document.createElement("a");
+      a.href = data.url;
+      a.download = data.filename;
+      a.target = "_blank";
+      a.click();
+      toast.success("PDF report downloaded");
+    },
+    onError: (e) => toast.error(`PDF export failed: ${e.message}`),
+  });
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    // Client-side validation
+    if (!form.subjectName.trim() || form.subjectName.trim().length < 3) {
+      toast.error("Subject full name is required (minimum 3 characters).");
+      return;
+    }
+    if (!form.subjectAddress.trim() || form.subjectAddress.trim().length < 5) {
+      toast.error("Subject address is required (minimum 5 characters).");
+      return;
+    }
+    if (!form.state) {
+      toast.error("Please select a state.");
+      return;
+    }
+    const activePillars = INVESTIGATION_PILLARS.filter((p: any) => form.selectedPillars.includes(p.id));
+    if (activePillars.length === 0) {
+      toast.error("Select at least one investigation pillar.");
+      return;
+    }
     setLoading(true);
     zeroFootprintMutation.mutate({
       subjectName: form.subjectName || form.subjectId || "Unknown",
@@ -535,7 +567,7 @@ function ZeroFootprintPageInner() {
             )}
 
             <div className="flex gap-3">
-              <button onClick={() => { setView("form"); setOsintReport(null); setInvestigation(null); }} className="flex-1 bg-card border border-border text-muted-foreground font-medium py-3 rounded-xl text-sm">
+              <button onClick={() => { setView("form"); setOsintReport(null); setInvestigation(null); setOsintRecordId(null); }} className="flex-1 bg-card border border-border text-muted-foreground font-medium py-3 rounded-xl text-sm">
                 New Investigation
               </button>
               <button onClick={() => {
@@ -545,8 +577,15 @@ function ZeroFootprintPageInner() {
                 a.href = URL.createObjectURL(blob);
                 a.download = `osint-${investigation?.investigationId ?? "report"}.md`;
                 a.click();
-              }} className="flex-1 bg-orange-600 hover:bg-orange-700 text-white font-semibold py-3 rounded-xl text-sm flex items-center justify-center gap-2">
-                <span>⬇️</span> Download Report
+              }} className="flex-1 bg-card border border-border text-muted-foreground font-medium py-3 rounded-xl text-sm flex items-center justify-center gap-2">
+                <span>⬇️</span> Download .md
+              </button>
+              <button
+                onClick={() => { if (osintRecordId) exportPdfMutation.mutate({ id: osintRecordId }); }}
+                disabled={!osintRecordId || exportPdfMutation.isPending}
+                className="flex-1 bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-white font-semibold py-3 rounded-xl text-sm flex items-center justify-center gap-2"
+              >
+                {exportPdfMutation.isPending ? "Generating…" : "⬇️ Download PDF"}
               </button>
             </div>
           </div>
@@ -612,7 +651,14 @@ function ZeroFootprintPageInner() {
                             </div>
                           </details>
                         )}
-                        <div className="flex justify-end pt-1">
+                        <div className="flex justify-between items-center pt-1">
+                          <button
+                            onClick={() => exportPdfMutation.mutate({ id: record.id })}
+                            disabled={exportPdfMutation.isPending}
+                            className="text-xs text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-blue-50 transition-all disabled:opacity-50"
+                          >
+                            ⬇️ PDF
+                          </button>
                           <button
                             onClick={() => {
                               const rd = record.requestData as any;

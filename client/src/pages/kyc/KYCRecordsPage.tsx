@@ -6,14 +6,14 @@
  * action for flagged records.
  */
 
-import React, { useState, useMemo, useCallback, useEffect } from "react";
+import React, { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
 import BISLayout from "@/components/BISLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import BiometricCaptureModal from "@/components/BiometricCaptureModal";
@@ -147,6 +147,8 @@ export default function KYCRecordsPage() {
   // Bulk selection state
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number } | null>(null);
+  const [bulkResultSummary, setBulkResultSummary] = useState<{ results: { name: string; status: string }[]; passed: number; failed: number } | null>(null);
+  const selectAllRef = useRef<HTMLInputElement>(null);
 
   const toggleSelect = useCallback((id: number) => {
     setSelectedIds(prev => {
@@ -271,7 +273,7 @@ export default function KYCRecordsPage() {
     setSelectedIds(new Set());
     const passed = results.filter(r => r.status === "passed").length;
     const failed = results.filter(r => r.status === "error" || r.status === "failed").length;
-    toast.success(`Bulk re-verify complete: ${passed} passed, ${failed} failed / errored`);
+    setBulkResultSummary({ results, passed, failed });
     handleRefresh();
   }, [selectedIds, verifyMutation, handleRefresh]);
 
@@ -295,6 +297,16 @@ export default function KYCRecordsPage() {
       return matchStatus && matchSearch;
     });
   }, [allLoaded, statusFilter, search]);
+  // Set indeterminate state on select-all checkbox
+  useEffect(() => {
+    const eligible = filtered.filter(r => r.status === "review" || r.status === "failed");
+    const someSelected = eligible.some(r => selectedIds.has(r.id));
+    const allSelected = eligible.length > 0 && eligible.every(r => selectedIds.has(r.id));
+    if (selectAllRef.current) {
+      selectAllRef.current.indeterminate = someSelected && !allSelected;
+    }
+  }, [filtered, selectedIds]);
+
 
   const handleExportCSV = () => {
     const headers = ["ID", "Subject Name", "Status", "Risk Score", "NIN", "BVN", "DOB", "Phone", "Created At"];
@@ -449,6 +461,7 @@ export default function KYCRecordsPage() {
                   <tr className="border-b border-border bg-muted/30">
                     <th className="px-4 py-3 w-10">
                       <input
+                        ref={selectAllRef}
                         type="checkbox"
                         className="rounded border-border cursor-pointer"
                         checked={filtered.filter(r => r.status === "review" || r.status === "failed").length > 0 &&
@@ -578,7 +591,7 @@ export default function KYCRecordsPage() {
               <Tabs defaultValue="details" className="mt-2">
                 <TabsList className="w-full">
                   <TabsTrigger value="details" className="flex-1">Details</TabsTrigger>
-                  <TabsTrigger value="biometric" className="flex-1">Biometric History</TabsTrigger>
+                  <TabsTrigger value="biometric" className="flex-1 gap-1.5">Biometric History<BiometricSessionCountBadge kycRecordId={selected.id} /></TabsTrigger>
                 </TabsList>
 
                 {/* ── Details Tab ── */}
@@ -656,7 +669,73 @@ export default function KYCRecordsPage() {
           challenge="blink"
         />
       )}
+      {/* Bulk Re-verify Result Breakdown Dialog */}
+      {bulkResultSummary && (
+        <Dialog open={true} onOpenChange={() => setBulkResultSummary(null)}>
+          <DialogContent className="max-w-lg">
+            <DialogHeader>
+              <DialogTitle>Bulk Re-verify Complete</DialogTitle>
+              <DialogDescription>
+                {bulkResultSummary.passed} passed · {bulkResultSummary.failed} failed / errored
+              </DialogDescription>
+            </DialogHeader>
+            <div className="max-h-72 overflow-y-auto border border-border rounded-lg">
+              <table className="w-full text-sm">
+                <thead className="bg-muted sticky top-0">
+                  <tr>
+                    <th className="text-left px-3 py-2 font-medium">Subject</th>
+                    <th className="text-left px-3 py-2 font-medium">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {bulkResultSummary.results.map((r, i) => (
+                    <tr key={i} className="border-t border-border">
+                      <td className="px-3 py-2">{r.name}</td>
+                      <td className="px-3 py-2">
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
+                          r.status === "passed" ? "bg-green-100 text-green-700" :
+                          r.status === "failed" ? "bg-red-100 text-red-700" :
+                          "bg-yellow-100 text-yellow-700"
+                        }`}>
+                          {r.status}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <DialogFooter className="gap-2">
+              <Button variant="outline" onClick={() => {
+                const csv = ["Subject,Status", ...bulkResultSummary.results.map(r => `"${r.name}","${r.status}"`)].join("\n");
+                const a = document.createElement("a");
+                a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+                a.download = `bulk-reverify-${new Date().toISOString().slice(0,10)}.csv`;
+                a.click();
+              }}>
+                <Download className="w-4 h-4 mr-1" /> Download CSV
+              </Button>
+              <Button onClick={() => setBulkResultSummary(null)}>Close</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </BISLayout>
+  );
+}
+
+
+// ── Biometric Session Count Badge ─────────────────────────────────────────────
+function BiometricSessionCountBadge({ kycRecordId }: { kycRecordId: number }) {
+  const { data } = trpc.biometric.sessionLogs.useQuery(
+    { kycRecordId, limit: 1 },
+    { staleTime: 60000 }
+  );
+  if (!data?.total) return null;
+  return (
+    <span className="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full bg-primary/15 text-primary text-[10px] font-semibold">
+      {data.total}
+    </span>
   );
 }
 

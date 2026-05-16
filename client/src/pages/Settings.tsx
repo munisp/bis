@@ -10,7 +10,45 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Settings2, Bell, Shield, Globe, Key, Loader2, Save, Zap, Database, Eye, EyeOff, CheckCircle2 } from "lucide-react";
+import { Settings2, Bell, Shield, Globe, Key, Loader2, Save, Zap, Database, Eye, EyeOff, CheckCircle2, Send } from "lucide-react";
+
+function SlackTestButton() {
+  const { data: slackStatus } = trpc.system.slackStatus.useQuery(undefined, { staleTime: 60000 });
+  const testMutation = trpc.system.testSlackWebhook.useMutation({
+    onSuccess: (data) => {
+      if (data.success) {
+        toast.success("Test message sent to Slack successfully!");
+      } else {
+        toast.error(`Slack test failed: ${(data as any).error ?? "Unknown error"}`);
+      }
+    },
+    onError: (e) => toast.error(`Slack test failed: ${e.message}`),
+  });
+  return (
+    <div className="flex items-center gap-2">
+      {slackStatus !== undefined && (
+        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
+          slackStatus.configured
+            ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300"
+            : "bg-muted text-muted-foreground"
+        }`}>
+          {slackStatus.configured ? "✓ Configured" : "Not configured"}
+        </span>
+      )}
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={() => testMutation.mutate()}
+        disabled={testMutation.isPending || !slackStatus?.configured}
+        className="gap-1.5"
+        title={!slackStatus?.configured ? "Set SLACK_WEBHOOK_URL to enable" : undefined}
+      >
+        {testMutation.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+        {testMutation.isPending ? "Sending…" : "Send Test Alert"}
+      </Button>
+    </div>
+  );
+}
 
 const INTEGRATIONS = [
   { name: "NIMC Identity API", status: "connected", key: "nimc_api_key", endpoint: "https://api.nimc.gov.ng/v2", description: "National Identity Management Commission — NIN lookup & biometric" },
@@ -199,6 +237,15 @@ export default function Settings() {
                   onCheckedChange={v => setNotifs(p => ({ ...p, [key]: v }))} />
               </div>
             ))}
+            {notifs.slackIntegration && (
+              <div className="flex items-center justify-between py-3 pt-2">
+                <div>
+                  <div className="text-sm font-medium text-foreground">Test Slack Webhook</div>
+                  <div className="text-xs text-muted-foreground">Send a test message to confirm your Slack webhook is working</div>
+                </div>
+                <SlackTestButton />
+              </div>
+            )}
           </div>
         </TabsContent>
 

@@ -2185,7 +2185,7 @@
 ### Phase 7 — Final Tests & Smoke Tests
 - [ ] All unit tests pass (target: 600+)
 - [ ] TypeScript: 0 errors
-- [ ] Smoke test script for all major flows
+- [x] Smoke test script for all major flows
 
 ### Phase 8 — Archive
 - [ ] Comprehensive tar.gz archive with manifest of changes
@@ -2245,3 +2245,23 @@
 - [x] ZeroFootprint re-run button on history cards
 - [x] Slack webhook integration for spoof alert job
 - [x] KYC bulk re-verify shadcn Progress bar
+
+## Sprint v13
+
+- [x] Slack webhook test button on Platform Settings page
+- [x] ZeroFootprint PDF export button on completed OSINT results
+- [ ] Bulk re-verify result breakdown Dialog with CSV download
+
+## Sprint v14 — Next Steps
+
+- [x] OSINT PDF from history cards (Download PDF button on each history card)
+- [x] Slack test button result feedback (show success/failure message in Settings UI)
+- [x] Bulk re-verify select-all with indeterminate checkbox state
+
+## Sprint v15 — Production Hardening
+
+- [x] Audit log export CSV (add Download CSV button to AuditLogPage)
+- [x] KYC record detail — show full biometric session count badge on tab
+- [x] ZeroFootprint form validation (required fields, min length, error messages)
+- [x] Settings page — show SLACK_WEBHOOK_URL configured/not-configured status
+- [x] BiometricSessionLogPage — add pagination to session log table
