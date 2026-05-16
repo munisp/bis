@@ -13,7 +13,7 @@
 import { z } from "zod";
 import { protectedProcedure, publicProcedure, router, writeProcedure } from "./_core/trpc";
 import { TRPCError } from "@trpc/server";
-import { getDb, insertBiometricSessionLog, getBiometricSessionLogs, markBiometricSessionKafkaPublished } from "./db";
+import { getDb, insertBiometricSessionLog, getBiometricSessionLogs, markBiometricSessionKafkaPublished, getBiometricSessionStats } from "./db";
 import { kycRecords, biometricSessionLogs } from "../drizzle/schema";
 import { eq } from "drizzle-orm";
 import { storagePut } from "./storage";
@@ -780,6 +780,20 @@ export const biometricRouter = router({
       if (fullVerifyPublished && sessionId) { markBiometricSessionKafkaPublished(sessionId as any).catch(() => {}); }
 
       return result;
+    }),
+
+  // ─── Session Stats ─────────────────────────────────────────────────────────────
+  /**
+   * GET /biometric/sessionStats — daily pass/fail time-series + spoof-type breakdown
+   */
+  sessionStats: protectedProcedure
+    .input(
+      z.object({
+        days: z.number().int().min(7).max(365).default(30),
+      })
+    )
+    .query(async ({ input }) => {
+      return getBiometricSessionStats({ days: input.days });
     }),
 
   // ─── Session Logs ─────────────────────────────────────────────────────────────

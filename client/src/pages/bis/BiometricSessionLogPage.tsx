@@ -42,9 +42,12 @@ import {
 import {
   BarChart,
   Bar,
+  LineChart,
+  Line,
   XAxis,
   YAxis,
   Tooltip,
+  Legend,
   ResponsiveContainer,
   Cell,
 } from 'recharts';
@@ -179,7 +182,13 @@ export default function BiometricSessionLogPage() {
   const [verType, setVerType] = useState('all');
   const [resultFilter, setResultFilter] = useState<'all' | 'passed' | 'failed'>('all');
   const [selected, setSelected] = useState<SessionLog | null>(null);
+  const [statsDays, setStatsDays] = useState(30);
   const utils = trpc.useUtils();
+
+  const statsQuery = trpc.biometric.sessionStats.useQuery(
+    { days: statsDays },
+    { keepPreviousData: true } as any
+  );
 
   const query = trpc.biometric.sessionLogs.useQuery(
     {
@@ -297,31 +306,87 @@ export default function BiometricSessionLogPage() {
           ))}
         </div>
 
-        {/* Spoof breakdown chart */}
-        {spoofBreakdown.length > 0 && (
+        {/* Time-series pass/fail chart + spoof-type breakdown — backed by sessionStats tRPC */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {/* Daily pass/fail trend */}
           <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium">Spoof-Type Distribution (current page)</CardTitle>
+            <CardHeader className="pb-2 flex flex-row items-center justify-between">
+              <CardTitle className="text-sm font-medium">Daily Pass / Fail Trend</CardTitle>
+              <select
+                value={statsDays}
+                onChange={e => setStatsDays(Number(e.target.value))}
+                className="text-xs border rounded px-2 py-1 bg-background"
+              >
+                <option value={7}>Last 7 days</option>
+                <option value={30}>Last 30 days</option>
+                <option value={90}>Last 90 days</option>
+                <option value={365}>Last 365 days</option>
+              </select>
             </CardHeader>
             <CardContent>
-              <ResponsiveContainer width="100%" height={140}>
-                <BarChart data={spoofBreakdown} margin={{ top: 0, right: 10, left: -20, bottom: 0 }}>
-                  <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-                  <YAxis tick={{ fontSize: 11 }} />
-                  <Tooltip />
-                  <Bar dataKey="value" radius={[4, 4, 0, 0]}>
-                    {spoofBreakdown.map(entry => (
-                      <Cell
-                        key={entry.name}
-                        fill={SPOOF_COLORS[entry.name] ?? '#6b7280'}
-                      />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
+              {statsQuery.isLoading ? (
+                <div className="h-[160px] flex items-center justify-center text-muted-foreground text-sm">Loading…</div>
+              ) : (statsQuery.data?.dailyStats?.length ?? 0) === 0 ? (
+                <div className="h-[160px] flex items-center justify-center text-muted-foreground text-sm">No data yet</div>
+              ) : (
+                <ResponsiveContainer width="100%" height={160}>
+                  <LineChart data={statsQuery.data?.dailyStats ?? []} margin={{ top: 4, right: 10, left: -20, bottom: 0 }}>
+                    <XAxis dataKey="date" tick={{ fontSize: 10 }} tickFormatter={d => d.slice(5)} />
+                    <YAxis tick={{ fontSize: 10 }} />
+                    <Tooltip
+                      contentStyle={{ fontSize: 11, background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))' }}
+                    />
+                    <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }} />
+                    <Line type="monotone" dataKey="passed" stroke="#22c55e" strokeWidth={2} dot={false} name="Passed" />
+                    <Line type="monotone" dataKey="failed" stroke="#ef4444" strokeWidth={2} dot={false} name="Failed" />
+                  </LineChart>
+                </ResponsiveContainer>
+              )}
+              {statsQuery.data && (
+                <div className="mt-2 flex gap-4 text-xs text-muted-foreground">
+                  <span>Total: <strong>{statsQuery.data.totalSessions}</strong></span>
+                  <span>Pass rate: <strong className="text-green-600">{(statsQuery.data.overallPassRate * 100).toFixed(1)}%</strong></span>
+                </div>
+              )}
             </CardContent>
           </Card>
-        )}
+
+          {/* Spoof-type breakdown heatmap */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium">Attack-Type Breakdown (last {statsDays} days)</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {statsQuery.isLoading ? (
+                <div className="h-[160px] flex items-center justify-center text-muted-foreground text-sm">Loading…</div>
+              ) : (statsQuery.data?.spoofTypeBreakdown?.length ?? 0) === 0 ? (
+                <div className="h-[160px] flex items-center justify-center text-muted-foreground text-sm">No spoof attacks recorded</div>
+              ) : (
+                <ResponsiveContainer width="100%" height={160}>
+                  <BarChart
+                    data={statsQuery.data?.spoofTypeBreakdown ?? []}
+                    layout="vertical"
+                    margin={{ top: 0, right: 10, left: 80, bottom: 0 }}
+                  >
+                    <XAxis type="number" tick={{ fontSize: 10 }} />
+                    <YAxis type="category" dataKey="spoofType" tick={{ fontSize: 10 }} tickFormatter={v => v.replace(/_/g, ' ')} />
+                    <Tooltip
+                      contentStyle={{ fontSize: 11, background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))' }}
+                    />
+                    <Bar dataKey="count" radius={[0, 4, 4, 0]} name="Attacks">
+                      {(statsQuery.data?.spoofTypeBreakdown ?? []).map(entry => (
+                        <Cell
+                          key={entry.spoofType}
+                          fill={SPOOF_COLORS[entry.spoofType] ?? '#6b7280'}
+                        />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+            </CardContent>
+          </Card>
+        </div>
 
         {/* Filters */}
         <div className="flex flex-wrap gap-3">

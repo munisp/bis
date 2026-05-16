@@ -23,6 +23,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
+import BiometricCaptureModal, { type BiometricCaptureResult } from '@/components/BiometricCaptureModal';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -529,6 +530,7 @@ function BiometricEnrollmentPageInner() {
   const { data: challengesData } = trpc.biometric.getChallenges.useQuery();
   const challenges = challengesData?.challenges ?? [];
   const [selectedChallenge, setSelectedChallenge] = useState<'blink' | 'turn_left' | 'turn_right' | 'smile' | 'nod'>('blink');
+  const [showCaptureModal, setShowCaptureModal] = useState(false);
 
   const livenessCheck = trpc.biometric.checkLiveness.useMutation({
     onError: (e) => toast.error(`Liveness check failed: ${e.message}`),
@@ -573,38 +575,19 @@ function BiometricEnrollmentPageInner() {
     if (validateSubjectInfo()) setStep('liveness');
   };
 
-  const handleLivenessCapture = async (imageB64: string) => {
+  // Called by BiometricCaptureModal when all 3 stages pass
+  const handleBiometricCaptureSuccess = (result: BiometricCaptureResult) => {
+    setShowCaptureModal(false);
     const capture: BiometricCapture = {
-      imageB64,
-      qualityScore: 0.94,
-      livenessScore: 0,
+      imageB64: result.imageBase64,
+      qualityScore: result.antiSpoofScore,
+      livenessScore: result.livenessScore,
       capturedAt: new Date().toISOString(),
     };
     setState(s => ({ ...s, livenessCapture: capture }));
-
-    // Call real liveness endpoint
-    try {
-      const result = await livenessCheck.mutateAsync({
-        imageBase64: imageB64,
-        challenge: selectedChallenge,
-        subjectRef: state.subjectInfo.nin || state.subjectInfo.bvn || state.subjectInfo.fullName,
-      });
-      if (!result.passed && !result.sandbox) {
-        toast.error('Liveness check failed. Please try again.');
-        setState(s => ({ ...s, livenessCapture: null }));
-        return;
-      }
-      setState(s => ({
-        ...s,
-        livenessCapture: { ...capture, livenessScore: result.score ?? 0.97 },
-      }));
-      toast.success(`Liveness verified (score: ${((result.score ?? 0.97) * 100).toFixed(0)}%)`);
-      setStep('face_enroll');
-    } catch {
-      // On error, proceed with sandbox score
-      setState(s => ({ ...s, livenessCapture: { ...capture, livenessScore: 0.97 } }));
-      setStep('face_enroll');
-    }
+    const scoreLabel = `passive: ${(result.livenessScore * 100).toFixed(0)}%, active: ${(result.activeLivenessScore * 100).toFixed(0)}%, anti-spoof: ${(result.antiSpoofScore * 100).toFixed(0)}%`;
+    toast.success(`Biometric verification passed (${scoreLabel})`);
+    setStep('face_enroll');
   };
 
   const handleEnrollCapture = async (imageB64: string) => {
@@ -831,17 +814,30 @@ function BiometricEnrollmentPageInner() {
         </Card>
       )}
 
-      {/* ── Step 2: Liveness Challenge ── */}
+      {/* ── Step 2: Liveness Challenge (BiometricCaptureModal) ── */}
       {step === 'liveness' && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Liveness Detection</CardTitle>
+            <CardTitle className="text-base">Biometric Verification</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <h3 className="font-semibold text-blue-800 mb-1">ISO 30107-3 Level 2 — 3-Stage Verification</h3>
+              <p className="text-sm text-blue-700 mb-3">
+                The system will run three sequential checks: passive liveness, active liveness challenge, and anti-spoofing analysis.
+                All three must pass before enrollment can proceed.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <span className="inline-flex items-center gap-1 text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full">👁 Passive Liveness</span>
+                <span className="inline-flex items-center gap-1 text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full">⚡ Active Liveness</span>
+                <span className="inline-flex items-center gap-1 text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full">🛡 Anti-Spoofing (6 attack types)</span>
+              </div>
+            </div>
+
             {/* Challenge selector */}
             {challenges.length > 0 && (
               <div>
-                <p className="text-sm font-medium mb-2">Select a challenge:</p>
+                <p className="text-sm font-medium mb-2">Active liveness challenge:</p>
                 <div className="flex flex-wrap gap-2">
                   {challenges.map(c => (
                     <button
@@ -860,22 +856,12 @@ function BiometricEnrollmentPageInner() {
               </div>
             )}
 
-            <CameraStep
-              title="ISO 30107-3 Level 2 Active Liveness"
-              description="Follow the on-screen challenge to prove you are a real person. This prevents spoofing with photos or videos."
-              challenge={selectedChallenge}
-              challengeLabel={challenges.find(c => c.id === selectedChallenge)?.label}
-              onCapture={handleLivenessCapture}
-              t={t}
-              isLiveness
-            />
-
-            {livenessCheck.isPending && (
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-blue-700 text-sm flex items-center gap-2">
-                <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
-                Verifying liveness with biometric engine...
-              </div>
-            )}
+            <Button
+              onClick={() => setShowCaptureModal(true)}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white gap-2"
+            >
+              <span>📷</span> Start Biometric Capture
+            </Button>
 
             <Button variant="ghost" onClick={() => setStep('subject_info')} className="w-full text-muted-foreground">
               ← Back
@@ -883,6 +869,16 @@ function BiometricEnrollmentPageInner() {
           </CardContent>
         </Card>
       )}
+
+      {/* BiometricCaptureModal — 3-stage sequential verification */}
+      <BiometricCaptureModal
+        open={showCaptureModal}
+        onClose={() => setShowCaptureModal(false)}
+        onSuccess={handleBiometricCaptureSuccess}
+        subjectRef={state.subjectInfo.nin || state.subjectInfo.bvn || state.subjectInfo.fullName || 'enrollment'}
+        challenge={selectedChallenge}
+        frameCount={7}
+      />
 
       {/* ── Step 3: Face Enrollment ── */}
       {step === 'face_enroll' && (

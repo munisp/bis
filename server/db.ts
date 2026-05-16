@@ -1,4 +1,4 @@
-import { eq, desc, and, gte, lte, ilike, or, count, sql, inArray } from "drizzle-orm";
+import { eq, desc, asc, and, gte, lte, ilike, or, count, sql, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import {
@@ -541,5 +541,67 @@ export async function markBiometricSessionKafkaPublished(id: number): Promise<vo
     await db.update(biometricSessionLogs).set({ kafkaPublished: true }).where(eq(biometricSessionLogs.id, id));
   } catch (e) {
     console.warn("[DB] Failed to mark biometric session kafka published:", e);
+  }
+}
+
+// ─── Biometric Session Stats ───────────────────────────────────────────────────
+
+export async function getBiometricSessionStats(filters?: {
+  days?: number;
+}): Promise<{
+  dailyStats: Array<{ date: string; passed: number; failed: number; total: number }>;
+  spoofTypeBreakdown: Array<{ spoofType: string; count: number }>;
+  overallPassRate: number;
+  totalSessions: number;
+}> {
+  try {
+    const db = await getDb();
+    if (!db) return { dailyStats: [], spoofTypeBreakdown: [], overallPassRate: 0, totalSessions: 0 };
+    const daysBack = filters?.days ?? 30;
+    const since = new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000);
+    const rows = await db
+      .select({
+        createdAt: biometricSessionLogs.createdAt,
+        overallVerified: biometricSessionLogs.overallVerified,
+        antiSpoofType: biometricSessionLogs.antiSpoofType,
+      })
+      .from(biometricSessionLogs)
+      .where(gte(biometricSessionLogs.createdAt, since))
+      .orderBy(asc(biometricSessionLogs.createdAt));
+
+    // Build daily stats map
+    const dailyMap: Record<string, { passed: number; failed: number }> = {};
+    const spoofMap: Record<string, number> = {};
+
+    for (const row of rows) {
+      const date = row.createdAt.toISOString().slice(0, 10);
+      if (!dailyMap[date]) dailyMap[date] = { passed: 0, failed: 0 };
+      if (row.overallVerified) {
+        dailyMap[date].passed++;
+      } else {
+        dailyMap[date].failed++;
+        const st = row.antiSpoofType ?? "unknown";
+        spoofMap[st] = (spoofMap[st] ?? 0) + 1;
+      }
+    }
+
+    const dailyStats = Object.entries(dailyMap).map(([date, counts]) => ({
+      date,
+      passed: counts.passed,
+      failed: counts.failed,
+      total: counts.passed + counts.failed,
+    }));
+
+    const spoofTypeBreakdown = Object.entries(spoofMap)
+      .map(([spoofType, count]) => ({ spoofType, count }))
+      .sort((a, b) => b.count - a.count);
+
+    const totalSessions = rows.length;
+    const totalPassed = rows.filter((r: { overallVerified: boolean | null }) => r.overallVerified).length;
+    const overallPassRate = totalSessions > 0 ? totalPassed / totalSessions : 0;
+
+    return { dailyStats, spoofTypeBreakdown, overallPassRate, totalSessions };
+  } catch {
+    return { dailyStats: [], spoofTypeBreakdown: [], overallPassRate: 0, totalSessions: 0 };
   }
 }

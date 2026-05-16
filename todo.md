@@ -2189,3 +2189,16 @@
 
 ### Phase 8 — Archive
 - [ ] Comprehensive tar.gz archive with manifest of changes
+
+## Next Steps Sprint (May 2026)
+
+- [x] BiometricCaptureModal: webcam still capture for passive liveness
+- [x] BiometricCaptureModal: multi-frame video capture for active liveness
+- [x] BiometricCaptureModal: antispoofing check after liveness
+- [x] BiometricCaptureModal: wire into KYC enrollment submission flow
+- [x] InsightFace ArcFace-R100: already implemented (confirmed)
+- [x] InsightFace ArcFace-R100: buffalo_l model loads on startup (confirmed)
+- [x] InsightFace ArcFace-R100: 512-d ArcFace embeddings used (confirmed)
+- [ ] BiometricSessionLogPage: time-series daily pass/fail rate chart
+- [ ] BiometricSessionLogPage: spoof-type heatmap by week
+- [x] tRPC sessionStats procedure: date-range aggregation for charts
