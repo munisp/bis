@@ -11,7 +11,7 @@
  */
 
 import { z } from "zod";
-import { protectedProcedure, publicProcedure, router, writeProcedure } from "./_core/trpc";
+import { protectedProcedure, publicProcedure, router, writeProcedure, adminProcedure } from "./_core/trpc";
 import { TRPCError } from "@trpc/server";
 import { getDb, insertBiometricSessionLog, getBiometricSessionLogs, markBiometricSessionKafkaPublished, getBiometricSessionStats } from "./db";
 import { kycRecords, biometricSessionLogs, platformSettings } from "../drizzle/schema";
@@ -1032,6 +1032,68 @@ export const biometricRouter = router({
       };
     }),
 
+  // ── Retention Policy Settings ────────────────────────────────────────────────
+  // Read the configurable hot-storage retention window (default 90 days).
+  getRetentionDays: protectedProcedure.query(async () => {
+    const db = await getDb();
+    if (!db) return { retentionDays: 90 };
+    const [row] = await db
+      .select()
+      .from(platformSettings)
+      .where(eq(platformSettings.key, "biometric_retention_days"))
+      .limit(1);
+    const retentionDays = row?.value ? Number(row.value) : 90;
+    return { retentionDays: isNaN(retentionDays) ? 90 : retentionDays };
+  }),
+
+  // Write the configurable hot-storage retention window.
+  setRetentionDays: adminProcedure
+    .input(z.object({ retentionDays: z.number().int().min(7).max(3650) }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
+      const existing = await db
+        .select({ id: platformSettings.id })
+        .from(platformSettings)
+        .where(eq(platformSettings.key, "biometric_retention_days"))
+        .limit(1);
+      if (existing.length > 0) {
+        await db
+          .update(platformSettings)
+          .set({ value: input.retentionDays, updatedAt: new Date() })
+          .where(eq(platformSettings.key, "biometric_retention_days"));
+      } else {
+        await db.insert(platformSettings).values({
+          key: "biometric_retention_days",
+          value: input.retentionDays,
+          namespace: "biometric",
+        });
+      }
+      return { retentionDays: input.retentionDays };
+    }),
+
+  // ── On-Demand Archival Trigger ───────────────────────────────────────────────
+  // Allows admins to trigger an immediate archival run outside the weekly schedule.
+  triggerArchival: adminProcedure.mutation(async () => {
+    try {
+      const { runBiometricSessionLogArchival } = await import("./biometricSessionLogArchiver");
+      const result = await runBiometricSessionLogArchival();
+      return {
+        success: true,
+        archived: result.archived,
+        deleted: result.deleted,
+        skipped: result.skipped,
+        errors: result.errors,
+        ranAt: new Date(),
+      };
+    } catch (err) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: `Archival run failed: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    }
+  }),
+
   // ── Archival Status ─────────────────────────────────────────────────────────
   // Returns count of rows eligible for archival (older than 90 days),
   // last archival run timestamp, and next scheduled run.
@@ -1045,16 +1107,23 @@ export const biometricRouter = router({
       retentionDays: 90,
     };
 
-    const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+    // Read retention days from platformSettings (default 90)
+    const [retentionRow] = await db
+      .select()
+      .from(platformSettings)
+      .where(eq(platformSettings.key, "biometric_retention_days"))
+      .limit(1);
+    const retentionDays = retentionRow?.value ? Number(retentionRow.value) : 90;
+    const effectiveRetention = isNaN(retentionDays) ? 90 : retentionDays;
 
-    // Count rows older than 90 days still in hot table
+    const cutoff = new Date(Date.now() - effectiveRetention * 24 * 60 * 60 * 1000);
+    // Count rows older than retention window still in hot table
     const { sql: sqlFn } = await import("drizzle-orm");
     const [countResult] = await db
       .select({ count: sqlFn<number>`count(*)` })
       .from(biometricSessionLogs)
       .where(sqlFn`${biometricSessionLogs.createdAt} < ${cutoff}`);
     const eligibleRows = Number(countResult?.count ?? 0);
-
     // Read last archival run from platformSettings
     const [setting] = await db
       .select()
@@ -1062,7 +1131,6 @@ export const biometricRouter = router({
       .where(eq(platformSettings.key, "biometric_last_archival_run"))
       .limit(1);
     const lastArchivalRun = setting?.value ? new Date(setting.value as string) : null;
-
     // Next run: next Sunday at 03:00 UTC
     const now = new Date();
     const daysUntilSunday = (7 - now.getUTCDay()) % 7 || 7;
@@ -1070,13 +1138,12 @@ export const biometricRouter = router({
       now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + daysUntilSunday,
       3, 0, 0, 0
     ));
-
     return {
       eligibleRows,
       lastArchivalRun,
       nextArchivalRun: nextSunday,
       coldStoragePrefix: "biometric-archive/",
-      retentionDays: 90,
+      retentionDays: effectiveRetention,
     };
   }),
 });

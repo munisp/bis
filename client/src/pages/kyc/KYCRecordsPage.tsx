@@ -15,9 +15,12 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
+import BiometricCaptureModal from "@/components/BiometricCaptureModal";
+import type { BiometricCaptureResult } from "@/components/BiometricCaptureModal";
 import {
   Search, RefreshCw, Download, CheckCircle2, XCircle, Clock,
-  AlertTriangle, Loader2, ShieldCheck, RotateCcw, Eye, ChevronDown, ListChecks, Fingerprint
+  AlertTriangle, Loader2, ShieldCheck, RotateCcw, Eye, ChevronDown, ListChecks, Fingerprint,
+  Camera, UserPlus,
 } from "lucide-react";
 
 
@@ -97,7 +100,43 @@ export default function KYCRecordsPage() {
   const [statusFilter, setStatusFilter] = useState<KYCStatus | "all">("all");
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<KYCRecord | null>(null);
-  const [reVerifying, setReVerifying] = useState<number | null>(null);
+    const [reVerifying, setReVerifying] = useState<number | null>(null);
+  // Re-enrollment state
+  const [showReEnrollModal, setShowReEnrollModal] = useState(false);
+  const [reEnrollingRecord, setReEnrollingRecord] = useState<KYCRecord | null>(null);
+  const [isReEnrolling, setIsReEnrolling] = useState(false);
+  const utils = trpc.useUtils();
+
+  const enrollMutation = trpc.biometric.enroll.useMutation({
+    onSuccess: (data: any) => {
+      setIsReEnrolling(false);
+      setShowReEnrollModal(false);
+      setReEnrollingRecord(null);
+      utils.biometric.sessionLogs.invalidate();
+      utils.kyc.list.invalidate();
+      if (data.enrolled) {
+        toast.success(`Re-enrollment successful — face ID: ${data.faceId ?? 'assigned'}.`);
+      } else {
+        toast.error('Re-enrollment failed — face not detected or quality too low.');
+      }
+    },
+    onError: (err: any) => {
+      setIsReEnrolling(false);
+      toast.error(`Re-enrollment failed: ${err.message}`);
+    },
+  });
+
+  function handleReEnrollSuccess(result: BiometricCaptureResult) {
+    if (!reEnrollingRecord) return;
+    setIsReEnrolling(true);
+    enrollMutation.mutate({
+      imageBase64: result.imageBase64,
+      subjectRef: reEnrollingRecord.nin
+        ? `NIN-${reEnrollingRecord.nin}`
+        : `kyc-${reEnrollingRecord.id}`,
+      kycRecordId: reEnrollingRecord.id,
+    });
+  }
 
   // Bulk selection state
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
@@ -151,11 +190,8 @@ export default function KYCRecordsPage() {
     setPages([firstPage.items as KYCRecord[]]);
     setNextCursor(firstPage.nextCursor ?? undefined);
     setHasMore(firstPage.nextCursor !== null);
-    setTotal(firstPage.total);
+        setTotal(firstPage.total);
   }, [firstPage]);
-
-  const utils = trpc.useUtils();
-
   const handleRefresh = useCallback(() => {
     setPages([]);
     setNextCursor(undefined);
@@ -554,6 +590,21 @@ export default function KYCRecordsPage() {
               </Tabs>
 
               <DialogFooter className="mt-4 gap-2">
+                {/* Re-enroll button — available for all biometric statuses */}
+                <Button
+                  variant="outline"
+                  className="text-blue-600 border-blue-200 hover:bg-blue-50 dark:hover:bg-blue-900/20"
+                  disabled={isReEnrolling}
+                  onClick={() => {
+                    setReEnrollingRecord(selected);
+                    setShowReEnrollModal(true);
+                  }}
+                >
+                  {isReEnrolling
+                    ? <Loader2 className="w-4 h-4 animate-spin mr-1" />
+                    : <Camera className="w-4 h-4 mr-1" />}
+                  {isReEnrolling ? 'Enrolling…' : 'Re-enroll Biometrics'}
+                </Button>
                 {(selected.status === "review" || selected.status === "failed") && (
                   <Button
                     variant="outline"
@@ -573,6 +624,24 @@ export default function KYCRecordsPage() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Re-enrollment BiometricCaptureModal */}
+      {reEnrollingRecord && (
+        <BiometricCaptureModal
+          open={showReEnrollModal}
+          onClose={() => {
+            setShowReEnrollModal(false);
+            setReEnrollingRecord(null);
+          }}
+          onSuccess={handleReEnrollSuccess}
+          subjectRef={
+            reEnrollingRecord.nin
+              ? `NIN-${reEnrollingRecord.nin}`
+              : `kyc-${reEnrollingRecord.id}`
+          }
+          challenge="blink"
+        />
+      )}
     </BISLayout>
   );
 }

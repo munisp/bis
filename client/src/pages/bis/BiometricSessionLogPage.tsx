@@ -55,6 +55,7 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Slider } from '@/components/ui/slider';
 import { toast } from 'sonner';
+import { useAuth } from '@/_core/hooks/useAuth';
 import {
   Shield,
   ShieldCheck,
@@ -73,6 +74,8 @@ import {
   Clock,
   CalendarClock,
   HardDrive,
+  Play,
+  Pencil,
 } from 'lucide-react';
 
 const SPOOF_COLORS: Record<string, string> = {
@@ -202,7 +205,42 @@ export default function BiometricSessionLogPage() {
   const [isPdfExporting, setIsPdfExporting] = useState(false);
   const utils = trpc.useUtils();
 
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
+
   const archivalStatusQuery = trpc.biometric.archivalStatus.useQuery();
+  const retentionQuery = trpc.biometric.getRetentionDays.useQuery();
+  const [showRetentionEdit, setShowRetentionEdit] = useState(false);
+  const [localRetentionDays, setLocalRetentionDays] = useState(90);
+  const [isTriggeringArchival, setIsTriggeringArchival] = useState(false);
+
+  const setRetentionMutation = trpc.biometric.setRetentionDays.useMutation({
+    onSuccess: (data: any) => {
+      utils.biometric.archivalStatus.invalidate();
+      utils.biometric.getRetentionDays.invalidate();
+      setShowRetentionEdit(false);
+      toast.success(`Retention policy updated — hot storage window set to ${data.retentionDays} days.`);
+    },
+    onError: (err: any) => {
+      toast.error(`Failed to save retention policy: ${err.message}`);
+    },
+  });
+
+  const triggerArchivalMutation = trpc.biometric.triggerArchival.useMutation({
+    onSuccess: (data: any) => {
+      utils.biometric.archivalStatus.invalidate();
+      setIsTriggeringArchival(false);
+      if (data.errors && data.errors.length > 0) {
+        toast.warning(`Archival completed with ${data.errors.length} error(s) — archived: ${data.archived}, deleted: ${data.deleted}.`);
+      } else {
+        toast.success(`Archival complete — ${data.archived} rows archived, ${data.deleted} rows deleted from hot table.`);
+      }
+    },
+    onError: (err: any) => {
+      setIsTriggeringArchival(false);
+      toast.error(`Archival run failed: ${err.message}`);
+    },
+  });
 
   const pdfExportMutation = trpc.biometric.exportSessionLogs.useMutation({
     onSuccess: (data: any) => {
@@ -464,11 +502,41 @@ export default function BiometricSessionLogPage() {
 
         {/* Archival Status Card */}
         <Card className="border-dashed border-muted-foreground/30">
-          <CardHeader className="pb-2 flex flex-row items-center gap-2">
-            <Archive size={15} className="text-muted-foreground" />
-            <CardTitle className="text-sm font-medium">Cold-Storage Archival Status</CardTitle>
+          <CardHeader className="pb-2 flex flex-row items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Archive size={15} className="text-muted-foreground" />
+              <CardTitle className="text-sm font-medium">Cold-Storage Archival Status</CardTitle>
+            </div>
+            {isAdmin && (
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setLocalRetentionDays(retentionQuery.data?.retentionDays ?? archivalStatusQuery.data?.retentionDays ?? 90);
+                    setShowRetentionEdit(v => !v);
+                  }}
+                >
+                  <Pencil size={12} className="mr-1" /> Retention Policy
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={isTriggeringArchival || triggerArchivalMutation.isPending}
+                  onClick={() => {
+                    setIsTriggeringArchival(true);
+                    triggerArchivalMutation.mutate();
+                  }}
+                >
+                  {(isTriggeringArchival || triggerArchivalMutation.isPending)
+                    ? <Loader2 size={12} className="mr-1 animate-spin" />
+                    : <Play size={12} className="mr-1" />}
+                  {(isTriggeringArchival || triggerArchivalMutation.isPending) ? 'Archiving…' : 'Archive Now'}
+                </Button>
+              </div>
+            )}
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-4">
             {archivalStatusQuery.isLoading ? (
               <div className="flex items-center gap-2 text-muted-foreground text-sm">
                 <Loader2 size={14} className="animate-spin" /> Loading archival status…
@@ -482,7 +550,7 @@ export default function BiometricSessionLogPage() {
                   <span className="text-lg font-semibold tabular-nums">
                     {archivalStatusQuery.data?.eligibleRows ?? 0}
                   </span>
-                  <span className="text-[10px] text-muted-foreground">rows &gt; 90 days old</span>
+                  <span className="text-[10px] text-muted-foreground">rows &gt; {archivalStatusQuery.data?.retentionDays ?? 90} days old</span>
                 </div>
                 <div className="flex flex-col gap-0.5">
                   <span className="text-xs text-muted-foreground flex items-center gap-1">
@@ -515,6 +583,39 @@ export default function BiometricSessionLogPage() {
                   <span className="text-[10px] text-muted-foreground">
                     Retention: {archivalStatusQuery.data?.retentionDays ?? 90} days hot
                   </span>
+                </div>
+              </div>
+            )}
+            {/* Retention Policy Editor (admin only) */}
+            {showRetentionEdit && isAdmin && (
+              <div className="border-t pt-4 space-y-3">
+                <p className="text-xs text-muted-foreground">
+                  Hot-storage retention window: rows older than this threshold are eligible for cold-storage archival.
+                  Minimum 7 days, maximum 3650 days (10 years).
+                </p>
+                <div className="space-y-2">
+                  <Label className="text-xs">Retention window: <strong>{localRetentionDays} days</strong></Label>
+                  <Slider
+                    min={7}
+                    max={365}
+                    step={1}
+                    value={[localRetentionDays]}
+                    onValueChange={([v]: number[]) => setLocalRetentionDays(v)}
+                    className="w-full max-w-sm"
+                  />
+                  <p className="text-[10px] text-muted-foreground">
+                    Rows older than {localRetentionDays} days will be moved to cold storage on the next archival run.
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <Button size="sm" variant="ghost" onClick={() => setShowRetentionEdit(false)}>Cancel</Button>
+                  <Button
+                    size="sm"
+                    disabled={setRetentionMutation.isPending}
+                    onClick={() => setRetentionMutation.mutate({ retentionDays: localRetentionDays })}
+                  >
+                    {setRetentionMutation.isPending ? 'Saving…' : 'Save Retention Policy'}
+                  </Button>
                 </div>
               </div>
             )}

@@ -2218,3 +2218,12 @@
 - [ ] Biometric audit trail PDF export (format=pdf in exportSessionLogs, compliance report for NFIU/CBN)
 - [ ] Session log retention archival scheduler (weekly, 90-day cold S3 move + DB delete)
 - [ ] Biometric enrollment status badge on KYC list page (Enrolled/Pending/Failed badge)
+
+## Sprint v8 — Next Steps (Round 8)
+
+- [x] triggerArchival adminProcedure: on-demand cold-storage archival outside weekly schedule
+- [x] Archive Now button on Archival Status card wired to triggerArchival
+- [x] Retention policy editable setting: biometric_retention_days in platformSettings
+- [x] Retention days slider/input in Archival Status card (like spoof alert threshold)
+- [x] KYC biometric re-enrollment button in KYC detail drawer biometric tab
+- [x] Re-enrollment opens BiometricCaptureModal pre-seeded with kycRecordId
