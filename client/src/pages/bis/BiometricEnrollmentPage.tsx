@@ -531,6 +531,42 @@ function BiometricEnrollmentPageInner() {
   const challenges = challengesData?.challenges ?? [];
   const [selectedChallenge, setSelectedChallenge] = useState<'blink' | 'turn_left' | 'turn_right' | 'smile' | 'nod'>('blink');
   const [showCaptureModal, setShowCaptureModal] = useState(false);
+  const [cameraPermission, setCameraPermission] = useState<'unknown' | 'checking' | 'granted' | 'denied' | 'unsupported'>('unknown');
+
+  // Pre-flight camera permission check when user reaches the liveness step
+  const checkCameraPermission = useCallback(async () => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setCameraPermission('unsupported');
+      return;
+    }
+    setCameraPermission('checking');
+    try {
+      if (navigator.permissions?.query) {
+        const result = await navigator.permissions.query({ name: 'camera' as PermissionName });
+        if (result.state === 'granted') { setCameraPermission('granted'); return; }
+        if (result.state === 'denied') { setCameraPermission('denied'); return; }
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      stream.getTracks().forEach(t => t.stop());
+      setCameraPermission('granted');
+    } catch (err) {
+      const name = err instanceof DOMException ? err.name : '';
+      if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+        setCameraPermission('denied');
+      } else if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+        setCameraPermission('unsupported');
+      } else {
+        setCameraPermission('denied');
+      }
+    }
+  }, []);
+
+  // Run permission check when step changes to liveness
+  useEffect(() => {
+    if (step === 'liveness' && cameraPermission === 'unknown') {
+      checkCameraPermission();
+    }
+  }, [step, cameraPermission, checkCameraPermission]);
 
   const livenessCheck = trpc.biometric.checkLiveness.useMutation({
     onError: (e) => toast.error(`Liveness check failed: ${e.message}`),
@@ -856,11 +892,69 @@ function BiometricEnrollmentPageInner() {
               </div>
             )}
 
+            {/* Camera permission pre-flight UI */}
+            {cameraPermission === 'checking' && (
+              <div className="flex items-center gap-3 bg-yellow-50 border border-yellow-200 rounded-lg p-4 text-yellow-800">
+                <svg className="w-5 h-5 animate-spin text-yellow-600" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                </svg>
+                <div>
+                  <p className="font-medium text-sm">Checking camera access…</p>
+                  <p className="text-xs text-yellow-700">Your browser may show a permission prompt. Please click Allow.</p>
+                </div>
+              </div>
+            )}
+
+            {cameraPermission === 'denied' && (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4 space-y-3">
+                <div className="flex items-start gap-3">
+                  <span className="text-red-500 text-lg mt-0.5">🚫</span>
+                  <div>
+                    <p className="font-semibold text-red-800 text-sm">Camera access blocked</p>
+                    <p className="text-xs text-red-700 mt-1">
+                      Your browser has blocked camera access. To proceed with biometric verification, you must allow camera access.
+                    </p>
+                  </div>
+                </div>
+                <div className="bg-red-100 rounded p-3 text-xs text-red-800 space-y-1">
+                  <p className="font-medium">How to enable camera access:</p>
+                  <p>• <strong>Chrome/Edge:</strong> Click the camera icon in the address bar → Allow</p>
+                  <p>• <strong>Firefox:</strong> Click the camera icon → Remove Block → Reload</p>
+                  <p>• <strong>Safari:</strong> Settings → Websites → Camera → Allow for this site</p>
+                  <p className="text-red-600 font-medium mt-1">Note: Safari Private Browsing and Brave Shields may permanently block camera access.</p>
+                </div>
+                <Button variant="outline" onClick={checkCameraPermission} className="w-full text-sm">
+                  🔄 Retry Camera Access
+                </Button>
+              </div>
+            )}
+
+            {cameraPermission === 'unsupported' && (
+              <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
+                <div className="flex items-start gap-3">
+                  <span className="text-orange-500 text-lg mt-0.5">⚠️</span>
+                  <div>
+                    <p className="font-semibold text-orange-800 text-sm">Camera not available</p>
+                    <p className="text-xs text-orange-700 mt-1">
+                      No camera was detected on this device, or your browser does not support camera access (requires HTTPS).
+                      Please use a device with a working camera or contact your field agent to complete biometric enrollment.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
             <Button
               onClick={() => setShowCaptureModal(true)}
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white gap-2"
+              disabled={cameraPermission === 'denied' || cameraPermission === 'unsupported' || cameraPermission === 'checking'}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <span>📷</span> Start Biometric Capture
+              <span>📷</span>
+              {cameraPermission === 'checking' ? 'Waiting for camera access…' :
+               cameraPermission === 'denied' ? 'Camera access required' :
+               cameraPermission === 'unsupported' ? 'Camera not available' :
+               'Start Biometric Capture'}
             </Button>
 
             <Button variant="ghost" onClick={() => setStep('subject_info')} className="w-full text-muted-foreground">

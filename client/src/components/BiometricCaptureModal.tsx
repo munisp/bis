@@ -71,6 +71,8 @@ interface Props {
   challenge?: BiometricChallengeType;
   /** Number of frames to capture for active liveness (default: 7) */
   frameCount?: number;
+  /** Maximum number of attempts before showing terminal exhausted state (default: 3) */
+  maxRetries?: number;
 }
 
 // ─── Stage definitions ────────────────────────────────────────────────────────
@@ -149,6 +151,7 @@ export default function BiometricCaptureModal({
   subjectRef = "unknown",
   challenge = "blink",
   frameCount = 7,
+  maxRetries = 3,
 }: Props) {
   // ── Refs ──────────────────────────────────────────────────────────────────
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -173,6 +176,10 @@ export default function BiometricCaptureModal({
   const [spoofType, setSpoofType] = useState("genuine");
   const [lastSessionId, setLastSessionId] = useState<string | undefined>();
   const [isSandbox, setIsSandbox] = useState(false);
+
+  // ── Retry tracking ────────────────────────────────────────────────────────
+  const [retryCount, setRetryCount] = useState(0);
+  const [retryHistory, setRetryHistory] = useState<string[]>([]);
 
   // ── tRPC mutations ────────────────────────────────────────────────────────
   const checkLiveness = trpc.biometric.checkLiveness.useMutation();
@@ -404,15 +411,27 @@ export default function BiometricCaptureModal({
     }
   }, [stage]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Reset ─────────────────────────────────────────────────────────────────
+  // ── Reset / Retry ─────────────────────────────────────────────────────────
 
   const handleRetry = useCallback(() => {
+    // Record failure reason before resetting
+    if (error) {
+      setRetryHistory(prev => [...prev, error]);
+    }
+    const nextRetry = retryCount + 1;
+    setRetryCount(nextRetry);
     setError(null);
     setCapturedFrame(null);
     setCapturedFrames([]);
     setFrameProgress(0);
-    setStage("idle");
-  }, []);
+    setLivenessScore(0);
+    setActiveLivenessScore(0);
+    setAntiSpoofScore(0);
+    setSpoofType('genuine');
+    setStage('idle');
+  }, [error, retryCount]);
+
+  const isExhausted = retryCount >= maxRetries && stage === 'failed';
 
   // ── Render helpers ────────────────────────────────────────────────────────
 
@@ -568,6 +587,30 @@ export default function BiometricCaptureModal({
           )}
         </div>
 
+        {/* Exhausted terminal state */}
+        {isExhausted && (
+          <div className="mx-6 mt-4 bg-red-950 border border-red-800 rounded-xl p-4 space-y-3">
+            <div className="flex items-start gap-3">
+              <XCircle className="w-6 h-6 text-red-400 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-semibold text-red-300 text-sm">Too many failed attempts</p>
+                <p className="text-xs text-red-400 mt-1">
+                  You have reached the maximum number of biometric verification attempts ({maxRetries}).
+                  Please contact your field agent or support team to complete enrollment.
+                </p>
+              </div>
+            </div>
+            {retryHistory.length > 0 && (
+              <div className="bg-red-900/40 rounded-lg p-3 space-y-1">
+                <p className="text-xs font-medium text-red-300 mb-1">Failure history:</p>
+                {retryHistory.map((reason, i) => (
+                  <p key={i} className="text-xs text-red-400">Attempt {i + 1}: {reason}</p>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Instruction / error */}
         <div className="px-6 mt-3 min-h-[48px]">
           {error ? (
@@ -626,14 +669,14 @@ export default function BiometricCaptureModal({
             Cancel
           </Button>
 
-          {stage === "failed" && (
+          {stage === "failed" && !isExhausted && (
             <Button
               onClick={handleRetry}
               variant="outline"
               className="border-blue-600 text-blue-400 hover:bg-blue-900/30 gap-2"
             >
               <RefreshCw className="w-4 h-4" />
-              Try Again
+              Try Again ({maxRetries - retryCount} left)
             </Button>
           )}
 

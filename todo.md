@@ -2202,3 +2202,14 @@
 - [ ] BiometricSessionLogPage: time-series daily pass/fail rate chart
 - [ ] BiometricSessionLogPage: spoof-type heatmap by week
 - [x] tRPC sessionStats procedure: date-range aggregation for charts
+
+## Next Steps Sprint v2 (May 2026)
+- [ ] Webcam permission pre-flight check on BiometricEnrollmentPage
+- [ ] Allow-camera prompt with clear instructions
+- [ ] Fallback message for browsers blocking getUserMedia (Safari Private, Brave)
+- [ ] maxRetries prop on BiometricCaptureModal (default 3)
+- [ ] Terminal "too many failed attempts" state after exhausting retries
+- [ ] Log each retry attempt to session log with failureReasons
+- [ ] Temporal hourly workflow: query sessionStats, alert if spoof count > threshold
+- [ ] notifyOwner call in Temporal workflow for spoof-attack alerting
+- [ ] Wire Temporal workflow into Temporal worker

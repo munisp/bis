@@ -35,6 +35,7 @@ import { startKycScheduledRerunExecutor } from "../kycScheduledRerunExecutor";
 import { startArchivalScheduler } from "../archivalScheduler";
 import { startKycExpiryDigestScheduler } from "../kycExpiryDigest";
 import { startRiskThresholdDigestScheduler } from "../riskThresholdDigest";
+import { startBiometricSpoofAlertScheduler } from "../biometricSpoofAlertScheduler";
 import { validateEnv } from "../envValidation";
 
 // ── Structured logger ─────────────────────────────────────────────────────────
@@ -870,6 +871,7 @@ startServer()
     startRiskThresholdDigestScheduler(); // Daily risk threshold digest at 09:00 WAT
     startDataSourcesHealthScheduler(); // 15-min health probe for all enabled data sources
     startKycScheduledRerunExecutor(); // 5-min poll for pending KYC scheduled re-runs
+    startBiometricSpoofAlertScheduler(); // Hourly biometric spoof-attack alert (ISO 30107-3)
     return srv;
   })
   .catch((err) => {
