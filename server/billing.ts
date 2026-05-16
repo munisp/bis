@@ -9,8 +9,9 @@ import { z } from "zod";
 import { router, protectedProcedure, writeProcedure } from "./_core/trpc";
 import { TRPCError } from "@trpc/server";
 import { storagePut } from "./storage";
+import { ENV } from "./_core/env";
 
-const TB_URL = process.env.TIGERBEETLE_URL ?? "";
+const TB_URL = ENV.tigerBeetleUrl;
 const ACCOUNT_REVENUE = "1";
 const ACCOUNT_TENANT_PREFIX = "10000";
 
@@ -455,7 +456,7 @@ export const billingRouter = router({
       })
     )
     .mutation(async ({ input, ctx }) => {
-      const PAYSTACK_KEY = process.env.PAYSTACK_SECRET_KEY ?? "";
+      const PAYSTACK_KEY = ENV.paystackSecretKey;
 
       if (!PAYSTACK_KEY) {
         // Simulated response for development / demo environments
@@ -541,7 +542,7 @@ export const billingRouter = router({
       })
     )
     .mutation(async ({ input }) => {
-      const PAYSTACK_KEY = process.env.PAYSTACK_SECRET_KEY ?? "";
+      const PAYSTACK_KEY = ENV.paystackSecretKey;
 
       let amountKobo: number;
       let status: string;
@@ -649,7 +650,7 @@ export const billingRouter = router({
       // Attempt to fetch transfer history from TigerBeetle HTTP proxy
       try {
         const res = await fetch(
-          `${process.env.TIGERBEETLE_HTTP_URL ?? "http://localhost:3001"}/accounts/transfers?id=${encodeURIComponent("tenant-" + input.tenantId)}&limit=${input.limit}`,
+          `${ENV.tigerBeetleHttpUrl}/accounts/transfers?id=${encodeURIComponent("tenant-" + input.tenantId)}&limit=${input.limit}`,
           { signal: AbortSignal.timeout(5000) }
         );
         if (res.ok) {

@@ -38,6 +38,7 @@ import { startRiskThresholdDigestScheduler } from "../riskThresholdDigest";
 import { startBiometricSpoofAlertScheduler } from "../biometricSpoofAlertScheduler";
 import { startBiometricSessionLogArchiver } from "../biometricSessionLogArchiver";
 import { validateEnv } from "../envValidation";
+import { ENV } from "./env";
 
 // ── Structured logger ─────────────────────────────────────────────────────────
 function log(level: "info" | "warn" | "error", msg: string, meta?: Record<string, unknown>) {
@@ -177,7 +178,7 @@ async function startServer() {
     "http://localhost:5173",
     "http://127.0.0.1:3000",
     "http://127.0.0.1:5173",
-    ...(process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(",") : []),
+    ...(ENV.allowedOrigins ? ENV.allowedOrigins.split(",") : []),
   ];
   // Ensure cors middleware is applied correctly
   const corsMiddleware = cors({
@@ -245,7 +246,7 @@ async function startServer() {
   });
   // Metrics endpoint — protected by METRICS_TOKEN bearer auth or localhost-only
   app.get('/metrics', async (req: Request, res: Response) => {
-    const metricsToken = process.env.METRICS_TOKEN;
+    const metricsToken = ENV.metricsToken || undefined;
     const authHeader = req.headers['authorization'];
     const clientIp = req.ip ?? '';
     const isLocalhost = clientIp === '127.0.0.1' || clientIp === '::1' || clientIp === '::ffff:127.0.0.1';
@@ -497,7 +498,7 @@ async function startServer() {
       res.status(401).json({ error: "Unauthorized" });
       return;
     }
-    const EVENT_EMITTER_URL = process.env.BIS_EVENT_EMITTER_URL ?? "http://localhost:8082";
+    const EVENT_EMITTER_URL = ENV.riskEngineUrl;
     try {
       const upstream = await fetch(`${EVENT_EMITTER_URL}/events/stream`, {
         headers: { Accept: "text/event-stream" },
@@ -850,7 +851,7 @@ async function startServer() {
     serveStatic(app);
   }
 
-  const preferredPort = parseInt(process.env.PORT || "3000");
+  const preferredPort = ENV.port;
   const port = await findAvailablePort(preferredPort);
 
   if (port !== preferredPort) {

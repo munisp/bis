@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { pendingCount as idbPendingCount } from "@/lib/lexOfflineQueue";
 
 interface OfflineSyncState {
   isOnline: boolean;
@@ -16,16 +17,26 @@ export function useOfflineSync() {
   });
 
   const getQueueCount = useCallback(async () => {
-    if (!navigator.serviceWorker?.controller) return 0;
-    return new Promise<number>((resolve) => {
-      const channel = new MessageChannel();
-      channel.port1.onmessage = (e) => resolve(e.data.count ?? 0);
-      navigator.serviceWorker.controller?.postMessage(
-        { type: "GET_QUEUE_COUNT" },
-        [channel.port2]
-      );
-      setTimeout(() => resolve(0), 1000);
-    });
+    // Try service worker first; fall back to IndexedDB so pending items are never hidden
+    if (navigator.serviceWorker?.controller) {
+      const swCount = await new Promise<number | null>((resolve) => {
+        const channel = new MessageChannel();
+        channel.port1.onmessage = (e) => resolve(e.data.count ?? 0);
+        navigator.serviceWorker.controller?.postMessage(
+          { type: "GET_QUEUE_COUNT" },
+          [channel.port2]
+        );
+        // If SW doesn't respond in 1s, resolve null so we fall back to IDB
+        setTimeout(() => resolve(null), 1000);
+      });
+      if (swCount !== null) return swCount;
+    }
+    // Fallback: read directly from IndexedDB to avoid hiding unsynced work
+    try {
+      return await idbPendingCount();
+    } catch {
+      return 0;
+    }
   }, []);
 
   useEffect(() => {

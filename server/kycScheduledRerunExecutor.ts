@@ -13,6 +13,7 @@
 import { and, eq, lte } from "drizzle-orm";
 import { getDb } from "./db";
 import { kycRecords, kycScheduledReruns } from "../drizzle/schema";
+import { ENV } from "./_core/env";
 import { notifyOwner } from "./_core/notification";
 import nodemailer from "nodemailer";
 
@@ -74,7 +75,7 @@ async function gatewayFetch(path: string): Promise<any> {
 }
 
 async function riskEngineFetch(path: string, body: unknown): Promise<any> {
-  const base = process.env.RISK_ENGINE_URL || "http://localhost:8082";
+  const base = ENV.riskEngineUrl;
   const res = await fetch(`${base}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -105,7 +106,7 @@ async function publishEvent(
   payload: unknown,
   source = "bis-bff"
 ): Promise<void> {
-  const eventProcessorUrl = process.env.EVENT_PROCESSOR_URL || "http://localhost:8083";
+  const eventProcessorUrl = ENV.eventProcessorUrl;
   await fetch(`${eventProcessorUrl}/events`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

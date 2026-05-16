@@ -10,6 +10,7 @@ import { lexAgencies, lexSubmissions, lexSubmitters, cases, caseParties, caseTim
 import { invokeLLM } from "./_core/llm";
 import { getDb } from "./db";
 import { protectedProcedure, publicProcedure, router, writeProcedure } from "./_core/trpc";
+import { ENV } from "./_core/env";
 
 // SECURITY: HTML escape function to prevent XSS in PDF template generation
 function escHtml(str: string | null | undefined): string {
@@ -879,7 +880,7 @@ ${sub.validationScore != null ? `
       const statusLabel = sub.status === "validated" ? "VALIDATED" : sub.status === "rejected" ? "REJECTED" : "RECEIVED";
       const message = `BIS LEX: Submission ${sub.referenceNumber} ${statusLabel}. Ref: ${sub.referenceNumber}. Contact your supervisor for details.`;
       // Send via configured provider (Africa's Talking or Termii)
-      const provider = process.env.SMS_PROVIDER ?? "africas_talking";
+      const provider = ENV.smsProvider;
       try {
         if (provider === "africas_talking") {
           const AT_API_KEY = process.env.AT_API_KEY;

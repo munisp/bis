@@ -2297,3 +2297,11 @@
 - [x] Biometric liveness replay protection: biometric_liveness_nonces table (migration 0038), 5-min nonce deduplication in checkActiveLiveness
 - [x] AML alert webhooks: dispatchAmlWebhook helper fans out to all active tenant webhooks subscribed to aml.alert events
 - [x] TypeScript: 0 errors; Tests: 486/609 pass (123 pre-existing ECONNREFUSED)
+
+## Sprint v21 — Full ENV Centralization, Replay Tests, Offline Sync Fix
+
+- [x] Added LAKEHOUSE_URL, OLLAMA_URL, BIOMETRIC_ENGINE_URL, EVENT_PROCESSOR_URL, BIS_GATEWAY_URL, TIGERBEETLE_URL, TIGERBEETLE_HTTP_URL, PAYSTACK_SECRET_KEY, ALLOWED_ORIGINS, METRICS_TOKEN, SMS_PROVIDER, DB_SSL_STRICT, PORT to ENV registry in server/_core/env.ts
+- [x] Updated server/lakehouse.ts, server/biometric.ts, server/billing.ts, server/kycScheduledRerunExecutor.ts, server/lex.ts, server/_core/index.ts to use ENV instead of raw process.env (52 raw accesses eliminated)
+- [x] Added 3 new biometric replay protection unit tests (sandbox fallback, duplicate rejection, nonce storage) — 489 tests now pass
+- [x] Fixed useOfflineSync.ts: falls back to IndexedDB pendingCount when service worker doesn't respond within 1s (prevents hiding unsynced work)
+- [x] TypeScript: 0 errors; Tests: 489/612 pass (123 pre-existing ECONNREFUSED — unchanged)

@@ -14,6 +14,31 @@ export const ENV = {
   // AML / risk engine sidecar URLs
   bisAmlEngineUrl: process.env.BIS_AML_ENGINE_URL ?? "http://localhost:8095",
   riskEngineUrl: process.env.RISK_ENGINE_URL ?? "http://localhost:8082",
+  // Lakehouse writer (Python Delta Lake + DuckDB)
+  lakehouseUrl: process.env.LAKEHOUSE_URL ?? "http://localhost:8085",
+  // Ollama local LLM (optional — used by OpenClaw skill engine)
+  ollamaUrl: process.env.OLLAMA_URL ?? "http://localhost:11434",
+  // Biometric engine (Go sidecar)
+  biometricEngineUrl: process.env.BIOMETRIC_ENGINE_URL ?? "http://localhost:8084",
+  // Event processor (Rust sidecar)
+  eventProcessorUrl: process.env.EVENT_PROCESSOR_URL ?? "http://localhost:8083",
+  // BIS API gateway (Go)
+  bisGatewayUrl: process.env.BIS_GATEWAY_URL ?? "http://localhost:8081",
+  // TigerBeetle ledger HTTP proxy
+  tigerBeetleUrl: process.env.TIGERBEETLE_URL ?? "",
+  tigerBeetleHttpUrl: process.env.TIGERBEETLE_HTTP_URL ?? "http://localhost:3001",
+  // Paystack payment gateway
+  paystackSecretKey: process.env.PAYSTACK_SECRET_KEY ?? "",
+  // CORS allowed origins (comma-separated)
+  allowedOrigins: process.env.ALLOWED_ORIGINS ?? "",
+  // Metrics bearer token
+  metricsToken: process.env.METRICS_TOKEN ?? "",
+  // SMS provider
+  smsProvider: process.env.SMS_PROVIDER ?? "africas_talking",
+  // DB SSL strict mode
+  dbSslStrict: (process.env.DB_SSL_STRICT ?? "false") === "true",
+  // Server port
+  port: parseInt(process.env.PORT ?? "3000", 10),
 
   // Gateway / verification engine
   // Default false in production — set GATEWAY_SANDBOX=true explicitly for sandbox/dev mode.
@@ -77,6 +102,8 @@ export function validateEnv(): void {
     ["BIS_GATEWAY_KEY", ENV.bisGatewayKey, "Internal service-to-service auth uses insecure dev key"],
     ["BIS_AML_ENGINE_URL", ENV.bisAmlEngineUrl, "AML engine defaults to localhost:8095"],
     ["RISK_ENGINE_URL", ENV.riskEngineUrl, "Risk engine defaults to localhost:8082"],
+    ["LAKEHOUSE_URL", ENV.lakehouseUrl, "Lakehouse writer defaults to localhost:8085"],
+    ["OLLAMA_URL", ENV.ollamaUrl, "Ollama LLM defaults to localhost:11434"],
     ["SLACK_WEBHOOK_URL", ENV.slackWebhookUrl, "Slack deploy/alert notifications disabled"],
     ["SMTP_USER", ENV.smtpUser, "Email notifications disabled"],
     ["SMTP_PASS", ENV.smtpPass, "Email notifications disabled"],

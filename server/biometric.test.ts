@@ -485,6 +485,74 @@ describe("checkActiveLiveness", () => {
       caller.checkActiveLiveness({ frames: ["f1", "f2", "f3"], challenge: "blink" })
     ).rejects.toThrow();
   });
+
+  it("allows first submission with unique frames (no DB — sandbox fallback)", async () => {
+    // getDb returns null (mocked) → replay protection skipped → sandbox response
+    mockFetch.mockRejectedValueOnce(new Error("ECONNREFUSED"));
+    const caller = biometricRouter.createCaller(makeCtx());
+    const result = await caller.checkActiveLiveness({
+      frames: ["unique-frame-A", "unique-frame-B", "unique-frame-C"],
+      challenge: "smile",
+      subjectRef: "REPLAY-TEST-001",
+    });
+    expect(result.live).toBe(true);
+    expect(result.sandbox).toBe(true);
+  });
+
+  it("replay protection: rejects duplicate frame hash when DB is available", async () => {
+    // Simulate DB returning an existing nonce for the same frame hash
+    const { getDb: mockGetDb } = await import("./db");
+    const mockSelect = vi.fn().mockResolvedValue([{ id: 99 }]);
+    const mockDbInstance = {
+      delete: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) }),
+      select: vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            limit: vi.fn().mockResolvedValue([{ id: 99 }]),
+          }),
+        }),
+      }),
+      insert: vi.fn(),
+    };
+    (mockGetDb as ReturnType<typeof vi.fn>).mockResolvedValueOnce(mockDbInstance);
+
+    const caller = biometricRouter.createCaller(makeCtx());
+    await expect(
+      caller.checkActiveLiveness({
+        frames: ["dup-frame-1", "dup-frame-2", "dup-frame-3"],
+        challenge: "blink",
+        subjectRef: "REPLAY-TEST-002",
+      })
+    ).rejects.toThrow("Duplicate liveness submission detected");
+  });
+
+  it("replay protection: stores nonce on first submission when DB is available", async () => {
+    const { getDb: mockGetDb } = await import("./db");
+    const insertValues = vi.fn().mockReturnValue({ onConflictDoNothing: vi.fn().mockReturnValue({ catch: vi.fn().mockResolvedValue(undefined) }) });
+    const mockDbInstance = {
+      delete: vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ catch: vi.fn() }) }),
+      select: vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            limit: vi.fn().mockResolvedValue([]), // no existing nonce
+          }),
+        }),
+      }),
+      insert: vi.fn().mockReturnValue({ values: insertValues }),
+    };
+    (mockGetDb as ReturnType<typeof vi.fn>).mockResolvedValueOnce(mockDbInstance);
+    mockFetch.mockRejectedValueOnce(new Error("ECONNREFUSED"));
+
+    const caller = biometricRouter.createCaller(makeCtx());
+    const result = await caller.checkActiveLiveness({
+      frames: ["new-frame-X", "new-frame-Y", "new-frame-Z"],
+      challenge: "nod",
+      subjectRef: "REPLAY-TEST-003",
+    });
+    expect(result.live).toBe(true);
+    // Verify insert was called to store the nonce
+    expect(mockDbInstance.insert).toHaveBeenCalled();
+  });
 });
 
 describe("checkAntispoofing", () => {

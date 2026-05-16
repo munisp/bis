@@ -8,8 +8,9 @@
 import { z } from "zod";
 import { protectedProcedure, router } from "./_core/trpc";
 import { TRPCError } from "@trpc/server";
+import { ENV } from "./_core/env";
 
-const LAKEHOUSE_URL = process.env.LAKEHOUSE_URL ?? "http://localhost:8085";
+const LAKEHOUSE_URL = ENV.lakehouseUrl;
 const TIMEOUT_MS = 8_000;
 
 // ── HTTP helper ───────────────────────────────────────────────────────────────

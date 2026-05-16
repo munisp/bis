@@ -13,6 +13,7 @@
 import { z } from "zod";
 import { protectedProcedure, publicProcedure, router, writeProcedure, adminProcedure } from "./_core/trpc";
 import { TRPCError } from "@trpc/server";
+import { ENV } from "./_core/env";
 import { getDb, insertBiometricSessionLog, getBiometricSessionLogs, markBiometricSessionKafkaPublished, getBiometricSessionStats } from "./db";
 import { kycRecords, biometricSessionLogs, platformSettings, biometricLivenessNonces } from "../drizzle/schema";
 import { and, eq, gte, desc, lt, sql, gt } from "drizzle-orm";
@@ -22,7 +23,7 @@ import { notifyOwner } from "./_core/notification";
 import { auditLog } from "../drizzle/schema";
 import * as crypto from "crypto";
 
-const EVENT_PROCESSOR_URL = process.env.EVENT_PROCESSOR_URL || "http://localhost:8083";
+const EVENT_PROCESSOR_URL = ENV.eventProcessorUrl;
 
 async function publishBiometricEvent(
   eventType: string,
@@ -35,7 +36,7 @@ async function publishBiometricEvent(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-BIS-Key": process.env.BIS_GATEWAY_KEY || "dev-gateway-key-change-in-prod",
+        "X-BIS-Key": ENV.bisGatewayKey,
       },
       body: JSON.stringify({
         event_type: eventType,
@@ -55,9 +56,9 @@ async function publishBiometricEvent(
   }
 }
 
-const GATEWAY_URL = process.env.BIS_GATEWAY_URL || "http://localhost:8081";
-const BIOMETRIC_ENGINE_URL = process.env.BIOMETRIC_ENGINE_URL || "http://localhost:8084";
-const GATEWAY_KEY = process.env.BIS_GATEWAY_KEY || "dev-gateway-key-change-in-prod";
+const GATEWAY_URL = ENV.bisGatewayUrl;
+const BIOMETRIC_ENGINE_URL = ENV.biometricEngineUrl;
+const GATEWAY_KEY = ENV.bisGatewayKey;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
