@@ -143,7 +143,7 @@ async function writeAuditLog(db: NonNullable<Awaited<ReturnType<typeof getDb>>>,
     const result = entry.result ?? "success";
     const createdAt = new Date();
     // Compute HMAC-SHA256 integrity hash for tamper detection
-    const AUDIT_HMAC_SECRET = process.env.AUDIT_HMAC_SECRET ?? process.env.JWT_SECRET ?? "bis-audit-hmac-dev";
+    const AUDIT_HMAC_SECRET = ENV.auditHmacSecret;
     const payload = [
       String(entry.userId ?? ""),
       entry.category,
@@ -1410,7 +1410,7 @@ const auditRouter = router({
     .mutation(async ({ input }) => {
       const db = await getDb();
       if (!db) throw new Error("Database unavailable");
-      const AUDIT_HMAC_SECRET = process.env.AUDIT_HMAC_SECRET ?? process.env.JWT_SECRET ?? "bis-audit-hmac-dev";
+      const AUDIT_HMAC_SECRET = ENV.auditHmacSecret;
       const { createHmac } = await import("crypto");
       const entries = await db.select().from(auditLog).where(inArray(auditLog.id, input.ids));
       const results = entries.map((entry) => {
@@ -3021,7 +3021,7 @@ const hostedLinkRouter = router({
         expiresAt,
         createdBy: ctx.user.id,
       }).returning();
-      return { ...link, url: `${process.env.VITE_OAUTH_PORTAL_URL ?? ''}/verify/${token}` };
+      return { ...link, url: `${ENV.oauthPortalUrl}/verify/${token}` };
     }),
 
   list: protectedProcedure

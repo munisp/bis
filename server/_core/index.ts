@@ -460,7 +460,7 @@ async function startServer() {
     // LLM check (built-in Forge API)
     const llmStart = Date.now();
     try {
-      const llmUrl = process.env.BUILT_IN_FORGE_API_URL;
+      const llmUrl = ENV.llmUrl;
       if (llmUrl) {
         const r = await fetch(`${llmUrl}/health`, { signal: AbortSignal.timeout(3000) });
         checks.llm = { status: r.ok ? "ok" : "degraded", latencyMs: Date.now() - llmStart };

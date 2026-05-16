@@ -5,6 +5,10 @@ export const ENV = {
   databaseUrl: process.env.DATABASE_URL ?? "",
   oAuthServerUrl: process.env.OAUTH_SERVER_URL ?? "",
   ownerOpenId: process.env.OWNER_OPEN_ID ?? "",
+  ownerName: process.env.OWNER_NAME ?? "",
+  oauthPortalUrl: process.env.VITE_OAUTH_PORTAL_URL ?? "",
+  oauthServerUrl: process.env.OAUTH_SERVER_URL ?? "https://api.manus.im",
+  viteAppId: process.env.VITE_APP_ID ?? "",
   isProduction: process.env.NODE_ENV === "production",
   forgeApiUrl: process.env.BUILT_IN_FORGE_API_URL ?? "",
   forgeApiKey: process.env.BUILT_IN_FORGE_API_KEY ?? "",
@@ -67,6 +71,10 @@ export const ENV = {
   ollamaAdapterUrl: process.env.OLLAMA_ADAPTER_URL ?? "http://localhost:8086",
   gatewayUrl: process.env.GATEWAY_URL ?? "http://localhost:8081",
 
+  // Audit HMAC secret (falls back to JWT_SECRET for dev convenience)
+  auditHmacSecret: process.env.AUDIT_HMAC_SECRET ?? process.env.JWT_SECRET ?? "bis-audit-hmac-dev",
+  // LLM/Forge URL (alias for forgeApiUrl, used in health checks)
+  llmUrl: process.env.BUILT_IN_FORGE_API_URL ?? "",
   // Gateway / verification engine
   // Default false in production — set GATEWAY_SANDBOX=true explicitly for sandbox/dev mode.
   // Lesson (1B payments): Never default to sandbox in production; fail loudly if real APIs are unreachable.

@@ -85,8 +85,8 @@ export const keycloakRouter = router({
       // Only allow origins that match known app origins or configured OAuth URLs.
       const parsed = new URL(input.redirectUri);
       const allowedOrigins = [
-        process.env.VITE_OAUTH_PORTAL_URL,
-        process.env.OAUTH_SERVER_URL,
+        ENV.oauthPortalUrl,
+        ENV.oauthServerUrl,
         'http://localhost:3000',
         'http://localhost:5173',
         'http://localhost:8081',

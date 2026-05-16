@@ -1196,7 +1196,7 @@ export const biometricRouter = router({
       try {
         const db = await getDb();
         if (db) {
-          const AUDIT_HMAC_SECRET = process.env.AUDIT_HMAC_SECRET ?? process.env.JWT_SECRET ?? "bis-audit-hmac-dev";
+          const AUDIT_HMAC_SECRET = ENV.auditHmacSecret;
           const category = "system" as const;
           const action = `Manual biometric archival triggered: ${result.archived} archived, ${result.deleted} deleted, ${result.errors?.length ?? 0} errors`;
           const targetRef = "biometric-archive";
@@ -1246,7 +1246,7 @@ export const biometricRouter = router({
       try {
         const db = await getDb();
         if (db) {
-          const AUDIT_HMAC_SECRET = process.env.AUDIT_HMAC_SECRET ?? process.env.JWT_SECRET ?? "bis-audit-hmac-dev";
+          const AUDIT_HMAC_SECRET = ENV.auditHmacSecret;
           const category = "system" as const;
           const action = `Manual biometric archival FAILED: ${err instanceof Error ? err.message : String(err)}`;
           const targetRef = "biometric-archive";

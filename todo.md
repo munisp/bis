@@ -2313,3 +2313,14 @@
 - [x] Fixed malformed import insertions in keycloakRouter.ts and temporal.ts
 - [x] Zero raw process.env accesses remain in any server file (outside env.ts and envValidation.ts)
 - [x] TypeScript: 0 errors; Tests: 489/612 pass (123 pre-existing ECONNREFUSED — unchanged)
+
+## Sprint v23 — Final Hardening: Zero process.env, Security Audit
+
+- [x] Added AUDIT_HMAC_SECRET, LLM_URL, VITE_OAUTH_PORTAL_URL, OAUTH_SERVER_URL, OWNER_NAME, VITE_APP_ID to ENV registry (65+ total vars)
+- [x] Updated biometric.ts, routers.ts, _core/index.ts, keycloakRouter.ts to use ENV for final raw process.env accesses
+- [x] Confirmed zero non-framework raw process.env accesses remain in any server file
+- [x] Confirmed no accidental secret logging (passwords, keys, tokens) in console.log calls
+- [x] Confirmed security middleware: helmet, cors, rate-limit, CSRF protection all active in _core/index.ts
+- [x] Confirmed no remaining "Feature coming soon" placeholder toasts in client code
+- [x] ENV registry now covers 65+ typed environment variables with safe defaults
+- [x] TypeScript: 0 errors; Tests: 489/612 pass (123 pre-existing ECONNREFUSED — unchanged)
