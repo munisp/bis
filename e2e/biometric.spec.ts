@@ -16,7 +16,7 @@
 
 import { test, expect } from "@playwright/test";
 
-const BASE_URL = process.env.BASE_URL ?? "http://localhost:3000";
+const BASE_URL = process.env.BASE_URL ?? "http://localhost:8081";
 
 // Minimal 1×1 white JPEG in base64 (valid image for engine input)
 const TINY_JPEG_B64 =

@@ -1909,12 +1909,12 @@
 - [x] todo.md: all v70 items done, 0 pending
 
 ## v71 Additions (Apr 25 2026)
-- [ ] Create bis-mobile more.tsx drawer
-- [ ] Create bis-mobile biometric.tsx screen
-- [ ] PWA UI audit and CRUD fixes across all 72 pages
-- [ ] Backend audit: all 51 routers, 57 tables, business logic
-- [ ] Security audit: 0 CVEs, 0 TypeScript errors
-- [ ] v71 archive and change manifest
+- [x] Create bis-mobile more.tsx drawer
+- [x] Create bis-mobile biometric.tsx screen
+- [x] PWA UI audit and CRUD fixes across all 72 pages
+- [x] Backend audit: all 51 routers, 57 tables, business logic
+- [x] Security audit: 0 CVEs, 0 TypeScript errors
+- [x] v71 archive and change manifest
 
 ## v71 Additions (Apr 25 2026)
 
@@ -1954,13 +1954,13 @@
 - [x] Tests: 544 passing (349 Node.js + 6 Go + 189 Python)
 
 ## v74 Additions (Apr 25 2026)
-- [ ] Beneficiary lookup (NIP name enquiry) in PaymentRails New Transfer modal
-- [ ] SAR pre-select via ?id= URL param in SARFilingPage
-- [ ] KYC expiry daily email digest scheduled task (08:00 WAT)
-- [ ] Seed data for all unseeded DB tables (Nigerian financial crime scenarios)
-- [ ] Docker Compose smoke tests and healthcheck entries for all 27 services
-- [ ] React Native parity audit: all 15 Expo screens verified
-- [ ] Deep security audit: OWASP Top 10, 0 vulnerability score
+- [x] Beneficiary lookup (NIP name enquiry) in PaymentRails New Transfer modal
+- [x] SAR pre-select via ?id= URL param in SARFilingPage
+- [x] KYC expiry daily email digest scheduled task (08:00 WAT)
+- [x] Seed data for all unseeded DB tables (Nigerian financial crime scenarios)
+- [x] Docker Compose smoke tests and healthcheck entries for all 27 services
+- [x] React Native parity audit: all 15 Expo screens verified
+- [x] Deep security audit: OWASP Top 10, 0 vulnerability score
 
 ## v74 Additions (Apr 25 2026)
 - [x] Add lookupAccount (NIP name enquiry) procedure to paymentRails router
@@ -2140,55 +2140,55 @@
 ## Comprehensive Production Hardening (Rounds 15–22)
 
 ### Phase 1 — Complete Suggested Next Steps
-- [ ] DataSources: notifyOwner when health scheduler marks source as offline
-- [ ] KYC: Post-rerun email digest via SMTP after executor batch fires
-- [ ] Onboarding: File upload field in drawer + S3 storage + enable Verify Documents on real files
+- [x] DataSources: notifyOwner when health scheduler marks source as offline
+- [x] KYC: Post-rerun email digest via SMTP after executor batch fires
+- [x] Onboarding: File upload field in drawer + S3 storage + enable Verify Documents on real files
 
 ### Phase 2 — Deep Audit & Gap Closure
-- [ ] Audit all orphan server files not imported anywhere
-- [ ] Audit all DB tables for missing CRUD procedures
-- [ ] Replace all remaining mock/setTimeout stubs with real implementations
-- [ ] Add domain business logic to generic CRUD-only routers
-- [ ] Seed data: ensure all tables have realistic seeded data
+- [x] Audit all orphan server files not imported anywhere
+- [x] Audit all DB tables for missing CRUD procedures
+- [x] Replace all remaining mock/setTimeout stubs with real implementations
+- [x] Add domain business logic to generic CRUD-only routers
+- [x] Seed data: ensure all tables have realistic seeded data
 
 ### Phase 3 — Security Hardening
-- [ ] Rate limiting on all public and auth endpoints (express-rate-limit)
-- [ ] CSRF protection on all mutation endpoints
-- [ ] Input sanitization / SQL injection prevention audit
-- [ ] Security headers (CSP, HSTS, X-Frame-Options, X-Content-Type-Options)
-- [ ] JWT rotation and refresh token security
-- [ ] Helmet.js integration
-- [ ] Vulnerability scoring and remediation report
+- [x] Rate limiting on all public and auth endpoints (express-rate-limit)
+- [x] CSRF protection on all mutation endpoints
+- [x] Input sanitization / SQL injection prevention audit
+- [x] Security headers (CSP, HSTS, X-Frame-Options, X-Content-Type-Options)
+- [x] JWT rotation and refresh token security
+- [x] Helmet.js integration
+- [x] Vulnerability scoring and remediation report
 
 ### Phase 4 — Resilience
-- [ ] Service Worker / offline support for PWA (workbox)
-- [ ] Optimistic UI with offline queue for mutations
-- [ ] WebSocket/SSE fallback to polling for low-bandwidth environments
-- [ ] Retry logic with exponential backoff on all tRPC calls
-- [ ] Connection status indicator in UI
+- [x] Service Worker / offline support for PWA (workbox)
+- [x] Optimistic UI with offline queue for mutations
+- [x] WebSocket/SSE fallback to polling for low-bandwidth environments
+- [x] Retry logic with exponential backoff on all tRPC calls
+- [x] Connection status indicator in UI
 
 ### Phase 5 — Middleware Wiring Verification
-- [ ] Verify Temporal workflow integration end-to-end
-- [ ] Verify Keycloak SSO integration
-- [ ] Verify Redis caching layer
-- [ ] Verify Permify PBAC policy enforcement
-- [ ] Verify TigerBeetle ledger integration
-- [ ] Verify Lakehouse query integration
+- [x] Verify Temporal workflow integration end-to-end
+- [x] Verify Keycloak SSO integration
+- [x] Verify Redis caching layer
+- [x] Verify Permify PBAC policy enforcement
+- [x] Verify TigerBeetle ledger integration
+- [x] Verify Lakehouse query integration
 
 ### Phase 6 — Full UI/UX Audit
-- [ ] Audit every nav link in DashboardLayout sidebar
-- [ ] Audit every page for complete CRUD (list, create, edit, delete, search)
-- [ ] Audit every button, dropdown, and search field for functionality
-- [ ] Ensure all forms have validation and error messages
-- [ ] Ensure all tables have sorting, filtering, and pagination
+- [x] Audit every nav link in DashboardLayout sidebar
+- [x] Audit every page for complete CRUD (list, create, edit, delete, search)
+- [x] Audit every button, dropdown, and search field for functionality
+- [x] Ensure all forms have validation and error messages
+- [x] Ensure all tables have sorting, filtering, and pagination
 
 ### Phase 7 — Final Tests & Smoke Tests
-- [ ] All unit tests pass (target: 600+)
-- [ ] TypeScript: 0 errors
+- [x] All unit tests pass (target: 600+)
+- [x] TypeScript: 0 errors
 - [x] Smoke test script for all major flows
 
 ### Phase 8 — Archive
-- [ ] Comprehensive tar.gz archive with manifest of changes
+- [x] Comprehensive tar.gz archive with manifest of changes
 
 ## Next Steps Sprint (May 2026)
 
@@ -2199,25 +2199,25 @@
 - [x] InsightFace ArcFace-R100: already implemented (confirmed)
 - [x] InsightFace ArcFace-R100: buffalo_l model loads on startup (confirmed)
 - [x] InsightFace ArcFace-R100: 512-d ArcFace embeddings used (confirmed)
-- [ ] BiometricSessionLogPage: time-series daily pass/fail rate chart
-- [ ] BiometricSessionLogPage: spoof-type heatmap by week
+- [x] BiometricSessionLogPage: time-series daily pass/fail rate chart
+- [x] BiometricSessionLogPage: spoof-type heatmap by week
 - [x] tRPC sessionStats procedure: date-range aggregation for charts
 
 ## Next Steps Sprint v2 (May 2026)
-- [ ] Webcam permission pre-flight check on BiometricEnrollmentPage
-- [ ] Allow-camera prompt with clear instructions
-- [ ] Fallback message for browsers blocking getUserMedia (Safari Private, Brave)
-- [ ] maxRetries prop on BiometricCaptureModal (default 3)
-- [ ] Terminal "too many failed attempts" state after exhausting retries
-- [ ] Log each retry attempt to session log with failureReasons
-- [ ] Temporal hourly workflow: query sessionStats, alert if spoof count > threshold
-- [ ] notifyOwner call in Temporal workflow for spoof-attack alerting
-- [ ] Wire Temporal workflow into Temporal worker
+- [x] Webcam permission pre-flight check on BiometricEnrollmentPage
+- [x] Allow-camera prompt with clear instructions
+- [x] Fallback message for browsers blocking getUserMedia (Safari Private, Brave)
+- [x] maxRetries prop on BiometricCaptureModal (default 3)
+- [x] Terminal "too many failed attempts" state after exhausting retries
+- [x] Log each retry attempt to session log with failureReasons
+- [x] Temporal hourly workflow: query sessionStats, alert if spoof count > threshold
+- [x] notifyOwner call in Temporal workflow for spoof-attack alerting
+- [x] Wire Temporal workflow into Temporal worker
 
 ## Sprint 6 (May 2026)
-- [ ] Biometric audit trail PDF export (format=pdf in exportSessionLogs, compliance report for NFIU/CBN)
-- [ ] Session log retention archival scheduler (weekly, 90-day cold S3 move + DB delete)
-- [ ] Biometric enrollment status badge on KYC list page (Enrolled/Pending/Failed badge)
+- [x] Biometric audit trail PDF export (format=pdf in exportSessionLogs, compliance report for NFIU/CBN)
+- [x] Session log retention archival scheduler (weekly, 90-day cold S3 move + DB delete)
+- [x] Biometric enrollment status badge on KYC list page (Enrolled/Pending/Failed badge)
 
 ## Sprint v8 — Next Steps (Round 8)
 
@@ -2250,7 +2250,7 @@
 
 - [x] Slack webhook test button on Platform Settings page
 - [x] ZeroFootprint PDF export button on completed OSINT results
-- [ ] Bulk re-verify result breakdown Dialog with CSV download
+- [x] Bulk re-verify result breakdown Dialog with CSV download
 
 ## Sprint v14 — Next Steps
 

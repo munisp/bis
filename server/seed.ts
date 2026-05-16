@@ -31,6 +31,7 @@ import {
   ruleEvaluations,
   onboardingApplications,
   biometricSessionLogs,
+  platformSettings,
 } from "../drizzle/schema";
 
 // ─── DB connection ────────────────────────────────────────────────────────────
@@ -941,6 +942,65 @@ async function seedBiometricSessionLogs(kycIds: number[]) {
   console.log(`    ✓ ${count} biometric session logs`);
 }
 
+
+// ─── Platform Settings ────────────────────────────────────────────────────────
+async function seedPlatformSettings() {
+  console.log("  Seeding platform settings…");
+  const defaults = [
+    { key: "biometric_spoof_alert_threshold", value: "5", description: "Number of spoof detections per hour before alert fires" },
+    { key: "biometric_retention_days", value: "90", description: "Days before biometric session logs are moved to cold storage" },
+    { key: "biometric_archive_s3_prefix", value: "biometric-archive/", description: "S3 key prefix for archived biometric session logs" },
+    { key: "kyc_auto_approve_threshold", value: "85", description: "Risk score below which KYC records are auto-approved" },
+    { key: "investigation_max_open_days", value: "30", description: "Maximum days an investigation can remain open before escalation" },
+    { key: "alert_auto_close_days", value: "7", description: "Days before unacknowledged low-severity alerts are auto-closed" },
+    { key: "slack_webhook_enabled", value: "false", description: "Whether Slack webhook notifications are enabled" },
+    { key: "osint_max_pillars", value: "6", description: "Maximum number of OSINT pillars per zero-footprint investigation" },
+  ];
+  for (const setting of defaults) {
+    await db.execute(
+      sql`INSERT INTO platform_settings (key, value, description, "updatedAt")
+          VALUES (${setting.key}, ${setting.value}, ${setting.description}, NOW())
+          ON CONFLICT (key) DO NOTHING`
+    );
+  }
+  const all = await db.select({ id: platformSettings.id }).from(platformSettings);
+  console.log(`    ✓ ${all.length} platform settings`);
+}
+
+// ─── Webhooks ─────────────────────────────────────────────────────────────────
+async function seedWebhooks(tenantIds: number[]) {
+  console.log("  Seeding webhooks…");
+  const existing = await db.select({ id: webhooks.id }).from(webhooks);
+  if (existing.length > 0) {
+    console.log(`    ✓ ${existing.length} webhooks (already seeded)`);
+    return;
+  }
+  const events = [
+    ["kyc.passed", "kyc.failed", "kyc.review"],
+    ["alert.created", "alert.resolved"],
+    ["investigation.completed", "investigation.flagged"],
+    ["biometric.enrolled", "biometric.spoof_detected"],
+  ];
+  const sampleUrls = [
+    "https://hooks.example.com/bis-kyc",
+    "https://api.example.com/webhooks/alerts",
+    "https://notify.example.com/investigations",
+    "https://integrations.example.com/biometric",
+  ];
+  for (let i = 0; i < Math.min(tenantIds.length, 4); i++) {
+    await db.insert(webhooks).values({
+      tenantId: tenantIds[i % tenantIds.length],
+      url: sampleUrls[i],
+      events: events[i],
+      secret: `whsec_${Math.random().toString(36).slice(2, 34)}`,
+      status: "active" as const,
+      createdAt: new Date(Date.now() - i * 86400000),
+    });
+  }
+  const all = await db.select({ id: webhooks.id }).from(webhooks);
+  console.log(`    ✓ ${all.length} webhooks`);
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -964,6 +1024,8 @@ async function main() {
     await seedRuleEvaluations(ruleIds, invRows);
     await seedOnboardingApplications();
     await seedDataSources();
+    await seedPlatformSettings();
+    await seedWebhooks(tenantIds);
     const kycRows = await db.select({ id: kycRecords.id }).from(kycRecords);
     await seedBiometricSessionLogs(kycRows.map(k => k.id));
 

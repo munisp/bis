@@ -13,7 +13,7 @@
 import { chromium } from "@playwright/test";
 import * as path from "path";
 
-const BASE_URL = process.env.BASE_URL ?? "http://localhost:3000";
+const BASE_URL = process.env.BASE_URL ?? "http://localhost:8081";
 
 async function setupAuth() {
   const browser = await chromium.launch();
