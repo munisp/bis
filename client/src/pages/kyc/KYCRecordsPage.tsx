@@ -6,13 +6,14 @@
  * action for flagged records.
  */
 
-import { useState, useMemo, useCallback, useEffect } from "react";
+import React, { useState, useMemo, useCallback, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
 import BISLayout from "@/components/BISLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import {
   Search, RefreshCw, Download, CheckCircle2, XCircle, Clock,
@@ -524,18 +525,33 @@ export default function KYCRecordsPage() {
                 </DialogTitle>
               </DialogHeader>
 
-              <div className="space-y-3 mt-2 text-sm">
-                <div className="grid grid-cols-2 gap-2">
-                  <div><span className="text-muted-foreground">Record ID:</span> <span className="font-mono">#{selected.id}</span></div>
-                  <div><span className="text-muted-foreground">Risk Score:</span> <span className={riskColor(selected.riskScore)}>{selected.riskScore ?? "—"}</span></div>
-                  <div><span className="text-muted-foreground">NIN:</span> {selected.nin ?? "—"}</div>
-                  <div><span className="text-muted-foreground">BVN:</span> {selected.bvn ?? "—"}</div>
-                  <div><span className="text-muted-foreground">DOB:</span> {selected.dob ?? "—"}</div>
-                  <div><span className="text-muted-foreground">Phone:</span> {selected.phone ?? "—"}</div>
-                  <div><span className="text-muted-foreground">Created:</span> {new Date(selected.createdAt).toLocaleString()}</div>
-                  <div><span className="text-muted-foreground">Updated:</span> {new Date(selected.updatedAt).toLocaleString()}</div>
-                </div>
-              </div>
+              <Tabs defaultValue="details" className="mt-2">
+                <TabsList className="w-full">
+                  <TabsTrigger value="details" className="flex-1">Details</TabsTrigger>
+                  <TabsTrigger value="biometric" className="flex-1">Biometric History</TabsTrigger>
+                </TabsList>
+
+                {/* ── Details Tab ── */}
+                <TabsContent value="details">
+                  <div className="space-y-3 mt-2 text-sm">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div><span className="text-muted-foreground">Record ID:</span> <span className="font-mono">#{selected.id}</span></div>
+                      <div><span className="text-muted-foreground">Risk Score:</span> <span className={riskColor(selected.riskScore)}>{selected.riskScore ?? "—"}</span></div>
+                      <div><span className="text-muted-foreground">NIN:</span> {selected.nin ?? "—"}</div>
+                      <div><span className="text-muted-foreground">BVN:</span> {selected.bvn ?? "—"}</div>
+                      <div><span className="text-muted-foreground">DOB:</span> {selected.dob ?? "—"}</div>
+                      <div><span className="text-muted-foreground">Phone:</span> {selected.phone ?? "—"}</div>
+                      <div><span className="text-muted-foreground">Created:</span> {new Date(selected.createdAt).toLocaleString()}</div>
+                      <div><span className="text-muted-foreground">Updated:</span> {new Date(selected.updatedAt).toLocaleString()}</div>
+                    </div>
+                  </div>
+                </TabsContent>
+
+                {/* ── Biometric History Tab ── */}
+                <TabsContent value="biometric">
+                  <KYCBiometricHistory kycRecordId={selected.id} />
+                </TabsContent>
+              </Tabs>
 
               <DialogFooter className="mt-4 gap-2">
                 {(selected.status === "review" || selected.status === "failed") && (
@@ -558,5 +574,117 @@ export default function KYCRecordsPage() {
         </DialogContent>
       </Dialog>
     </BISLayout>
+  );
+}
+
+// ── KYC Biometric History Component ─────────────────────────────────────────
+function KYCBiometricHistory({ kycRecordId }: { kycRecordId: number }) {
+  const { data, isLoading, error } = trpc.biometric.sessionLogs.useQuery(
+    { kycRecordId, limit: 20 },
+    { staleTime: 30000 }
+  );
+
+  const SPOOF_LABELS: Record<string, string> = {
+    printed_photo: "Printed Photo",
+    screen_replay: "Screen Replay",
+    paper_mask: "Paper Mask",
+    three_d_mask: "3D Mask",
+    deepfake: "Deepfake",
+    high_quality_photo: "High-Quality Photo",
+  };
+
+  const VERIFICATION_ICONS: Record<string, React.ReactNode> = {
+    passive_liveness: <Fingerprint className="w-3 h-3" />,
+    active_liveness: <Eye className="w-3 h-3" />,
+    antispoofing: <ShieldCheck className="w-3 h-3" />,
+    face_match: <CheckCircle2 className="w-3 h-3" />,
+    full_verify: <ShieldCheck className="w-3 h-3" />,
+  };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-8 text-muted-foreground">
+        <Loader2 className="w-4 h-4 animate-spin mr-2" />
+        Loading biometric history…
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center gap-2 py-6 text-sm text-red-500">
+        <AlertTriangle className="w-4 h-4" />
+        Failed to load biometric history.
+      </div>
+    );
+  }
+
+  const logs = data?.data ?? [];
+
+  if (logs.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-8 text-muted-foreground text-sm gap-2">
+        <Fingerprint className="w-8 h-8 opacity-30" />
+        <p>No biometric sessions recorded for this subject.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-2 max-h-72 overflow-y-auto space-y-2 pr-1">
+      {logs.map((log: any) => (
+        <div
+          key={log.id}
+          className={`rounded-lg border p-3 text-xs space-y-1 ${
+            log.overallVerified
+              ? "border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-900/10"
+              : "border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-900/10"
+          }`}
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1.5 font-medium">
+              {VERIFICATION_ICONS[log.verificationType] ?? <ShieldCheck className="w-3 h-3" />}
+              <span className="capitalize">{(log.verificationType ?? "unknown").replace(/_/g, " ")}</span>
+            </div>
+            <span className={`font-semibold ${log.overallVerified ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
+              {log.overallVerified ? "PASS" : "FAIL"}
+            </span>
+          </div>
+
+          <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-muted-foreground">
+            {log.livenessScore != null && (
+              <span>Liveness: <span className="text-foreground font-medium">{(log.livenessScore * 100).toFixed(1)}%</span></span>
+            )}
+            {log.matchScore != null && (
+              <span>Match: <span className="text-foreground font-medium">{(log.matchScore * 100).toFixed(1)}%</span></span>
+            )}
+            {log.antiSpoofScore != null && (
+              <span>Anti-spoof: <span className="text-foreground font-medium">{(log.antiSpoofScore * 100).toFixed(1)}%</span></span>
+            )}
+            {log.antiSpoofType && log.antiSpoofType !== "none" && (
+              <span className="text-red-500 font-medium">
+                ⚠ {SPOOF_LABELS[log.antiSpoofType] ?? log.antiSpoofType}
+              </span>
+            )}
+          </div>
+
+          {log.failureReasons && log.failureReasons.length > 0 && (
+            <div className="text-red-500">
+              {(log.failureReasons as string[]).join(" · ")}
+            </div>
+          )}
+
+          <div className="text-muted-foreground">
+            {new Date(log.createdAt).toLocaleString()}
+          </div>
+        </div>
+      ))}
+
+      {data?.total != null && data.total > logs.length && (
+        <p className="text-center text-xs text-muted-foreground pt-1">
+          Showing {logs.length} of {data.total} sessions
+        </p>
+      )}
+    </div>
   );
 }

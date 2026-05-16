@@ -67,6 +67,12 @@ import {
   Eye,
   Settings2,
   FileJson,
+  FileText,
+  Loader2,
+  Archive,
+  Clock,
+  CalendarClock,
+  HardDrive,
 } from 'lucide-react';
 
 const SPOOF_COLORS: Record<string, string> = {
@@ -193,7 +199,38 @@ export default function BiometricSessionLogPage() {
   const [localThreshold, setLocalThreshold] = useState(5);
   const [localNotifEnabled, setLocalNotifEnabled] = useState(true);
   const [isExporting, setIsExporting] = useState(false);
+  const [isPdfExporting, setIsPdfExporting] = useState(false);
   const utils = trpc.useUtils();
+
+  const archivalStatusQuery = trpc.biometric.archivalStatus.useQuery();
+
+  const pdfExportMutation = trpc.biometric.exportSessionLogs.useMutation({
+    onSuccess: (data: any) => {
+      // Trigger browser download via a temporary anchor element
+      const a = document.createElement('a');
+      a.href = data.url;
+      a.download = `biometric-audit-report-${new Date().toISOString().slice(0, 10)}.pdf`;
+      a.target = '_blank';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      toast.success(`PDF report ready — ${data.rowCount} sessions exported.`);
+      setIsPdfExporting(false);
+    },
+    onError: (err: any) => {
+      toast.error(`PDF export failed: ${err.message}`);
+      setIsPdfExporting(false);
+    },
+  });
+
+  function handlePdfExport() {
+    setIsPdfExporting(true);
+    pdfExportMutation.mutate({
+      days: statsDays,
+      format: 'pdf',
+      subjectRef: search.trim() || undefined,
+    });
+  }
 
 
   const thresholdQuery = trpc.biometric.getSpoofAlertThreshold.useQuery(undefined, {
@@ -325,6 +362,17 @@ export default function BiometricSessionLogPage() {
             <Button
               variant="outline"
               size="sm"
+              disabled={isPdfExporting}
+              onClick={handlePdfExport}
+            >
+              {isPdfExporting
+                ? <Loader2 size={14} className="mr-1 animate-spin" />
+                : <FileText size={14} className="mr-1" />}
+              {isPdfExporting ? 'Generating PDF…' : 'Export PDF Report'}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
               onClick={() => setShowThresholdConfig(v => !v)}
             >
               <Settings2 size={14} className="mr-1" /> Alert Threshold
@@ -413,6 +461,65 @@ export default function BiometricSessionLogPage() {
             </CardContent>
           </Card>
         )}
+
+        {/* Archival Status Card */}
+        <Card className="border-dashed border-muted-foreground/30">
+          <CardHeader className="pb-2 flex flex-row items-center gap-2">
+            <Archive size={15} className="text-muted-foreground" />
+            <CardTitle className="text-sm font-medium">Cold-Storage Archival Status</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {archivalStatusQuery.isLoading ? (
+              <div className="flex items-center gap-2 text-muted-foreground text-sm">
+                <Loader2 size={14} className="animate-spin" /> Loading archival status…
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-xs text-muted-foreground flex items-center gap-1">
+                    <HardDrive size={11} /> Eligible Rows
+                  </span>
+                  <span className="text-lg font-semibold tabular-nums">
+                    {archivalStatusQuery.data?.eligibleRows ?? 0}
+                  </span>
+                  <span className="text-[10px] text-muted-foreground">rows &gt; 90 days old</span>
+                </div>
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-xs text-muted-foreground flex items-center gap-1">
+                    <Clock size={11} /> Last Archival Run
+                  </span>
+                  <span className="text-sm font-medium">
+                    {archivalStatusQuery.data?.lastArchivalRun
+                      ? new Date(archivalStatusQuery.data.lastArchivalRun).toLocaleString()
+                      : <span className="text-muted-foreground italic">Never run</span>}
+                  </span>
+                </div>
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-xs text-muted-foreground flex items-center gap-1">
+                    <CalendarClock size={11} /> Next Scheduled Run
+                  </span>
+                  <span className="text-sm font-medium">
+                    {archivalStatusQuery.data?.nextArchivalRun
+                      ? new Date(archivalStatusQuery.data.nextArchivalRun).toLocaleString()
+                      : '—'}
+                  </span>
+                  <span className="text-[10px] text-muted-foreground">Sunday 03:00 UTC</span>
+                </div>
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-xs text-muted-foreground flex items-center gap-1">
+                    <Archive size={11} /> Cold Storage
+                  </span>
+                  <span className="text-sm font-mono">
+                    {archivalStatusQuery.data?.coldStoragePrefix ?? 'biometric-archive/'}
+                  </span>
+                  <span className="text-[10px] text-muted-foreground">
+                    Retention: {archivalStatusQuery.data?.retentionDays ?? 90} days hot
+                  </span>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
         {/* Time-series pass/fail chart + spoof-type breakdown — backed by sessionStats tRPC */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

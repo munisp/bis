@@ -1031,4 +1031,52 @@ export const biometricRouter = router({
         generatedAt: new Date(),
       };
     }),
+
+  // ── Archival Status ─────────────────────────────────────────────────────────
+  // Returns count of rows eligible for archival (older than 90 days),
+  // last archival run timestamp, and next scheduled run.
+  archivalStatus: protectedProcedure.query(async () => {
+    const db = await getDb();
+    if (!db) return {
+      eligibleRows: 0,
+      lastArchivalRun: null,
+      nextArchivalRun: null,
+      coldStoragePrefix: "biometric-archive/",
+      retentionDays: 90,
+    };
+
+    const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+
+    // Count rows older than 90 days still in hot table
+    const { sql: sqlFn } = await import("drizzle-orm");
+    const [countResult] = await db
+      .select({ count: sqlFn<number>`count(*)` })
+      .from(biometricSessionLogs)
+      .where(sqlFn`${biometricSessionLogs.createdAt} < ${cutoff}`);
+    const eligibleRows = Number(countResult?.count ?? 0);
+
+    // Read last archival run from platformSettings
+    const [setting] = await db
+      .select()
+      .from(platformSettings)
+      .where(eq(platformSettings.key, "biometric_last_archival_run"))
+      .limit(1);
+    const lastArchivalRun = setting?.value ? new Date(setting.value as string) : null;
+
+    // Next run: next Sunday at 03:00 UTC
+    const now = new Date();
+    const daysUntilSunday = (7 - now.getUTCDay()) % 7 || 7;
+    const nextSunday = new Date(Date.UTC(
+      now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + daysUntilSunday,
+      3, 0, 0, 0
+    ));
+
+    return {
+      eligibleRows,
+      lastArchivalRun,
+      nextArchivalRun: nextSunday,
+      coldStoragePrefix: "biometric-archive/",
+      retentionDays: 90,
+    };
+  }),
 });
