@@ -2233,3 +2233,9 @@
 - [x] Archival audit log: write audit_log entry on triggerArchival (who, rows archived, errors)
 - [x] Re-enrollment owner notification: call notifyOwner after successful biometric.enroll
 - [x] Archive Now confirmation dialog: require typing "ARCHIVE" before executing manual archival
+
+## Sprint v11 — Dry-run UI, ZFP History, Cooldown Bypass
+
+- [x] Dry-run preview UI on Archival Status card (Preview Impact button + modal)
+- [x] ZeroFootprint history tab with searchable past OSINT reports
+- [x] Cooldown bypass for admins in biometric.enroll (bypassCooldown input)

@@ -8,6 +8,7 @@
 
 import React, { useState, useMemo, useCallback, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
+import { useAuth } from "@/_core/hooks/useAuth";
 import BISLayout from "@/components/BISLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -106,6 +107,8 @@ export default function KYCRecordsPage() {
   const [reEnrollingRecord, setReEnrollingRecord] = useState<KYCRecord | null>(null);
   const [isReEnrolling, setIsReEnrolling] = useState(false);
   const utils = trpc.useUtils();
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
 
   const enrollMutation = trpc.biometric.enroll.useMutation({
     onSuccess: (data: any) => {
@@ -135,6 +138,8 @@ export default function KYCRecordsPage() {
         ? `NIN-${reEnrollingRecord.nin}`
         : `kyc-${reEnrollingRecord.id}`,
       kycRecordId: reEnrollingRecord.id,
+      // Admin-only: bypass 24h cooldown for emergency re-enrollments
+      bypassCooldown: isAdmin ? true : undefined,
     });
   }
 

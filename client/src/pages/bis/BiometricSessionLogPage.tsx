@@ -254,6 +254,22 @@ export default function BiometricSessionLogPage() {
     },
   });
 
+  // Dry-run preview state
+  const [showDryRunModal, setShowDryRunModal] = useState(false);
+  const [dryRunResult, setDryRunResult] = useState<{
+    eligibleRows: number; retentionDays: number; cutoff: string;
+    coldStoragePrefix: string; message: string;
+  } | null>(null);
+  const dryRunMutation = trpc.biometric.triggerArchival.useMutation({
+    onSuccess: (data: any) => {
+      if (data.dryRun) {
+        setDryRunResult(data);
+        setShowDryRunModal(true);
+      }
+    },
+    onError: (err: any) => toast.error(`Dry run failed: ${err.message}`),
+  });
+
   const pdfExportMutation = trpc.biometric.exportSessionLogs.useMutation({
     onSuccess: (data: any) => {
       // Trigger browser download via a temporary anchor element
@@ -530,6 +546,17 @@ export default function BiometricSessionLogPage() {
                   }}
                 >
                   <Pencil size={12} className="mr-1" /> Retention Policy
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={dryRunMutation.isPending}
+                  onClick={() => dryRunMutation.mutate({ dryRun: true })}
+                >
+                  {dryRunMutation.isPending
+                    ? <Loader2 size={12} className="mr-1 animate-spin" />
+                    : <Eye size={12} className="mr-1" />}
+                  Preview Impact
                 </Button>
                 <Button
                   variant="outline"
@@ -925,6 +952,57 @@ export default function BiometricSessionLogPage() {
           )}
         </SheetContent>
       </Sheet>
+
+      {/* Dry-Run Preview Modal */}
+      <AlertDialog open={showDryRunModal} onOpenChange={setShowDryRunModal}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <Eye size={16} className="text-orange-500" /> Archival Impact Preview
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3 text-sm">
+                <p className="text-muted-foreground">
+                  This is a <strong>dry run</strong> — no data will be moved. Review the impact before committing.
+                </p>
+                {dryRunResult && (
+                  <div className="grid grid-cols-2 gap-3 mt-2">
+                    <div className="bg-muted rounded-lg p-3">
+                      <div className="text-xs text-muted-foreground mb-1">Rows to archive</div>
+                      <div className="text-2xl font-bold text-orange-500">{dryRunResult.eligibleRows.toLocaleString()}</div>
+                    </div>
+                    <div className="bg-muted rounded-lg p-3">
+                      <div className="text-xs text-muted-foreground mb-1">Retention threshold</div>
+                      <div className="text-2xl font-bold">{dryRunResult.retentionDays}d</div>
+                    </div>
+                    <div className="bg-muted rounded-lg p-3 col-span-2">
+                      <div className="text-xs text-muted-foreground mb-1">Cutoff date</div>
+                      <div className="font-mono text-sm">{new Date(dryRunResult.cutoff).toLocaleString()}</div>
+                    </div>
+                    <div className="bg-muted rounded-lg p-3 col-span-2">
+                      <div className="text-xs text-muted-foreground mb-1">Cold storage prefix</div>
+                      <div className="font-mono text-sm">{dryRunResult.coldStoragePrefix}</div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Close</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-orange-600 hover:bg-orange-700 text-white"
+              onClick={() => {
+                setShowDryRunModal(false);
+                setArchiveConfirmText('');
+                setShowArchiveConfirm(true);
+              }}
+            >
+              Proceed to Archive Now
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Archive Now Confirmation Dialog */}
       <AlertDialog open={showArchiveConfirm} onOpenChange={setShowArchiveConfirm}>

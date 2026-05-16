@@ -148,7 +148,9 @@ const NIGERIAN_STATES = [
 ];
 
 function ZeroFootprintPageInner() {
-  const [view, setView] = useState<"intro" | "form" | "active" | "result">("intro");
+  const [view, setView] = useState<"intro" | "form" | "active" | "result" | "history">("intro");
+  const [historySearch, setHistorySearch] = useState("");
+  const historyQuery = trpc.screening.zeroFootprintHistory.useQuery({ limit: 50 });
   const [form, setForm] = useState<ZFFormData>({
     subjectId: "", subjectName: "", subjectAddress: "", state: "Lagos", lga: "",
     phone: "", statedEmployer: "", statedIncome: "",
@@ -249,11 +251,11 @@ function ZeroFootprintPageInner() {
             </div>
           </div>
           <div className="flex gap-2">
-            {["intro", "form"].map(v => (
-              <button key={v} onClick={() => setView(v as any)}
+            {(["intro", "form", "history"] as const).map(v => (
+              <button key={v} onClick={() => setView(v)}
                 className={`px-4 py-2 rounded-lg text-sm font-medium capitalize transition-all ${view === v ? "bg-orange-600 text-white" : "text-muted-foreground hover:bg-muted"}`}
               >
-                {v === "intro" ? "Overview" : "New Investigation"}
+                {v === "intro" ? "Overview" : v === "form" ? "New Investigation" : "History"}
               </button>
             ))}
           </div>
@@ -547,6 +549,74 @@ function ZeroFootprintPageInner() {
                 <span>⬇️</span> Download Report
               </button>
             </div>
+          </div>
+        )}
+        {/* History Tab */}
+        {view === "history" && (
+          <div className="space-y-4">
+            <div className="flex items-center gap-3">
+              <input
+                type="text"
+                placeholder="Search by subject name or reference ID…"
+                value={historySearch}
+                onChange={e => setHistorySearch(e.target.value)}
+                className="flex-1 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 bg-card"
+              />
+              <button onClick={() => historyQuery.refetch()} className="px-3 py-2 rounded-lg border border-border text-sm text-muted-foreground hover:bg-muted">
+                ↻ Refresh
+              </button>
+            </div>
+            {historyQuery.isLoading ? (
+              <div className="text-center py-12 text-muted-foreground text-sm">Loading history…</div>
+            ) : historyQuery.data?.length === 0 ? (
+              <div className="text-center py-12 text-muted-foreground text-sm">No past investigations found.</div>
+            ) : (
+              <div className="space-y-3">
+                {(historyQuery.data ?? [])
+                  .filter(r => {
+                    if (!historySearch) return true;
+                    const q = historySearch.toLowerCase();
+                    return (r.subjectName ?? "").toLowerCase().includes(q) ||
+                      (r.requestRef ?? "").toLowerCase().includes(q);
+                  })
+                  .map(record => {
+                    const result = record.result as any;
+                    const osint = result?.osintReport as string | undefined;
+                    return (
+                      <div key={record.id} className="bg-card border border-border rounded-xl p-4 space-y-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <div className="font-semibold text-sm text-muted-foreground">{record.subjectName}</div>
+                            <div className="font-mono text-xs text-muted-foreground">{record.requestRef}</div>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            {record.riskScore !== null && (
+                              <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                                (record.riskScore ?? 0) >= 70 ? "bg-red-100 text-red-700" :
+                                (record.riskScore ?? 0) >= 40 ? "bg-amber-100 text-amber-700" :
+                                "bg-emerald-100 text-emerald-700"
+                              }`}>
+                                Risk: {record.riskScore}
+                              </span>
+                            )}
+                            <span className="text-xs text-muted-foreground">
+                              {record.createdAt ? new Date(record.createdAt).toLocaleDateString() : ""}
+                            </span>
+                          </div>
+                        </div>
+                        {osint && (
+                          <details className="text-xs">
+                            <summary className="cursor-pointer text-orange-600 hover:text-orange-700 font-medium">View OSINT Report</summary>
+                            <div className="mt-2 prose prose-xs max-w-none text-muted-foreground border-t border-border pt-2">
+                              <Streamdown>{osint}</Streamdown>
+                            </div>
+                          </details>
+                        )}
+                      </div>
+                    );
+                  })}
+              </div>
+            )}
           </div>
         )}
       </div>

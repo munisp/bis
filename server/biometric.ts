@@ -183,6 +183,8 @@ export const biometricRouter = router({
         imageBase64: z.string().max(5_500_000),
         subjectRef: z.string().max(128),
         kycRecordId: z.number().optional(),
+        // Admin-only: bypass the 24h re-enrollment cooldown for emergency re-enrollments
+        bypassCooldown: z.boolean().optional(),
       })
     )
     .mutation(async ({ input, ctx }) => {
@@ -190,27 +192,32 @@ export const biometricRouter = router({
       // Reject re-enrollment if the same kycRecordId was successfully enrolled
       // within the last 24 hours to prevent rapid face-embedding cycling.
       if (input.kycRecordId) {
-        const db = await getDb();
-        if (db) {
-          const cooldownCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
-          const [recentEnrollment] = await db
-            .select({ id: biometricSessionLogs.id, createdAt: biometricSessionLogs.createdAt })
-            .from(biometricSessionLogs)
-            .where(
-              and(
-                eq(biometricSessionLogs.kycRecordId, input.kycRecordId),
-                eq(biometricSessionLogs.overallVerified, true),
-                gte(biometricSessionLogs.createdAt, cooldownCutoff)
+        // bypassCooldown is admin-only — non-admins cannot set it to true
+        const isAdmin = ctx.user?.role === 'admin';
+        const shouldBypass = input.bypassCooldown === true && isAdmin;
+        if (!shouldBypass) {
+          const db = await getDb();
+          if (db) {
+            const cooldownCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+            const [recentEnrollment] = await db
+              .select({ id: biometricSessionLogs.id, createdAt: biometricSessionLogs.createdAt })
+              .from(biometricSessionLogs)
+              .where(
+                and(
+                  eq(biometricSessionLogs.kycRecordId, input.kycRecordId),
+                  eq(biometricSessionLogs.overallVerified, true),
+                  gte(biometricSessionLogs.createdAt, cooldownCutoff)
+                )
               )
-            )
-            .orderBy(desc(biometricSessionLogs.createdAt))
-            .limit(1);
-          if (recentEnrollment) {
-            const nextAllowedAt = new Date(recentEnrollment.createdAt.getTime() + 24 * 60 * 60 * 1000);
-            throw new TRPCError({
-              code: "TOO_MANY_REQUESTS",
-              message: `Re-enrollment cooldown active. This subject was successfully enrolled within the last 24 hours. Next re-enrollment allowed after ${nextAllowedAt.toISOString()}.`,
-            });
+              .orderBy(desc(biometricSessionLogs.createdAt))
+              .limit(1);
+            if (recentEnrollment) {
+              const nextAllowedAt = new Date(recentEnrollment.createdAt.getTime() + 24 * 60 * 60 * 1000);
+              throw new TRPCError({
+                code: "TOO_MANY_REQUESTS",
+                message: `Re-enrollment cooldown active. This subject was successfully enrolled within the last 24 hours. Next re-enrollment allowed after ${nextAllowedAt.toISOString()}.`,
+              });
+            }
           }
         }
       }
