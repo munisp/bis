@@ -14,8 +14,8 @@ import { z } from "zod";
 import { protectedProcedure, publicProcedure, router, writeProcedure } from "./_core/trpc";
 import { TRPCError } from "@trpc/server";
 import { getDb, insertBiometricSessionLog, getBiometricSessionLogs, markBiometricSessionKafkaPublished, getBiometricSessionStats } from "./db";
-import { kycRecords, biometricSessionLogs } from "../drizzle/schema";
-import { eq } from "drizzle-orm";
+import { kycRecords, biometricSessionLogs, platformSettings } from "../drizzle/schema";
+import { and, eq, gte, desc } from "drizzle-orm";
 import { storagePut } from "./storage";
 import { invokeLLM } from "./_core/llm";
 
@@ -818,5 +818,123 @@ export const biometricRouter = router({
       });
       const safeList = Array.isArray(logs) ? logs : [];
       return { data: safeList, total: safeList.length };
+    }),
+
+  // ── Spoof Alert Threshold Settings ──────────────────────────────────────────
+
+  getSpoofAlertThreshold: protectedProcedure.query(async () => {
+    const db = await getDb();
+    if (!db) return { perTypeThreshold: 5, notificationsEnabled: true };
+    const [row] = await db
+      .select()
+      .from(platformSettings)
+      .where(eq(platformSettings.key, "biometric_spoof_alert_threshold"))
+      .limit(1);
+    const config = row?.value as any;
+    return {
+      perTypeThreshold: Number(config?.perTypeThreshold ?? 5),
+      notificationsEnabled: Boolean(config?.notificationsEnabled ?? true),
+    };
+  }),
+
+  setSpoofAlertThreshold: writeProcedure
+    .input(z.object({
+      perTypeThreshold: z.number().int().min(1).max(100),
+      notificationsEnabled: z.boolean(),
+    }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
+      const existing = await db
+        .select({ id: platformSettings.id })
+        .from(platformSettings)
+        .where(eq(platformSettings.key, "biometric_spoof_alert_threshold"))
+        .limit(1);
+      if (existing.length > 0) {
+        await db
+          .update(platformSettings)
+          .set({ value: input, updatedAt: new Date() })
+          .where(eq(platformSettings.key, "biometric_spoof_alert_threshold"));
+      } else {
+        await db.insert(platformSettings).values({
+          key: "biometric_spoof_alert_threshold",
+          value: input,
+        });
+      }
+      return { success: true };
+    }),
+
+  // ── Session Log Export ───────────────────────────────────────────────────────
+
+  exportSessionLogs: protectedProcedure
+    .input(z.object({
+      subjectRef: z.string().optional(),
+      kycRecordId: z.string().optional(),
+      days: z.number().int().min(1).max(365).default(30),
+      format: z.enum(["csv", "json"]).default("csv"),
+    }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
+
+      const since = new Date(Date.now() - input.days * 24 * 3_600_000);
+      const conditions = [gte(biometricSessionLogs.createdAt, since)];
+      if (input.subjectRef) conditions.push(eq(biometricSessionLogs.subjectRef, input.subjectRef));
+      if (input.kycRecordId) conditions.push(eq(biometricSessionLogs.kycRecordId, parseInt(input.kycRecordId, 10)));
+
+      const rows = await db
+        .select()
+        .from(biometricSessionLogs)
+        .where(and(...conditions))
+        .orderBy(desc(biometricSessionLogs.createdAt))
+        .limit(10000);
+
+      let content: string;
+      let contentType: string;
+      let ext: string;
+
+      if (input.format === "csv") {
+        const headers = [
+          "id", "subjectRef", "kycRecordId", "overallVerified", "overallScore",
+          "livenessScore", "livenessLive", "activeLivenessScore", "activeLivenessLive",
+          "activeLivenessChallenge", "antiSpoofScore", "antiSpoofGenuine", "antiSpoofType",
+          "matchScore", "matchDecision", "faceDetected", "faceCount",
+          "embeddingDimension", "embeddingModel", "failureReasons",
+          "kafkaPublished", "latencyMs", "engineVersion", "createdAt",
+        ];
+        const csvRows = rows.map(r => [
+          r.id, r.subjectRef ?? "", r.kycRecordId ?? "",
+          r.overallVerified ? "true" : "false", r.overallScore ?? "",
+          r.livenessScore ?? "", r.livenessLive ? "true" : "false",
+          r.activeLivenessScore ?? "", r.activeLivenessLive ? "true" : "false",
+          r.activeLivenessChallenge ?? "",
+          r.antiSpoofScore ?? "", r.antiSpoofGenuine ? "true" : "false", r.antiSpoofType ?? "",
+          r.matchScore ?? "", r.matchDecision ? "true" : "false",
+          r.faceDetected ? "true" : "false", r.faceCount ?? "",
+          r.embeddingDimension ?? "", r.embeddingModel ?? "",
+          JSON.stringify(r.failureReasons ?? []).replace(/"/g, "'"),
+          r.kafkaPublished ? "true" : "false",
+          r.latencyMs ?? "", r.engineVersion ?? "",
+          r.createdAt?.toISOString() ?? "",
+        ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(","));
+        content = [headers.join(","), ...csvRows].join("\n");
+        contentType = "text/csv";
+        ext = "csv";
+      } else {
+        content = JSON.stringify(rows, null, 2);
+        contentType = "application/json";
+        ext = "json";
+      }
+
+      const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+      const fileKey = `biometric-exports/session-logs-${timestamp}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+      const { url } = await storagePut(fileKey, Buffer.from(content, "utf-8"), contentType);
+
+      return {
+        url,
+        rowCount: rows.length,
+        format: input.format,
+        generatedAt: new Date(),
+      };
     }),
 });

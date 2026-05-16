@@ -51,6 +51,10 @@ import {
   ResponsiveContainer,
   Cell,
 } from 'recharts';
+import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
+import { Slider } from '@/components/ui/slider';
+import { toast } from 'sonner';
 import {
   Shield,
   ShieldCheck,
@@ -61,6 +65,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Eye,
+  Settings2,
+  FileJson,
 } from 'lucide-react';
 
 const SPOOF_COLORS: Record<string, string> = {
@@ -183,7 +189,42 @@ export default function BiometricSessionLogPage() {
   const [resultFilter, setResultFilter] = useState<'all' | 'passed' | 'failed'>('all');
   const [selected, setSelected] = useState<SessionLog | null>(null);
   const [statsDays, setStatsDays] = useState(30);
+  const [showThresholdConfig, setShowThresholdConfig] = useState(false);
+  const [localThreshold, setLocalThreshold] = useState(5);
+  const [localNotifEnabled, setLocalNotifEnabled] = useState(true);
+  const [isExporting, setIsExporting] = useState(false);
   const utils = trpc.useUtils();
+
+
+  const thresholdQuery = trpc.biometric.getSpoofAlertThreshold.useQuery(undefined, {
+    onSuccess: (data: any) => {
+      setLocalThreshold(data.perTypeThreshold);
+      setLocalNotifEnabled(data.notificationsEnabled);
+    },
+  } as any);
+
+  const setThresholdMutation = trpc.biometric.setSpoofAlertThreshold.useMutation({
+    onSuccess: () => {
+      utils.biometric.getSpoofAlertThreshold.invalidate();
+      setShowThresholdConfig(false);
+      toast.success('Threshold saved — spoof alert threshold updated successfully.');
+    },
+    onError: (err: any) => {
+      toast.error(`Save failed: ${err.message}`);
+    },
+  });
+
+  const exportMutation = trpc.biometric.exportSessionLogs.useMutation({
+    onSuccess: (data: any) => {
+      window.open(data.url, '_blank');
+      toast.success(`Export ready (${data.rowCount} rows) — file opened in a new tab.`);
+      setIsExporting(false);
+    },
+    onError: (err: any) => {
+      toast.error(`Export failed: ${err.message}`);
+      setIsExporting(false);
+    },
+  });
 
   const statsQuery = trpc.biometric.sessionStats.useQuery(
     { days: statsDays },
@@ -262,12 +303,31 @@ export default function BiometricSessionLogPage() {
               Audit trail of all biometric verification sessions — liveness, antispoofing, face match, and full verify.
             </p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             <Button variant="outline" size="sm" onClick={() => utils.biometric.sessionLogs.invalidate()}>
               <RefreshCw size={14} className="mr-1" /> Refresh
             </Button>
             <Button variant="outline" size="sm" onClick={exportCSV}>
-              <Download size={14} className="mr-1" /> Export CSV
+              <Download size={14} className="mr-1" /> Export CSV (page)
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={isExporting || exportMutation.isPending}
+              onClick={() => {
+                setIsExporting(true);
+                exportMutation.mutate({ days: statsDays, format: 'csv', subjectRef: search.trim() || undefined });
+              }}
+            >
+              <FileJson size={14} className="mr-1" />
+              {exportMutation.isPending ? 'Exporting…' : 'Export Full (S3)'}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowThresholdConfig(v => !v)}
+            >
+              <Settings2 size={14} className="mr-1" /> Alert Threshold
             </Button>
           </div>
         </div>
@@ -305,6 +365,54 @@ export default function BiometricSessionLogPage() {
             </Card>
           ))}
         </div>
+
+        {/* Spoof Alert Threshold Config Card */}
+        {showThresholdConfig && (
+          <Card className="border-orange-200 dark:border-orange-800">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium flex items-center gap-2">
+                <Settings2 size={14} className="text-orange-500" />
+                Spoof Attack Alert Threshold
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-xs text-muted-foreground">
+                Notify when any single spoof-attack type exceeds this count within a 24-hour window (ISO 30107-3 compliance).
+                Current threshold: <strong>{thresholdQuery.data?.perTypeThreshold ?? localThreshold}</strong> attacks per type per day.
+              </p>
+              <div className="space-y-2">
+                <Label className="text-xs">Per-type threshold: {localThreshold}</Label>
+                <Slider
+                  min={1}
+                  max={50}
+                  step={1}
+                  value={[localThreshold]}
+                  onValueChange={([v]: number[]) => setLocalThreshold(v)}
+                  className="w-full max-w-sm"
+                />
+                <p className="text-[10px] text-muted-foreground">Alert fires when any attack type count ≥ {localThreshold} in 24 h</p>
+              </div>
+              <div className="flex items-center justify-between max-w-sm">
+                <Label htmlFor="biometric-notif-toggle" className="text-xs text-muted-foreground">Enable owner notifications</Label>
+                <Switch
+                  id="biometric-notif-toggle"
+                  checked={localNotifEnabled}
+                  onCheckedChange={setLocalNotifEnabled}
+                />
+              </div>
+              <div className="flex gap-2">
+                <Button size="sm" variant="ghost" onClick={() => setShowThresholdConfig(false)}>Cancel</Button>
+                <Button
+                  size="sm"
+                  disabled={setThresholdMutation.isPending}
+                  onClick={() => setThresholdMutation.mutate({ perTypeThreshold: localThreshold, notificationsEnabled: localNotifEnabled })}
+                >
+                  {setThresholdMutation.isPending ? 'Saving…' : 'Save Threshold'}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Time-series pass/fail chart + spoof-type breakdown — backed by sessionStats tRPC */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

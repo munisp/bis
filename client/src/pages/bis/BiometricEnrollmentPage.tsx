@@ -561,6 +561,27 @@ function BiometricEnrollmentPageInner() {
     }
   }, []);
 
+  // Active liveness challenge types (ISO 30107-3 anti-replay)
+  const CHALLENGE_TYPES: Array<'blink' | 'turn_left' | 'turn_right' | 'smile' | 'nod'> = ['blink', 'turn_left', 'turn_right', 'smile', 'nod'];
+
+  /** Picks a random challenge different from the current one to prevent replay attacks */
+  const randomiseChallenge = useCallback(() => {
+    const pool = (challenges as Array<{ id: string }>).length > 0
+      ? (challenges as Array<{ id: string }>).map(c => c.id as typeof CHALLENGE_TYPES[number])
+      : CHALLENGE_TYPES;
+    const others = pool.filter(c => c !== selectedChallenge);
+    const next = others.length > 0
+      ? others[Math.floor(Math.random() * others.length)]
+      : pool[Math.floor(Math.random() * pool.length)];
+    setSelectedChallenge(next);
+  }, [challenges, selectedChallenge]);
+
+  // Auto-randomise challenge when entering the liveness step
+  useEffect(() => {
+    if (step === 'liveness') randomiseChallenge();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step]);
+
   // Run permission check when step changes to liveness
   useEffect(() => {
     if (step === 'liveness' && cameraPermission === 'unknown') {
@@ -967,7 +988,7 @@ function BiometricEnrollmentPageInner() {
       {/* BiometricCaptureModal — 3-stage sequential verification */}
       <BiometricCaptureModal
         open={showCaptureModal}
-        onClose={() => setShowCaptureModal(false)}
+        onClose={() => { setShowCaptureModal(false); randomiseChallenge(); }}
         onSuccess={handleBiometricCaptureSuccess}
         subjectRef={state.subjectInfo.nin || state.subjectInfo.bvn || state.subjectInfo.fullName || 'enrollment'}
         challenge={selectedChallenge}
