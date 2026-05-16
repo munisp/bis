@@ -871,7 +871,7 @@ export const biometricRouter = router({
       subjectRef: z.string().optional(),
       kycRecordId: z.string().optional(),
       days: z.number().int().min(1).max(365).default(30),
-      format: z.enum(["csv", "json"]).default("csv"),
+      format: z.enum(["csv", "json", "pdf"]).default("csv"),
     }))
     .mutation(async ({ input }) => {
       const db = await getDb();
@@ -920,6 +920,100 @@ export const biometricRouter = router({
         content = [headers.join(","), ...csvRows].join("\n");
         contentType = "text/csv";
         ext = "csv";
+      } else if (input.format === "pdf") {
+        // ── PDF compliance report (weasyprint) ───────────────────────────────
+        const escHtml = (s: unknown) => String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+        const passCount = rows.filter(r => r.overallVerified).length;
+        const failCount = rows.length - passCount;
+        const spoofCounts: Record<string, number> = {};
+        rows.forEach(r => { if (r.antiSpoofType) spoofCounts[r.antiSpoofType] = (spoofCounts[r.antiSpoofType] ?? 0) + 1; });
+        const spoofRows = Object.entries(spoofCounts).map(([t, c]) =>
+          `<tr><td>${escHtml(t.replace(/_/g," ").toUpperCase())}</td><td>${c}</td><td>${((c/rows.length)*100).toFixed(1)}%</td></tr>`
+        ).join("");
+        const tableRows = rows.slice(0, 500).map(r =>
+          `<tr class="${r.overallVerified ? "pass" : "fail"}">
+            <td>${escHtml(r.id)}</td>
+            <td>${escHtml(r.subjectRef)}</td>
+            <td>${r.overallVerified ? "PASS" : "FAIL"}</td>
+            <td>${escHtml((r.overallScore ?? 0).toFixed(3))}</td>
+            <td>${escHtml((r.livenessScore ?? 0).toFixed(3))}</td>
+            <td>${escHtml((r.antiSpoofScore ?? 0).toFixed(3))}</td>
+            <td>${escHtml(r.antiSpoofType ?? "—")}</td>
+            <td>${escHtml((r.matchScore ?? 0).toFixed(3))}</td>
+            <td>${r.createdAt?.toISOString().slice(0,19).replace("T"," ") ?? ""}</td>
+          </tr>`
+        ).join("");
+        const reportDate = new Date().toISOString().slice(0,10);
+        const filterDesc = [
+          input.subjectRef ? `Subject: ${input.subjectRef}` : null,
+          input.kycRecordId ? `KYC Record: ${input.kycRecordId}` : null,
+          `Last ${input.days} days`,
+        ].filter(Boolean).join(" | ");
+        const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
+<style>
+  body { font-family: Arial, sans-serif; font-size: 10px; color: #1a1a2e; margin: 20px; }
+  h1 { font-size: 16px; color: #1e3a5f; margin-bottom: 2px; }
+  h2 { font-size: 12px; color: #1e3a5f; margin: 16px 0 6px; border-bottom: 1px solid #d1d5db; padding-bottom: 4px; }
+  .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; }
+  .meta { font-size: 9px; color: #666; }
+  .summary { display: flex; gap: 24px; margin: 12px 0; }
+  .stat { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px 16px; text-align: center; }
+  .stat .val { font-size: 22px; font-weight: bold; color: #1e3a5f; }
+  .stat .lbl { font-size: 9px; color: #64748b; }
+  table { width: 100%; border-collapse: collapse; font-size: 9px; }
+  th { background: #1e3a5f; color: white; padding: 5px 6px; text-align: left; }
+  td { padding: 4px 6px; border-bottom: 1px solid #f1f5f9; }
+  tr.pass td { background: #f0fdf4; }
+  tr.fail td { background: #fff1f2; }
+  .footer { margin-top: 24px; font-size: 8px; color: #94a3b8; border-top: 1px solid #e2e8f0; padding-top: 8px; display: flex; justify-content: space-between; }
+  .watermark { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%) rotate(-30deg); font-size: 72px; color: rgba(30,58,95,0.04); font-weight: bold; pointer-events: none; white-space: nowrap; }
+  @page { size: A4 landscape; margin: 15mm; }
+</style></head><body>
+<div class="watermark">OFFICIAL USE ONLY</div>
+<div class="header">
+  <div>
+    <h1>BIOMETRIC AUDIT TRAIL REPORT</h1>
+    <p class="meta">Background Intelligence System (BIS) — Federal Republic of Nigeria</p>
+    <p class="meta">Generated: ${reportDate} | Filter: ${filterDesc} | Total records: ${rows.length}</p>
+  </div>
+  <div style="text-align:right">
+    <p class="meta">NFIU/CBN Compliance Export</p>
+    <p class="meta">ISO 30107-3 Anti-Spoofing Audit</p>
+  </div>
+</div>
+<h2>1. Summary</h2>
+<div class="summary">
+  <div class="stat"><div class="val">${rows.length}</div><div class="lbl">Total Sessions</div></div>
+  <div class="stat"><div class="val" style="color:#16a34a">${passCount}</div><div class="lbl">Passed</div></div>
+  <div class="stat"><div class="val" style="color:#dc2626">${failCount}</div><div class="lbl">Failed</div></div>
+  <div class="stat"><div class="val">${rows.length > 0 ? ((passCount/rows.length)*100).toFixed(1) : "0.0"}%</div><div class="lbl">Pass Rate</div></div>
+</div>
+<h2>2. Spoof Attack Breakdown</h2>
+<table><thead><tr><th>Attack Type</th><th>Count</th><th>% of Total</th></tr></thead><tbody>${spoofRows || "<tr><td colspan=3>No spoof attacks detected in period</td></tr>"}</tbody></table>
+<h2>3. Session Log (latest ${Math.min(rows.length,500)} of ${rows.length} records)</h2>
+<table><thead><tr><th>ID</th><th>Subject Ref</th><th>Result</th><th>Overall Score</th><th>Liveness</th><th>Anti-Spoof</th><th>Spoof Type</th><th>Match Score</th><th>Timestamp (UTC)</th></tr></thead><tbody>${tableRows}</tbody></table>
+<div class="footer">
+  <div>Biometric Audit Trail — BIS LEX/KYC Module — For official use only. Unauthorised disclosure is an offence.</div>
+  <div>Report ref: BIO-AUDIT-${Date.now()} | ${reportDate}</div>
+</div>
+</body></html>`;
+        const { spawnSync } = await import("child_process");
+        const { writeFileSync, readFileSync, unlinkSync } = await import("fs");
+        const safeTs = Date.now();
+        const tmpHtml = `/tmp/bio_audit_${safeTs}.html`;
+        const tmpPdf = `/tmp/bio_audit_${safeTs}.pdf`;
+        writeFileSync(tmpHtml, html);
+        const result = spawnSync("weasyprint", [tmpHtml, tmpPdf], { timeout: 30000 });
+        try { unlinkSync(tmpHtml); } catch {}
+        if (result.status !== 0) {
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "PDF generation failed — weasyprint error" });
+        }
+        const pdfBuffer = readFileSync(tmpPdf);
+        try { unlinkSync(tmpPdf); } catch {}
+        const timestamp2 = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+        const fileKey2 = `biometric-exports/audit-report-${timestamp2}-${Math.random().toString(36).slice(2, 8)}.pdf`;
+        const { url: pdfUrl } = await storagePut(fileKey2, pdfBuffer, "application/pdf");
+        return { url: pdfUrl, rowCount: rows.length, format: "pdf" as const, generatedAt: new Date() };
       } else {
         content = JSON.stringify(rows, null, 2);
         contentType = "application/json";

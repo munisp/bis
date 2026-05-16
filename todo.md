@@ -2213,3 +2213,8 @@
 - [ ] Temporal hourly workflow: query sessionStats, alert if spoof count > threshold
 - [ ] notifyOwner call in Temporal workflow for spoof-attack alerting
 - [ ] Wire Temporal workflow into Temporal worker
+
+## Sprint 6 (May 2026)
+- [ ] Biometric audit trail PDF export (format=pdf in exportSessionLogs, compliance report for NFIU/CBN)
+- [ ] Session log retention archival scheduler (weekly, 90-day cold S3 move + DB delete)
+- [ ] Biometric enrollment status badge on KYC list page (Enrolled/Pending/Failed badge)

@@ -16,44 +16,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { toast } from "sonner";
 import {
   Search, RefreshCw, Download, CheckCircle2, XCircle, Clock,
-  AlertTriangle, Loader2, ShieldCheck, RotateCcw, Eye, ChevronDown, ListChecks, Fingerprint, Trash2
+  AlertTriangle, Loader2, ShieldCheck, RotateCcw, Eye, ChevronDown, ListChecks, Fingerprint
 } from "lucide-react";
 
-// ── Biometric Status Cell ──────────────────────────────────────────────────────
-function BiometricStatusCell({ subjectId }: { subjectId: number }) {
-  const utils = trpc.useUtils();
-  const { data, isLoading } = trpc.biometric.list.useQuery(
-    { limit: 1 },
-    { staleTime: 30000 }
-  );
-  const revokeMutation = trpc.biometric.delete.useMutation({
-    onSuccess: () => {
-      toast.success("Biometric enrollment revoked");
-      utils.biometric.list.invalidate();
-    },
-    onError: (e: any) => toast.error(e.message),
-  });
-  if (isLoading) return <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />;
-  // Find enrollment for this specific subject
-  const enrollment = data?.data?.find((r: any) => r.subjectId === String(subjectId));
-  if (!enrollment) {
-    return <span className="text-xs text-muted-foreground">Not enrolled</span>;
-  }
-  return (
-    <div className="flex items-center gap-1.5">
-      <Fingerprint className="w-3 h-3 text-green-500" />
-      <span className="text-xs text-green-600 dark:text-green-400 capitalize">{enrollment.modality ?? 'face'}</span>
-      <button
-        className="text-muted-foreground hover:text-red-500 transition-colors"
-        title="Revoke enrollment"
-        onClick={() => revokeMutation.mutate({ id: enrollment.id })}
-        disabled={revokeMutation.isPending}
-      >
-        <Trash2 className="w-3 h-3" />
-      </button>
-    </div>
-  );
-}
+
 
 type KYCStatus = "pending" | "processing" | "passed" | "failed" | "review";
 
@@ -93,9 +59,29 @@ type KYCRecord = {
   bvn?: string | null;
   dob?: string | null;
   phone?: string | null;
+  biometricStatus?: string | null;
   createdAt: Date;
   updatedAt: Date;
 };
+
+// ── Biometric enrollment status badge ─────────────────────────────────────────
+const BIOMETRIC_STATUS_CONFIG: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
+  enrolled:     { label: "Enrolled",     color: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300",  icon: <ShieldCheck className="w-3 h-3" /> },
+  pending:      { label: "Pending",      color: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300",    icon: <Clock className="w-3 h-3" /> },
+  failed:       { label: "Failed",       color: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300",        icon: <XCircle className="w-3 h-3" /> },
+  not_enrolled: { label: "Not Enrolled", color: "bg-muted text-muted-foreground",                                        icon: <Fingerprint className="w-3 h-3" /> },
+};
+
+function BiometricBadge({ status }: { status?: string | null }) {
+  const key = status ?? "not_enrolled";
+  const cfg = BIOMETRIC_STATUS_CONFIG[key] ?? BIOMETRIC_STATUS_CONFIG["not_enrolled"];
+  return (
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${cfg.color}`}>
+      {cfg.icon}
+      {cfg.label}
+    </span>
+  );
+}
 
 function riskColor(score?: number | null) {
   if (score == null) return "text-muted-foreground";
@@ -466,7 +452,7 @@ export default function KYCRecordsPage() {
                         {!record.nin && !record.bvn && "—"}
                       </td>
                       <td className="px-4 py-3">
-                        <BiometricStatusCell subjectId={record.id} />
+                        <BiometricBadge status={record.biometricStatus} />
                       </td>
                       <td className="px-4 py-3 text-xs text-muted-foreground">
                         {new Date(record.createdAt).toLocaleDateString()}
