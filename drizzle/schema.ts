@@ -1732,3 +1732,21 @@ export const biometricSessionLogs = pgTable("biometric_session_logs", {
   }));
 export type BiometricSessionLog = typeof biometricSessionLogs.$inferSelect;
 export type InsertBiometricSessionLog = typeof biometricSessionLogs.$inferInsert;
+
+// ─── Biometric Liveness Nonces (replay protection) ───────────────────────────
+// Stores a SHA-256 hash of the frames payload for each active-liveness session.
+// Any duplicate submission within 5 minutes is rejected to prevent replay attacks.
+export const biometricLivenessNonces = pgTable("biometric_liveness_nonces", {
+  id: serial("id").primaryKey(),
+  framesHash: varchar("frames_hash", { length: 64 }).notNull().unique(),
+  subjectRef: varchar("subject_ref", { length: 128 }),
+  challenge: varchar("challenge", { length: 32 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+},
+  (table) => ({
+    bio_nonce_hash_idx: index("bio_nonce_hash_idx").on(table.framesHash),
+    bio_nonce_expires_idx: index("bio_nonce_expires_idx").on(table.expiresAt),
+  }));
+export type BiometricLivenessNonce = typeof biometricLivenessNonces.$inferSelect;
+export type InsertBiometricLivenessNonce = typeof biometricLivenessNonces.$inferInsert;

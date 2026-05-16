@@ -1,11 +1,71 @@
+import crypto from "crypto";
 import { z } from "zod";
 import { router, protectedProcedure, writeProcedure, adminProcedure } from "./_core/trpc";
 import { ENV } from "./_core/env";
 import { getDb } from "./db";
 import {
-  transactions, amlRules, amlAlerts, swiftMessages, sepaPayments, travelRuleRecords, cases, alertRules,
+  transactions, amlRules, amlAlerts, swiftMessages, sepaPayments, travelRuleRecords, cases, alertRules, webhooks,
 } from "../drizzle/schema";
 import { eq, desc, and, gte, lte, like, or, sql, count, sum } from "drizzle-orm";
+
+// ─── AML Webhook Fan-out ──────────────────────────────────────────────────────
+/**
+ * Dispatch an AML alert event to all active tenant webhooks subscribed to
+ * "aml.alert" events. Non-blocking — failures are logged but do not affect
+ * the main transaction flow.
+ */
+async function dispatchAmlWebhook(payload: {
+  event: string;
+  alertRef: string;
+  riskLevel: string;
+  title: string;
+  transactionId: number;
+  amount: number;
+  currency: string;
+  originatorName: string;
+  beneficiaryName: string;
+  flags: string[];
+  timestamp: string;
+}): Promise<void> {
+  try {
+    const db = await getDb();
+    if (!db) return;
+    // Find all active webhooks subscribed to aml.alert events
+    const activeWebhooks = await db.select().from(webhooks)
+      .where(eq(webhooks.status, "active"));
+    const amlWebhooks = activeWebhooks.filter(wh => {
+      const events = (wh.events ?? []) as string[];
+      return events.length === 0 || events.includes("aml.alert") || events.includes("*");
+    });
+    if (amlWebhooks.length === 0) return;
+    const body = JSON.stringify(payload);
+    await Promise.allSettled(amlWebhooks.map(async (wh) => {
+      const sig = `sha256=${crypto.createHmac("sha256", wh.secret ?? "").update(body).digest("hex")}`;
+      try {
+        const res = await fetch(wh.url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-BIS-Signature": sig,
+            "X-BIS-Event": payload.event,
+          },
+          body,
+          signal: AbortSignal.timeout(8_000),
+        });
+        // Update delivery status
+        if (res.ok) {
+          await db.update(webhooks).set({ lastDeliveredAt: new Date(), failureCount: 0 }).where(eq(webhooks.id, wh.id));
+        } else {
+          await db.update(webhooks).set({ failureCount: (wh.failureCount ?? 0) + 1 }).where(eq(webhooks.id, wh.id));
+        }
+      } catch {
+        await db.update(webhooks).set({ failureCount: (wh.failureCount ?? 0) + 1 }).where(eq(webhooks.id, wh.id)).catch(() => {});
+      }
+    }));
+  } catch (err) {
+    console.warn("[AML Webhook] Fan-out error:", err);
+  }
+}
 
 // ─── AML Auto-Escalation ─────────────────────────────────────────────────────
 /**
@@ -210,6 +270,20 @@ export const amlRouter = router({
               }, ctx.user.id);
             }
           }
+          // Webhook fan-out: notify all subscribed tenants (non-blocking)
+          dispatchAmlWebhook({
+            event: "aml.alert",
+            alertRef: newAlert.alertRef,
+            riskLevel,
+            title: newAlert.title ?? `AML Alert ${newAlert.alertRef}`,
+            transactionId: tx.id,
+            amount: input.amount,
+            currency: input.currency,
+            originatorName: input.originatorName,
+            beneficiaryName: input.beneficiaryName,
+            flags,
+            timestamp: new Date().toISOString(),
+          }).catch(() => {});
         }
         return tx;
       }),

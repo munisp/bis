@@ -267,6 +267,13 @@
       "when": 1778943635095,
       "tag": "0037_smart_captain_universe",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1778971469089,
+      "tag": "0038_serious_black_queen",
+      "breakpoints": true
     }
   ]
 }

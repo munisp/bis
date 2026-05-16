@@ -14,8 +14,8 @@ import { z } from "zod";
 import { protectedProcedure, publicProcedure, router, writeProcedure, adminProcedure } from "./_core/trpc";
 import { TRPCError } from "@trpc/server";
 import { getDb, insertBiometricSessionLog, getBiometricSessionLogs, markBiometricSessionKafkaPublished, getBiometricSessionStats } from "./db";
-import { kycRecords, biometricSessionLogs, platformSettings } from "../drizzle/schema";
-import { and, eq, gte, desc, lt, sql } from "drizzle-orm";
+import { kycRecords, biometricSessionLogs, platformSettings, biometricLivenessNonces } from "../drizzle/schema";
+import { and, eq, gte, desc, lt, sql, gt } from "drizzle-orm";
 import { storagePut } from "./storage";
 import { invokeLLM } from "./_core/llm";
 import { notifyOwner } from "./_core/notification";
@@ -550,6 +550,36 @@ export const biometricRouter = router({
       })
     )
     .mutation(async ({ input }) => {
+      // ── Replay protection: reject duplicate frame submissions within 5 minutes ──
+      const framesHash = crypto.createHash("sha256").update(input.frames.join("|")).digest("hex");
+      const dbForNonce = await getDb();
+      if (dbForNonce) {
+        const now = new Date();
+        // Purge expired nonces (housekeeping, non-blocking)
+        dbForNonce.delete(biometricLivenessNonces).where(lt(biometricLivenessNonces.expiresAt, now)).catch(() => {});
+        // Check for existing nonce within 5-minute window
+        const [existing] = await dbForNonce.select({ id: biometricLivenessNonces.id })
+          .from(biometricLivenessNonces)
+          .where(and(
+            eq(biometricLivenessNonces.framesHash, framesHash),
+            gt(biometricLivenessNonces.expiresAt, now),
+          ))
+          .limit(1);
+        if (existing) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Duplicate liveness submission detected. This frame sequence was already processed within the last 5 minutes. Please capture a new session.",
+          });
+        }
+        // Store nonce with 5-minute TTL
+        const expiresAt = new Date(now.getTime() + 5 * 60 * 1000);
+        await dbForNonce.insert(biometricLivenessNonces).values({
+          framesHash,
+          subjectRef: input.subjectRef ?? null,
+          challenge: input.challenge,
+          expiresAt,
+        }).onConflictDoNothing().catch(() => {});
+      }
       const result = await biometricFetch("/liveness/active", {
         frames: input.frames,
         challenge: input.challenge,

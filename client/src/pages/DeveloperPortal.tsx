@@ -15,7 +15,8 @@ import { Slider } from "@/components/ui/slider";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
-import { Copy, Key, Plus, Trash2, BarChart3, AlertTriangle, Code2, RefreshCw, Shield, Zap, Globe, Play, Download, BookOpen, Terminal, ChevronRight, History, Clock, CheckCircle2, XCircle } from "lucide-react";
+import { Copy, Key, Plus, Trash2, BarChart3, AlertTriangle, Code2, RefreshCw, Shield, Zap, Globe, Play, Download, BookOpen, Terminal, ChevronRight, History, Clock, CheckCircle2, XCircle, TrendingUp, TrendingDown, Activity } from "lucide-react";
+import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 
 const SCOPE_GROUPS = [
   { label: "Investigations", scopes: ["investigations:read", "investigations:write"] },
@@ -647,7 +648,20 @@ export default function DeveloperPortal() {
   const { user } = useAuth();
   const utils = trpc.useUtils();
   const [createOpen, setCreateOpen] = useState(false);
-  const [activeSection, setActiveSection] = useState<"tokens" | "playground" | "docs" | "openclaw" | "replay">("tokens");
+  const [activeSection, setActiveSection] = useState<"tokens" | "playground" | "docs" | "openclaw" | "ratelimits">("tokens");
+  const [selectedTokenForAnomalies, setSelectedTokenForAnomalies] = useState<number | null>(null);
+  const { data: anomalyData, isLoading: anomalyLoading } = trpc.apiTokens.anomalies.useQuery(
+    { tokenId: selectedTokenForAnomalies!, days: 30 },
+    { enabled: activeSection === "ratelimits" && selectedTokenForAnomalies !== null }
+  );
+  const { data: timeseriesData, isLoading: timeseriesLoading } = trpc.apiTokens.timeseries.useQuery(
+    { tokenId: selectedTokenForAnomalies!, days: 7, granularity: "day" },
+    { enabled: activeSection === "ratelimits" && selectedTokenForAnomalies !== null }
+  );
+  const { data: platformStatsData } = trpc.apiTokens.platformStats.useQuery(
+    { days: 30 },
+    { enabled: activeSection === "ratelimits" && user?.role === "admin" }
+  );
   const [openclawTab, setOpenclawTab] = useState<"skills" | "history">("skills");
   const REPLAY_PAGE_SIZE = 20;
   const [replayPage, setReplayPage] = useState(0);
@@ -727,6 +741,7 @@ export default function DeveloperPortal() {
       <div className="flex gap-1 bg-muted p-1 rounded-lg w-fit">
         {([
           { key: "tokens", label: "API Tokens", icon: Key },
+          { key: "ratelimits", label: "Rate Limits", icon: Activity },
           { key: "playground", label: "Playground", icon: Play },
           { key: "docs", label: "API Docs", icon: BookOpen },
           { key: "openclaw", label: "OpenClaw", icon: Zap },
@@ -1047,6 +1062,144 @@ export default function DeveloperPortal() {
             </div>
           </CardContent>
         </Card>
+      )}
+
+      {/* Rate Limits & Anomaly Dashboard */}
+      {activeSection === "ratelimits" && (
+        <div className="space-y-6">
+          <div>
+            <h2 className="font-semibold text-lg">Rate Limit & Anomaly Dashboard</h2>
+            <p className="text-sm text-muted-foreground mt-0.5">Per-token usage anomalies, timeseries charts, and platform-wide stats.</p>
+          </div>
+          {user?.role === "admin" && platformStatsData && typeof platformStatsData === "object" ? (
+            <Card className="border-amber-500/30 bg-amber-500/5">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm flex items-center gap-2"><Shield className="h-4 w-4 text-amber-500" />Platform Overview (Admin)</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
+                  {Object.entries(platformStatsData as Record<string, unknown>).slice(0, 8).map(([k, v]) => (
+                    <div key={k}>
+                      <div className="text-muted-foreground text-xs capitalize">{k.replace(/_/g, " ")}</div>
+                      <div className="font-semibold">{String(v as string)}</div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
+          {/* Token selector */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm">Select Token to Inspect</CardTitle>
+              <CardDescription>Choose an API token to view its usage timeseries and anomaly detections.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {tokens.length === 0 ? (
+                <div className="text-sm text-muted-foreground">No tokens yet. Create one first.</div>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {tokens.map(t => (
+                    <button
+                      key={t.id}
+                      onClick={() => setSelectedTokenForAnomalies(t.id)}
+                      className={`px-3 py-1.5 rounded-md text-xs font-mono border transition-colors ${
+                        selectedTokenForAnomalies === t.id
+                          ? "bg-primary text-primary-foreground border-primary"
+                          : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/40"
+                      }`}
+                    >
+                      {t.name} <span className="opacity-60">({t.prefix}...)</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+          {selectedTokenForAnomalies !== null && (
+            <>
+              {/* Timeseries chart */}
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm flex items-center gap-2"><TrendingUp className="h-4 w-4 text-blue-500" />7-Day Usage Timeseries</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {timeseriesLoading ? (
+                    <div className="h-40 flex items-center justify-center text-muted-foreground text-sm">Loading chart...</div>
+                  ) : Array.isArray(timeseriesData) && (timeseriesData as any[]).length > 0 ? (
+                    <ResponsiveContainer width="100%" height={180}>
+                      <LineChart data={timeseriesData as any[]} margin={{ top: 4, right: 10, left: -20, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
+                        <XAxis dataKey="date" tick={{ fontSize: 11 }} />
+                        <YAxis tick={{ fontSize: 11 }} />
+                        <Tooltip />
+                        <Line type="monotone" dataKey="requests" stroke="#3b82f6" strokeWidth={2} dot={false} />
+                        <Line type="monotone" dataKey="errors" stroke="#ef4444" strokeWidth={1.5} dot={false} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="h-40 flex flex-col items-center justify-center text-muted-foreground text-sm gap-2">
+                      <TrendingDown className="h-8 w-8 opacity-30" />
+                      <span>No timeseries data available.</span>
+                      <span className="text-xs">Data will appear once the Python analytics engine is running and processing token usage logs.</span>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+              {/* Anomaly panel */}
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm flex items-center gap-2"><AlertTriangle className="h-4 w-4 text-orange-500" />Anomaly Detection (30d)</CardTitle>
+                  <CardDescription className="text-xs">Usage patterns that deviate significantly from baseline — potential abuse signals.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {anomalyLoading ? (
+                    <div className="text-sm text-muted-foreground">Analysing patterns...</div>
+                  ) : anomalyData && typeof anomalyData === "object" && (anomalyData as any).anomalies?.length > 0 ? (
+                    <div className="space-y-3">
+                      {((anomalyData as any).anomalies as any[]).map((a: any, i: number) => (
+                        <div key={i} className="flex items-start gap-3 p-3 rounded-lg bg-orange-500/10 border border-orange-500/20">
+                          <AlertTriangle className="h-4 w-4 text-orange-500 mt-0.5 shrink-0" />
+                          <div className="min-w-0">
+                            <div className="text-sm font-medium">{a.type ?? "Anomaly"}</div>
+                            <div className="text-xs text-muted-foreground mt-0.5">{a.description ?? JSON.stringify(a)}</div>
+                            {a.severity && <Badge variant="outline" className={`mt-1 text-xs ${a.severity === "high" ? "border-red-500 text-red-500" : "border-orange-500 text-orange-500"}`}>{a.severity}</Badge>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center py-8 text-center gap-2">
+                      <CheckCircle2 className="h-8 w-8 text-emerald-500 opacity-60" />
+                      <div className="text-sm font-medium text-emerald-600">No anomalies detected</div>
+                      <div className="text-xs text-muted-foreground">This token's usage pattern is within normal bounds over the last 30 days.</div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+              {/* Rate limit utilisation bar chart across all tokens */}
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm flex items-center gap-2"><BarChart3 className="h-4 w-4 text-purple-500" />Rate Limit Utilisation — All Tokens</CardTitle>
+                  <CardDescription className="text-xs">Total calls vs configured rate limit per token (last 30 days).</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <ResponsiveContainer width="100%" height={160}>
+                    <BarChart data={tokens.map(t => ({ name: t.name.slice(0, 14), calls: t.usageCount ?? 0, limit: (t.rateLimit ?? 60) * 30 * 24 * 60 }))} margin={{ top: 4, right: 10, left: -20, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
+                      <XAxis dataKey="name" tick={{ fontSize: 10 }} />
+                      <YAxis tick={{ fontSize: 10 }} />
+                      <Tooltip />
+                      <Legend wrapperStyle={{ fontSize: 11 }} />
+                      <Bar dataKey="calls" fill="#8b5cf6" name="Total Calls" radius={[3, 3, 0, 0]} />
+                      <Bar dataKey="limit" fill="#d1d5db" name="Max Allowed" radius={[3, 3, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </CardContent>
+              </Card>
+            </>
+          )}
+        </div>
       )}
 
       <CreateTokenDialog open={createOpen} onClose={() => setCreateOpen(false)} />

@@ -2289,3 +2289,11 @@
 - [x] Updated server/apiTokens.ts to use ENV.riskEngineUrl and ENV.bisGatewayKey instead of raw process.env
 - [x] TypeScript check: 0 errors
 - [x] Test suite: 486/609 pass (123 pre-existing PostgreSQL ECONNREFUSED — unchanged)
+
+## Sprint v20 — Rate-limit Dashboard, Replay Protection, AML Webhooks
+
+- [x] Rate-limit dashboard tab in Developer Portal with per-token anomaly view, timeseries chart, utilisation bar chart, admin platform stats
+- [x] Wire trpc.apiTokens.anomalies + timeseries + platformStats into Rate Limits tab
+- [x] Biometric liveness replay protection: biometric_liveness_nonces table (migration 0038), 5-min nonce deduplication in checkActiveLiveness
+- [x] AML alert webhooks: dispatchAmlWebhook helper fans out to all active tenant webhooks subscribed to aml.alert events
+- [x] TypeScript: 0 errors; Tests: 486/609 pass (123 pre-existing ECONNREFUSED)
