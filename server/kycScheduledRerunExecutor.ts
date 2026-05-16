@@ -28,11 +28,11 @@ interface RerunDigestEntry {
 
 async function sendRerunDigest(entries: RerunDigestEntry[]): Promise<void> {
   if (entries.length === 0) return;
-  const smtpHost = process.env.SMTP_HOST;
-  const smtpPort = parseInt(process.env.SMTP_PORT || "587", 10);
-  const smtpUser = process.env.SMTP_USER;
-  const smtpPass = process.env.SMTP_PASS;
-  const smtpFrom = process.env.SMTP_FROM || smtpUser;
+  const smtpHost = ENV.smtpHost;
+  const smtpPort = ENV.smtpPort;
+  const smtpUser = ENV.smtpUser;
+  const smtpPass = ENV.smtpPass;
+  const smtpFrom = ENV.smtpFrom || smtpUser;
 
   if (!smtpHost || !smtpUser || !smtpPass) {
     // Fall back to notifyOwner if SMTP not configured
@@ -68,7 +68,7 @@ async function sendRerunDigest(entries: RerunDigestEntry[]): Promise<void> {
 // ─── Inline helpers (mirrors routers.ts implementations) ─────────────────────
 
 async function gatewayFetch(path: string): Promise<any> {
-  const base = process.env.GATEWAY_SANDBOX || "http://localhost:8081";
+  const base = ENV.bisGatewayUrl;
   const res = await fetch(`${base}${path}`, { headers: { "x-api-key": "internal" } });
   if (!res.ok) throw new Error(`Gateway ${path} → ${res.status}`);
   return res.json();

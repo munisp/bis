@@ -7,15 +7,16 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { adminProcedure, protectedProcedure, router } from "./_core/trpc";
+import { ENV } from "./_core/env";
 import {
   startInvestigationWorkflow,
   getWorkflowStatus,
   type InvestigationWorkflowInput,
 } from "./temporal";
 
-const TEMPORAL_HOST = process.env.TEMPORAL_HOST ?? "";
-const GATEWAY_URL = process.env.GATEWAY_URL ?? "http://localhost:8081";
-const BIS_GATEWAY_KEY = process.env.BIS_GATEWAY_KEY ?? "dev-gateway-key-change-in-prod";
+const TEMPORAL_HOST = ENV.temporalHost ?? "";
+const GATEWAY_URL = ENV.gatewayUrl;
+const BIS_GATEWAY_KEY = ENV.bisGatewayKey;
 
 /** Generic call to the Go gateway's workflow endpoints */
 async function gatewayCall(path: string, method = "GET", body?: unknown): Promise<unknown> {
@@ -40,7 +41,7 @@ export const temporalRouter = router({
   status: protectedProcedure.query(() => ({
     configured: !!TEMPORAL_HOST,
     host: TEMPORAL_HOST || null,
-    namespace: process.env.TEMPORAL_NAMESPACE ?? "default",
+    namespace: ENV.temporalNamespace ?? "default",
     taskQueue: "bis-investigation",
   })),
 
@@ -61,7 +62,7 @@ export const temporalRouter = router({
       const workflowInput: InvestigationWorkflowInput = {
         ...input,
         gatewayUrl: GATEWAY_URL,
-        riskUrl: process.env.RISK_ENGINE_URL ?? "http://localhost:8082",
+        riskUrl: ENV.riskEngineUrl,
       };
       const result = await startInvestigationWorkflow(workflowInput);
       return result;

@@ -23,8 +23,8 @@ let jwks: ReturnType<typeof createRemoteJWKSet> | null = null;
 let issuer: string | null = null;
 
 function init() {
-  const keycloakUrl = process.env.KEYCLOAK_URL;
-  const realm = process.env.KEYCLOAK_REALM;
+  const keycloakUrl = ENV.keycloakUrl;
+  const realm = ENV.keycloakRealm;
   if (!keycloakUrl || !realm) {
     return; // dev mode — Keycloak disabled
   }
@@ -43,7 +43,7 @@ init();
 export async function verifyKeycloakToken(token: string): Promise<KeycloakClaims | null> {
   if (!jwks || !issuer) return null; // Keycloak not configured — skip
 
-  const clientId = process.env.KEYCLOAK_CLIENT_ID ?? "bis-app";
+  const clientId = ENV.keycloakClientId;
   const { payload } = await jwtVerify(token, jwks, {
     issuer,
     audience: clientId,
@@ -56,7 +56,7 @@ export async function verifyKeycloakToken(token: string): Promise<KeycloakClaims
  * Merges realm roles and client-specific roles.
  */
 export function extractRoles(claims: KeycloakClaims): string[] {
-  const clientId = process.env.KEYCLOAK_CLIENT_ID ?? "bis-app";
+  const clientId = ENV.keycloakClientId;
   const realmRoles = claims.realm_access?.roles ?? [];
   const clientRoles = claims.resource_access?.[clientId]?.roles ?? [];
   return Array.from(new Set([...realmRoles, ...clientRoles]));
@@ -76,9 +76,9 @@ export function mapRole(roles: string[]): "admin" | "user" {
  * Returns null when Keycloak is not configured.
  */
 export function getKeycloakLoginUrl(redirectUri: string): string | null {
-  const keycloakUrl = process.env.KEYCLOAK_URL;
-  const realm = process.env.KEYCLOAK_REALM;
-  const clientId = process.env.KEYCLOAK_CLIENT_ID ?? "bis-app";
+  const keycloakUrl = ENV.keycloakUrl;
+  const realm = ENV.keycloakRealm;
+  const clientId = ENV.keycloakClientId;
   if (!keycloakUrl || !realm) return null;
 
   const params = new URLSearchParams({
@@ -97,10 +97,10 @@ export async function exchangeCode(
   code: string,
   redirectUri: string
 ): Promise<{ access_token: string; id_token: string; refresh_token: string } | null> {
-  const keycloakUrl = process.env.KEYCLOAK_URL;
-  const realm = process.env.KEYCLOAK_REALM;
-  const clientId = process.env.KEYCLOAK_CLIENT_ID ?? "bis-app";
-  const clientSecret = process.env.KEYCLOAK_CLIENT_SECRET;
+  const keycloakUrl = ENV.keycloakUrl;
+  const realm = ENV.keycloakRealm;
+  const clientId = ENV.keycloakClientId;
+  const clientSecret = ENV.keycloakClientSecret;
   if (!keycloakUrl || !realm) return null;
 
   const tokenUrl = `${keycloakUrl}/realms/${realm}/protocol/openid-connect/token`;

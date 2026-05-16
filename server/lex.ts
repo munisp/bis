@@ -883,8 +883,8 @@ ${sub.validationScore != null ? `
       const provider = ENV.smsProvider;
       try {
         if (provider === "africas_talking") {
-          const AT_API_KEY = process.env.AT_API_KEY;
-          const AT_USERNAME = process.env.AT_USERNAME ?? "sandbox";
+          const AT_API_KEY = ENV.atApiKey;
+          const AT_USERNAME = ENV.atUsername;
           if (!AT_API_KEY) return { ok: false, reason: "no_at_api_key" };
           const body = new URLSearchParams({ username: AT_USERNAME, to: submitter.phone, message, from: "BIS-LEX" });
           const res = await fetch("https://api.africastalking.com/version1/messaging", {
@@ -896,7 +896,7 @@ ${sub.validationScore != null ? `
           const sent = data?.SMSMessageData?.Recipients?.[0]?.status === "Success";
           return { ok: sent, provider: "africas_talking", phone: submitter.phone };
         } else if (provider === "termii") {
-          const TERMII_API_KEY = process.env.TERMII_API_KEY;
+          const TERMII_API_KEY = ENV.termiiApiKey;
           if (!TERMII_API_KEY) return { ok: false, reason: "no_termii_api_key" };
           const res = await fetch("https://api.ng.termii.com/api/sms/send", {
             method: "POST",

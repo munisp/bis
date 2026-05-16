@@ -31,9 +31,9 @@ let _redisAvailable = false;
  *   REDIS_URL=redis://host:6379
  */
 function buildRedisClient(): Redis | null {
-  const sentinelsEnv = process.env.REDIS_SENTINELS;
-  const sentinelName = process.env.REDIS_SENTINEL_NAME || "mymaster";
-  const sentinelPassword = process.env.REDIS_SENTINEL_PASSWORD;
+  const sentinelsEnv = ENV.redisSentinels;
+  const sentinelName = ENV.redisSentinelName;
+  const sentinelPassword = ENV.redisSentinelPassword;
 
   if (sentinelsEnv) {
     // Sentinel HA mode — automatic failover without application restart

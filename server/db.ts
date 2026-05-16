@@ -28,7 +28,7 @@ export async function getDb() {
       const dbUrl = process.env.DATABASE_URL ?? "";
       const isLocal = dbUrl.includes("localhost") || dbUrl.includes("127.0.0.1");
       // Enforce SSL for all non-local connections; allow self-signed certs for managed DBs
-      const sslConfig = isLocal ? undefined : { ssl: { rejectUnauthorized: process.env.DB_SSL_STRICT === "true" } };
+      const sslConfig = isLocal ? undefined : { ssl: { rejectUnauthorized: ENV.dbSslStrict } };
       _pool = new Pool({
         connectionString: dbUrl,
         max: 20,            // max pool size

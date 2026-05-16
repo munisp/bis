@@ -2305,3 +2305,11 @@
 - [x] Added 3 new biometric replay protection unit tests (sandbox fallback, duplicate rejection, nonce storage) — 489 tests now pass
 - [x] Fixed useOfflineSync.ts: falls back to IndexedDB pendingCount when service worker doesn't respond within 1s (prevents hiding unsynced work)
 - [x] TypeScript: 0 errors; Tests: 489/612 pass (123 pre-existing ECONNREFUSED — unchanged)
+
+## Sprint v22 — Complete ENV Centralization (Zero Raw process.env)
+
+- [x] Added 20+ new env vars to ENV registry: SESSION_TTL_SECONDS, RATE_LIMIT_MAX_REQUESTS, RATE_LIMIT_WINDOW_SECONDS, GRAFANA_WEBHOOK_SECRET, REDIS_SENTINEL_PASSWORD, PERMIFY_URL/API_KEY/TENANT_ID, AT_USERNAME/API_KEY, TERMII_API_KEY, KEYCLOAK_ADMIN_USER/PASSWORD, BIS_KYC_SERVICE_URL, BIS_VERIFIER_URL, BIS_LEX_INTAKE_URL, OLLAMA_ADAPTER_URL, GATEWAY_URL
+- [x] Updated 17 server files to use ENV: _core/index.ts, _core/systemRouter.ts, cache.ts, db.ts, index.ts, keycloak.ts, keycloakRouter.ts, permify.ts, redis.ts, redisRouter.ts, temporal.ts, temporalRouter.ts, paymentRails.ts, riskDashboard.ts, openclawEndpoints.ts, routers.ts, kycScheduledRerunExecutor.ts
+- [x] Fixed malformed import insertions in keycloakRouter.ts and temporal.ts
+- [x] Zero raw process.env accesses remain in any server file (outside env.ts and envValidation.ts)
+- [x] TypeScript: 0 errors; Tests: 489/612 pass (123 pre-existing ECONNREFUSED — unchanged)

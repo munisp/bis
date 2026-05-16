@@ -4,6 +4,7 @@
  * Triggers investigation workflows on the Temporal server.
  * Falls back to direct service calls when TEMPORAL_HOST is not set.
  */
+import { ENV } from "./_core/env";
 
 export interface InvestigationWorkflowInput {
   ref: string;
@@ -23,8 +24,8 @@ export interface WorkflowStartResult {
   mode: "temporal" | "direct";
 }
 
-const TEMPORAL_HOST = process.env.TEMPORAL_HOST;
-const TEMPORAL_NAMESPACE = process.env.TEMPORAL_NAMESPACE ?? "default";
+const TEMPORAL_HOST = ENV.temporalHost;
+const TEMPORAL_NAMESPACE = ENV.temporalNamespace ?? "default";
 const TEMPORAL_TASK_QUEUE = "bis-investigation";
 
 /**
@@ -47,12 +48,12 @@ export async function startInvestigationWorkflow(
   // Production: call the Temporal HTTP API (Temporal Cloud / self-hosted)
   // The @temporalio/client package requires a gRPC connection; for HTTP we use
   // the Temporal HTTP API or the Go gateway's /v1/workflow/start endpoint.
-  const gatewayUrl = process.env.GATEWAY_URL ?? "http://localhost:8081";
+  const gatewayUrl = ENV.gatewayUrl;
   const resp = await fetch(`${gatewayUrl}/v1/workflow/start`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "X-BIS-Key": process.env.BIS_GATEWAY_KEY ?? "",
+      "X-BIS-Key": ENV.bisGatewayKey,
     },
     body: JSON.stringify({
       workflow_type: "InvestigationWorkflow",
@@ -86,9 +87,9 @@ export async function getWorkflowStatus(workflowId: string): Promise<{
     return { status: "completed", result: null };
   }
 
-  const gatewayUrl = process.env.GATEWAY_URL ?? "http://localhost:8081";
+  const gatewayUrl = ENV.gatewayUrl;
   const resp = await fetch(`${gatewayUrl}/v1/workflow/status/${workflowId}`, {
-    headers: { "X-BIS-Key": process.env.BIS_GATEWAY_KEY ?? "" },
+    headers: { "X-BIS-Key": ENV.bisGatewayKey },
   });
 
   if (!resp.ok) {

@@ -67,7 +67,7 @@ export const systemRouter = router({
     }),
 
   slackStatus: publicProcedure.query(async () => {
-    const configured = !!(process.env.SLACK_WEBHOOK_URL && process.env.SLACK_WEBHOOK_URL.startsWith("https://hooks.slack.com/"));
+    const configured = !!(ENV.slackWebhookUrl && ENV.slackWebhookUrl.startsWith("https://hooks.slack.com/"));
     return { configured };
   }),
 

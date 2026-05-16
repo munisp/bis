@@ -13,6 +13,7 @@ import { invokeLLM } from "./_core/llm";
 import { getDb } from "./db";
 import { apiTokens, investigations, kycRecords, sarFilings, alerts, auditLog } from "../drizzle/schema";
 import { eq, and } from "drizzle-orm";
+import { ENV } from "./_core/env";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -109,8 +110,8 @@ For risk scores, use a deterministic score based on the subject name and checks 
     console.warn('[OpenClaw] Cloud LLM failed, trying Ollama fallback:', (err as Error).message);
   }
   // 2. Ollama local fallback
-  const OLLAMA_ADAPTER = process.env.OLLAMA_ADAPTER_URL || 'http://localhost:8090';
-  const GATEWAY_KEY = process.env.BIS_GATEWAY_KEY || 'dev-gateway-key-change-in-prod';
+  const OLLAMA_ADAPTER = ENV.ollamaAdapterUrl;
+  const GATEWAY_KEY = ENV.bisGatewayKey;
   try {
     const ollamaResp = await fetch(`${OLLAMA_ADAPTER}/chat`, {
       method: 'POST',

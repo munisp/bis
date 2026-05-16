@@ -14,6 +14,7 @@ import { investigations, kycRecords, platformSettings } from "../drizzle/schema"
 import { desc, sql, gte, and, eq } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { notifyOwner } from "./_core/notification";
+import { ENV } from "./_core/env";
 
 export const riskDashboardRouter = router({
   /**
@@ -242,8 +243,8 @@ export const riskDashboardRouter = router({
       days: z.number().min(1).max(90).default(7),
     }))
     .query(async ({ input }) => {
-      const RISK_ENGINE_URL = process.env.BIS_RISK_ENGINE_URL || "http://localhost:8082";
-      const GATEWAY_KEY = process.env.BIS_GATEWAY_KEY || "dev-gateway-key-change-in-prod";
+      const RISK_ENGINE_URL = ENV.riskEngineUrl;
+      const GATEWAY_KEY = ENV.bisGatewayKey;
       try {
         const res = await fetch(`${RISK_ENGINE_URL}/v1/analytics`, {
           method: "POST",

@@ -17,6 +17,7 @@ import { transactions, frozenAccounts, auditLog, exportSchedules } from "../driz
 import { desc, eq, sql, and, gte, lt, or, ilike, inArray, isNull } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { storagePut } from "./storage";
+import { ENV } from "./_core/env";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -1114,8 +1115,8 @@ export const paymentRailsRouter = router({
       }
 
       // 3. Try Go gateway's live NIP name-enquiry endpoint
-      const gatewayURL = process.env.GATEWAY_SANDBOX || process.env.GATEWAY_URL || '';
-      const gatewayKey = process.env.BIS_GATEWAY_KEY || 'dev-gateway-key-change-in-prod';
+      const gatewayURL = ENV.bisGatewayUrl;
+      const gatewayKey = ENV.bisGatewayKey;
       if (gatewayURL) {
         try {
           const gwRes = await fetch(`${gatewayURL}/v1/nip/name-enquiry`, {

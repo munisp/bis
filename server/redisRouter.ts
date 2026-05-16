@@ -17,8 +17,9 @@ import {
   markEventProcessed,
 } from "./redis";
 import Redis from "ioredis";
+import { ENV } from "./_core/env";
 
-const REDIS_URL = process.env.REDIS_URL ?? "redis://localhost:6379";
+const REDIS_URL = ENV.redisUrl ?? "redis://localhost:6379";
 
 /** Get a raw Redis client for admin operations (key listing, flush, etc.) */
 let adminClient: Redis | null = null;

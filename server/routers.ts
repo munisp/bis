@@ -83,14 +83,15 @@ import {
 } from "./db";
 import { eq, desc, asc, and, ilike, gte, lte, lt, sql, count, inArray } from "drizzle-orm";
 import { z } from "zod";
+import { ENV } from "./_core/env";
 
 // ─── Service URLs ─────────────────────────────────────────────────────────────
 
-const GATEWAY_URL = process.env.BIS_GATEWAY_URL || "http://localhost:8081";
-const RISK_ENGINE_URL = process.env.BIS_RISK_ENGINE_URL || "http://localhost:8082";
-const EVENT_PROCESSOR_URL = process.env.BIS_EVENT_PROCESSOR_URL || "http://localhost:8083";
-const KYC_SERVICE_URL = process.env.BIS_KYC_SERVICE_URL || "http://localhost:8084";
-const GATEWAY_KEY = process.env.BIS_GATEWAY_KEY || "dev-gateway-key-change-in-prod";
+const GATEWAY_URL = ENV.bisGatewayUrl;
+const RISK_ENGINE_URL = ENV.riskEngineUrl;
+const EVENT_PROCESSOR_URL = ENV.eventProcessorUrl;
+const KYC_SERVICE_URL = ENV.bisKycServiceUrl;
+const GATEWAY_KEY = ENV.bisGatewayKey;
 
 // ─── Service Client Helpers ───────────────────────────────────────────────────
 
@@ -744,10 +745,10 @@ const lookupRouter = router({
   }),
   allServicesHealth: protectedProcedure.query(async () => {
     // Poll all known service health endpoints in parallel
-    const VERIFIER_URL = process.env.BIS_VERIFIER_URL || 'http://localhost:8085';
-    const LEX_INTAKE_URL = process.env.BIS_LEX_INTAKE_URL || 'http://localhost:8086';
-    const LAKEHOUSE_URL = process.env.BIS_LAKEHOUSE_URL || 'http://localhost:8087';
-    const OLLAMA_URL = process.env.OLLAMA_ADAPTER_URL || 'http://localhost:8090';
+    const VERIFIER_URL = ENV.bisVerifierUrl;
+    const LEX_INTAKE_URL = ENV.bisLexIntakeUrl;
+    const LAKEHOUSE_URL = ENV.lakehouseUrl;
+    const OLLAMA_URL = ENV.ollamaAdapterUrl;
     const services: Array<{ name: string; displayName: string; url: string; uptime: number }> = [
       { name: 'gateway',          displayName: 'Go Gateway',        url: `${GATEWAY_URL}/health`,         uptime: 99.5 },
       { name: 'risk-engine',      displayName: 'Risk Engine',       url: `${RISK_ENGINE_URL}/health`,     uptime: 99.2 },
@@ -4119,8 +4120,8 @@ ${timeline.map(e => `<tr><td>${new Date(e.createdAt).toLocaleDateString()}</td><
 });
 // ─── Ollama Router ────────────────────────────────────────────────────────────
 
-const OLLAMA_ADAPTER_URL = process.env.OLLAMA_ADAPTER_URL || "http://localhost:8090";
-const OLLAMA_ADAPTER_KEY = process.env.BIS_GATEWAY_KEY || "dev-gateway-key-change-in-prod";
+const OLLAMA_ADAPTER_URL = ENV.ollamaAdapterUrl;
+const OLLAMA_ADAPTER_KEY = ENV.bisGatewayKey;
 
 async function ollamaFetch(path: string, body: unknown) {
   const res = await fetch(`${OLLAMA_ADAPTER_URL}${path}`, {

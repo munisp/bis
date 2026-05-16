@@ -39,6 +39,33 @@ export const ENV = {
   dbSslStrict: (process.env.DB_SSL_STRICT ?? "false") === "true",
   // Server port
   port: parseInt(process.env.PORT ?? "3000", 10),
+  // Session TTL (seconds)
+  sessionTtlSeconds: parseInt(process.env.SESSION_TTL_SECONDS ?? "86400", 10),
+  // Rate limiting
+  rateLimitMaxRequests: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS ?? "300", 10),
+  rateLimitWindowSeconds: parseInt(process.env.RATE_LIMIT_WINDOW_SECONDS ?? "900", 10),
+  // Grafana webhook secret
+  grafanaWebhookSecret: process.env.GRAFANA_WEBHOOK_SECRET ?? "bis-grafana-webhook-dev",
+  // Redis Sentinel HA
+  redisSentinelPassword: process.env.REDIS_SENTINEL_PASSWORD ?? "",
+  // Permify authorization engine
+  permifyUrl: process.env.PERMIFY_URL ?? "http://localhost:3476",
+  permifyApiKey: process.env.PERMIFY_API_KEY ?? "",
+  permifyTenantId: process.env.PERMIFY_TENANT_ID ?? "t1",
+  // Africa's Talking SMS gateway
+  atUsername: process.env.AT_USERNAME ?? "sandbox",
+  atApiKey: process.env.AT_API_KEY ?? "",
+  // Termii SMS gateway (fallback)
+  termiiApiKey: process.env.TERMII_API_KEY ?? "",
+  // Keycloak admin credentials (for admin API calls)
+  keycloakAdminUser: process.env.KEYCLOAK_ADMIN_USER ?? "admin",
+  keycloakAdminPassword: process.env.KEYCLOAK_ADMIN_PASSWORD ?? "",
+  // Additional BIS service aliases (some files use different env var names)
+  bisKycServiceUrl: process.env.BIS_KYC_SERVICE_URL ?? "http://localhost:8089",
+  bisVerifierUrl: process.env.BIS_VERIFIER_URL ?? "http://localhost:8090",
+  bisLexIntakeUrl: process.env.BIS_LEX_INTAKE_URL ?? "http://localhost:8087",
+  ollamaAdapterUrl: process.env.OLLAMA_ADAPTER_URL ?? "http://localhost:8086",
+  gatewayUrl: process.env.GATEWAY_URL ?? "http://localhost:8081",
 
   // Gateway / verification engine
   // Default false in production — set GATEWAY_SANDBOX=true explicitly for sandbox/dev mode.

@@ -357,7 +357,7 @@ async function startServer() {
   // Note: Paystack webhook needs raw body — registered BEFORE json parser below
   app.post("/api/webhooks/paystack", express.raw({ type: "application/json" }), async (req, res) => {
     try {
-      const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY ?? "";
+      const PAYSTACK_SECRET = ENV.paystackSecretKey;
       const signature = req.headers["x-paystack-signature"] as string | undefined;
 
       // Validate HMAC-SHA512 signature when secret is configured
@@ -647,7 +647,7 @@ async function startServer() {
   // ── Grafana alert webhook ──────────────────────────────────────────────────
   app.post("/api/webhooks/grafana-alert", async (req, res) => {
     try {
-      const expectedToken = process.env.GRAFANA_WEBHOOK_SECRET ?? "bis-grafana-webhook-dev";
+      const expectedToken = ENV.grafanaWebhookSecret;
       const authHeader = req.headers["authorization"] ?? "";
       const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
       // Timing-safe comparison

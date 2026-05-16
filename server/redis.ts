@@ -3,11 +3,12 @@
  * Uses ioredis with graceful fail-open when Redis is unavailable.
  */
 import Redis from "ioredis";
+import { ENV } from "./_core/env";
 
-const REDIS_URL = process.env.REDIS_URL ?? "redis://localhost:6379";
-const SESSION_TTL = parseInt(process.env.SESSION_TTL_SECONDS ?? "86400", 10); // 24h
-const RATE_LIMIT_WINDOW = parseInt(process.env.RATE_LIMIT_WINDOW_SECONDS ?? "60", 10);
-const RATE_LIMIT_MAX = parseInt(process.env.RATE_LIMIT_MAX_REQUESTS ?? "100", 10);
+const REDIS_URL = ENV.redisUrl ?? "redis://localhost:6379";
+const SESSION_TTL = ENV.sessionTtlSeconds; // 24h
+const RATE_LIMIT_WINDOW = ENV.rateLimitWindowSeconds;
+const RATE_LIMIT_MAX = ENV.rateLimitMaxRequests;
 
 let client: Redis | null = null;
 let connected = false;

@@ -6,10 +6,11 @@
  */
 
 import { TRPCError } from "@trpc/server";
+import { ENV } from "./_core/env";
 
-const PERMIFY_URL = process.env.PERMIFY_URL ?? "";
-const PERMIFY_TENANT = process.env.PERMIFY_TENANT_ID ?? "t1";
-const PERMIFY_API_KEY = process.env.PERMIFY_API_KEY ?? "";
+const PERMIFY_URL = ENV.permifyUrl;
+const PERMIFY_TENANT = ENV.permifyTenantId;
+const PERMIFY_API_KEY = ENV.permifyApiKey;
 
 interface CheckRequest {
   metadata: { depth: number; snap_token?: string };

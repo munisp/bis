@@ -8,6 +8,7 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { adminProcedure, protectedProcedure, publicProcedure, router } from "./_core/trpc";
+import { ENV } from "./_core/env";
 import {
   verifyKeycloakToken,
   getKeycloakLoginUrl,
@@ -16,12 +17,12 @@ import {
   mapRole,
 } from "./keycloak";
 
-const KEYCLOAK_URL = process.env.KEYCLOAK_URL ?? "";
-const KEYCLOAK_REALM = process.env.KEYCLOAK_REALM ?? "bis";
-const KEYCLOAK_CLIENT_ID = process.env.KEYCLOAK_CLIENT_ID ?? "bis-app";
-const KEYCLOAK_CLIENT_SECRET = process.env.KEYCLOAK_CLIENT_SECRET ?? "";
-const KEYCLOAK_ADMIN_USER = process.env.KEYCLOAK_ADMIN_USER ?? "admin";
-const KEYCLOAK_ADMIN_PASSWORD = process.env.KEYCLOAK_ADMIN_PASSWORD ?? "";
+const KEYCLOAK_URL = ENV.keycloakUrl;
+const KEYCLOAK_REALM = ENV.keycloakRealm;
+const KEYCLOAK_CLIENT_ID = ENV.keycloakClientId;
+const KEYCLOAK_CLIENT_SECRET = ENV.keycloakClientSecret;
+const KEYCLOAK_ADMIN_USER = ENV.keycloakAdminUser;
+const KEYCLOAK_ADMIN_PASSWORD = ENV.keycloakAdminPassword;
 
 /** Obtain a Keycloak admin access token for Admin REST API calls. */
 async function getAdminToken(): Promise<string> {
