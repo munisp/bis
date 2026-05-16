@@ -9,6 +9,12 @@ export const ENV = {
   forgeApiUrl: process.env.BUILT_IN_FORGE_API_URL ?? "",
   forgeApiKey: process.env.BUILT_IN_FORGE_API_KEY ?? "",
 
+  // Internal service-to-service gateway key
+  bisGatewayKey: process.env.BIS_GATEWAY_KEY ?? "dev-gateway-key-change-in-prod",
+  // AML / risk engine sidecar URLs
+  bisAmlEngineUrl: process.env.BIS_AML_ENGINE_URL ?? "http://localhost:8095",
+  riskEngineUrl: process.env.RISK_ENGINE_URL ?? "http://localhost:8082",
+
   // Gateway / verification engine
   // Default false in production — set GATEWAY_SANDBOX=true explicitly for sandbox/dev mode.
   // Lesson (1B payments): Never default to sandbox in production; fail loudly if real APIs are unreachable.
@@ -68,6 +74,9 @@ export function validateEnv(): void {
     ["BIS_VERIFY_CAC_KEY", ENV.bisVerifyCacKey, "CAC own-engine lookups will fall back to Youverify/sandbox"],
     ["YOUVERIFY_API_KEY", ENV.youverifyApiKey, "Verification fallback disabled — sandbox mode only"],
     ["KEYCLOAK_CLIENT_SECRET", ENV.keycloakClientSecret, "Keycloak IDP page will show 'not configured'"],
+    ["BIS_GATEWAY_KEY", ENV.bisGatewayKey, "Internal service-to-service auth uses insecure dev key"],
+    ["BIS_AML_ENGINE_URL", ENV.bisAmlEngineUrl, "AML engine defaults to localhost:8095"],
+    ["RISK_ENGINE_URL", ENV.riskEngineUrl, "Risk engine defaults to localhost:8082"],
     ["SLACK_WEBHOOK_URL", ENV.slackWebhookUrl, "Slack deploy/alert notifications disabled"],
     ["SMTP_USER", ENV.smtpUser, "Email notifications disabled"],
     ["SMTP_PASS", ENV.smtpPass, "Email notifications disabled"],

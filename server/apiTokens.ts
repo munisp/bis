@@ -19,6 +19,7 @@
 import crypto from "crypto";
 import { z } from "zod";
 import { router, protectedProcedure, writeProcedure, adminProcedure } from "./_core/trpc";
+import { ENV } from "./_core/env";
 import { getDb } from "./db";
 import { apiTokens, tokenUsageLog } from "../drizzle/schema";
 import { eq, desc, and, sql } from "drizzle-orm";
@@ -36,8 +37,8 @@ function generateToken(): { token: string; prefix: string } {
   return { token, prefix };
 }
 
-const ANALYTICS_URL = process.env.RISK_ENGINE_URL ?? "http://localhost:8082";
-const GATEWAY_KEY = process.env.BIS_GATEWAY_KEY ?? "dev-gateway-key-change-in-prod";
+const ANALYTICS_URL = ENV.riskEngineUrl;
+const GATEWAY_KEY = ENV.bisGatewayKey;
 
 async function fetchAnalytics(path: string): Promise<unknown> {
   try {

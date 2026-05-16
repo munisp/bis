@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { router, protectedProcedure, writeProcedure, adminProcedure } from "./_core/trpc";
+import { ENV } from "./_core/env";
 import { getDb } from "./db";
 import {
   transactions, amlRules, amlAlerts, swiftMessages, sepaPayments, travelRuleRecords, cases, alertRules,
@@ -43,7 +44,7 @@ async function autoEscalateToCase(db: NonNullable<Awaited<ReturnType<typeof getD
 }
 
 // ─── AML Engine (Rust microservice, port 8095) ────────────────────────────────
-const AML_ENGINE_URL = process.env.BIS_AML_ENGINE_URL ?? "http://localhost:8095";
+const AML_ENGINE_URL = ENV.bisAmlEngineUrl;
 async function callAmlEngine(path: string, body: unknown): Promise<unknown> {
   try {
     const res = await fetch(`${AML_ENGINE_URL}${path}`, {

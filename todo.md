@@ -2265,3 +2265,27 @@
 - [x] ZeroFootprint form validation (required fields, min length, error messages)
 - [x] Settings page — show SLACK_WEBHOOK_URL configured/not-configured status
 - [x] BiometricSessionLogPage — add pagination to session log table
+
+## Sprint v16 — Smoke Test
+
+- [x] Smoke test script (scripts/smoke-test.ts, pnpm smoke)
+
+## Sprint v17 — Final Hardening Sweep
+
+- [x] All audit items verified complete: offline/SW, webcam preflight, maxRetries, time-series charts, spoof heatmap, archival scheduler, PDF export, pagination
+- [x] 0 TypeScript errors confirmed
+- [x] 486/609 unit tests pass (123 pre-existing PostgreSQL ECONNREFUSED)
+
+## Sprint v18 — E2E & Seed Enhancements
+
+- [x] Comprehensive E2E test suite (10 spec files, 967+ lines)
+- [x] Seed data covering all tables including platformSettings and webhooks
+- [x] Playwright configuration and e2e/ directory
+
+## Sprint v19 — ENV Centralization
+
+- [x] Added BIS_AML_ENGINE_URL, RISK_ENGINE_URL, BIS_GATEWAY_KEY to server/_core/env.ts (ENV object + validateEnv optional warnings)
+- [x] Updated server/aml.ts to use ENV.bisAmlEngineUrl instead of raw process.env.BIS_AML_ENGINE_URL
+- [x] Updated server/apiTokens.ts to use ENV.riskEngineUrl and ENV.bisGatewayKey instead of raw process.env
+- [x] TypeScript check: 0 errors
+- [x] Test suite: 486/609 pass (123 pre-existing PostgreSQL ECONNREFUSED — unchanged)
