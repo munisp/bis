@@ -23,6 +23,7 @@ import {
   AlertTriangle, Loader2, ShieldCheck, RotateCcw, Eye, ChevronDown, ListChecks, Fingerprint,
   Camera, UserPlus,
 } from "lucide-react";
+import { Progress } from "@/components/ui/progress";
 
 
 
@@ -376,15 +377,23 @@ export default function KYCRecordsPage() {
           </span>
           <div className="flex items-center gap-2">
             {bulkProgress ? (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="w-4 h-4 animate-spin" />
-                Re-verifying {bulkProgress.done} / {bulkProgress.total}…
-                <div className="w-32 h-1.5 bg-muted rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-primary rounded-full transition-all duration-300"
-                    style={{ width: `${(bulkProgress.done / bulkProgress.total) * 100}%` }}
-                  />
+              <div className="flex flex-col gap-1.5 min-w-[220px]">
+                <div className="flex items-center justify-between text-xs text-muted-foreground">
+                  <span className="flex items-center gap-1.5">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    Re-verifying records…
+                  </span>
+                  <span className="font-mono font-medium">
+                    {bulkProgress.done} / {bulkProgress.total}
+                  </span>
                 </div>
+                <Progress
+                  value={Math.round((bulkProgress.done / bulkProgress.total) * 100)}
+                  className="h-2"
+                />
+                <p className="text-xs text-muted-foreground text-right">
+                  {Math.round((bulkProgress.done / bulkProgress.total) * 100)}% complete
+                </p>
               </div>
             ) : (
               <Button

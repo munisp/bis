@@ -19,6 +19,7 @@ import { getDb } from "./db";
 import { biometricSessionLogs, alerts, platformSettings } from "../drizzle/schema";
 import { and, eq, gte, sql } from "drizzle-orm";
 import { notifyOwner } from "./_core/notification";
+import { ENV } from "./_core/env";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -32,6 +33,7 @@ export interface SpoofAlertResult {
   breachedTypes: string[];
   alertsCreated: number;
   notified: boolean;
+  slackNotified?: boolean;
   skippedReason?: string;
 }
 
@@ -258,10 +260,60 @@ Regulatory basis: ISO 30107-3 — Presentation Attack Detection (PAD) monitoring
     });
   }
 
+  // ── Slack notification ────────────────────────────────────────────────────
+  let slackNotified = false;
+  if ((thresholdBreached || totalSpoofAttacks > 0) && ENV.slackWebhookUrl) {
+    try {
+      const color = thresholdBreached ? "#e53e3e" : "#dd6b20";
+      const icon = thresholdBreached ? ":rotating_light:" : ":warning:";
+      const breakdownFields = Object.entries(spoofBreakdown)
+        .sort(([, a], [, b]) => b - a)
+        .map(([type, count]) => ({
+          title: SPOOF_TYPE_LABELS[type] ?? type,
+          value: `${count} attack${count !== 1 ? "s" : ""}${count >= perTypeThreshold ? " ⚠️" : ""}`,
+          short: true,
+        }));
+      const payload = {
+        attachments: [
+          {
+            color,
+            fallback: thresholdBreached
+              ? `🚨 Biometric Spoof Alert: ${totalSpoofAttacks} attacks — threshold breached`
+              : `⚠️ Biometric Spoof Alert: ${totalSpoofAttacks} attacks detected`,
+            pretext: `${icon} *BIS Biometric Spoof-Attack Alert*`,
+            title: thresholdBreached
+              ? `Threshold Breached: ${breachedTypes.map(t => SPOOF_TYPE_LABELS[t] ?? t).join(", ")}`
+              : `${totalSpoofAttacks} Spoof Attacks in Last ${windowHours}h`,
+            fields: [
+              { title: "Total Sessions", value: String(totalSessions), short: true },
+              { title: "Spoof Attacks", value: String(totalSpoofAttacks), short: true },
+              { title: "Threshold Breached", value: thresholdBreached ? "YES 🚨" : "NO ✅", short: true },
+              { title: "Threshold (per type)", value: String(perTypeThreshold), short: true },
+              ...breakdownFields,
+            ],
+            footer: "BIS Platform · ISO 30107-3 PAD Monitoring",
+            ts: Math.floor(Date.now() / 1000),
+          },
+        ],
+      };
+      const res = await fetch(ENV.slackWebhookUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      slackNotified = res.ok;
+      if (!res.ok) {
+        console.warn(`[Biometric Spoof Alert] Slack webhook returned ${res.status}`);
+      }
+    } catch (err) {
+      console.warn("[Biometric Spoof Alert] Slack notification failed:", err);
+    }
+  }
+
   console.log(
     `[Biometric Spoof Alert] total=${totalSessions} spoofAttacks=${totalSpoofAttacks} ` +
     `breached=${thresholdBreached} breachedTypes=${breachedTypes.join(",")} ` +
-    `alertsCreated=${alertsCreated} notified=${notified}`
+    `alertsCreated=${alertsCreated} notified=${notified} slackNotified=${slackNotified}`
   );
 
   return {
@@ -274,6 +326,7 @@ Regulatory basis: ISO 30107-3 — Presentation Attack Detection (PAD) monitoring
     breachedTypes,
     alertsCreated,
     notified,
+    slackNotified,
   };
 }
 

@@ -612,6 +612,31 @@ function ZeroFootprintPageInner() {
                             </div>
                           </details>
                         )}
+                        <div className="flex justify-end pt-1">
+                          <button
+                            onClick={() => {
+                              const rd = record.requestData as any;
+                              setForm(f => ({
+                                ...f,
+                                subjectName: record.subjectName ?? "",
+                                subjectId: rd?.subjectId ?? "",
+                                subjectAddress: rd?.subjectAddress ?? "",
+                                state: rd?.state ?? "Lagos",
+                                lga: rd?.lga ?? "",
+                                phone: rd?.phone ?? "",
+                                statedEmployer: rd?.statedEmployer ?? "",
+                                statedIncome: rd?.statedIncome ?? "",
+                                selectedPillars: rd?.selectedPillars ?? f.selectedPillars,
+                                fieldAgentZone: rd?.fieldAgentZone ?? "Lagos",
+                                notes: rd?.notes ?? "",
+                              }));
+                              setView("form");
+                            }}
+                            className="text-xs text-orange-600 hover:text-orange-700 font-medium flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-orange-50 transition-all"
+                          >
+                            ↺ Re-run Investigation
+                          </button>
+                        </div>
                       </div>
                     );
                   })}

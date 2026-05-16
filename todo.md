@@ -2239,3 +2239,9 @@
 - [x] Dry-run preview UI on Archival Status card (Preview Impact button + modal)
 - [x] ZeroFootprint history tab with searchable past OSINT reports
 - [x] Cooldown bypass for admins in biometric.enroll (bypassCooldown input)
+
+## Sprint v12 — Re-run, Slack Alerts, Progress Bar
+
+- [x] ZeroFootprint re-run button on history cards
+- [x] Slack webhook integration for spoof alert job
+- [x] KYC bulk re-verify shadcn Progress bar
