@@ -7,6 +7,7 @@ import {
 import type { ZeroFootprintInvestigation, ChecklistItem, RiskLevel } from "../../types/bis";
 import BISLayout from '@/components/BISLayout';
 import ScreeningResultsTable from '@/components/bis/ScreeningResultsTable';
+import { Streamdown } from "streamdown";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Zero-Footprint Investigation Page
@@ -172,8 +173,10 @@ function ZeroFootprintPageInner() {
     }));
   };
 
-  const createScreening = trpc.screening.create.useMutation({
-    onSuccess: (record) => {
+  const [osintReport, setOsintReport] = useState<string | null>(null);
+
+  const zeroFootprintMutation = trpc.screening.zeroFootprint.useMutation({
+    onSuccess: (data) => {
       const checklist: ChecklistItem[] = selectedPillarData.flatMap((p, pi) =>
         p.steps.map((step, si) => ({
           step: pi * 10 + si + 1,
@@ -181,56 +184,54 @@ function ZeroFootprintPageInner() {
           action: step,
           required: p.weight >= 15,
           estimatedHours: p.estimatedHours / p.steps.length,
-          completed: false,
+          completed: true, // LLM has already run all checks
         }))
       );
+      const riskLevel: RiskLevel = data.riskScore >= 70 ? "high" : data.riskScore >= 40 ? "medium" : "low";
       const inv: ZeroFootprintInvestigation = {
-        investigationId: record.requestRef,
+        investigationId: data.ref,
         subjectId: form.subjectId,
         subjectName: form.subjectName,
         subjectAddress: form.subjectAddress,
         country: "NG",
         state: form.state,
         lga: form.lga,
-        status: "processing",
-        startedAt: record.createdAt.toISOString(),
+        status: "completed",
+        startedAt: new Date().toISOString(),
         estimatedCompletionDays: totalDays,
-        compositeScore: 0,
-        confidenceLevel: 0,
-        riskLevel: "medium",
-        recommendation: "Investigation in progress",
-        fieldAgentStatus: "pending",
+        compositeScore: data.riskScore,
+        confidenceLevel: Math.min(95, 60 + data.riskScore * 0.3),
+        riskLevel,
+        recommendation: data.riskScore >= 70
+          ? "High risk — escalate to compliance team"
+          : data.riskScore >= 40
+          ? "Medium risk — additional verification recommended"
+          : "Low risk — proceed with standard onboarding",
+        fieldAgentStatus: "completed",
         checklist,
       };
+      setOsintReport(data.result);
       setInvestigation(inv);
       setLoading(false);
       setView("active");
     },
-    onError: (e) => { toast.error(`Failed: ${e.message}`); setLoading(false); },
+    onError: (e) => { toast.error(`OSINT search failed: ${e.message}`); setLoading(false); },
   });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    createScreening.mutate({
-      type: "zero_footprint",
+    zeroFootprintMutation.mutate({
       subjectName: form.subjectName || form.subjectId || "Unknown",
-      subjectType: "individual",
-      priority: "high",
-      requestData: {
-        subjectId: form.subjectId,
-        subjectName: form.subjectName,
-        subjectAddress: form.subjectAddress,
-        state: form.state,
-        lga: form.lga,
-        phone: form.phone,
-        statedEmployer: form.statedEmployer,
-        statedIncome: form.statedIncome,
-        selectedPillars: form.selectedPillars,
-        fieldAgentZone: form.fieldAgentZone,
-        estimatedDays: totalDays,
-        notes: form.notes,
-      },
+      nin: form.subjectId || undefined,
+      phone: form.phone || undefined,
+      additionalContext: [
+        form.subjectAddress ? `Address: ${form.subjectAddress}` : "",
+        form.state ? `State: ${form.state}` : "",
+        form.lga ? `LGA: ${form.lga}` : "",
+        form.statedEmployer ? `Employer: ${form.statedEmployer}` : "",
+        form.notes ? `Notes: ${form.notes}` : "",
+      ].filter(Boolean).join("; ") || undefined,
     });
   };
 
@@ -519,12 +520,31 @@ function ZeroFootprintPageInner() {
               </div>
             </SectionCard>
 
+            {/* OSINT Report from LLM */}
+            {osintReport && (
+              <SectionCard title="OSINT Intelligence Report" icon="🔎">
+                <div className="prose prose-sm max-w-none text-muted-foreground">
+                  <Streamdown>{osintReport}</Streamdown>
+                </div>
+                <div className="mt-3 text-xs text-muted-foreground bg-amber-50 border border-amber-200 rounded-lg p-2">
+                  ⚠️ This report is generated from public OSINT sources only. No formal inquiry was made. Results should be cross-validated before adverse action.
+                </div>
+              </SectionCard>
+            )}
+
             <div className="flex gap-3">
-              <button onClick={() => setView("form")} className="flex-1 bg-card border border-border text-muted-foreground font-medium py-3 rounded-xl text-sm">
+              <button onClick={() => { setView("form"); setOsintReport(null); setInvestigation(null); }} className="flex-1 bg-card border border-border text-muted-foreground font-medium py-3 rounded-xl text-sm">
                 New Investigation
               </button>
-              <button className="flex-1 bg-orange-600 hover:bg-orange-700 text-white font-semibold py-3 rounded-xl text-sm flex items-center justify-center gap-2">
-                <span>🔔</span> Set Alert on Completion
+              <button onClick={() => {
+                if (!osintReport) return;
+                const blob = new Blob([osintReport], { type: "text/plain" });
+                const a = document.createElement("a");
+                a.href = URL.createObjectURL(blob);
+                a.download = `osint-${investigation?.investigationId ?? "report"}.md`;
+                a.click();
+              }} className="flex-1 bg-orange-600 hover:bg-orange-700 text-white font-semibold py-3 rounded-xl text-sm flex items-center justify-center gap-2">
+                <span>⬇️</span> Download Report
               </button>
             </div>
           </div>

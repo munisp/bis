@@ -15,7 +15,7 @@ import { protectedProcedure, publicProcedure, router, writeProcedure, adminProce
 import { TRPCError } from "@trpc/server";
 import { getDb, insertBiometricSessionLog, getBiometricSessionLogs, markBiometricSessionKafkaPublished, getBiometricSessionStats } from "./db";
 import { kycRecords, biometricSessionLogs, platformSettings } from "../drizzle/schema";
-import { and, eq, gte, desc } from "drizzle-orm";
+import { and, eq, gte, desc, lt, sql } from "drizzle-orm";
 import { storagePut } from "./storage";
 import { invokeLLM } from "./_core/llm";
 import { notifyOwner } from "./_core/notification";
@@ -186,6 +186,35 @@ export const biometricRouter = router({
       })
     )
     .mutation(async ({ input, ctx }) => {
+      // ── Re-enrollment cooldown guard ────────────────────────────────────────
+      // Reject re-enrollment if the same kycRecordId was successfully enrolled
+      // within the last 24 hours to prevent rapid face-embedding cycling.
+      if (input.kycRecordId) {
+        const db = await getDb();
+        if (db) {
+          const cooldownCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+          const [recentEnrollment] = await db
+            .select({ id: biometricSessionLogs.id, createdAt: biometricSessionLogs.createdAt })
+            .from(biometricSessionLogs)
+            .where(
+              and(
+                eq(biometricSessionLogs.kycRecordId, input.kycRecordId),
+                eq(biometricSessionLogs.overallVerified, true),
+                gte(biometricSessionLogs.createdAt, cooldownCutoff)
+              )
+            )
+            .orderBy(desc(biometricSessionLogs.createdAt))
+            .limit(1);
+          if (recentEnrollment) {
+            const nextAllowedAt = new Date(recentEnrollment.createdAt.getTime() + 24 * 60 * 60 * 1000);
+            throw new TRPCError({
+              code: "TOO_MANY_REQUESTS",
+              message: `Re-enrollment cooldown active. This subject was successfully enrolled within the last 24 hours. Next re-enrollment allowed after ${nextAllowedAt.toISOString()}.`,
+            });
+          }
+        }
+      }
+
       // Maps to Go gateway /v1/biometric/enroll → Python engine /verify/match (enroll stores embedding)
       const result = await biometricFetch("/enroll", {
         image: input.imageBase64,
@@ -1090,8 +1119,37 @@ export const biometricRouter = router({
 
   // ── On-Demand Archival Trigger ───────────────────────────────────────────────
   // Allows admins to trigger an immediate archival run outside the weekly schedule.
-  triggerArchival: adminProcedure.mutation(async ({ ctx }) => {
+  triggerArchival: adminProcedure
+    .input(z.object({ dryRun: z.boolean().default(false) }).optional())
+    .mutation(async ({ input, ctx }) => {
+    const isDryRun = input?.dryRun ?? false;
     const ranAt = new Date();
+
+    // ── Dry-run mode: count eligible rows without moving data ──────────────────
+    if (isDryRun) {
+      try {
+        const db = await getDb();
+        if (!db) return { dryRun: true, eligibleRows: 0, message: "DB unavailable" };
+        const [retentionRow] = await db.select().from(platformSettings).where(eq(platformSettings.key, "biometric_retention_days")).limit(1);
+        const retentionDays = retentionRow?.value ? Number(retentionRow.value) : 90;
+        const effectiveRetention = isNaN(retentionDays) ? 90 : retentionDays;
+        const cutoff = new Date(Date.now() - effectiveRetention * 24 * 60 * 60 * 1000);
+        const { sql: sqlFn } = await import("drizzle-orm");
+        const [countRow] = await db.select({ c: sqlFn<number>`count(*)` }).from(biometricSessionLogs).where(lt(biometricSessionLogs.createdAt, cutoff));
+        const eligibleRows = Number(countRow?.c ?? 0);
+        return {
+          dryRun: true,
+          eligibleRows,
+          retentionDays: effectiveRetention,
+          cutoff: cutoff.toISOString(),
+          coldStoragePrefix: "biometric-archive/",
+          message: `Dry run: ${eligibleRows} rows would be archived (older than ${effectiveRetention} days).`,
+        };
+      } catch (err) {
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: `Dry run failed: ${err instanceof Error ? err.message : String(err)}` });
+      }
+    }
+
     try {
       const { runBiometricSessionLogArchival } = await import("./biometricSessionLogArchiver");
       const result = await runBiometricSessionLogArchival();

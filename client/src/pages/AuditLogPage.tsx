@@ -44,6 +44,7 @@ export default function AuditLogPage() {
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [resultFilter, setResultFilter] = useState("all");
+  const [targetRefFilter, setTargetRefFilter] = useState<string | undefined>(undefined);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [page, setPage] = useState(0);
   const [userIdFilter, setUserIdFilter] = useState<number | undefined>(undefined);
@@ -94,6 +95,7 @@ export default function AuditLogPage() {
   const { data, isLoading, refetch } = trpc.audit.list.useQuery({
     category: categoryFilter !== "all" ? categoryFilter : undefined,
     result: resultFilter !== "all" ? resultFilter : undefined,
+    targetRef: targetRefFilter,
     userId: userIdFilter,
     limit: PAGE_SIZE,
     offset: page * PAGE_SIZE,
@@ -221,6 +223,27 @@ export default function AuditLogPage() {
             ))}
           </SelectContent>
         </Select>
+        {/* Quick-filter chips */}
+        <button
+          onClick={() => {
+            if (targetRefFilter === "biometric-archive") {
+              setTargetRefFilter(undefined);
+              setCategoryFilter("all");
+            } else {
+              setTargetRefFilter("biometric-archive");
+              setCategoryFilter("system");
+            }
+            setPage(0);
+          }}
+          className={cn(
+            "h-8 px-3 rounded-md text-xs font-medium border transition-colors flex items-center gap-1",
+            targetRefFilter === "biometric-archive"
+              ? "bg-orange-500/20 border-orange-500/50 text-orange-400"
+              : "border-border text-muted-foreground hover:border-orange-500/40 hover:text-orange-400"
+          )}
+        >
+          🗄️ Archival Events
+        </button>
       </div>
 
       {/* Loading */}
