@@ -13,7 +13,7 @@
 import { z } from "zod";
 import { protectedProcedure, publicProcedure, router, writeProcedure } from "./_core/trpc";
 import { TRPCError } from "@trpc/server";
-import { getDb, insertBiometricSessionLog, getBiometricSessionLogs } from "./db";
+import { getDb, insertBiometricSessionLog, getBiometricSessionLogs, markBiometricSessionKafkaPublished } from "./db";
 import { kycRecords, biometricSessionLogs } from "../drizzle/schema";
 import { eq } from "drizzle-orm";
 import { storagePut } from "./storage";
@@ -26,9 +26,9 @@ async function publishBiometricEvent(
   subjectRef: string,
   payload: Record<string, unknown>,
   severity: "info" | "low" | "medium" | "high" | "critical" = "info"
-): Promise<void> {
+): Promise<boolean> {
   try {
-    await fetch(`${EVENT_PROCESSOR_URL}/v1/events`, {
+    const res = await fetch(`${EVENT_PROCESSOR_URL}/v1/events`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -44,9 +44,11 @@ async function publishBiometricEvent(
       }),
       signal: AbortSignal.timeout(5000),
     });
+    return res.ok;
   } catch (e) {
     // Non-blocking — event publishing failures must not break the main flow
     console.warn(`[Biometric] Failed to publish event ${eventType}:`, e);
+    return false;
   }
 }
 
@@ -517,13 +519,14 @@ export const biometricRouter = router({
         createdAt: new Date(),
       });
 
-      // Publish event
-      await publishBiometricEvent(
+      // Publish event and mark kafkaPublished
+      const activeLivenessPublished = await publishBiometricEvent(
         "BIOMETRIC_ACTIVE_LIVENESS_CHECKED",
         input.subjectRef ?? "unknown",
         { score: result.score, challenge: input.challenge, passed: result.live, sessionId },
         result.live ? "info" : "medium"
       );
+      if (activeLivenessPublished && sessionId) { markBiometricSessionKafkaPublished(sessionId as any).catch(() => {}); }
 
       return result;
     }),
@@ -571,13 +574,14 @@ export const biometricRouter = router({
         createdAt: new Date(),
       });
 
-      // Publish event
-      await publishBiometricEvent(
+      // Publish event and mark kafkaPublished
+      const antiSpoofPublished = await publishBiometricEvent(
         "BIOMETRIC_ANTI_SPOOFING_CHECKED",
         input.subjectRef ?? "unknown",
         { score: result.score, genuine: result.genuine, spoof_type: result.spoof_type, sessionId },
         result.genuine ? "info" : "high"
       );
+      if (antiSpoofPublished && sessionId) { markBiometricSessionKafkaPublished(sessionId as any).catch(() => {}); }
 
       return result;
     }),
@@ -616,13 +620,14 @@ export const biometricRouter = router({
         createdAt: new Date(),
       });
 
-      // Publish event
-      await publishBiometricEvent(
+      // Publish event and mark kafkaPublished
+      const faceMatchPublished = await publishBiometricEvent(
         "BIOMETRIC_FACE_MATCHED",
         input.subjectRef ?? "unknown",
         { score: result.score, match: result.match, cosine_similarity: result.cosine_similarity, sessionId },
         result.match ? "info" : "medium"
       );
+      if (faceMatchPublished && sessionId) { markBiometricSessionKafkaPublished(sessionId as any).catch(() => {}); }
 
       return result;
     }),
@@ -762,8 +767,8 @@ export const biometricRouter = router({
         }
       }
 
-      // Publish event
-      await publishBiometricEvent(
+      // Publish event and mark kafkaPublished
+      const fullVerifyPublished = await publishBiometricEvent(
         "BIOMETRIC_FULL_VERIFICATION",
         input.subjectRef ?? "unknown",
         {
@@ -772,6 +777,7 @@ export const biometricRouter = router({
         },
         result.verified ? "info" : "high"
       );
+      if (fullVerifyPublished && sessionId) { markBiometricSessionKafkaPublished(sessionId as any).catch(() => {}); }
 
       return result;
     }),

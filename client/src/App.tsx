@@ -20,6 +20,7 @@ const Settings               = lazy(() => import("@/pages/Settings"));
 const NotFound               = lazy(() => import("@/pages/NotFound"));
 
 const BiometricEnrollmentPage   = lazy(() => import("@/pages/bis/BiometricEnrollmentPage"));
+const BiometricSessionLogPage   = lazy(() => import("@/pages/bis/BiometricSessionLogPage"));
 const FieldAgentsPage           = lazy(() => import("@/pages/bis/FieldAgentsPage"));
 const DataSourcesPage           = lazy(() => import("@/pages/bis/DataSourcesPage"));
 const ContinuousMonitoringPage  = lazy(() => import("@/pages/bis/ContinuousMonitoringPage"));
@@ -122,6 +123,7 @@ function Router() {
 
         {/* BIS Feature Modules */}
         <Route path="/biometric-enrollment" component={BiometricEnrollmentPage} />
+        <Route path="/biometric-sessions" component={BiometricSessionLogPage} />
         <Route path="/continuous-monitoring" component={ContinuousMonitoringPage} />
         <Route path="/drug-screening" component={DrugScreeningPage} />
         <Route path="/mvr-check" component={MVRCheckPage} />

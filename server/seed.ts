@@ -30,6 +30,7 @@ import {
   alertRules,
   ruleEvaluations,
   onboardingApplications,
+  biometricSessionLogs,
 } from "../drizzle/schema";
 
 // ─── DB connection ────────────────────────────────────────────────────────────
@@ -843,6 +844,103 @@ async function seedDataSources() {
   console.log(`    ✓ ${all.length} data sources`);
 }
 
+// ─── Biometric Session Logs ──────────────────────────────────────────────────
+
+async function seedBiometricSessionLogs(kycIds: number[]) {
+  console.log("  Seeding biometric session logs…");
+
+  const SPOOF_TYPES = [
+    "genuine", "genuine", "genuine", "genuine", "genuine", // majority genuine
+    "printed_photo", "screen_replay", "paper_mask", "3d_mask", "deepfake", "high_quality_photo",
+  ] as const;
+
+  const VER_TYPES = [
+    "passive_liveness", "active_liveness", "antispoofing", "face_match", "full_verify",
+  ] as const;
+
+  const CHALLENGES = ["blink", "smile", "turn_left", "turn_right", "nod"] as const;
+
+  const existing = await db.execute(sql`SELECT COUNT(*) as cnt FROM biometric_session_logs`);
+  if ((existing.rows as any[])[0]?.cnt > 0) {
+    console.log("    ✓ biometric session logs already seeded");
+    return;
+  }
+
+  let count = 0;
+  for (let i = 0; i < 80; i++) {
+    const spoofType = rnd(SPOOF_TYPES);
+    const genuine = spoofType === "genuine";
+    const verType = rnd(VER_TYPES);
+    const passed = genuine ? Math.random() > 0.05 : Math.random() < 0.08;
+    const kycId = kycIds.length > 0 ? rnd(kycIds) : null;
+    const daysBack = rndInt(0, 90);
+    const sessionId = `bio-seed-${i.toString().padStart(4, "0")}-${Math.random().toString(36).slice(2, 8)}`;
+    const subjectRef = `SUBJ-${rndInt(1000, 9999)}`;
+
+    const isActiveLiveness = verType === "active_liveness" || verType === "full_verify";
+    const isAntispoof = verType === "antispoofing" || verType === "full_verify";
+    const isFaceMatch = verType === "face_match" || verType === "full_verify";
+    const isPassive = verType === "passive_liveness" || verType === "full_verify";
+
+    await db.insert(biometricSessionLogs).values({
+      sessionId,
+      subjectRef,
+      kycRecordId: kycId,
+      // Passive liveness
+      livenessScore: isPassive ? rndFloat(passed ? 0.75 : 0.1, passed ? 0.99 : 0.45, 3) : null,
+      livenessLive: isPassive ? passed : null,
+      livenessReason: isPassive ? (passed ? "motion_detected" : "no_motion") : null,
+      livenessLandmarksFound: isPassive ? true : null,
+      livenessEar: isPassive ? rndFloat(0.2, 0.4, 3) : null,
+      livenessTextureScore: isPassive ? rndFloat(0.6, 0.99, 3) : null,
+      livenessFaceAreaRatio: isPassive ? rndFloat(0.05, 0.35, 3) : null,
+      livenessLandmarkVariance: isPassive ? rndFloat(0.001, 0.05, 4) : null,
+      // Active liveness
+      activeLivenessScore: isActiveLiveness ? rndFloat(passed ? 0.7 : 0.1, passed ? 0.99 : 0.4, 3) : null,
+      activeLivenessLive: isActiveLiveness ? passed : null,
+      activeLivenessChallenge: isActiveLiveness ? rnd(CHALLENGES) : null,
+      activeLivenessChallengeCompleted: isActiveLiveness ? passed : null,
+      activeLivenessFramesAnalysed: isActiveLiveness ? rndInt(3, 30) : null,
+      // Face detection
+      faceDetected: true,
+      faceCount: 1,
+      faceQualityScore: rndFloat(0.65, 0.99, 3),
+      faceBboxX: rndInt(80, 160),
+      faceBboxY: rndInt(50, 120),
+      faceBboxW: rndInt(120, 200),
+      faceBboxH: rndInt(140, 220),
+      // Anti-spoofing
+      antiSpoofScore: isAntispoof ? rndFloat(genuine ? 0.8 : 0.05, genuine ? 0.99 : 0.35, 3) : null,
+      antiSpoofGenuine: isAntispoof ? genuine : null,
+      antiSpoofType: isAntispoof ? (genuine ? "genuine" : spoofType) as any : null,
+      antiSpoofModel: isAntispoof ? "texture_analysis_v2" : null,
+      antiSpoofSharpness: isAntispoof ? rndFloat(0.6, 0.99, 3) : null,
+      antiSpoofColourDepth: isAntispoof ? rndFloat(0.7, 0.99, 3) : null,
+      antiSpoofHfScore: isAntispoof ? rndFloat(0.5, 0.95, 3) : null,
+      antiSpoofFreqAnomalyScore: isAntispoof ? rndFloat(genuine ? 0.0 : 0.4, genuine ? 0.2 : 0.95, 3) : null,
+      antiSpoofReflectionScore: isAntispoof ? rndFloat(0.1, 0.6, 3) : null,
+      antiSpoofDepthScore: isAntispoof ? rndFloat(0.5, 0.99, 3) : null,
+      // Face matching
+      matchScore: isFaceMatch ? rndFloat(passed ? 0.75 : 0.1, passed ? 0.99 : 0.45, 3) : null,
+      matchCosineSimilarity: isFaceMatch ? rndFloat(passed ? 0.7 : 0.05, passed ? 0.98 : 0.4, 3) : null,
+      matchDecision: isFaceMatch ? passed : null,
+      matchThreshold: isFaceMatch ? 0.6 : null,
+      // Overall
+      overallScore: verType === "full_verify" ? rndFloat(passed ? 0.75 : 0.1, passed ? 0.99 : 0.4, 3) : null,
+      overallVerified: verType === "full_verify" ? passed : null,
+      failureReasons: !passed ? (genuine ? "liveness_check_failed" : `spoof_detected:${spoofType}`) : null,
+      // Metadata
+      requestId: `req-${Math.random().toString(36).slice(2, 12)}`,
+      latencyMs: rndFloat(80, 1200, 0),
+      engineVersion: "biometric-engine-v2.1.0",
+      kafkaPublished: Math.random() > 0.1,
+      createdAt: daysAgo(daysBack),
+    });
+    count++;
+  }
+  console.log(`    ✓ ${count} biometric session logs`);
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -866,6 +964,8 @@ async function main() {
     await seedRuleEvaluations(ruleIds, invRows);
     await seedOnboardingApplications();
     await seedDataSources();
+    const kycRows = await db.select({ id: kycRecords.id }).from(kycRecords);
+    await seedBiometricSessionLogs(kycRows.map(k => k.id));
 
     console.log("\n✅  Seed complete!\n");
   } catch (err) {

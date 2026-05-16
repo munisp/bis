@@ -2218,9 +2218,10 @@ const onboardingRouter = router({
   uploadDocument: writeProcedure
     .input(z.object({
       applicationId: z.number(),
-      fileName: z.string().min(1),
+      fileName: z.string().min(1).max(255),
       fileDataUri: z.string().min(10), // base64 data URI
       mimeType: z.string().default("application/octet-stream"),
+      fileSize: z.number().max(16 * 1024 * 1024).optional(),
     }))
     .mutation(async ({ input, ctx }) => {
       const db = await getDb();
@@ -2231,9 +2232,49 @@ const onboardingRouter = router({
       if (app.createdBy !== String(ctx.user!.id) && ctx.user!.role !== "admin") {
         throw new TRPCError({ code: "FORBIDDEN" });
       }
-      // Upload to S3
+      // ── Security: MIME allowlist (ransomware / malware prevention) ────────────
+      const ONBOARDING_ALLOWED_TYPES = [
+        'application/pdf',
+        'application/msword',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'application/vnd.ms-excel',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'image/png', 'image/jpeg', 'image/jpg', 'text/plain',
+      ];
+      if (!ONBOARDING_ALLOWED_TYPES.includes(input.mimeType)) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'File type not allowed. Permitted: PDF, DOCX, XLSX, PNG, JPG, TXT' });
+      }
+      // ── Security: Blocked dangerous file extensions ───────────────────────────
+      const BLOCKED_EXT = ['exe','bat','sh','ps1','vbs','cmd','com','scr','pif','msi','dll','sys','jar','py','rb','php','asp','aspx','js','ts','mjs','cjs'];
+      const rawExt = (input.fileName.split('.').pop() ?? '').toLowerCase();
+      if (BLOCKED_EXT.includes(rawExt)) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: `File extension .${rawExt} is not permitted` });
+      }
+      // ── Security: Magic-byte validation ───────────────────────────────────────
       const base64 = input.fileDataUri.split(",")[1] ?? input.fileDataUri;
       const buffer = Buffer.from(base64, "base64");
+      if (buffer.length > 16 * 1024 * 1024) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'File exceeds 16 MB limit' });
+      }
+      const magicBytes = buffer.slice(0, 8);
+      const ONBOARDING_MAGIC: Record<string, number[][]> = {
+        'application/pdf':  [[0x25, 0x50, 0x44, 0x46]],
+        'image/png':        [[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]],
+        'image/jpeg':       [[0xFF, 0xD8, 0xFF]],
+        'image/jpg':        [[0xFF, 0xD8, 0xFF]],
+        'application/msword': [[0xD0, 0xCF, 0x11, 0xE0]],
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document': [[0x50, 0x4B, 0x03, 0x04]],
+        'application/vnd.ms-excel': [[0xD0, 0xCF, 0x11, 0xE0]],
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': [[0x50, 0x4B, 0x03, 0x04]],
+        'text/plain': [],
+      };
+      const expectedMagics = ONBOARDING_MAGIC[input.mimeType];
+      if (expectedMagics && expectedMagics.length > 0) {
+        const matches = expectedMagics.some((magic: number[]) => magic.every((byte: number, i: number) => magicBytes[i] === byte));
+        if (!matches) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'File content does not match declared MIME type (magic-byte mismatch)' });
+        }
+      }
       const suffix = Math.random().toString(36).slice(2, 8);
       const safeFileName = input.fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
       const key = `onboarding/${app.referenceId}/${suffix}-${safeFileName}`;
