@@ -1263,6 +1263,323 @@ async def list_enrollments(pattern: str = "face:*", count: int = 100):
     return {"enrolled": refs, "total": len(refs)}
 
 
+# ── Face Detection ───────────────────────────────────────────────────────────
+@app.post("/detect/face")
+async def detect_face(req: ImagePayload):
+    """
+    Detect faces in an image and return bounding boxes, count, and quality score.
+    Uses InsightFace if available, falls back to OpenCV Haar cascade.
+    """
+    start = time.time()
+    try:
+        img = decode_image(req.image)
+        h, w = img.shape[:2]
+        faces_data = []
+
+        if _models.get("insightface") is not None:
+            faces = _models["insightface"].get(img)
+            for face in faces:
+                x1, y1, x2, y2 = [float(v) for v in face.bbox]
+                faces_data.append({
+                    "bbox": {"x": x1/w, "y": y1/h, "w": (x2-x1)/w, "h": (y2-y1)/h},
+                    "bbox_px": {"x": int(x1), "y": int(y1), "w": int(x2-x1), "h": int(y2-y1)},
+                    "det_score": round(float(face.det_score), 4),
+                    "quality_score": round(float(face.det_score), 4),
+                })
+        else:
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+            cascade = cv2.CascadeClassifier(cascade_path)
+            haar_faces = cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(60, 60))
+            for (x, y, fw, fh) in haar_faces:
+                faces_data.append({
+                    "bbox": {"x": x/w, "y": y/h, "w": fw/w, "h": fh/h},
+                    "bbox_px": {"x": int(x), "y": int(y), "w": int(fw), "h": int(fh)},
+                    "det_score": 0.85,
+                    "quality_score": 0.85,
+                })
+
+        face_detected = len(faces_data) > 0
+        quality_score = max((f["quality_score"] for f in faces_data), default=0.0)
+        return {
+            "face_detected": face_detected,
+            "face_count": len(faces_data),
+            "quality_score": round(quality_score, 4),
+            "faces": faces_data,
+            "bbox": faces_data[0]["bbox"] if faces_data else None,
+            "using_insightface": _models.get("insightface") is not None,
+            "request_id": str(uuid.uuid4()),
+            "latency_ms": round((time.time() - start) * 1000, 1),
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        log.error(f"Face detect error: {e}")
+        raise HTTPException(status_code=500, detail="Internal biometric engine error")
+
+
+# ── 68-point Landmark Extraction ──────────────────────────────────────────────
+@app.post("/detect/landmarks")
+async def detect_landmarks(req: ImagePayload):
+    """
+    Extract 68 canonical facial landmarks from an image.
+    MediaPipe Face Mesh provides 478 landmarks; we map to the standard 68-point
+    subset (compatible with dlib/OpenFace conventions).
+    """
+    start = time.time()
+    try:
+        img = decode_image(req.image)
+        h, w = img.shape[:2]
+
+        # MediaPipe 478-point → 68-point canonical mapping
+        # Indices chosen to match the standard 68-point face model:
+        # 0-16: jaw, 17-21: right brow, 22-26: left brow, 27-35: nose,
+        # 36-41: right eye, 42-47: left eye, 48-67: mouth
+        MP_TO_68 = [
+            # Jaw (0-16)
+            234, 93, 132, 58, 172, 136, 150, 149, 176, 148, 152, 377, 400, 378, 379, 365, 454,
+            # Right eyebrow (17-21)
+            70, 63, 105, 66, 107,
+            # Left eyebrow (22-26)
+            336, 296, 334, 293, 300,
+            # Nose bridge (27-30)
+            168, 6, 197, 195,
+            # Nose tip + nostrils (31-35)
+            5, 4, 1, 19, 94,
+            # Right eye (36-41)
+            33, 160, 158, 133, 153, 144,
+            # Left eye (42-47)
+            362, 385, 387, 263, 373, 380,
+            # Outer mouth (48-59)
+            61, 39, 37, 0, 267, 269, 291, 405, 314, 17, 84, 181,
+            # Inner mouth (60-67)
+            78, 82, 13, 312, 308, 317, 14, 87,
+        ]
+
+        if _models.get("face_mesh") is None:
+            return {
+                "landmarks_found": False,
+                "reason": "mediapipe_unavailable",
+                "request_id": str(uuid.uuid4()),
+                "latency_ms": round((time.time() - start) * 1000, 1),
+            }
+
+        import mediapipe as mp
+        rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        results = _models["face_mesh"].process(rgb)
+
+        if not results.multi_face_landmarks:
+            return {
+                "landmarks_found": False,
+                "reason": "no_face_detected",
+                "request_id": str(uuid.uuid4()),
+                "latency_ms": round((time.time() - start) * 1000, 1),
+            }
+
+        lms = results.multi_face_landmarks[0].landmark
+        landmarks_68 = []
+        for idx in MP_TO_68:
+            if idx < len(lms):
+                lm = lms[idx]
+                landmarks_68.append({
+                    "x": round(lm.x * w, 2),
+                    "y": round(lm.y * h, 2),
+                    "z": round(lm.z, 6),
+                    "x_norm": round(lm.x, 6),
+                    "y_norm": round(lm.y, 6),
+                })
+            else:
+                landmarks_68.append({"x": 0.0, "y": 0.0, "z": 0.0, "x_norm": 0.0, "y_norm": 0.0})
+
+        # Compute landmark variance (useful for liveness)
+        coords = np.array([[p["x_norm"], p["y_norm"]] for p in landmarks_68])
+        variance = float(np.var(coords))
+
+        return {
+            "landmarks_found": True,
+            "landmark_count": len(landmarks_68),
+            "landmarks": landmarks_68,
+            "landmark_variance": round(variance, 8),
+            "mediapipe_total_landmarks": len(lms),
+            "request_id": str(uuid.uuid4()),
+            "latency_ms": round((time.time() - start) * 1000, 1),
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        log.error(f"Landmark detection error: {e}")
+        raise HTTPException(status_code=500, detail="Internal biometric engine error")
+
+
+# ── Face Feature Extraction ───────────────────────────────────────────────────
+@app.post("/extract/features")
+async def extract_features(req: ImagePayload):
+    """
+    Extract face embedding (feature vector) from an image.
+    Returns 512-d ArcFace embedding if InsightFace is available,
+    otherwise returns 128-d LBPH fallback descriptor.
+    Embedding is NOT returned in plaintext — only metadata is exposed.
+    """
+    start = time.time()
+    try:
+        img = decode_image(req.image)
+        embedding = _get_embedding(img)
+        using_arcface = _models.get("insightface") is not None
+
+        if embedding is None:
+            return {
+                "face_detected": False,
+                "reason": "no_face_detected",
+                "request_id": str(uuid.uuid4()),
+                "latency_ms": round((time.time() - start) * 1000, 1),
+            }
+
+        # Quality estimate from embedding norm (ArcFace: well-aligned faces have norm ≈ 1.0)
+        emb_norm = float(np.linalg.norm(embedding))
+        quality_score = min(1.0, emb_norm) if using_arcface else 0.75
+
+        # Face detection metadata
+        h, w = img.shape[:2]
+        bbox = None
+        if using_arcface:
+            faces = _models["insightface"].get(img)
+            if faces:
+                face = max(faces, key=lambda f: (f.bbox[2]-f.bbox[0])*(f.bbox[3]-f.bbox[1]))
+                x1, y1, x2, y2 = [float(v) for v in face.bbox]
+                bbox = {"x": x1/w, "y": y1/h, "w": (x2-x1)/w, "h": (y2-y1)/h}
+
+        return {
+            "face_detected": True,
+            "embedding_dimension": len(embedding),
+            "embedding_model": "insightface_arcface_buffalo_l" if using_arcface else "opencv_lbph_fallback",
+            "quality_score": round(quality_score, 4),
+            "embedding_norm": round(emb_norm, 4),
+            "bbox": bbox,
+            "request_id": str(uuid.uuid4()),
+            "latency_ms": round((time.time() - start) * 1000, 1),
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        log.error(f"Feature extraction error: {e}")
+        raise HTTPException(status_code=500, detail="Internal biometric engine error")
+
+
+# ── Granular Anti-Spoofing with Attack Type Classification ────────────────────
+@app.post("/verify/antispoofing/classify")
+async def classify_spoof_type(req: AntiSpoofRequest):
+    """
+    Granular anti-spoofing that classifies the specific attack type:
+      - genuine: real live face
+      - printed_photo: flat printed photograph
+      - screen_replay: digital screen replay attack
+      - paper_mask: paper or printed mask
+      - three_d_mask: 3D silicone or resin mask
+      - deepfake: AI-generated or manipulated face
+      - high_quality_photo: high-resolution photo that passes basic checks
+    """
+    start = time.time()
+    try:
+        img = decode_image(req.image)
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        h, w = img.shape[:2]
+
+        # ── Feature extraction for classification ──────────────────────────────
+
+        # 1. Laplacian variance (sharpness) — printed photos are blurrier
+        lap_var = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+        sharpness = min(1.0, lap_var / 400.0)
+
+        # 2. Colour channel variance (printed/screen have less colour depth)
+        b, g, r = cv2.split(img)
+        colour_depth = min(1.0, (float(np.var(b)) + float(np.var(g)) + float(np.var(r))) / 30000.0)
+
+        # 3. High-frequency content (Fourier analysis)
+        f = np.fft.fft2(gray)
+        fshift = np.fft.fftshift(f)
+        magnitude = 20 * np.log(np.abs(fshift) + 1)
+        fh, fw = magnitude.shape
+        hf_region = magnitude[fh//4:3*fh//4, fw//4:3*fw//4]
+        hf_score = min(1.0, float(np.mean(hf_region)) / 80.0)
+
+        # 4. Frequency anomaly (screen replay has periodic patterns from display refresh)
+        f_mag = np.abs(np.fft.fft2(gray))
+        f_mag[0, 0] = 0  # Remove DC component
+        top_k = np.sort(f_mag.flatten())[-20:]
+        freq_anomaly_score = float(np.std(top_k)) / (float(np.mean(top_k)) + 1e-6)
+        freq_anomaly_score = min(1.0, freq_anomaly_score / 5.0)
+
+        # 5. Reflection score (3D masks and real faces have specular highlights)
+        _, bright_mask = cv2.threshold(gray, 220, 255, cv2.THRESH_BINARY)
+        reflection_score = float(np.sum(bright_mask > 0)) / (h * w)
+        reflection_score = min(1.0, reflection_score * 20)
+
+        # 6. Depth cue (colour gradient variance — 3D objects have more depth variation)
+        sobel_x = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
+        sobel_y = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
+        gradient_mag = np.sqrt(sobel_x**2 + sobel_y**2)
+        depth_score = min(1.0, float(np.mean(gradient_mag)) / 30.0)
+
+        # ── Classification logic ───────────────────────────────────────────────
+        # Composite genuine score
+        composite = 0.35 * sharpness + 0.25 * colour_depth + 0.25 * hf_score + 0.15 * depth_score
+        genuine = composite >= ANTISPOOFING_THRESHOLD
+
+        # Determine attack type based on feature signatures
+        spoof_type = "genuine"
+        confidence_scores = {}
+
+        if not genuine:
+            # Printed photo: low sharpness + low colour depth + low HF
+            printed_score = (1-sharpness) * 0.4 + (1-colour_depth) * 0.4 + (1-hf_score) * 0.2
+            # Screen replay: high freq anomaly (display refresh lines) + moderate colour
+            screen_score = freq_anomaly_score * 0.5 + colour_depth * 0.3 + (1-sharpness) * 0.2
+            # Paper mask: low colour depth + low reflection + moderate sharpness
+            paper_mask_score = (1-colour_depth) * 0.5 + (1-reflection_score) * 0.3 + sharpness * 0.2
+            # 3D mask: high depth + high reflection + moderate colour
+            three_d_mask_score = depth_score * 0.4 + reflection_score * 0.4 + colour_depth * 0.2
+            # Deepfake: high sharpness + high colour + low freq anomaly (too perfect)
+            deepfake_score = sharpness * 0.4 + colour_depth * 0.3 + (1-freq_anomaly_score) * 0.3
+            # High quality photo: high sharpness + high colour but no depth cues
+            hq_photo_score = sharpness * 0.5 + colour_depth * 0.3 + (1-depth_score) * 0.2
+
+            confidence_scores = {
+                "printed_photo": round(printed_score, 4),
+                "screen_replay": round(screen_score, 4),
+                "paper_mask": round(paper_mask_score, 4),
+                "three_d_mask": round(three_d_mask_score, 4),
+                "deepfake": round(deepfake_score, 4),
+                "high_quality_photo": round(hq_photo_score, 4),
+            }
+            spoof_type = max(confidence_scores, key=confidence_scores.get)
+        else:
+            confidence_scores = {"genuine": round(composite, 4)}
+
+        return {
+            "score": round(composite, 4),
+            "genuine": genuine,
+            "spoof_type": spoof_type,
+            "confidence_scores": confidence_scores,
+            "reason": "passed" if genuine else f"spoof_detected_{spoof_type}",
+            "model": "multi_feature_classifier",
+            "features": {
+                "sharpness": round(sharpness, 4),
+                "colour_depth": round(colour_depth, 4),
+                "hf_score": round(hf_score, 4),
+                "freq_anomaly_score": round(freq_anomaly_score, 4),
+                "reflection_score": round(reflection_score, 4),
+                "depth_score": round(depth_score, 4),
+            },
+            "request_id": str(uuid.uuid4()),
+            "latency_ms": round((time.time() - start) * 1000, 1),
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        log.error(f"Spoof classification error: {e}")
+        raise HTTPException(status_code=500, detail="Internal biometric engine error")
+
+
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", "8084"))

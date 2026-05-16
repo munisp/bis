@@ -1,6 +1,7 @@
 import { defineConfig } from "drizzle-kit";
 
-// BIS platform uses local PostgreSQL. Always use the local PG URL for migrations.
+// Schema uses PostgreSQL-specific types (pgEnum, pgTable).
+// DATABASE_URL must be a PostgreSQL connection string for migrations.
 const rawUrl = process.env.DATABASE_URL ?? "";
 const connectionString =
   rawUrl.startsWith("postgresql") || rawUrl.startsWith("postgres")

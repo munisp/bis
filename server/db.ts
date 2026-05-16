@@ -14,6 +14,7 @@ import {
   InsertMonitor, monitors,
   InsertScreeningRequest, screeningRequests,
   cases, lexSubmissions,
+  biometricSessionLogs, InsertBiometricSessionLog,
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
@@ -490,4 +491,55 @@ export async function seedDataSources(): Promise<{ seeded: number }> {
     }
   }
   return { seeded };
+}
+
+// ─── Biometric Session Logs ───────────────────────────────────────────────────
+
+export async function insertBiometricSessionLog(data: InsertBiometricSessionLog): Promise<number | null> {
+  const db = await getDb();
+  if (!db) { console.warn("[DB] Cannot insert biometric session log: database not available"); return null; }
+  try {
+    const result = await db.insert(biometricSessionLogs).values(data).returning({ id: biometricSessionLogs.id });
+    return result[0]?.id ?? null;
+  } catch (e) {
+    console.warn("[DB] Failed to insert biometric session log:", e);
+    return null;
+  }
+}
+
+export async function getBiometricSessionLogs(filters?: {
+  subjectRef?: string;
+  kycRecordId?: number;
+  limit?: number;
+  offset?: number;
+}): Promise<typeof biometricSessionLogs.$inferSelect[]> {
+  const db = await getDb();
+  if (!db) return [];
+  try {
+    const { and, eq, desc } = await import("drizzle-orm");
+    const conditions = [];
+    if (filters?.subjectRef) conditions.push(eq(biometricSessionLogs.subjectRef, filters.subjectRef));
+    if (filters?.kycRecordId) conditions.push(eq(biometricSessionLogs.kycRecordId, filters.kycRecordId));
+    return await db
+      .select()
+      .from(biometricSessionLogs)
+      .where(conditions.length ? and(...conditions) : undefined)
+      .orderBy(desc(biometricSessionLogs.createdAt))
+      .limit(filters?.limit ?? 50)
+      .offset(filters?.offset ?? 0);
+  } catch (e) {
+    console.warn("[DB] Failed to get biometric session logs:", e);
+    return [];
+  }
+}
+
+export async function markBiometricSessionKafkaPublished(id: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  try {
+    const { eq } = await import("drizzle-orm");
+    await db.update(biometricSessionLogs).set({ kafkaPublished: true }).where(eq(biometricSessionLogs.id, id));
+  } catch (e) {
+    console.warn("[DB] Failed to mark biometric session kafka published:", e);
+  }
 }

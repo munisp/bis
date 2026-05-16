@@ -202,6 +202,69 @@ mod tests {
         assert!(port_num > 0);
     }
 
+    // ─── Biometric event types ──────────────────────────────────────────────
+
+    #[test]
+    fn test_biometric_liveness_checked_serialization() {
+        let et = EventType::BiometricLivenessChecked;
+        let s = serde_json::to_string(&et).unwrap();
+        assert_eq!(s, "\"BIOMETRIC_LIVENESS_CHECKED\"");
+    }
+
+    #[test]
+    fn test_biometric_active_liveness_checked_serialization() {
+        let et = EventType::BiometricActiveLivenessChecked;
+        let s = serde_json::to_string(&et).unwrap();
+        assert_eq!(s, "\"BIOMETRIC_ACTIVE_LIVENESS_CHECKED\"");
+    }
+
+    #[test]
+    fn test_biometric_face_matched_serialization() {
+        let et = EventType::BiometricFaceMatched;
+        let s = serde_json::to_string(&et).unwrap();
+        assert_eq!(s, "\"BIOMETRIC_FACE_MATCHED\"");
+    }
+
+    #[test]
+    fn test_biometric_anti_spoofing_checked_serialization() {
+        let et = EventType::BiometricAntiSpoofingChecked;
+        let s = serde_json::to_string(&et).unwrap();
+        assert_eq!(s, "\"BIOMETRIC_ANTI_SPOOFING_CHECKED\"");
+    }
+
+    #[test]
+    fn test_biometric_full_verification_serialization() {
+        let et = EventType::BiometricFullVerification;
+        let s = serde_json::to_string(&et).unwrap();
+        assert_eq!(s, "\"BIOMETRIC_FULL_VERIFICATION\"");
+    }
+
+    #[test]
+    fn test_biometric_enrolled_serialization() {
+        let et = EventType::BiometricEnrolled;
+        let s = serde_json::to_string(&et).unwrap();
+        assert_eq!(s, "\"BIOMETRIC_ENROLLED\"");
+    }
+
+    #[test]
+    fn test_biometric_revoked_serialization() {
+        let et = EventType::BiometricRevoked;
+        let s = serde_json::to_string(&et).unwrap();
+        assert_eq!(s, "\"BIOMETRIC_REVOKED\"");
+    }
+
+    #[test]
+    fn test_biometric_liveness_checked_deserialization() {
+        let et: EventType = serde_json::from_str("\"BIOMETRIC_LIVENESS_CHECKED\"").unwrap();
+        assert!(matches!(et, EventType::BiometricLivenessChecked));
+    }
+
+    #[test]
+    fn test_biometric_full_verification_deserialization() {
+        let et: EventType = serde_json::from_str("\"BIOMETRIC_FULL_VERIFICATION\"").unwrap();
+        assert!(matches!(et, EventType::BiometricFullVerification));
+    }
+
     // ─── AUDIT_LOG_CAPACITY constant ─────────────────────────────────────────
 
     #[test]

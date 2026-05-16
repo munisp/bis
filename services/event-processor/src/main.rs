@@ -54,6 +54,13 @@ pub enum EventType {
     ReportGenerated,
     UserLogin,
     ApiKeyRotated,
+    BiometricLivenessChecked,
+    BiometricActiveLivenessChecked,
+    BiometricFaceMatched,
+    BiometricAntiSpoofingChecked,
+    BiometricFullVerification,
+    BiometricEnrolled,
+    BiometricRevoked,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, PartialOrd)]

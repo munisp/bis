@@ -1651,3 +1651,84 @@ export const kycScheduledReruns = pgTable("kyc_scheduled_reruns", {
   }));
 export type KycScheduledRerun = typeof kycScheduledReruns.$inferSelect;
 export type InsertKycScheduledRerun = typeof kycScheduledReruns.$inferInsert;
+
+// ── Biometric Session Logs ────────────────────────────────────────────────────
+export const spoofTypeEnum = pgEnum("spoof_type", [
+  "genuine",
+  "printed_photo",
+  "screen_replay",
+  "paper_mask",
+  "three_d_mask",
+  "deepfake",
+  "high_quality_photo",
+  "unknown",
+]);
+
+export const biometricSessionLogs = pgTable("biometric_session_logs", {
+  id: serial("id").primaryKey(),
+  sessionId: varchar("session_id", { length: 64 }).notNull(),
+  subjectRef: varchar("subject_ref", { length: 128 }),
+  kycRecordId: integer("kyc_record_id"),
+  // Passive liveness
+  livenessScore: real("liveness_score"),
+  livenessLive: boolean("liveness_live"),
+  livenessReason: varchar("liveness_reason", { length: 128 }),
+  livenessLandmarksFound: boolean("liveness_landmarks_found"),
+  livenessEar: real("liveness_ear"),
+  livenessTextureScore: real("liveness_texture_score"),
+  livenessFaceAreaRatio: real("liveness_face_area_ratio"),
+  livenessLandmarkVariance: real("liveness_landmark_variance"),
+  // Active liveness
+  activeLivenessScore: real("active_liveness_score"),
+  activeLivenessLive: boolean("active_liveness_live"),
+  activeLivenessChallenge: varchar("active_liveness_challenge", { length: 32 }),
+  activeLivenessChallengeCompleted: boolean("active_liveness_challenge_completed"),
+  activeLivenessFramesAnalysed: integer("active_liveness_frames_analysed"),
+  // Face detection
+  faceDetected: boolean("face_detected"),
+  faceCount: integer("face_count"),
+  faceQualityScore: real("face_quality_score"),
+  faceBboxX: real("face_bbox_x"),
+  faceBboxY: real("face_bbox_y"),
+  faceBboxW: real("face_bbox_w"),
+  faceBboxH: real("face_bbox_h"),
+  // 68-point landmarks (JSON array of {x,y,z})
+  landmarks68: text("landmarks_68"),
+  // Face feature extraction
+  embeddingDimension: integer("embedding_dimension"),
+  embeddingModel: varchar("embedding_model", { length: 64 }),
+  // Face matching
+  matchScore: real("match_score"),
+  matchCosineSimilarity: real("match_cosine_similarity"),
+  matchDecision: boolean("match_decision"),
+  matchThreshold: real("match_threshold"),
+  // Anti-spoofing — binary + 6-class spoof taxonomy
+  antiSpoofScore: real("anti_spoof_score"),
+  antiSpoofGenuine: boolean("anti_spoof_genuine"),
+  antiSpoofType: spoofTypeEnum("anti_spoof_type").default("unknown"),
+  antiSpoofModel: varchar("anti_spoof_model", { length: 64 }),
+  antiSpoofSharpness: real("anti_spoof_sharpness"),
+  antiSpoofColourDepth: real("anti_spoof_colour_depth"),
+  antiSpoofHfScore: real("anti_spoof_hf_score"),
+  antiSpoofFreqAnomalyScore: real("anti_spoof_freq_anomaly_score"),
+  antiSpoofReflectionScore: real("anti_spoof_reflection_score"),
+  antiSpoofDepthScore: real("anti_spoof_depth_score"),
+  // Overall composite
+  overallScore: real("overall_score"),
+  overallVerified: boolean("overall_verified"),
+  failureReasons: text("failure_reasons"),
+  // Metadata
+  requestId: varchar("request_id", { length: 64 }),
+  latencyMs: real("latency_ms"),
+  engineVersion: varchar("engine_version", { length: 32 }),
+  kafkaPublished: boolean("kafka_published").default(false),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+},
+  (table) => ({
+    bio_session_subject_idx: index("bio_session_subject_idx").on(table.subjectRef),
+    bio_session_created_at_idx: index("bio_session_created_at_idx").on(table.createdAt),
+    bio_session_spoof_type_idx: index("bio_session_spoof_type_idx").on(table.antiSpoofType),
+    bio_session_kyc_record_idx: index("bio_session_kyc_record_idx").on(table.kycRecordId),
+  }));
+export type BiometricSessionLog = typeof biometricSessionLogs.$inferSelect;
+export type InsertBiometricSessionLog = typeof biometricSessionLogs.$inferInsert;

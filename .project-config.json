@@ -1,0 +1,63 @@
+{
+  "build_command": "pnpm run build",
+  "capabilities": [
+    "db",
+    "server",
+    "user"
+  ],
+  "dev_command": "pnpm run dev",
+  "env_vars": {
+    "DATABASE_URL": "mysql://2t5rixfHAYLQmtB.9f3d6c4c4f9f:YNu0Becy37NV5w3hw5OQ@gateway04.us-east-1.prod.aws.tidbcloud.com:4000/NigNpTxRrpwoLqf7dXXspm?ssl={\"rejectUnauthorized\":true}"
+  },
+  "experiments": null,
+  "git_remote": {
+    "repo_url": "s3://vida-prod-gitrepo/webdev-git/310519663412555753/NigNpTxRrpwoLqf7dXXspm",
+    "access_key_id": "ASIAZV3A2ECZLOWVZVEF",
+    "secret_access_key": "7qWmvYHmUrcR/4PM8t0BO7eYW3WDvkfnIvOP0ZHP",
+    "session_token": "IQoJb3JpZ2luX2VjEMf//////////wEaCXVzLWVhc3QtMSJHMEUCIQC4wRpHvgj/PqGewTuXq3nWM8MLcOV+/skP/yBCGzUZ9QIgbOVnY9DxYl4y68ZGYFziFDmsms9dJjplKE29w5UjEpMq/wMIkP//////////ARAEGgw2NjUzODYwOTg4NjYiDKPRADu4Nzsy451CoyrTAyjhCvUnURaBUeVvZZbqEIWCOhhR1mEazvJDGBcWooM0rfEzRp7Xyk90RFxiLhb2xsCyHUL2sNkAbH/jXmC58gwr3Y2js2qF2tI1yeVoo9fI5JmPBz/MzA1OwJSHbkulIkXwmTMmXz11itWPihAFmnhDVwUd4N0P3FTtuoPsz97qFE94NQnwhGLtBxkTk4pHRdKwD3BIziliFe4iXdIWycd4cpXDuNTccaW1Du13nK77g5zsQ4N6UyvCS6+b5ridHpNJmXGP16YydPbyXzyXWgz9P8l6MTwR06tnJfYQ8Noq2aZuPA4/3kM/61hF0tvAilzBgK6/O4PGrB9m5GM3dn4h9XT+btPIpp0HyLPR1LhZmkjuAkM6JLBgHBlgG25glTRcwpR+wGVrhv3d5mm62a6RvPhxhAPJXpnXOx4aR/fZLHr5a3lbl6SP1cllJowvpcB8Qa/Q3CK14ibd6bBfTU9N+2LZLsTwZ0yErzWKlcRFGipxUXTwDlOiRkb9HjsjHe+ou4Kf7ZxhdeJQEhKqIdaAi09Fj/ZzIRrXttqgfD27TVCysLKB9dxd/3/purhcghdcUSxPbM1WtbISHCUc0DEYrR63TwhBs3dfUutlVLNpOP3nMMSMotAGOp0BvNYVBjSF9CFnPHQQ2nVlTNaFgDc9JuKs8xEf4YocA2T2I0TKO3jKumD0OdbbW7aH4lKjJ4x4rq5GuF2I4PNkfxPPfW2S2VE3U9zOZN8d9KjdyssigbM20f/WDx8FaV3SLxGGgLUu1/AkigZYAdqALzuTCj9BVs8OOLtjSehVdEvvWwAaMUCfOEZb+s3SadUdHgD/WuQntYZy1akBRg==",
+    "expiration": "2026-05-17T02:59:16.000Z"
+  },
+  "name": "bis-pwa",
+  "path": "/home/ubuntu/bis-pwa",
+  "port": 3000,
+  "secrets": {
+    "BIS_VERIFY_CAC_KEY": "bis-cac-key-default",
+    "BIS_VERIFY_CAC_URL": "https://search.cac.gov.ng/api/v1",
+    "BIS_VERIFY_NIBSS_KEY": "bis-nibss-key-default",
+    "BIS_VERIFY_NIBSS_URL": "https://api.nibss-plc.com.ng/v1",
+    "BIS_VERIFY_NIMC_KEY": "bis-nimc-key-default",
+    "BIS_VERIFY_NIMC_URL": "https://api.nimc.gov.ng/v1",
+    "BUILT_IN_FORGE_API_KEY": "iMVAv9s63a3uLWLWrUn6Ev",
+    "BUILT_IN_FORGE_API_URL": "https://forge.manus.ai",
+    "GATEWAY_SANDBOX": "true",
+    "JWT_SECRET": "4mxaUixAcVF56W8GbJiawZ",
+    "KEYCLOAK_CLIENT_ID": "bis-platform",
+    "KEYCLOAK_CLIENT_SECRET": "bis-keycloak-secret-default",
+    "KEYCLOAK_REALM": "bis-platform",
+    "KEYCLOAK_URL": "http://keycloak:8080",
+    "OAUTH_SERVER_URL": "https://api.manus.im",
+    "OWNER_NAME": "patrick.munis",
+    "OWNER_OPEN_ID": "CpxAPLAEvuXJBrxHJPfzMJ",
+    "REDIS_URL": "redis://redis:6379",
+    "SLACK_WEBHOOK_URL": "https://hooks.slack.com/services/bis-default/webhook",
+    "SMTP_FROM": "noreply@bis-platform.com",
+    "SMTP_HOST": "smtp.sendgrid.net",
+    "SMTP_PASS": "bis-smtp-pass-default",
+    "SMTP_PORT": "587",
+    "SMTP_USER": "apikey",
+    "TEMPORAL_HOST": "temporal:7233",
+    "TEMPORAL_NAMESPACE": "default",
+    "VITE_ANALYTICS_ENDPOINT": "https://manus-analytics.com",
+    "VITE_ANALYTICS_WEBSITE_ID": "70279fc1-e169-4252-9948-7e5cac1b7ed5",
+    "VITE_APP_ID": "NigNpTxRrpwoLqf7dXXspm",
+    "VITE_APP_LOGO": "https://files.manuscdn.com/user_upload_by_module/web_dev_logo/310519663412555753/QNNkXdajsOcvxVTW.png",
+    "VITE_APP_TITLE": "BIS — Background Intelligence System",
+    "VITE_FRONTEND_FORGE_API_KEY": "ixNrRGKa4bEwLMJSKzBruM",
+    "VITE_FRONTEND_FORGE_API_URL": "https://forge.manus.ai",
+    "VITE_OAUTH_PORTAL_URL": "https://manus.im",
+    "YOUVERIFY_API_KEY": "bis-youverify-key-default",
+    "YOUVERIFY_BASE_URL": "https://api.youverify.co/v2"
+  },
+  "template_id": "web-db-user",
+  "test_command": "pnpm test"
+}

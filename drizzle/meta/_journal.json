@@ -260,6 +260,13 @@
       "when": 1778763441919,
       "tag": "0036_purple_black_cat",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1778943635095,
+      "tag": "0037_smart_captain_universe",
+      "breakpoints": true
     }
   ]
 }
