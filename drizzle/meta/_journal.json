@@ -274,6 +274,13 @@
       "when": 1778971469089,
       "tag": "0038_serious_black_queen",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1781639092958,
+      "tag": "0039_left_maria_hill",
+      "breakpoints": true
     }
   ]
 }

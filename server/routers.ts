@@ -2423,6 +2423,7 @@ const onboardingRouter = router({
             phone: sh.phone ?? null,
             status: "pending",
             subjectRef,
+            onboardingApplicationId: app.id,
             createdBy: ctx.user!.id,
           });
         }
@@ -2440,6 +2441,7 @@ const onboardingRouter = router({
               phone: app.contactPhone ?? null,
               status: "pending",
               subjectRef: primaryRef,
+              onboardingApplicationId: app.id,
               createdBy: ctx.user!.id,
             });
           }

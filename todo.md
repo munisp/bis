@@ -2338,3 +2338,16 @@
 - [x] Webhook retry queue: deliverWithRetry() helper (5 attempts, exponential backoff, ±20% jitter, 4xx permanent fail) added to aml.ts and tenants.ts
 - [x] CLICKHOUSE_URL, GOAML_API_URL, GOAML_API_KEY added to ENV registry
 - [x] TypeScript: 0 errors; Tests: 489/612 pass (123 pre-existing ECONNREFUSED)
+
+## Sprint v25 — Unit Tests, onboardingApplicationId FK, Final Hardening
+
+- [x] Added 20 new unit tests in server/sprint-v25.test.ts covering: deliverWithRetry (5 tests), hostedLinks.resolve (5 tests), hostedLinks.submit (5 tests), submitToNfiu fallback (4 tests) — all pass
+- [x] Added onboardingApplicationId FK column to kycRecords table (migration 0039_left_maria_hill.sql)
+- [x] Updated auto-KYC creation in onboarding.updateStatus to include onboardingApplicationId in all kycRecords inserts
+- [x] Updated OnboardingAdminPage.tsx approval toast to confirm tenant provisioning + KYC record creation
+- [x] Confirmed zero remaining TODOs/FIXMEs/STUBs in server code (outside seed files)
+- [x] Confirmed zero remaining Feature coming soon placeholders in client code
+- [x] Confirmed zero remaining fake delays in server code
+- [x] Confirmed security middleware (helmet, cors, rateLimit, CSRF) all active
+- [x] Confirmed no accidental secret logging in console.log calls
+- [x] TypeScript: 0 errors; Tests: 509/632 pass (123 pre-existing ECONNREFUSED — unchanged)

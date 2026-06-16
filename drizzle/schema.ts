@@ -144,6 +144,7 @@ export const kycRecords = pgTable("kyc_records", {
   pepResult: json("pepResult"),
   creditResult: json("creditResult"),
   subjectRef: varchar("subjectRef", { length: 64 }),
+  onboardingApplicationId: integer("onboardingApplicationId"),
   biometricStatus: varchar("biometricStatus", { length: 32 }).default("not_enrolled"),
   biometricFaceId: varchar("biometricFaceId", { length: 128 }),
   documentOcrData: json("documentOcrData"),
@@ -158,6 +159,7 @@ export const kycRecords = pgTable("kyc_records", {
     kyc_records_investigation_id_idx: index("kyc_records_investigation_id_idx").on(table.investigationId),
     kyc_records_nin_idx: index("kyc_records_nin_idx").on(table.nin),
     kyc_records_bvn_idx: index("kyc_records_bvn_idx").on(table.bvn),
+    kyc_records_onboarding_app_idx: index("kyc_records_onboarding_app_idx").on(table.onboardingApplicationId),
   }));
 export type KycRecord = typeof kycRecords.$inferSelect;
 export type InsertKycRecord = typeof kycRecords.$inferInsert;

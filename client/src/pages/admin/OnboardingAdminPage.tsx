@@ -117,7 +117,14 @@ export default function OnboardingAdminPage() {
 
   const updateStatus = trpc.onboarding.updateStatus.useMutation({
     onSuccess: (_, vars) => {
-      toast.success(`Application status updated to "${vars.status}"`);
+      if (vars.status === 'approved') {
+        toast.success(
+          'Application approved — tenant provisioned and KYC records created for all stakeholders.',
+          { duration: 6000 }
+        );
+      } else {
+        toast.success(`Application status updated to "${vars.status}"`);
+      }
       setActionLoading(false);
       setSelectedId(null);
       refetch();
