@@ -181,10 +181,12 @@ export const goamlRouter = router({
         offset: z.number().min(0).default(0),
       })
     )
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new Error("Database unavailable");
       const conditions = [];
+      // Tenant isolation: non-admin users only see their own tenant's filings
+      if (ctx.tenantId !== null) conditions.push(eq(goamlFilings.tenantId, ctx.tenantId));
       if (input.status) conditions.push(eq(goamlFilings.status, input.status));
       if (input.search) conditions.push(like(goamlFilings.subjectName, `%${input.search}%`));
 
@@ -202,13 +204,15 @@ export const goamlRouter = router({
   /** Get a single STR filing by ID */
   get: protectedProcedure
     .input(z.object({ id: z.number() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new Error("Database unavailable");
+      const conditions = [eq(goamlFilings.id, input.id)];
+      if (ctx.tenantId !== null) conditions.push(eq(goamlFilings.tenantId, ctx.tenantId));
       const [filing] = await db
         .select()
         .from(goamlFilings)
-        .where(eq(goamlFilings.id, input.id))
+        .where(and(...conditions))
         .limit(1);
       if (!filing) throw new Error("Filing not found");
       return filing;
@@ -256,6 +260,7 @@ export const goamlRouter = router({
           narrativeDetails: input.narrativeDetails,
           goamlXml: xml,
           status: "draft",
+          tenantId: ctx.tenantId ?? undefined,
           createdBy: ctx.user.id,
         })
         .returning();
@@ -470,10 +475,12 @@ export const goamlRouter = router({
     }),
 
   /** Summary stats for the dashboard widget */
-  stats: protectedProcedure.query(async () => {
+  stats: protectedProcedure.query(async ({ ctx }) => {
       const db = await getDb();
       if (!db) throw new Error("Database unavailable");
-    const rows = await db.select().from(goamlFilings);
+    const conditions = [];
+    if (ctx.tenantId !== null) conditions.push(eq(goamlFilings.tenantId, ctx.tenantId));
+    const rows = await db.select().from(goamlFilings).where(conditions.length > 0 ? and(...conditions) : undefined);
     const total = rows.length;
     const drafts = rows.filter((r: typeof rows[0]) => r.status === "draft").length;
     const submitted = rows.filter((r: typeof rows[0]) => r.status === "submitted").length;

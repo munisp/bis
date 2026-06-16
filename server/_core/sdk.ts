@@ -4,6 +4,7 @@ import axios, { type AxiosInstance } from "axios";
 import { parse as parseCookieHeader } from "cookie";
 import type { Request } from "express";
 import { SignJWT, jwtVerify } from "jose";
+import { SESSION_INACTIVITY_MS } from "@shared/const";
 import type { User } from "../../drizzle/schema";
 import * as db from "../db";
 import { ENV } from "./env";
@@ -290,6 +291,14 @@ class SDKServer {
 
     if (!user) {
       throw ForbiddenError("User not found");
+    }
+
+    // Enforce 8-hour inactivity timeout: reject if last activity was > SESSION_INACTIVITY_MS ago
+    if (user.lastSignedIn) {
+      const idleMs = Date.now() - new Date(user.lastSignedIn).getTime();
+      if (idleMs > SESSION_INACTIVITY_MS) {
+        throw ForbiddenError("Session expired due to inactivity (8 hours)");
+      }
     }
 
     await db.upsertUser({

@@ -42,12 +42,16 @@ function makeCtx(role: "admin" | "analyst" | "supervisor" | "auditor" | "readonl
       email: `${role}@test.bis`,
       loginMethod: "test",
       role,
+      tenantId: null, // null = platform admin scope (sees all data)
+      pushToken: null,
       createdAt: new Date(),
       updatedAt: new Date(),
       lastSignedIn: new Date(),
     },
     req: { protocol: "https", headers: {} } as TrpcContext["req"],
     res: makeMockRes(),
+    tenantId: null, // null = platform admin scope (sees all data)
+    isDemo: false,
   };
 }
 
@@ -65,12 +69,16 @@ function makeDemoCtx(): TrpcContext {
       email: "demo@bis-platform.dev",
       loginMethod: "demo",
       role: "admin",
+      tenantId: null,
+      pushToken: null,
       createdAt: new Date("2026-01-01"),
       updatedAt: new Date("2026-01-01"),
       lastSignedIn: new Date(),
     },
     req: { protocol: "https", headers: {} } as TrpcContext["req"],
     res: makeMockRes(),
+    tenantId: null,
+    isDemo: true,
   };
 }
 

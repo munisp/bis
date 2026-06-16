@@ -3,6 +3,7 @@ import { z } from "zod";
 import { router, protectedProcedure, writeProcedure, adminProcedure } from "./_core/trpc";
 import { ENV } from "./_core/env";
 import { getDb } from "./db";
+import { publishAmlAlert } from "./dapr";
 import {
   transactions, amlRules, amlAlerts, swiftMessages, sepaPayments, travelRuleRecords, cases, alertRules, webhooks,
 } from "../drizzle/schema";
@@ -299,6 +300,14 @@ export const amlRouter = router({
               }, ctx.user.id);
             }
           }
+          // Dapr pub/sub: publish AML alert event (non-blocking)
+          publishAmlAlert({
+            alertId: newAlert.id,
+            alertType: riskLevel,
+            riskScore: score,
+            transactionRef: tx.txRef,
+            autoEscalated: score >= 70,
+          }).catch(() => {});
           // Webhook fan-out: notify all subscribed tenants (non-blocking)
           dispatchAmlWebhook({
             event: "aml.alert",
@@ -418,10 +427,12 @@ export const amlRouter = router({
         limit: z.number().min(1).max(250).default(50), offset: z.number().default(0),
         status: z.string().optional(), riskLevel: z.string().optional(),
       }))
-      .query(async ({ input }) => {
+      .query(async ({ input, ctx }) => {
         const db = await getDb();
         if (!db) throw new Error("Database unavailable");
         const conditions = [];
+        // Tenant isolation: non-admin users only see their own tenant's AML alerts
+        if (ctx.tenantId !== null) conditions.push(eq(amlAlerts.tenantId, ctx.tenantId));
         if (input.status) conditions.push(eq(amlAlerts.status, input.status as any));
         if (input.riskLevel) conditions.push(eq(amlAlerts.riskLevel, input.riskLevel as any));
         const where = conditions.length > 0 ? and(...conditions) : undefined;
@@ -448,16 +459,17 @@ export const amlRouter = router({
         return alert;
       }),
 
-    stats: protectedProcedure.query(async () => {
+    stats: protectedProcedure.query(async ({ ctx }) => {
       const db = await getDb();
         if (!db) throw new Error("Database unavailable");
+      const tenantCondition = ctx.tenantId !== null ? eq(amlAlerts.tenantId, ctx.tenantId) : undefined;
       const [totals] = await db.select({
         total: count(),
         open: sql<number>`count(*) filter (where ${amlAlerts.status} = 'open')`,
         escalated: sql<number>`count(*) filter (where ${amlAlerts.status} = 'escalated')`,
         cleared: sql<number>`count(*) filter (where ${amlAlerts.status} = 'cleared')`,
         critical: sql<number>`count(*) filter (where ${amlAlerts.riskLevel} = 'critical')`,
-      }).from(amlAlerts);
+      }).from(amlAlerts).where(tenantCondition);
       return {
         total: Number(totals.total), open: Number(totals.open),
         escalated: Number(totals.escalated), cleared: Number(totals.cleared), critical: Number(totals.critical),

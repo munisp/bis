@@ -111,7 +111,7 @@ export async function runBiometricSpoofAlert(): Promise<SpoofAlertResult> {
   const [totals] = await db
     .select({
       totalSessions: sql<number>`COUNT(*)`,
-      totalFailed: sql<number>`SUM(CASE WHEN ${biometricSessionLogs.overallVerified} = 0 THEN 1 ELSE 0 END)`,
+      totalFailed: sql<number>`SUM(CASE WHEN ${biometricSessionLogs.overallVerified} = false THEN 1 ELSE 0 END)`,
     })
     .from(biometricSessionLogs)
     .where(gte(biometricSessionLogs.createdAt, since));

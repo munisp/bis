@@ -281,6 +281,20 @@
       "when": 1781639092958,
       "tag": "0039_left_maria_hill",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1781640799699,
+      "tag": "0040_rare_omega_red",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1781640926723,
+      "tag": "0041_chief_thunderbird",
+      "breakpoints": true
     }
   ]
 }

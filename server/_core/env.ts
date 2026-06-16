@@ -167,6 +167,20 @@ export function validateEnv(): void {
     }
   }
 
+  // CRITICAL: Refuse to start in production if the gateway key is the default dev value.
+  // This prevents accidental deployment with an insecure key.
+  const isProduction = process.env.NODE_ENV === "production";
+  const devGatewayKey = "dev-gateway-key-change-in-prod";
+  if (isProduction && ENV.bisGatewayKey === devGatewayKey) {
+    throw new Error(
+      "[BIS] FATAL: BIS_GATEWAY_KEY is set to the default dev value. " +
+      "Set a strong random secret before deploying to production."
+    );
+  }
+  if (!isProduction && ENV.bisGatewayKey === devGatewayKey) {
+    console.warn("[BIS] WARNING: BIS_GATEWAY_KEY is using the insecure dev default. Change before production.");
+  }
+
   if (ENV.gatewaySandbox) {
     console.info("[BIS] Gateway running in SANDBOX mode — synthetic verification data");
   } else {

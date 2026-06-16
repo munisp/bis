@@ -31,6 +31,8 @@ import { archivalRouter } from "./archival";
 import { paymentRailsRouter } from "./paymentRails";
 import { documentVaultRouter } from "./documentVault";
 import { riskDashboardRouter } from "./riskDashboard";
+import { searchRouter } from "./search";
+import { publishInvestigationEvent, publishKycEvent } from "./dapr";
 import { getDb } from "./db";
 import { evaluateAlertRules } from "./alertRules";
 import {
@@ -197,10 +199,12 @@ const investigationsRouter = router({
       limit: z.number().min(1).max(250).default(50),
       offset: z.number().default(0),
     }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) return { items: [], total: 0 };
       const conditions = [];
+      // Tenant isolation: non-admin users only see their own tenant's investigations
+      if (ctx.tenantId !== null) conditions.push(eq(investigations.tenantId, ctx.tenantId));
       if (input.search) conditions.push(ilike(investigations.subjectName, `%${input.search}%`));
       if (input.status) conditions.push(eq(investigations.status, input.status as any));
       if (input.country) conditions.push(eq(investigations.country, input.country));
@@ -217,10 +221,12 @@ const investigationsRouter = router({
 
   get: protectedProcedure
     .input(z.object({ ref: z.string() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) return null;
-      const result = await db.select().from(investigations).where(eq(investigations.ref, input.ref)).limit(1);
+      const conditions = [eq(investigations.ref, input.ref)];
+      if (ctx.tenantId !== null) conditions.push(eq(investigations.tenantId, ctx.tenantId));
+      const result = await db.select().from(investigations).where(and(...conditions)).limit(1);
       return result[0] ?? null;
     }),
 
@@ -244,32 +250,38 @@ const investigationsRouter = router({
       const db = await getDb();
       if (!db) throw new Error("Database unavailable");
       const ref = generateRef("BIS");
-      await db.insert(investigations).values({
-        ref,
-        subjectType: input.subjectType,
-        subjectName: input.subjectName,
-        country: input.country,
-        tier: input.tier,
-        priority: input.priority,
-        status: "pending",
-        nin: input.nin,
-        bvn: input.bvn,
-        rcNumber: input.rcNumber,
-        phone: input.phone,
-        email: input.email,
-        address: input.address,
-        purpose: input.purpose,
-        dataSources: input.dataSources as any,
-        createdBy: ctx.user!.id,
+      // Wrap DB writes in a transaction for atomicity
+      await db.transaction(async (tx) => {
+        await tx.insert(investigations).values({
+          ref,
+          subjectType: input.subjectType,
+          subjectName: input.subjectName,
+          country: input.country,
+          tier: input.tier,
+          priority: input.priority,
+          status: "pending",
+          nin: input.nin,
+          bvn: input.bvn,
+          rcNumber: input.rcNumber,
+          phone: input.phone,
+          email: input.email,
+          address: input.address,
+          purpose: input.purpose,
+          dataSources: input.dataSources as any,
+          createdBy: ctx.user!.id,
+        });
+        await writeAuditLog(tx as any, { userId: ctx.user!.id, userEmail: ctx.user!.email ?? undefined, category: "investigation", action: "Investigation created", targetRef: ref });
       });
-      await writeAuditLog(db, { userId: ctx.user!.id, userEmail: ctx.user!.email ?? undefined, category: "investigation", action: "Investigation created", targetRef: ref });
-      await publishEvent("INVESTIGATION_CREATED", ref, "info", { subjectName: input.subjectName, tier: input.tier });
+      // Post-transaction: publish event, seed Permify, evaluate alert rules (non-fatal)
+      await publishEvent("INVESTIGATION_CREATED", ref, "info", { subjectName: input.subjectName, tier: input.tier }).catch(() => {});
+      // Dapr pub/sub: publish investigation created event
+      publishInvestigationEvent({ eventType: "created", ref, subjectName: input.subjectName, status: "pending" }).catch(() => {});
       // Seed Permify: creator is both owner and assignee of the new investigation
       const userId = String(ctx.user!.id);
       await permifyWriteRelationship([
         { entity: { type: "investigation", id: ref }, relation: "owner",    subject: { type: "user", id: userId } },
         { entity: { type: "investigation", id: ref }, relation: "assignee", subject: { type: "user", id: userId } },
-      ]);
+      ]).catch(() => {});
       // Evaluate alert rules for new investigation (initial risk_score = 0, rules may fire on creation)
       await evaluateAlertRules("risk_score", 0, {
         subjectRef: ref,
@@ -870,10 +882,12 @@ const alertsRouter = router({
       limit: z.number().min(1).max(250).default(50),
       subjectRef: z.string().optional(),
     }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) return [];
       const conditions: any[] = [];
+      // Tenant isolation: non-admin users only see their own tenant's alerts
+      if (ctx.tenantId !== null) conditions.push(eq(alerts.tenantId, ctx.tenantId));
       if (input.unreadOnly) conditions.push(eq(alerts.read, false));
       if (input.subjectRef) conditions.push(eq(alerts.subjectRef, input.subjectRef));
       return db.select().from(alerts).where(conditions.length ? and(...conditions) : undefined).orderBy(desc(alerts.createdAt)).limit(input.limit);
@@ -1017,15 +1031,19 @@ const kycRouter = router({
       cursor: z.number().optional(), // last seen record id for cursor pagination
       status: z.enum(["pending", "processing", "passed", "failed", "review"]).optional(),
     }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) return { items: [], total: 0, nextCursor: null };
       const conditions: ReturnType<typeof eq>[] = [];
+      // Tenant isolation: non-admin users only see their own tenant's KYC records
+      if (ctx.tenantId !== null) conditions.push(eq(kycRecords.tenantId, ctx.tenantId) as any);
       if (input.cursor) conditions.push(sql`${kycRecords.id} < ${input.cursor}` as any);
       if (input.status) conditions.push(eq(kycRecords.status, input.status));
       const where = conditions.length > 0 ? and(...conditions) : undefined;
-      // Count query respects status filter
-      const countConditions = input.status ? [eq(kycRecords.status, input.status)] : [];
+      // Count query respects status filter + tenant filter
+      const countConditions: ReturnType<typeof eq>[] = [];
+      if (ctx.tenantId !== null) countConditions.push(eq(kycRecords.tenantId, ctx.tenantId) as any);
+      if (input.status) countConditions.push(eq(kycRecords.status, input.status));
       const [items, countResult] = await Promise.all([
         db.select().from(kycRecords)
           .where(where)
@@ -1042,10 +1060,12 @@ const kycRouter = router({
 
   get: protectedProcedure
     .input(z.object({ id: z.number() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new Error("Database unavailable");
-      const [record] = await db.select().from(kycRecords).where(eq(kycRecords.id, input.id)).limit(1);
+      const conditions = [eq(kycRecords.id, input.id)];
+      if (ctx.tenantId !== null) conditions.push(eq(kycRecords.tenantId, ctx.tenantId));
+      const [record] = await db.select().from(kycRecords).where(and(...conditions)).limit(1);
       if (!record) throw new TRPCError({ code: "NOT_FOUND" });
       return record;
     }),
@@ -1208,6 +1228,8 @@ const kycRouter = router({
       }).where(eq(kycRecords.id, record!.id));
       await writeAuditLog(db, { userId: ctx.user!.id, category: "kyc", action: `KYC ${status}`, targetRef: input.subjectName });
       await publishEvent("KYC_COMPLETED", input.subjectName, status === "failed" ? "high" : "info", { status, score: scoreResult.composite_score });
+      // Dapr pub/sub: publish KYC completed event
+      publishKycEvent({ eventType: "completed", kycRecordId: record!.id, subjectRef: input.subjectName, status, riskScore: scoreResult.composite_score }).catch(() => {});
       return { id: record!.id, status, riskScore: scoreResult.composite_score, nin, bvn, sanctions, pep, credit };
     }),
   /**
@@ -1381,6 +1403,8 @@ const auditRouter = router({
       const db = await getDb();
       if (!db) return { items: [], total: 0 };
       const conditions = [];
+      // Tenant isolation: non-admin users only see their own tenant's audit log entries
+      if (ctx.tenantId !== null) conditions.push(eq(auditLog.tenantId, ctx.tenantId));
       if (input.category) conditions.push(eq(auditLog.category, input.category as any));
       if (input.result) conditions.push(eq(auditLog.result, input.result as any));
       if (input.targetRef) conditions.push(eq(auditLog.targetRef, input.targetRef));
@@ -2364,98 +2388,103 @@ const onboardingRouter = router({
     .mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new Error("Database unavailable");
-      // Fetch application for notification context
+      // Fetch application for notification context (read-only, outside transaction)
       const [app] = await db.select().from(onboardingApplications).where(eq(onboardingApplications.id, input.id)).limit(1);
-      await db.update(onboardingApplications).set({ status: input.status, updatedAt: new Date() }).where(eq(onboardingApplications.id, input.id));
-      await writeAuditLog(db, { userId: ctx.user!.id, category: "system", action: `Onboarding status → ${input.status}`, targetRef: String(input.id) });
 
-      // ─── On Approval: Auto-provision Tenant + Auto-create KYC records for stakeholders ───
-      if (input.status === "approved" && app) {
-        // 1. Auto-provision a Tenant record from the onboarding application
-        const slug = (app.legalName ?? `tenant-${app.id}`)
-          .toLowerCase()
-          .replace(/[^a-z0-9]+/g, "-")
-          .replace(/^-+|-+$/g, "")
-          .slice(0, 60) + "-" + app.id;
+      // ─── Wrap ALL writes in a single atomic transaction ───
+      // If any step fails, the entire approval is rolled back (no partial tenant/KYC state).
+      await db.transaction(async (tx) => {
+        await tx.update(onboardingApplications)
+          .set({ status: input.status, updatedAt: new Date() })
+          .where(eq(onboardingApplications.id, input.id));
+        await writeAuditLog(tx as any, { userId: ctx.user!.id, category: "system", action: `Onboarding status → ${input.status}`, targetRef: String(input.id) });
 
-        const [existingTenant] = await db.select({ id: tenants.id })
-          .from(tenants)
-          .where(eq(tenants.slug, slug))
-          .limit(1);
+        // ─── On Approval: Auto-provision Tenant + Auto-create KYC records for stakeholders ───
+        if (input.status === "approved" && app) {
+          // 1. Auto-provision a Tenant record from the onboarding application
+          const slug = (app.legalName ?? `tenant-${app.id}`)
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, "-")
+            .replace(/^-+|-+$/g, "")
+            .slice(0, 60) + "-" + app.id;
 
-        let tenantId: number | undefined;
-        if (!existingTenant) {
-          const [newTenant] = await db.insert(tenants).values({
-            name: app.legalName,
-            slug,
-            plan: "starter",
-            status: "trial",
-            contactEmail: app.contactEmail ?? undefined,
-            contactName: app.contactName ?? undefined,
-            country: app.countryCode ?? undefined,
-            industry: app.businessCategory ?? undefined,
-          }).returning({ id: tenants.id });
-          tenantId = newTenant?.id;
-          await writeAuditLog(db, { userId: ctx.user!.id, category: "system", action: `Auto-provisioned tenant ${slug} from onboarding ${app.referenceId}`, targetRef: String(tenantId) });
-        } else {
-          tenantId = existingTenant.id;
-        }
-
-        // 2. Auto-create KYC records for each stakeholder listed in the application
-        const stakeholders: Array<{ name?: string; nin?: string; bvn?: string; dob?: string; phone?: string; role?: string }> =
-          Array.isArray(app.stakeholders) ? app.stakeholders : [];
-
-        for (const sh of stakeholders) {
-          if (!sh.name) continue;
-          // Avoid duplicate KYC records for the same stakeholder in the same onboarding
-          const subjectRef = `onboarding-${app.id}-${(sh.name).replace(/\s+/g, "-").toLowerCase().slice(0, 40)}`;
-          const [existing] = await db.select({ id: kycRecords.id })
-            .from(kycRecords)
-            .where(eq(kycRecords.subjectRef, subjectRef))
+          const [existingTenant] = await tx.select({ id: tenants.id })
+            .from(tenants)
+            .where(eq(tenants.slug, slug))
             .limit(1);
-          if (existing) continue;
 
-          await db.insert(kycRecords).values({
-            subjectName: sh.name,
-            nin: sh.nin ?? null,
-            bvn: sh.bvn ?? null,
-            dob: sh.dob ?? null,
-            phone: sh.phone ?? null,
-            status: "pending",
-            subjectRef,
-            onboardingApplicationId: app.id,
-            createdBy: ctx.user!.id,
-          });
-        }
+          let provisionedTenantId: number | undefined;
+          if (!existingTenant) {
+            const [newTenant] = await tx.insert(tenants).values({
+              name: app.legalName,
+              slug,
+              plan: "starter",
+              status: "trial",
+              contactEmail: app.contactEmail ?? undefined,
+              contactName: app.contactName ?? undefined,
+              country: app.countryCode ?? undefined,
+              industry: app.businessCategory ?? undefined,
+            }).returning({ id: tenants.id });
+            provisionedTenantId = newTenant?.id;
+            await writeAuditLog(tx as any, { userId: ctx.user!.id, category: "system", action: `Auto-provisioned tenant ${slug} from onboarding ${app.referenceId}`, targetRef: String(provisionedTenantId) });
+          } else {
+            provisionedTenantId = existingTenant.id;
+          }
 
-        // 3. Also create a KYC record for the primary contact if not already a stakeholder
-        if (app.contactName) {
-          const primaryRef = `onboarding-${app.id}-primary-contact`;
-          const [existing] = await db.select({ id: kycRecords.id })
-            .from(kycRecords)
-            .where(eq(kycRecords.subjectRef, primaryRef))
-            .limit(1);
-          if (!existing) {
-            await db.insert(kycRecords).values({
-              subjectName: app.contactName,
-              phone: app.contactPhone ?? null,
+          // 2. Auto-create KYC records for each stakeholder listed in the application
+          const stakeholders: Array<{ name?: string; nin?: string; bvn?: string; dob?: string; phone?: string; role?: string }> =
+            Array.isArray(app.stakeholders) ? app.stakeholders : [];
+
+          for (const sh of stakeholders) {
+            if (!sh.name) continue;
+            const subjectRef = `onboarding-${app.id}-${(sh.name).replace(/\s+/g, "-").toLowerCase().slice(0, 40)}`;
+            const [existing] = await tx.select({ id: kycRecords.id })
+              .from(kycRecords)
+              .where(eq(kycRecords.subjectRef, subjectRef))
+              .limit(1);
+            if (existing) continue;
+            await tx.insert(kycRecords).values({
+              subjectName: sh.name,
+              nin: sh.nin ?? null,
+              bvn: sh.bvn ?? null,
+              dob: sh.dob ?? null,
+              phone: sh.phone ?? null,
               status: "pending",
-              subjectRef: primaryRef,
+              subjectRef,
               onboardingApplicationId: app.id,
               createdBy: ctx.user!.id,
             });
           }
+
+          // 3. Also create a KYC record for the primary contact if not already a stakeholder
+          if (app.contactName) {
+            const primaryRef = `onboarding-${app.id}-primary-contact`;
+            const [existing] = await tx.select({ id: kycRecords.id })
+              .from(kycRecords)
+              .where(eq(kycRecords.subjectRef, primaryRef))
+              .limit(1);
+            if (!existing) {
+              await tx.insert(kycRecords).values({
+                subjectName: app.contactName,
+                phone: app.contactPhone ?? null,
+                status: "pending",
+                subjectRef: primaryRef,
+                onboardingApplicationId: app.id,
+                createdBy: ctx.user!.id,
+              });
+            }
+          }
+
+          await writeAuditLog(tx as any, {
+            userId: ctx.user!.id,
+            category: "system",
+            action: `Auto-created KYC records for ${stakeholders.length + 1} stakeholder(s) from onboarding ${app.referenceId}`,
+            targetRef: String(app.id),
+          });
         }
+      }); // end db.transaction
 
-        await writeAuditLog(db, {
-          userId: ctx.user!.id,
-          category: "system",
-          action: `Auto-created KYC records for ${stakeholders.length + 1} stakeholder(s) from onboarding ${app.referenceId}`,
-          targetRef: String(app.id),
-        });
-      }
-
-      // Notify owner on terminal status changes
+      // Notify owner on terminal status changes (non-critical side-effect, outside transaction)
       if (input.status === "approved" || input.status === "rejected") {
         notifyOwner({
           title: `Onboarding ${input.status === "approved" ? "Approved" : "Rejected"} — ${app?.legalName ?? `ID ${input.id}`}`,
@@ -4423,5 +4452,6 @@ export const appRouter = router({
   paymentRails: paymentRailsRouter,
   documentVault: documentVaultRouter,
   riskDashboard: riskDashboardRouter,
+  search: searchRouter,
 });
 export type AppRouter = typeof appRouter;

@@ -34,6 +34,7 @@ export const reportStatusEnum = pgEnum("report_status", ["generating", "ready", 
 
 export const users = pgTable("users", {
   id: serial("id").primaryKey(),
+  tenantId: integer("tenantId"),  // FK to tenants.id — null for platform admins
   openId: varchar("openId", { length: 64 }).notNull().unique(),
   name: text("name"),
   email: varchar("email", { length: 320 }),
@@ -52,6 +53,7 @@ export type InsertUser = typeof users.$inferInsert;
 
 export const investigations = pgTable("investigations", {
   id: serial("id").primaryKey(),
+  tenantId: integer("tenantId"),
   ref: varchar("ref", { length: 32 }).notNull().unique(),
   subjectType: subjectTypeEnum("subjectType").notNull(),
   subjectName: varchar("subjectName", { length: 255 }).notNull(),
@@ -97,6 +99,7 @@ export type InsertInvestigation = typeof investigations.$inferInsert;
 
 export const alerts = pgTable("alerts", {
   id: serial("id").primaryKey(),
+  tenantId: integer("tenantId"),
   investigationId: integer("investigationId"),
   type: alertTypeEnum("type").notNull(),
   severity: severityEnum("severity").notNull(),
@@ -130,6 +133,7 @@ export type InsertAlert = typeof alerts.$inferInsert;
 
 export const kycRecords = pgTable("kyc_records", {
   id: serial("id").primaryKey(),
+  tenantId: integer("tenantId"),
   investigationId: integer("investigationId"),
   subjectName: varchar("subjectName", { length: 255 }).notNull(),
   nin: varchar("nin", { length: 11 }),
@@ -168,6 +172,7 @@ export type InsertKycRecord = typeof kycRecords.$inferInsert;
 
 export const auditLog = pgTable("audit_log", {
   id: serial("id").primaryKey(),
+  tenantId: integer("tenantId"),
   userId: integer("userId"),
   userEmail: varchar("userEmail", { length: 320 }),
   category: auditCategoryEnum("category").notNull(),
@@ -623,6 +628,7 @@ export const strStatusEnum = pgEnum("str_status", ["draft", "submitted", "accept
 
 export const goamlFilings = pgTable("goaml_filings", {
   id: serial("id").primaryKey(),
+  tenantId: integer("tenantId"),
   filingRef: varchar("filingRef", { length: 32 }).notNull().unique(),
   investigationRef: varchar("investigationRef", { length: 32 }),
   status: strStatusEnum("status").notNull().default("draft"),
@@ -1186,6 +1192,7 @@ export const amlRiskLevelEnum = pgEnum("aml_risk_level", ["low", "medium", "high
 
 export const transactions = pgTable("transactions", {
   id: serial("id").primaryKey(),
+  tenantId: integer("tenantId"),
   txRef: varchar("txRef", { length: 64 }).notNull().unique(),
   // Idempotency key (1B payments lesson): prevents double-posting on retries.
   // Clients MUST send X-Idempotency-Key header; server stores it here for deduplication.
@@ -1256,6 +1263,7 @@ export const amlAlertStatusEnum = pgEnum("aml_alert_status", [
 
 export const amlAlerts = pgTable("aml_alerts", {
   id: serial("id").primaryKey(),
+  tenantId: integer("tenantId"),
   alertRef: varchar("alertRef", { length: 32 }).notNull().unique(),
   transactionId: integer("transactionId").references(() => transactions.id),
   ruleId: integer("ruleId").references(() => amlRules.id),
@@ -1379,6 +1387,7 @@ export const sarCategoryEnum = pgEnum("sar_category", [
 
 export const sarFilings = pgTable("sar_filings", {
   id: serial("id").primaryKey(),
+  tenantId: integer("tenantId"),
   sarRef: varchar("sarRef", { length: 32 }).notNull().unique(),
   status: sarStatusEnum("status").notNull().default("draft"),
   category: sarCategoryEnum("category").notNull(),

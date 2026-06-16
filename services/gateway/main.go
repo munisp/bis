@@ -32,7 +32,9 @@ import (
 	"strings"
 	"time"
 
+	daprpkg "bis/gateway/dapr"
 	kafkapkg "bis/gateway/kafka"
+	ospkg "bis/gateway/opensearch"
 	keycloakpkg "bis/gateway/keycloak"
 	permifypkg "bis/gateway/permify"
 	redispkg "bis/gateway/redis"
@@ -1534,12 +1536,33 @@ func newRouter() http.Handler {
 	mux.HandleFunc("/v1/biometric/document-match", protected(handleBiometricDocumentMatch))
 	mux.HandleFunc("/v1/nip/name-enquiry", protected(handleNIPNameEnquiry))
 
+	// ── OpenSearch endpoints ────────────────────────────────────────────────
+	mux.HandleFunc("/v1/search", protected(ospkg.HandleSearch))
+	mux.HandleFunc("/v1/index/investigation", protected(ospkg.HandleIndexInvestigation))
+	mux.HandleFunc("/v1/index/alert", protected(ospkg.HandleIndexAlert))
+
+	// ── Dapr pub/sub subscriber endpoints ────────────────────────────────────
+	// Dapr calls GET /dapr/subscribe to discover subscriptions
+	mux.HandleFunc("/dapr/subscribe", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(daprpkg.Subscriptions())
+	})
+	mux.HandleFunc("/dapr/subscribe/aml-alerts", daprpkg.HandleAMLAlert)
+	mux.HandleFunc("/dapr/subscribe/investigation-events", daprpkg.HandleInvestigationEvent)
+	mux.HandleFunc("/dapr/subscribe/biometric-events", daprpkg.HandleBiometricEvent)
+	mux.HandleFunc("/dapr/subscribe/kyc-events", daprpkg.HandleKYCEvent)
+	mux.HandleFunc("/dapr/subscribe/payment-events", daprpkg.HandlePaymentEvent)
+
 	return mux
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 func main() {
+	// Ensure OpenSearch indices exist at startup (non-fatal)
+	if err := ospkg.EnsureIndices(); err != nil {
+		log.Printf("[OpenSearch] index setup warning: %v", err)
+	}
 	log.Printf("BIS API Gateway v2.0 starting on :%s", port)
 	log.Printf("Risk Engine URL: %s", riskEngineURL)
 	log.Printf("Event Processor URL: %s", eventProcURL)

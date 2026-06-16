@@ -8,9 +8,10 @@
 import { TRPCError } from "@trpc/server";
 import { ENV } from "./_core/env";
 
-const PERMIFY_URL = ENV.permifyUrl;
-const PERMIFY_TENANT = ENV.permifyTenantId;
-const PERMIFY_API_KEY = ENV.permifyApiKey;
+// Read at call-time so tests can delete process.env.PERMIFY_URL
+function getPermifyUrl() { return process.env.PERMIFY_URL ?? ""; }
+function getPermifyTenant() { return process.env.PERMIFY_TENANT_ID ?? "t1"; }
+function getPermifyApiKey() { return process.env.PERMIFY_API_KEY ?? ""; }
 
 interface CheckRequest {
   metadata: { depth: number; snap_token?: string };
@@ -31,7 +32,9 @@ interface RelationshipTuple {
 
 /**
  * Check whether a user has a permission on an entity.
- * Fails-open when Permify is not configured.
+ * Fails-CLOSED when Permify is unavailable: throws FORBIDDEN to prevent privilege escalation.
+ * When PERMIFY_URL is not configured (dev/test env), the check is bypassed (returns true).
+ * In production, PERMIFY_URL must be set; any connectivity failure throws FORBIDDEN.
  */
 export async function permifyCheck(
   entityType: string,
@@ -39,7 +42,13 @@ export async function permifyCheck(
   permission: string,
   userId: string
 ): Promise<boolean> {
-  if (!PERMIFY_URL) return true; // fail-open
+  const PERMIFY_URL = getPermifyUrl();
+  const PERMIFY_TENANT = getPermifyTenant();
+  const PERMIFY_API_KEY = getPermifyApiKey();
+
+  // If Permify is not configured at all (local dev / test), bypass the check (fail-open).
+  // In production PERMIFY_URL must be set — enforced by validateEnv().
+  if (!PERMIFY_URL) return true;
 
   const body: CheckRequest = {
     metadata: { depth: 20 },
@@ -63,14 +72,29 @@ export async function permifyCheck(
     );
 
     if (!res.ok) {
-      console.warn(`[Permify] check returned ${res.status} — fail-open`);
-      return true;
+      // Permify returned an error — fail CLOSED to prevent privilege escalation
+      console.error(`[Permify] check returned ${res.status} — denying access (fail-closed)`);
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: "Authorization service unavailable — access denied",
+      });
     }
 
     const data = (await res.json()) as CheckResponse;
     return data.can === "RESULT_ALLOWED";
   } catch (err) {
-    console.warn("[Permify] check error (fail-open):", err);
+    if (err instanceof TRPCError) throw err;
+    // Network / timeout error — fail OPEN (test/dev) or CLOSED (production)
+    const isProduction = process.env.NODE_ENV === "production";
+    if (isProduction) {
+      console.error("[Permify] check error — denying access (fail-closed):", err);
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: "Authorization service unavailable — access denied",
+      });
+    }
+    // In dev/test: fail-open so tests don't need a running Permify instance
+    console.error("[Permify] check error — fail-open in non-production:", err);
     return true;
   }
 }
@@ -82,6 +106,9 @@ export async function permifyCheck(
 export async function permifyWriteRelationship(
   tuples: RelationshipTuple[]
 ): Promise<void> {
+  const PERMIFY_URL = getPermifyUrl();
+  const PERMIFY_TENANT = getPermifyTenant();
+  const PERMIFY_API_KEY = getPermifyApiKey();
   if (!PERMIFY_URL) return;
 
   try {

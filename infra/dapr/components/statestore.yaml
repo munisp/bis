@@ -1,0 +1,30 @@
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: bis-statestore
+  namespace: default
+spec:
+  type: state.redis
+  version: v1
+  metadata:
+    - name: redisHost
+      value: "redis:6379"
+    - name: redisPassword
+      secretKeyRef:
+        name: bis-secrets
+        key: REDIS_PASSWORD
+    - name: enableTLS
+      value: "false"
+    # Key prefix: bis-state
+    - name: keyPrefix
+      value: "bis-state"
+    # TTL for workflow state: 24 hours
+    - name: defaultTTLInSeconds
+      value: "86400"
+    - name: actorStateStore
+      value: "true"
+auth:
+  secretStore: bis-secretstore
+scopes:
+  - bis-bff
+  - bis-gateway

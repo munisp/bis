@@ -19,10 +19,12 @@ export const sarRouter = router({
       category: z.string().optional(),
       search: z.string().optional(),
     }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new Error("Database unavailable");
       const conditions = [];
+      // Tenant isolation: non-admin users only see their own tenant's SAR filings
+      if (ctx.tenantId !== null) conditions.push(eq(sarFilings.tenantId, ctx.tenantId));
       if (input.status) conditions.push(eq(sarFilings.status, input.status as any));
       if (input.category) conditions.push(eq(sarFilings.category, input.category as any));
       if (input.search) {
@@ -42,10 +44,12 @@ export const sarRouter = router({
 
   get: protectedProcedure
     .input(z.object({ id: z.number() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new Error("Database unavailable");
-      const [row] = await db.select().from(sarFilings).where(eq(sarFilings.id, input.id));
+      const conditions = [eq(sarFilings.id, input.id)];
+      if (ctx.tenantId !== null) conditions.push(eq(sarFilings.tenantId, ctx.tenantId));
+      const [row] = await db.select().from(sarFilings).where(and(...conditions));
       return row ?? null;
     }),
 
@@ -91,6 +95,7 @@ export const sarRouter = router({
         relatedTransactions: input.relatedTransactions,
         relatedInvestigationId: input.relatedInvestigationId,
         relatedGoamlFilingId: input.relatedGoamlFilingId,
+        tenantId: ctx.tenantId ?? undefined,
         createdBy: ctx.user.id,
       }).returning();
       return sar;
@@ -286,9 +291,10 @@ export const sarRouter = router({
     return { filed, errors, results };
   }),
 
-  stats: protectedProcedure.query(async () => {
+  stats: protectedProcedure.query(async ({ ctx }) => {
     const db = await getDb();
     if (!db) throw new Error("Database unavailable");
+    const tenantCondition = ctx.tenantId !== null ? eq(sarFilings.tenantId, ctx.tenantId) : undefined;
     const [totals] = await db.select({
       total: count(),
       draft: sql<number>`count(*) filter (where ${sarFilings.status} = 'draft')`,
@@ -296,7 +302,7 @@ export const sarRouter = router({
       approved: sql<number>`count(*) filter (where ${sarFilings.status} = 'approved')`,
       filed: sql<number>`count(*) filter (where ${sarFilings.status} = 'filed')`,
       acknowledged: sql<number>`count(*) filter (where ${sarFilings.status} = 'acknowledged')`,
-    }).from(sarFilings);
+    }).from(sarFilings).where(tenantCondition);
     return {
       total: Number(totals.total),
       draft: Number(totals.draft),

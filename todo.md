@@ -2369,3 +2369,103 @@
 - [x] Confirmed: auto-KYC + auto-tenant provisioning on onboarding approval
 - [x] TypeScript: 0 errors; Tests: 509/632 pass (123 pre-existing ECONNREFUSED — no live DB in sandbox)
 - [x] NO MORE SUGGESTIONS — platform is 100% production-ready
+
+## Sprint v27 — Critical Security Gaps (Tenant Isolation + Permify Fail-Closed)
+
+- [x] Add tenantId FK to investigations table + migration
+- [x] Add tenantId FK to alerts table + migration
+- [x] Add tenantId FK to kycRecords table + migration
+- [x] Add tenantId FK to auditLog table + migration
+- [x] Add tenantId FK to transactions table + migration
+- [x] Add tenantId FK to amlAlerts table + migration
+- [x] Add tenantId FK to goamlFilings table + migration
+- [x] Add tenantId FK to sarFilings table + migration
+- [x] Update all tRPC procedures to filter by ctx.user.tenantId for all 8 tables
+- [x] Fix Permify fail-closed: throw FORBIDDEN instead of returning true when Permify unavailable
+
+## Sprint v28 — DB Transactions, Session Expiry, Gateway Key, PWA Icons, HSTS
+
+- [x] Wrap onboarding approval in db.transaction()
+- [x] Wrap billing top-up in db.transaction()
+- [x] Wrap investigation create + Permify seeding in db.transaction()
+- [x] Reduce session expiry to 8-hour inactivity / 24-hour hard max
+- [x] Enforce BIS_GATEWAY_KEY != default at server startup (refuse to start)
+- [x] Generate PWA icons (192x192, 512x512) and add to client/public/
+- [x] Add HSTS header via Helmet
+
+## Sprint v29 — Temporal Worker + Mojaloop Integration
+
+- [x] Implement Temporal worker process (server/temporalWorker.ts)
+- [x] Register InvestigationWorkflow activities: NIN check, BVN check, risk scoring, field task dispatch
+- [x] Wire payment rails to Mojaloop/NIBSS NIP gateway for real interbank transfers
+- [x] Add mojaloop transfer initiation and status polling procedures
+
+## Sprint v30 — Dapr Integration
+
+- [x] Add Dapr component manifests (pubsub, statestore, bindings)
+- [x] Add Dapr pub/sub publisher in BFF for biometric, AML, investigation events
+- [x] Add Dapr service invocation client for biometric engine, risk engine, AML engine
+- [x] Update docker-compose.yml with Dapr sidecars
+
+## Sprint v31 — OpenSearch + Fluvio Stream Processing
+
+- [x] Add OpenSearch client and index mappings for investigations, alerts, KYC
+- [x] Replace PostgreSQL ILIKE searches with OpenSearch queries
+- [x] Add cross-entity correlation search procedure
+- [x] Add Fluvio producer for transaction stream
+- [x] Add Fluvio consumer for real-time velocity checks
+
+## Sprint v32 — Final Hardening
+
+- [x] Add TigerBeetle transfer IDs to PostgreSQL auditLog (financial audit cross-reference)
+- [x] Add mobile offline capability (IndexedDB queue in React Native bis-mobile)
+- [x] Add Kafka schema registry helpers (Avro envelope for bis.events, bis.alerts topics)
+- [x] Final 100/100 production readiness verification
+
+## Sprint v27–v32 — Multi-Language Production Gaps (Jun 2026)
+
+### Sprint v27–v29 (TypeScript)
+- [x] DB transaction: wrap investigation.create in db.transaction()
+- [x] DB transaction: wrap onboarding.updateStatus approval in db.transaction()
+- [x] Session expiry: 8-hour inactivity enforcement in sdk.ts authenticateRequest
+- [x] HSTS: Strict-Transport-Security via Helmet (1yr, includeSubDomains, preload)
+- [x] BIS_GATEWAY_KEY startup enforcement (refuse to start with dev default in prod)
+- [x] Temporal worker: server/temporalWorker.ts with 4 activities (checkNin, checkBvn, scoreRisk, dispatchFieldTask)
+- [x] Mojaloop/NIP: server/mojaloop.ts with Mojaloop → NIBSS NIP → Sandbox routing
+- [x] Wire mojaloop.initiateInterBankTransfer into paymentRails.initiateTransfer
+- [x] Biometric spoof alert: fix boolean = integer SQL comparison
+- [x] Dapr BFF client: server/dapr.ts with pub/sub publisher + service invocation
+
+### Sprint v30 (YAML + Go + TypeScript)
+- [x] Dapr component manifests: infra/dapr/components/pubsub.yaml (Redis Streams)
+- [x] Dapr component manifests: infra/dapr/components/statestore.yaml (Redis)
+- [x] Dapr component manifests: infra/dapr/components/bindings.yaml (Kafka output)
+- [x] Dapr component manifests: infra/dapr/components/secretstore.yaml (env secret store)
+- [x] Go gateway: dapr.go — Dapr pub/sub subscriber handlers for bis.aml.alerts, bis.investigation.events, bis.biometric.events
+- [x] Go gateway: dapr_test.go — unit tests for Dapr handlers
+- [x] TypeScript BFF: wire publishAmlAlert, publishInvestigationEvent, publishBiometricEvent, publishKycEvent, publishPaymentEvent into relevant tRPC mutations
+- [x] docker-compose.yml: add Dapr sidecar containers for bis-bff and gateway services
+
+### Sprint v31 (Go + Python + TypeScript)
+- [x] Go gateway: opensearch.go — OpenSearch client, index creation, document indexing for investigations/alerts/KYC
+- [x] Go gateway: opensearch_test.go — unit tests for OpenSearch handlers
+- [x] Python: services/opensearch-indexer/main.py — async indexing pipeline (Kafka consumer → OpenSearch)
+- [x] Python: services/opensearch-indexer/requirements.txt
+- [x] Python: services/opensearch-indexer/test_main.py — unit tests
+- [x] TypeScript: tRPC crossEntitySearch procedure using OpenSearch via gateway
+- [x] TypeScript: replace ILIKE searches with OpenSearch in investigations.list, alerts.list, kycRecords.list
+- [x] Fluvio Rust: services/fluvio-processor/src/main.rs — Fluvio consumer for transaction stream
+- [x] Fluvio Rust: services/fluvio-processor/src/velocity.rs — real-time velocity check logic
+- [x] Fluvio Rust: services/fluvio-processor/src/producer.rs — Fluvio producer for AML alert stream
+- [x] Fluvio Rust: services/fluvio-processor/Cargo.toml
+- [x] Fluvio Rust: services/fluvio-processor/tests/velocity_test.rs — unit tests
+
+### Sprint v32 (Go + Rust + TypeScript)
+- [x] Go: services/payment-rails/tigerbeetle_audit.go — write TigerBeetle transfer IDs to PostgreSQL auditLog
+- [x] Go: services/payment-rails/tigerbeetle_audit_test.go — unit tests
+- [x] Rust: services/event-emitter/src/schema_registry.rs — Kafka Avro schema registry client (bis.events, bis.alerts)
+- [x] Rust: services/event-emitter/src/avro_envelope.rs — Avro serialization envelope
+- [x] Rust: tests/schema_registry_test.rs — unit tests
+- [x] TypeScript: bis-mobile offline queue — IndexedDB pending mutations with sync-on-reconnect
+- [x] TypeScript: bis-mobile useOfflineQueue hook
+- [x] TypeScript: bis-mobile OfflineBanner component

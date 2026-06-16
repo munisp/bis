@@ -31,12 +31,16 @@ function createAdminCtx(): TrpcContext {
       name: "Admin User",
       loginMethod: "manus",
       role: "admin",
+      tenantId: null,
+      pushToken: null,
       createdAt: new Date(),
       updatedAt: new Date(),
       lastSignedIn: new Date(),
     },
     req: { protocol: "https", headers: {} } as TrpcContext["req"],
     res: { clearCookie: vi.fn() } as unknown as TrpcContext["res"],
+    tenantId: null,
+    isDemo: false,
   };
 }
 
@@ -49,12 +53,16 @@ function createUserCtx(): TrpcContext {
       name: "Regular User",
       loginMethod: "manus",
       role: "user",
+      tenantId: null,
+      pushToken: null,
       createdAt: new Date(),
       updatedAt: new Date(),
       lastSignedIn: new Date(),
     },
     req: { protocol: "https", headers: {} } as TrpcContext["req"],
     res: { clearCookie: vi.fn() } as unknown as TrpcContext["res"],
+    tenantId: null,
+    isDemo: false,
   };
 }
 
@@ -63,6 +71,8 @@ function createAnonCtx(): TrpcContext {
     user: null,
     req: { protocol: "https", headers: {} } as TrpcContext["req"],
     res: { clearCookie: vi.fn() } as unknown as TrpcContext["res"],
+    tenantId: null,
+    isDemo: false,
   };
 }
 

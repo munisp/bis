@@ -1,0 +1,40 @@
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: bis-pubsub
+  namespace: default
+spec:
+  type: pubsub.redis
+  version: v1
+  metadata:
+    # Redis Streams — same Redis instance used for caching
+    - name: redisHost
+      value: "redis:6379"
+    - name: redisPassword
+      secretKeyRef:
+        name: bis-secrets
+        key: REDIS_PASSWORD
+    - name: enableTLS
+      value: "false"
+    # Consumer group for BIS BFF
+    - name: consumerID
+      value: "bis-bff"
+    # Retain messages for 7 days
+    - name: maxLenApprox
+      value: "1000000"
+    - name: processingTimeout
+      value: "60s"
+    - name: redeliverInterval
+      value: "15s"
+    - name: maxRetries
+      value: "5"
+    - name: maxRetryInterval
+      value: "120s"
+auth:
+  secretStore: bis-secretstore
+scopes:
+  - bis-bff
+  - bis-gateway
+  - bis-aml-engine
+  - bis-risk-engine
+  - bis-biometric-engine

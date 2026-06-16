@@ -1,0 +1,26 @@
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: bis-kafka-binding
+  namespace: default
+spec:
+  type: bindings.kafka
+  version: v1
+  metadata:
+    - name: brokers
+      value: "kafka:9092"
+    - name: authRequired
+      value: "false"
+    - name: publishTopic
+      value: "bis.events"
+    - name: topics
+      value: "bis.events,bis.alerts,bis.aml.alerts,bis.investigation.events,bis.biometric.events,bis.kyc.events,bis.payment.events"
+    - name: consumerGroup
+      value: "bis-dapr-binding"
+    - name: initialOffset
+      value: "newest"
+    - name: maxMessageBytes
+      value: "1048576"
+scopes:
+  - bis-bff
+  - bis-gateway

@@ -18,6 +18,8 @@ import { desc, eq, sql, and, gte, lt, or, ilike, inArray, isNull } from "drizzle
 import { TRPCError } from "@trpc/server";
 import { storagePut } from "./storage";
 import { ENV } from "./_core/env";
+import { initiateInterBankTransfer, pollTransferStatus, getActiveRail } from "./mojaloop";
+import { publishPaymentEvent } from "./dapr";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -100,12 +102,41 @@ export const paymentRailsRouter = router({
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
       const txRef = input.reference ?? `TXN-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
       const amountKobo = Math.round(input.amount * 100);
+
+      // Initiate via Mojaloop → NIBSS NIP → Sandbox
+      let externalRef: string | undefined;
+      let finalStatus: "pending" | "completed" | "failed" = "pending";
+      const activeRail = getActiveRail();
+      try {
+        const railResult = await initiateInterBankTransfer({
+          txRef,
+          originatorAccount: input.originatorAccountId,
+          originatorName: input.originatorAccountId,
+          beneficiaryAccount: input.beneficiaryAccountId,
+          beneficiaryName: input.beneficiaryName,
+          beneficiaryBankCode: (input as any).beneficiaryBankCode ?? "000",
+          amountKobo,
+          currency: input.currency,
+          narration: input.narration,
+        });
+        externalRef = railResult.externalRef;
+        finalStatus = railResult.status === "completed" ? "completed" : "pending";
+      } catch (err) {
+        console.error(`[PaymentRails] ${activeRail} initiation failed for ${txRef}:`, err);
+        // Store as failed rather than silently dropping
+        finalStatus = "failed";
+      }
+
+      const dbStatus = finalStatus === "completed" ? "completed" as const :
+                       finalStatus === "failed"    ? "failed" as const :
+                                                     "pending" as const;
+
       const [created] = await db
         .insert(transactions)
         .values({
           txRef,
           type: "nip" as const,
-          status: "pending" as const,
+          status: dbStatus,
           amount: amountKobo,
           currency: input.currency,
           originatorName: input.originatorAccountId,
@@ -113,9 +144,12 @@ export const paymentRailsRouter = router({
           beneficiaryAccount: input.beneficiaryAccountId,
           beneficiaryName: input.beneficiaryName,
           narration: input.narration ?? undefined,
+          tigerBeetleId: externalRef ?? undefined,
         })
         .returning();
-      return { success: true, txRef, id: created.id, status: "pending" };
+      // Dapr pub/sub: publish payment event (non-blocking)
+      publishPaymentEvent({ eventType: "initiated", txRef, amountKobo, currency: input.currency, rail: activeRail }).catch(() => {});
+      return { success: true, txRef, id: created.id, status: dbStatus, rail: activeRail };
     }),
 
   listTransfers: protectedProcedure
