@@ -25,6 +25,7 @@ import { QuickCheckResultScreen } from '../screens/main/QuickCheckResultScreen';
 import { ProfileScreen } from '../screens/main/ProfileScreen';
 import { FieldAgentScreen } from '../screens/main/FieldAgentScreen';
 import { CaptureEvidenceScreen } from '../screens/main/CaptureEvidenceScreen';
+import { KYCDocumentCaptureScreen } from '../screens/main/KYCDocumentCaptureScreen';
 
 export type AuthStackParamList = {
   Login: undefined;
@@ -44,6 +45,7 @@ export type InvestigationsStackParamList = {
   InvestigationDetail: { id: string };
   FieldAgent: { investigationId: string };
   CaptureEvidence: { investigationId: string };
+  KYCDocumentCapture: { kycRecordId: string };
 };
 
 export type QuickCheckStackParamList = {
@@ -78,6 +80,11 @@ function InvestigationsNavigator() {
         name="CaptureEvidence"
         component={CaptureEvidenceScreen}
         options={{ title: 'Capture Evidence' }}
+      />
+      <InvestigationsStack.Screen
+        name="KYCDocumentCapture"
+        component={KYCDocumentCaptureScreen}
+        options={{ title: 'KYC Document Capture' }}
       />
     </InvestigationsStack.Navigator>
   );

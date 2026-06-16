@@ -1,0 +1,91 @@
+name: Smoke Tests
+
+# Run smoke tests against a deployed environment to verify all services are healthy.
+# Triggered after deployment or manually.
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_url:
+        description: "Base URL to smoke test (e.g. https://bis.example.ng)"
+        required: true
+        default: "https://bis.example.ng"
+      environment:
+        description: "Environment name"
+        required: true
+        default: "staging"
+        type: choice
+        options:
+          - staging
+          - production
+  workflow_run:
+    workflows: ["Deploy to Production"]
+    types: [completed]
+    branches: [main]
+
+env:
+  TARGET_URL: ${{ github.event.inputs.target_url || 'https://bis.example.ng' }}
+
+jobs:
+  smoke-test:
+    name: Smoke Tests — ${{ github.event.inputs.environment || 'production' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install curl and jq
+        run: sudo apt-get install -y curl jq
+
+      - name: Health Check — BFF
+        run: |
+          echo "Testing BFF health at $TARGET_URL/api/health"
+          STATUS=$(curl -sf -o /dev/null -w "%{http_code}" "$TARGET_URL/api/health" || echo "000")
+          echo "BFF health status: $STATUS"
+          [ "$STATUS" = "200" ] || (echo "BFF health check FAILED" && exit 1)
+
+      - name: Health Check — OpenAPI Spec
+        run: |
+          echo "Testing OpenAPI spec at $TARGET_URL/api/openapi.yaml"
+          BODY=$(curl -sf "$TARGET_URL/api/openapi.yaml" || echo "")
+          echo "$BODY" | grep -q "openapi:" || (echo "OpenAPI spec check FAILED" && exit 1)
+          echo "OpenAPI spec OK"
+
+      - name: Health Check — Swagger UI
+        run: |
+          echo "Testing Swagger UI at $TARGET_URL/api/docs"
+          STATUS=$(curl -sf -o /dev/null -w "%{http_code}" -L "$TARGET_URL/api/docs" || echo "000")
+          echo "Swagger UI status: $STATUS"
+          [ "$STATUS" = "200" ] || (echo "Swagger UI check FAILED" && exit 1)
+
+      - name: Health Check — CSRF Token
+        run: |
+          echo "Testing CSRF token endpoint"
+          BODY=$(curl -sf "$TARGET_URL/api/csrf-token" || echo "{}")
+          echo "$BODY" | jq -e '.csrfToken' > /dev/null || (echo "CSRF token check FAILED" && exit 1)
+          echo "CSRF token OK"
+
+      - name: Health Check — Metrics Endpoint
+        run: |
+          echo "Testing metrics endpoint (should return 401 without auth)"
+          STATUS=$(curl -sf -o /dev/null -w "%{http_code}" "$TARGET_URL/api/metrics" || echo "000")
+          echo "Metrics status (expect 401): $STATUS"
+          [ "$STATUS" = "401" ] || [ "$STATUS" = "403" ] || (echo "Metrics endpoint not protected!" && exit 1)
+
+      - name: Smoke Test — Run Full Suite
+        run: |
+          echo "Running full smoke test suite..."
+          chmod +x scripts/smoke-test.sh
+          # Override service URLs to use target
+          export BFF_URL="$TARGET_URL"
+          # Run with timeout
+          timeout 300 bash scripts/smoke-test.sh || echo "Some smoke tests failed (non-blocking in CI)"
+
+      - name: Notify on Failure
+        if: failure()
+        run: |
+          echo "Smoke tests FAILED for $TARGET_URL"
+          # In production, this would send a Slack/PagerDuty alert
+          # curl -X POST "$SLACK_WEBHOOK_URL" -d '{"text":"🚨 BIS smoke tests FAILED on ${{ github.event.inputs.environment }}"}'

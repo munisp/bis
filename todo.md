@@ -2484,10 +2484,17 @@
 ## Sprint v34
 
 - [x] /403 Forbidden page (BISLayout-wrapped, back button, admin contact link)
-- [ ] platform.touchSession tRPC procedure (updates userSessions.lastActiveAt for current token)
+- [x] platform.touchSession tRPC procedure (updates userSessions.lastActiveAt for current token)
 - [x] useSessionHeartbeat hook (pings touchSession every 5 min when tab is visible)
-- [ ] Wire useSessionHeartbeat into BISLayout
-- [ ] Full-page /search results view (overflow from GlobalSearchBar, all entity types)
-- [ ] TemporalPage live polling (refetchInterval: 10_000)
-- [ ] RedisPage live polling (refetchInterval: 10_000)
-- [ ] Push codebase to GitHub repo munisp/bis
+- [x] Wire useSessionHeartbeat into BISLayout
+- [x] Full-page /search results view (overflow from GlobalSearchBar, all entity types)
+- [x] TemporalPage live polling (refetchInterval: 10_000)
+- [x] RedisPage live polling (refetchInterval: 10_000)
+- [x] Push codebase to GitHub repo munisp/bis
+
+## Sprint v35
+
+- [x] Replace payment-rails stubKafka with real kafka-go writer (Go)
+- [x] Expand AML engine OFAC/FATF/UN sanctions list + SDN API sync (Rust)
+- [x] Implement case-manager GenericRepo full typed CRUD (Go)
+- [x] Add mobile KYC document capture screen (TypeScript/React Native)

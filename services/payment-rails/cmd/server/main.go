@@ -13,6 +13,7 @@ import (
 	"bis/payment-rails/config"
 	"bis/payment-rails/internal/backpressure"
 	"bis/payment-rails/internal/handlers"
+	"bis/payment-rails/internal/kafka"
 	"bis/payment-rails/internal/tigerbeetle"
 
 	"github.com/go-chi/chi/v5"
@@ -20,14 +21,6 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
-
-// stubKafka is a no-op Kafka publisher for development.
-type stubKafka struct{}
-
-func (s *stubKafka) Publish(_ context.Context, topic, key string, value []byte) error {
-	log.Debug().Str("topic", topic).Str("key", key).Int("bytes", len(value)).Msg("[Kafka/stub] publish")
-	return nil
-}
 
 func main() {
 	zerolog.TimeFieldFormat = time.RFC3339
@@ -49,10 +42,14 @@ func main() {
 	// Backpressure limiter — return 503 early when pipeline is saturated
 	bp := backpressure.New(cfg.MaxInflightTransfers)
 
-	kafka := &stubKafka{}
-	swiftH := handlers.NewSWIFTHandler(cfg.AMLEngineURL, kafka)
-	sepaH := handlers.NewSEPAHandler(kafka)
-	travelH := handlers.NewTravelRuleHandler(kafka)
+	// Real Kafka publisher (falls back to no-op stub when KAFKA_BROKERS is unset).
+	kafkaCfg := kafka.LoadConfigFromEnv()
+	kafkaPublisher := kafka.New(kafkaCfg)
+	defer kafkaPublisher.Close()
+
+	swiftH := handlers.NewSWIFTHandler(cfg.AMLEngineURL, kafkaPublisher)
+	sepaH := handlers.NewSEPAHandler(kafkaPublisher)
+	travelH := handlers.NewTravelRuleHandler(kafkaPublisher)
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -68,6 +65,10 @@ func main() {
 			"status":  "ok",
 			"service": "payment-rails",
 			"version": "1.1.0",
+			"kafka": map[string]interface{}{
+				"enabled": kafkaCfg.Brokers != "",
+				"brokers": kafkaCfg.Brokers,
+			},
 			"tigerbeetle": map[string]interface{}{
 				"enabled":        cfg.TigerBeetleURL != "",
 				"pending_batch":  tbClient.PendingCount(),
@@ -143,6 +144,7 @@ func main() {
 		log.Info().Str("port", cfg.Port).
 			Int("max_batch_size", cfg.MaxBatchSize).
 			Int("max_inflight", cfg.MaxInflightTransfers).
+			Bool("kafka_enabled", kafkaCfg.Brokers != "").
 			Msg("Payment Rails service starting")
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatal().Err(err).Msg("Server failed")

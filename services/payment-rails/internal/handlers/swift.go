@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -253,23 +254,53 @@ func (h *SWIFTHandler) bic() string {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+// screenAML calls the BIS AML Engine's /screen endpoint.
+// If the engine is unreachable it falls back to conservative inline scoring
+// so that payment processing is not blocked by an AML service outage.
 func (h *SWIFTHandler) screenAML(ctx context.Context, req models.AMLScreenRequest) (*models.AMLScreenResponse, error) {
-	body, _ := json.Marshal(req)
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, h.amlURL+"/screen", nil)
+	body, err := json.Marshal(req)
 	if err != nil {
-		return nil, err
+		return h.screenAMLFallback(req), nil
 	}
-	httpReq.Body = http.NoBody
-	_ = body
 
-	// Stub: inline scoring when AML engine is unavailable
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, h.amlURL+"/screen", bytes.NewReader(body))
+	if err != nil {
+		return h.screenAMLFallback(req), nil
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	httpResp, err := client.Do(httpReq)
+	if err != nil {
+		// AML engine unreachable — use fallback to avoid blocking payments
+		return h.screenAMLFallback(req), nil
+	}
+	defer httpResp.Body.Close()
+
+	if httpResp.StatusCode != http.StatusOK {
+		return h.screenAMLFallback(req), nil
+	}
+
+	var resp models.AMLScreenResponse
+	if err := json.NewDecoder(httpResp.Body).Decode(&resp); err != nil {
+		return h.screenAMLFallback(req), nil
+	}
+	return &resp, nil
+}
+
+// screenAMLFallback provides conservative inline scoring when the AML engine is unavailable.
+// This mirrors the Rust engine's core rules to ensure critical checks still run.
+func (h *SWIFTHandler) screenAMLFallback(req models.AMLScreenRequest) *models.AMLScreenResponse {
 	resp := &models.AMLScreenResponse{
 		RiskScore: 0,
 		RiskLevel: "low",
-		Flags:     []string{},
+		Flags:     []string{"aml_engine_fallback"},
 		Blocked:   false,
 	}
-	highRisk := map[string]bool{"KP": true, "IR": true, "SY": true, "RU": true, "MM": true}
+	highRisk := map[string]bool{
+		"KP": true, "IR": true, "SY": true, "RU": true, "MM": true,
+		"AF": true, "BY": true, "CU": true, "VE": true, "YE": true,
+	}
 	if highRisk[req.OriginatorCountry] || highRisk[req.BeneficiaryCountry] {
 		resp.RiskScore = 75
 		resp.RiskLevel = "high"
@@ -279,10 +310,19 @@ func (h *SWIFTHandler) screenAML(ctx context.Context, req models.AMLScreenReques
 		resp.RiskScore += 20
 		resp.Flags = append(resp.Flags, "large_value_transfer")
 	}
-	if resp.RiskScore > 90 {
-		resp.Blocked = true
+	if req.Amount > 9_000 && req.Amount < 10_000 && req.Currency == "USD" {
+		resp.RiskScore += 25
+		resp.Flags = append(resp.Flags, "potential_structuring")
 	}
-	return resp, nil
+	if resp.RiskScore >= 100 {
+		resp.Blocked = true
+		resp.RiskLevel = "critical"
+	} else if resp.RiskScore >= 75 {
+		resp.RiskLevel = "high"
+	} else if resp.RiskScore >= 50 {
+		resp.RiskLevel = "medium"
+	}
+	return resp
 }
 
 func (h *SWIFTHandler) publishEvent(ctx context.Context, topic string, event models.PaymentEvent) {
