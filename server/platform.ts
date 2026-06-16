@@ -10,6 +10,7 @@
 import { TRPCError } from "@trpc/server";
 import { and, desc, eq, gt, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
+import { COOKIE_NAME } from "../shared/const";
 import {
   userSessions,
   userTotpSecrets,
@@ -73,6 +74,31 @@ export const sessionsRouter = router({
       .set({ revokedAt: new Date() })
       .where(and(eq(userSessions.userId, ctx.user.id), isNull(userSessions.revokedAt)));
     return { ok: true, revoked: result.rowCount ?? 0 };
+  }),
+
+  /** Touch the current session — updates lastActiveAt to prevent inactivity logout */
+  touch: protectedProcedure.mutation(async ({ ctx }) => {
+    const db = await getDb();
+    if (!db) return { ok: false };
+    // Read the session token from the request cookie
+    const rawCookie: string | undefined = ctx.req.headers.cookie;
+    const sessionToken = rawCookie
+      ?.split(';')
+      .map(c => c.trim())
+      .find(c => c.startsWith(COOKIE_NAME + '='))
+      ?.split('=')[1];
+    if (!sessionToken) return { ok: false };
+    await db
+      .update(userSessions)
+      .set({ lastActiveAt: new Date() })
+      .where(
+        and(
+          eq(userSessions.userId, ctx.user.id),
+          eq(userSessions.sessionToken, sessionToken),
+          isNull(userSessions.revokedAt),
+        )
+      );
+    return { ok: true };
   }),
 
   /** Admin: list all sessions across all users */

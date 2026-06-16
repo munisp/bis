@@ -160,10 +160,16 @@ function TemporalPageInner() {
   const [signalWfId, setSignalWfId] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<"RUNNING" | "COMPLETED" | "FAILED" | "CANCELLED" | "TERMINATED" | undefined>("RUNNING");
 
-  const { data: status } = trpc.temporal.status.useQuery();
+  const { data: status } = trpc.temporal.status.useQuery(undefined, {
+    refetchInterval: 10_000,
+    staleTime: 5_000,
+  });
   const { data: workflowsData, refetch, isLoading } = trpc.temporal.listWorkflows.useQuery({
     status: statusFilter,
     pageSize: 50,
+  }, {
+    refetchInterval: 10_000,
+    staleTime: 5_000,
   });
 
   const terminate = trpc.temporal.terminateWorkflow.useMutation({

@@ -21,6 +21,7 @@ import { trpc } from '@/lib/trpc';
 import { useAuth } from '@/_core/hooks/useAuth';
 import { useEventStream } from '@/hooks/useEventStream';
 import { GlobalSearchBar } from '@/components/GlobalSearchBar';
+import { useSessionHeartbeat } from '@/hooks/useSessionHeartbeat';
 
 // ─── Nav config ───────────────────────────────────────────────────────────────
 
@@ -375,7 +376,9 @@ export default function BISLayout({ children, title, subtitle, actions }: BISLay
   const [bellOpen, setBellOpen] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const { theme, toggleTheme } = useTheme();
-  const { user } = useAuth();
+  const { user, isAuthenticated } = useAuth();
+  // Keep session alive while the user is actively using the app
+  useSessionHeartbeat(isAuthenticated);
 
   // ── Live dashboard stats for nav badges ──────────────────────────────────
   const { data: stats } = trpc.dashboard.stats.useQuery(undefined, {

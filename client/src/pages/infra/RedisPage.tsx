@@ -169,12 +169,21 @@ function RedisPageInner() {
   const [inspectKey, setInspectKey] = useState<string | null>(null);
   const [flushOpen, setFlushOpen] = useState(false);
 
-  const { data: statusData } = trpc.redis.status.useQuery();
+  const { data: statusData } = trpc.redis.status.useQuery(undefined, {
+    refetchInterval: 10_000,
+    staleTime: 5_000,
+  });
   const { data: keysData, refetch: refetchKeys, isLoading: keysLoading } = trpc.redis.listKeys.useQuery({
     pattern,
     count: 200,
+  }, {
+    refetchInterval: 30_000,
+    staleTime: 15_000,
   });
-  const { data: memData } = trpc.redis.memoryStats.useQuery();
+  const { data: memData } = trpc.redis.memoryStats.useQuery(undefined, {
+    refetchInterval: 10_000,
+    staleTime: 5_000,
+  });
 
   const del = trpc.redis.del.useMutation({
     onSuccess: (d) => { toast.success(`Deleted key: ${d.key}`); refetchKeys(); },

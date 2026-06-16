@@ -2472,11 +2472,22 @@
 
 ## Phase v33 — Next Steps (Round 11)
 
-- [ ] Global search bar in DashboardLayout.tsx wired to trpc.search.crossEntitySearch
-- [ ] GlobalSearchBar component with debounced input, result grouping (investigations/alerts/KYC), keyboard navigation
-- [ ] Search results panel with click-through navigation to entity detail pages
-- [ ] Mobile: useOfflineQueue hook (enqueue, drain, size, pending, remove)
-- [ ] Mobile: OfflineBanner component (shows when offline, displays pending count, retry button)
-- [ ] Mobile: wire OfflineBanner into App.tsx navigation shell
-- [ ] Admin role promotion SQL + webdev_execute_sql verification
-- [ ] Verify admin panel routes are gated by role === 'admin' in frontend
+- [x] Global search bar in DashboardLayout.tsx wired to trpc.search.crossEntitySearch
+- [x] GlobalSearchBar component with debounced input, result grouping (investigations/alerts/KYC), keyboard navigation
+- [x] Search results panel with click-through navigation to entity detail pages
+- [x] Mobile: useOfflineQueue hook (enqueue, drain, size, pending, remove)
+- [x] Mobile: OfflineBanner component (shows when offline, displays pending count, retry button)
+- [x] Mobile: wire OfflineBanner into App.tsx navigation shell
+- [x] Admin role promotion SQL + webdev_execute_sql verification
+- [x] Verify admin panel routes are gated by role === 'admin' in frontend
+
+## Sprint v34
+
+- [x] /403 Forbidden page (BISLayout-wrapped, back button, admin contact link)
+- [ ] platform.touchSession tRPC procedure (updates userSessions.lastActiveAt for current token)
+- [x] useSessionHeartbeat hook (pings touchSession every 5 min when tab is visible)
+- [ ] Wire useSessionHeartbeat into BISLayout
+- [ ] Full-page /search results view (overflow from GlobalSearchBar, all entity types)
+- [ ] TemporalPage live polling (refetchInterval: 10_000)
+- [ ] RedisPage live polling (refetchInterval: 10_000)
+- [ ] Push codebase to GitHub repo munisp/bis

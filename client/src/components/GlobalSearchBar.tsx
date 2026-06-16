@@ -357,7 +357,16 @@ export function GlobalSearchBar() {
               <span>↑↓ navigate</span>
               <span>↵ open</span>
               <span>esc close</span>
-              <span className="ml-auto">{flatHits.length} result{flatHits.length !== 1 ? 's' : ''}</span>
+              <button
+                onClick={() => {
+                  navigate(`/search?q=${encodeURIComponent(debouncedQuery)}`);
+                  setOpen(false);
+                  setQuery('');
+                }}
+                className="ml-auto text-primary hover:text-primary/80 transition-colors"
+              >
+                View all {flatHits.length} result{flatHits.length !== 1 ? 's' : ''} →
+              </button>
             </div>
           )}
         </div>
