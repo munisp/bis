@@ -700,6 +700,117 @@ async function startServer() {
     }
   });
 
+  // ── Sanctions list refresh webhook ──────────────────────────────────────────
+  // Called by the BIS gateway / AML engine when the UN/OFAC/FATF sanctions list
+  // is updated. Verifies HMAC-SHA256 signature, invalidates the in-memory cache,
+  // and notifies the platform owner.
+  //
+  // Expected headers:
+  //   x-bis-signature: sha256=<hex>   (HMAC-SHA256 of raw body using SANCTIONS_WEBHOOK_SECRET)
+  //   Content-Type: application/json
+  //
+  // Expected body: { listName: string; totalEntries: number; updatedAt: string; source?: string }
+  app.post("/api/webhooks/sanctions-refresh", express.raw({ type: "application/json" }), async (req, res) => {
+    try {
+      const secret = ENV.sanctionsWebhookSecret;
+      const sigHeader = (req.headers["x-bis-signature"] as string | undefined) ?? "";
+
+      // Verify HMAC-SHA256 signature
+      if (secret && secret !== "bis-sanctions-webhook-dev") {
+        const expected = "sha256=" + crypto
+          .createHmac("sha256", secret)
+          .update(req.body as Buffer)
+          .digest("hex");
+        const expectedBuf = Buffer.from(expected);
+        const sigBuf = Buffer.from(sigHeader);
+        const isValid =
+          expectedBuf.length === sigBuf.length &&
+          crypto.timingSafeEqual(expectedBuf, sigBuf);
+        if (!isValid) {
+          console.warn("[SanctionsWebhook] Invalid signature — request rejected");
+          res.status(401).json({ error: "Invalid signature" });
+          return;
+        }
+      } else if (!secret || secret === "bis-sanctions-webhook-dev") {
+        // Dev mode: accept without signature verification but log a warning
+        console.warn("[SanctionsWebhook] Running in dev mode — signature verification skipped");
+      }
+
+      const body = JSON.parse((req.body as Buffer).toString("utf8")) as {
+        listName?: string;
+        totalEntries?: number;
+        updatedAt?: string;
+        source?: string;
+        hitCount?: number;
+      };
+
+      const listName = body.listName ?? "Unknown";
+      const totalEntries = body.totalEntries ?? 0;
+      const updatedAt = body.updatedAt ? new Date(body.updatedAt).toISOString() : new Date().toISOString();
+      const source = body.source ?? "gateway";
+
+      console.log(`[SanctionsWebhook] List updated: ${listName} entries=${totalEntries} source=${source}`);
+
+      // Write an audit log entry for the sanctions list update
+      try {
+        const { getDb } = await import("../db");
+        const { auditLog } = await import("../../drizzle/schema");
+        const db = await getDb();
+        if (db) {
+          await db.insert(auditLog).values({
+            // userId 0 = system action (no real user)
+            category: "system" as const,
+            action: `Sanctions list updated: ${listName}`,
+            targetRef: "sanctions-list",
+            detail: { listName, totalEntries, updatedAt, source, hitCount: body.hitCount },
+          });
+        }
+      } catch {
+        // Audit log failure is non-fatal
+      }
+
+      // Notify the platform owner
+      const delivered = await notifyOwner({
+        title: `🛡️ Sanctions List Updated — ${listName}`,
+        content: [
+          `The **${listName}** sanctions list has been refreshed.`,
+          `- **Total entries:** ${totalEntries.toLocaleString()}`,
+          `- **Updated at:** ${updatedAt}`,
+          `- **Source:** ${source}`,
+          body.hitCount !== undefined ? `- **30-day hits:** ${body.hitCount}` : "",
+        ].filter(Boolean).join("\n"),
+      });
+
+      // Broadcast push notification to all admin users
+      try {
+        const { getDb } = await import("../db");
+        const { broadcastPush } = await import("../pushNotify");
+        const { users } = await import("../../drizzle/schema");
+        const { eq } = await import("drizzle-orm");
+        const db = await getDb();
+        if (db) {
+          const admins = await db.select({ id: users.id }).from(users).where(eq(users.role, "admin"));
+          if (admins.length > 0) {
+            broadcastPush(admins.map(a => a.id), {
+              title: `🛡️ Sanctions List Updated`,
+              body: `${listName} refreshed with ${totalEntries.toLocaleString()} entries`,
+              url: "/aml",
+              tag: "sanctions-refresh",
+            }).catch(() => {});
+          }
+        }
+      } catch {
+        // Push notification failure is non-fatal
+      }
+
+      console.log(`[SanctionsWebhook] Processed list=${listName} entries=${totalEntries} notified=${delivered}`);
+      res.status(200).json({ received: true, listName, totalEntries, delivered });
+    } catch (err) {
+      console.error("[SanctionsWebhook] Error:", err);
+      res.status(200).json({ received: true, error: "Processing error" });
+    }
+  });
+
   // ── API v1 Bearer token validation middleware ─────────────────────────────
   // All /api/v1/* requests (except /api/v1/health) must include a valid Bearer token.
   // Token is validated against the api_tokens table (SHA-256 hash comparison).

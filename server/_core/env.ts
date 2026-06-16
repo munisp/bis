@@ -118,6 +118,18 @@ export const ENV = {
   goamlApiUrl: process.env.GOAML_API_URL ?? "https://goaml.nfiu.gov.ng/api",
   goamlApiKey: process.env.GOAML_API_KEY ?? "",
   goamlInstitutionCode: process.env.GOAML_INSTITUTION_CODE ?? "",
+  // Push notifications (FCM + Web Push)
+  // FCM: Server key from Firebase Console → Project Settings → Cloud Messaging
+  fcmServerKey: process.env.FCM_SERVER_KEY ?? "",
+  // FCM v1 API: project ID for the HTTP v1 endpoint
+  fcmProjectId: process.env.FCM_PROJECT_ID ?? "",
+  // Web Push VAPID keys (generate with: npx web-push generate-vapid-keys)
+  vapidPublicKey: process.env.VAPID_PUBLIC_KEY ?? "",
+  vapidPrivateKey: process.env.VAPID_PRIVATE_KEY ?? "",
+  vapidSubject: process.env.VAPID_SUBJECT ?? "mailto:admin@bis-platform.com",
+  // Sanctions webhook shared secret (HMAC-SHA256)
+  sanctionsWebhookSecret: process.env.SANCTIONS_WEBHOOK_SECRET ?? "bis-sanctions-webhook-dev",
+
   // Notifications
   slackWebhookUrl: process.env.SLACK_WEBHOOK_URL ?? "",
   smtpHost: process.env.SMTP_HOST ?? "smtp.sendgrid.net",
@@ -152,6 +164,9 @@ export function validateEnv(): void {
     ["GOAML_API_KEY", ENV.goamlApiKey, "goAML NFIU submissions will use simulated reference numbers"],
     ["GOAML_INSTITUTION_CODE", ENV.goamlInstitutionCode, "goAML institution code not set — NFIU submissions will fail"],
     ["SLACK_WEBHOOK_URL", ENV.slackWebhookUrl, "Slack deploy/alert notifications disabled"],
+    ["FCM_SERVER_KEY", ENV.fcmServerKey, "FCM push notifications disabled — mobile alerts will not be delivered"],
+    ["VAPID_PUBLIC_KEY", ENV.vapidPublicKey, "Web Push notifications disabled — browser alerts will not be delivered"],
+    ["VAPID_PRIVATE_KEY", ENV.vapidPrivateKey, "Web Push notifications disabled — browser alerts will not be delivered"],
     ["SMTP_USER", ENV.smtpUser, "Email notifications disabled"],
     ["SMTP_PASS", ENV.smtpPass, "Email notifications disabled"],
   ];

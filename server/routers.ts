@@ -32,6 +32,7 @@ import { paymentRailsRouter } from "./paymentRails";
 import { documentVaultRouter } from "./documentVault";
 import { riskDashboardRouter } from "./riskDashboard";
 import { searchRouter } from "./search";
+import { sendPushToUser, broadcastPush } from "./pushNotify";
 import { publishInvestigationEvent, publishKycEvent } from "./dapr";
 import { getDb } from "./db";
 import { evaluateAlertRules } from "./alertRules";
@@ -422,6 +423,17 @@ const investigationsRouter = router({
           sourceService: "risk-engine",
         });
         await publishEvent("INVESTIGATION_FLAGGED", input.ref, scoreResult.risk_tier, { score: scoreResult.composite_score });
+        // Push notification to the investigation creator
+        const [inv] = await db.select({ createdBy: investigations.createdBy })
+          .from(investigations).where(eq(investigations.ref, input.ref)).limit(1);
+        if (inv?.createdBy) {
+          sendPushToUser(inv.createdBy, {
+            title: `🚨 ${scoreResult.risk_tier.toUpperCase()} Risk Alert`,
+            body: `Investigation ${input.ref} scored ${scoreResult.composite_score}. ${scoreResult.recommendation}`,
+            url: `/investigations/${input.ref}`,
+            tag: `risk-alert-${input.ref}`,
+          }).catch(() => {}); // fire-and-forget
+        }
       }
       return scoreResult;
     }),
@@ -1061,6 +1073,16 @@ const kycRouter = router({
       }).returning();
       await writeAuditLog(db, { userId: ctx.user!.id, category: "kyc", action: `KYC biometric ${status}`, targetRef: input.subjectName });
       await publishEvent("KYC_COMPLETED", input.subjectName, status === "failed" ? "high" : "info", { status, score: riskScore });
+      // Push notification to the record creator on non-passed status
+      if (status !== "passed") {
+        const emoji = status === "failed" ? "🚫" : "⚠️";
+        sendPushToUser(ctx.user!.id, {
+          title: `${emoji} KYC ${status.charAt(0).toUpperCase() + status.slice(1)}: ${input.subjectName}`,
+          body: `KYC verification ${status} with risk score ${riskScore}. Review required.`,
+          url: `/kyc-records`,
+          tag: `kyc-${record.id}`,
+        }).catch(() => {});
+      }
       // Evaluate alert rules against the computed risk score
       await evaluateAlertRules("risk_score", riskScore, {
         subjectRef: `kyc-${record.id}`,
@@ -1277,6 +1299,16 @@ const kycRouter = router({
       await publishEvent("KYC_COMPLETED", input.subjectName, status === "failed" ? "high" : "info", { status, score: scoreResult.composite_score });
       // Dapr pub/sub: publish KYC completed event
       publishKycEvent({ eventType: "completed", kycRecordId: record!.id, subjectRef: input.subjectName, status, riskScore: scoreResult.composite_score }).catch(() => {});
+      // Push notification to the record creator on non-passed status
+      if (status !== "passed") {
+        const emoji = status === "failed" ? "🚫" : "⚠️";
+        sendPushToUser(ctx.user!.id, {
+          title: `${emoji} KYC ${status.charAt(0).toUpperCase() + status.slice(1)}: ${input.subjectName}`,
+          body: `KYC verification ${status} with risk score ${scoreResult.composite_score}. Review required.`,
+          url: `/kyc-records`,
+          tag: `kyc-${record!.id}`,
+        }).catch(() => {});
+      }
       return { id: record!.id, status, riskScore: scoreResult.composite_score, nin, bvn, sanctions, pep, credit };
     }),
   /**
@@ -1468,6 +1500,78 @@ const kycRouter = router({
         uploadedBy: ctx.user!.id,
         capturedAt: input.capturedAt,
       }).returning();
+
+      // ── LLM OCR: extract document fields from the uploaded image ──────────────────
+      // Fire-and-forget: OCR runs asynchronously so the upload response is fast.
+      // On success, kycRecords.documentOcrData is updated with the extracted fields.
+      ;(async () => {
+        try {
+          const { invokeLLM } = await import('./_core/llm');
+          const ocrResponse = await invokeLLM({
+            messages: [
+              {
+                role: 'system',
+                content: 'You are a document OCR assistant. Extract structured data from identity documents. Always respond with valid JSON only — no markdown, no explanation.',
+              },
+              {
+                role: 'user',
+                content: [
+                  {
+                    type: 'image_url',
+                    image_url: { url: input.fileUrl, detail: 'high' },
+                  },
+                  {
+                    type: 'text',
+                    text: `Extract all readable fields from this ${input.documentType} document. Return a JSON object with any of these keys that are present: fullName, surname, firstName, middleName, dateOfBirth, gender, idNumber, documentNumber, nationality, expiryDate, issueDate, address, placeOfBirth, mrz. Use null for missing fields.`,
+                  },
+                ],
+              },
+            ],
+            response_format: {
+              type: 'json_schema',
+              json_schema: {
+                name: 'document_ocr',
+                strict: true,
+                schema: {
+                  type: 'object',
+                  properties: {
+                    fullName:       { type: ['string', 'null'] },
+                    surname:        { type: ['string', 'null'] },
+                    firstName:      { type: ['string', 'null'] },
+                    middleName:     { type: ['string', 'null'] },
+                    dateOfBirth:    { type: ['string', 'null'] },
+                    gender:         { type: ['string', 'null'] },
+                    idNumber:       { type: ['string', 'null'] },
+                    documentNumber: { type: ['string', 'null'] },
+                    nationality:    { type: ['string', 'null'] },
+                    expiryDate:     { type: ['string', 'null'] },
+                    issueDate:      { type: ['string', 'null'] },
+                    address:        { type: ['string', 'null'] },
+                    placeOfBirth:   { type: ['string', 'null'] },
+                    mrz:            { type: ['string', 'null'] },
+                  },
+                  required: ['fullName','surname','firstName','middleName','dateOfBirth','gender','idNumber','documentNumber','nationality','expiryDate','issueDate','address','placeOfBirth','mrz'],
+                  additionalProperties: false,
+                },
+              },
+            },
+          });
+          const raw = ocrResponse?.choices?.[0]?.message?.content;
+          if (raw) {
+            const ocrData = typeof raw === 'string' ? JSON.parse(raw) : raw;
+            // Persist OCR data to the KYC record
+            const db2 = await getDb();
+            if (db2) {
+              await db2.update(kycRecords)
+                .set({ documentOcrData: ocrData, updatedAt: new Date() })
+                .where(eq(kycRecords.id, input.kycRecordId));
+            }
+          }
+        } catch {
+          // OCR is best-effort; never fail the upload on OCR errors
+        }
+      })();
+
       await writeAuditLog(db, {
         userId: ctx.user!.id,
         category: 'kyc',
@@ -1498,6 +1602,7 @@ const kycRouter = router({
           doc: kycDocuments,
           subjectName: kycRecords.subjectName,
           kycStatus: kycRecords.status,
+          documentOcrData: kycRecords.documentOcrData,
         })
         .from(kycDocuments)
         .leftJoin(kycRecords, eq(kycDocuments.kycRecordId, kycRecords.id))
@@ -4623,6 +4728,51 @@ const pushRouter = router({
       .where(and(eq(pushSubscriptions.userId, ctx.user!.id), eq(pushSubscriptions.active, true)))
       .orderBy(desc(pushSubscriptions.createdAt));
   }),
+
+  // Send a push notification to a specific user (admin-only)
+  sendToUser: adminProcedure
+    .input(z.object({
+      userId: z.number().int().positive(),
+      title: z.string().min(1).max(128),
+      body: z.string().min(1).max(512),
+      url: z.string().optional(),
+      tag: z.string().optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const result = await sendPushToUser(input.userId, {
+        title: input.title,
+        body: input.body,
+        url: input.url,
+        tag: input.tag,
+      });
+      return result;
+    }),
+
+  // Broadcast a push notification to all users with active subscriptions (admin-only)
+  broadcastToAll: adminProcedure
+    .input(z.object({
+      title: z.string().min(1).max(128),
+      body: z.string().min(1).max(512),
+      url: z.string().optional(),
+      tag: z.string().optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return { sent: 0, failed: 0, deactivated: 0 };
+      // Collect distinct user IDs with active subscriptions
+      const rows = await db
+        .selectDistinct({ userId: pushSubscriptions.userId })
+        .from(pushSubscriptions)
+        .where(eq(pushSubscriptions.active, true));
+      const userIds = rows.map(r => r.userId);
+      const result = await broadcastPush(userIds, {
+        title: input.title,
+        body: input.body,
+        url: input.url,
+        tag: input.tag,
+      });
+      return result;
+    }),
 });
 
 export const appRouter = router({
