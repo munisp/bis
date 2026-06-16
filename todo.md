@@ -2498,3 +2498,18 @@
 - [x] Expand AML engine OFAC/FATF/UN sanctions list + SDN API sync (Rust)
 - [x] Implement case-manager GenericRepo full typed CRUD (Go)
 - [x] Add mobile KYC document capture screen (TypeScript/React Native)
+
+## Sprint v36
+
+- [x] DocumentReviewQueue tRPC procedure (kyc.listPendingDocuments, kyc.reviewDocument, kyc.uploadDocument)
+- [x] DocumentReviewQueue admin panel page with Approve/Reject/Request Re-upload actions
+- [x] AML sanctions status card in AMLTransactionsPage (live gateway status, hit count, last updated)
+- [x] lookup.sanctionsStatus tRPC procedure (gateway proxy with degraded/unreachable fallback)
+- [x] lookup.refreshSanctions tRPC mutation (manual refresh with audit log)
+- [x] Notification bell component with unread count badge (already in BISLayout)
+- [x] Dark/light theme toggle in BISLayout header (already in BISLayout)
+- [x] push_subscriptions DB table + migration 0043
+- [x] push.registerToken tRPC mutation (FCM/WebPush upsert)
+- [x] push.deregisterToken tRPC mutation (deactivate on logout)
+- [x] push.listMyTokens tRPC query (list active subscriptions)
+- [x] Push Sprint v36 to GitHub

@@ -1761,3 +1761,70 @@ export const biometricLivenessNonces = pgTable("biometric_liveness_nonces", {
   }));
 export type BiometricLivenessNonce = typeof biometricLivenessNonces.$inferSelect;
 export type InsertBiometricLivenessNonce = typeof biometricLivenessNonces.$inferInsert;
+
+// ─── KYC Uploaded Documents ───────────────────────────────────────────────────
+// Stores metadata for documents uploaded via the mobile KYCDocumentCaptureScreen.
+// File bytes live in S3; only the URL and key are stored here.
+export const kycDocumentReviewStatusEnum = pgEnum("kyc_document_review_status", [
+  "pending",
+  "approved",
+  "rejected",
+  "reupload_requested",
+]);
+
+export const kycDocuments = pgTable("kyc_documents", {
+  id: serial("id").primaryKey(),
+  kycRecordId: integer("kycRecordId").notNull().references(() => kycRecords.id, { onDelete: "cascade" }),
+  tenantId: integer("tenantId"),
+  documentType: varchar("documentType", { length: 64 }).notNull(),
+  fileName: varchar("fileName", { length: 255 }).notNull(),
+  fileKey: varchar("fileKey", { length: 512 }).notNull(),
+  fileUrl: text("fileUrl").notNull(),
+  fileSizeBytes: integer("fileSizeBytes"),
+  mimeType: varchar("mimeType", { length: 64 }),
+  reviewStatus: kycDocumentReviewStatusEnum("reviewStatus").notNull().default("pending"),
+  reviewedBy: integer("reviewedBy"),
+  reviewNote: text("reviewNote"),
+  reviewedAt: timestamp("reviewedAt"),
+  uploadedBy: integer("uploadedBy").notNull(),
+  capturedAt: timestamp("capturedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+},
+  (table) => ({
+    kyc_docs_record_idx: index("kyc_docs_record_idx").on(table.kycRecordId),
+    kyc_docs_status_idx: index("kyc_docs_status_idx").on(table.reviewStatus),
+    kyc_docs_tenant_idx: index("kyc_docs_tenant_idx").on(table.tenantId),
+    kyc_docs_created_at_idx: index("kyc_docs_created_at_idx").on(table.createdAt),
+  }));
+export type KycDocument = typeof kycDocuments.$inferSelect;
+export type InsertKycDocument = typeof kycDocuments.$inferInsert;
+
+// ─── Push Subscriptions (FCM / Web Push) ─────────────────────────────────────
+// Stores FCM registration tokens and Web Push subscription endpoints for
+// mobile and browser push notification delivery.
+// A user may have multiple devices/browsers, each with its own token.
+export const pushSubscriptions = pgTable("push_subscriptions", {
+  id: serial("id").primaryKey(),
+  userId: integer("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+  // FCM registration token (mobile) or Web Push endpoint URL (browser)
+  token: text("token").notNull(),
+  // 'fcm' | 'webpush'
+  platform: varchar("platform", { length: 16 }).notNull().default("fcm"),
+  // Device / browser label for display in settings
+  deviceLabel: varchar("device_label", { length: 128 }),
+  // Web Push keys (only for webpush platform)
+  p256dh: text("p256dh"),
+  auth: text("auth"),
+  // Whether this subscription is still active
+  active: boolean("active").notNull().default(true),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+},
+  (table) => ({
+    push_sub_user_idx:   index("push_sub_user_idx").on(table.userId),
+    push_sub_token_idx:  index("push_sub_token_idx").on(table.token),
+    push_sub_active_idx: index("push_sub_active_idx").on(table.active),
+  }));
+export type PushSubscription = typeof pushSubscriptions.$inferSelect;
+export type InsertPushSubscription = typeof pushSubscriptions.$inferInsert;
