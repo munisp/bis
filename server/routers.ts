@@ -2368,6 +2368,91 @@ const onboardingRouter = router({
       const [app] = await db.select().from(onboardingApplications).where(eq(onboardingApplications.id, input.id)).limit(1);
       await db.update(onboardingApplications).set({ status: input.status, updatedAt: new Date() }).where(eq(onboardingApplications.id, input.id));
       await writeAuditLog(db, { userId: ctx.user!.id, category: "system", action: `Onboarding status → ${input.status}`, targetRef: String(input.id) });
+
+      // ─── On Approval: Auto-provision Tenant + Auto-create KYC records for stakeholders ───
+      if (input.status === "approved" && app) {
+        // 1. Auto-provision a Tenant record from the onboarding application
+        const slug = (app.legalName ?? `tenant-${app.id}`)
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-+|-+$/g, "")
+          .slice(0, 60) + "-" + app.id;
+
+        const [existingTenant] = await db.select({ id: tenants.id })
+          .from(tenants)
+          .where(eq(tenants.slug, slug))
+          .limit(1);
+
+        let tenantId: number | undefined;
+        if (!existingTenant) {
+          const [newTenant] = await db.insert(tenants).values({
+            name: app.legalName,
+            slug,
+            plan: "starter",
+            status: "trial",
+            contactEmail: app.contactEmail ?? undefined,
+            contactName: app.contactName ?? undefined,
+            country: app.countryCode ?? undefined,
+            industry: app.businessCategory ?? undefined,
+          }).returning({ id: tenants.id });
+          tenantId = newTenant?.id;
+          await writeAuditLog(db, { userId: ctx.user!.id, category: "system", action: `Auto-provisioned tenant ${slug} from onboarding ${app.referenceId}`, targetRef: String(tenantId) });
+        } else {
+          tenantId = existingTenant.id;
+        }
+
+        // 2. Auto-create KYC records for each stakeholder listed in the application
+        const stakeholders: Array<{ name?: string; nin?: string; bvn?: string; dob?: string; phone?: string; role?: string }> =
+          Array.isArray(app.stakeholders) ? app.stakeholders : [];
+
+        for (const sh of stakeholders) {
+          if (!sh.name) continue;
+          // Avoid duplicate KYC records for the same stakeholder in the same onboarding
+          const subjectRef = `onboarding-${app.id}-${(sh.name).replace(/\s+/g, "-").toLowerCase().slice(0, 40)}`;
+          const [existing] = await db.select({ id: kycRecords.id })
+            .from(kycRecords)
+            .where(eq(kycRecords.subjectRef, subjectRef))
+            .limit(1);
+          if (existing) continue;
+
+          await db.insert(kycRecords).values({
+            subjectName: sh.name,
+            nin: sh.nin ?? null,
+            bvn: sh.bvn ?? null,
+            dob: sh.dob ?? null,
+            phone: sh.phone ?? null,
+            status: "pending",
+            subjectRef,
+            createdBy: ctx.user!.id,
+          });
+        }
+
+        // 3. Also create a KYC record for the primary contact if not already a stakeholder
+        if (app.contactName) {
+          const primaryRef = `onboarding-${app.id}-primary-contact`;
+          const [existing] = await db.select({ id: kycRecords.id })
+            .from(kycRecords)
+            .where(eq(kycRecords.subjectRef, primaryRef))
+            .limit(1);
+          if (!existing) {
+            await db.insert(kycRecords).values({
+              subjectName: app.contactName,
+              phone: app.contactPhone ?? null,
+              status: "pending",
+              subjectRef: primaryRef,
+              createdBy: ctx.user!.id,
+            });
+          }
+        }
+
+        await writeAuditLog(db, {
+          userId: ctx.user!.id,
+          category: "system",
+          action: `Auto-created KYC records for ${stakeholders.length + 1} stakeholder(s) from onboarding ${app.referenceId}`,
+          targetRef: String(app.id),
+        });
+      }
+
       // Notify owner on terminal status changes
       if (input.status === "approved" || input.status === "rejected") {
         notifyOwner({
@@ -3043,6 +3128,80 @@ const hostedLinkRouter = router({
         .set({ status: 'revoked' })
         .where(eq(hostedVerificationLinks.id, input.id));
       return { success: true };
+    }),
+
+  /**
+   * Public: resolve a hosted verification link by token.
+   * Returns the link metadata (required checks, subject name, expiry) without auth.
+   * Used by the /verify/:token self-service portal page.
+   */
+  resolve: publicProcedure
+    .input(z.object({ token: z.string().min(8).max(64) }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
+      const [link] = await db.select()
+        .from(hostedVerificationLinks)
+        .where(eq(hostedVerificationLinks.token, input.token))
+        .limit(1);
+      if (!link) throw new TRPCError({ code: 'NOT_FOUND', message: 'Verification link not found or expired' });
+      if (link.status === 'revoked') throw new TRPCError({ code: 'FORBIDDEN', message: 'This verification link has been revoked' });
+      if (link.status === 'completed') throw new TRPCError({ code: 'FORBIDDEN', message: 'This verification link has already been completed' });
+      if (new Date() > link.expiresAt) throw new TRPCError({ code: 'FORBIDDEN', message: 'This verification link has expired' });
+      // Return safe subset — do not expose internal IDs or createdBy
+      return {
+        token: link.token,
+        subjectName: link.subjectName,
+        requiredChecks: JSON.parse(link.requiredChecks ?? '[]') as string[],
+        expiresAt: link.expiresAt,
+        status: link.status,
+      };
+    }),
+
+  /**
+   * Public: submit KYC data via a hosted verification link.
+   * Creates a KYC record from the submitted data and marks the link as completed.
+   * Used by the /verify/:token self-service portal page.
+   */
+  submit: publicProcedure
+    .input(z.object({
+      token: z.string().min(8).max(64),
+      subjectName: z.string().min(1).max(255),
+      nin: z.string().length(11).optional(),
+      bvn: z.string().length(11).optional(),
+      dob: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      phone: z.string().max(20).optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
+      const [link] = await db.select()
+        .from(hostedVerificationLinks)
+        .where(eq(hostedVerificationLinks.token, input.token))
+        .limit(1);
+      if (!link) throw new TRPCError({ code: 'NOT_FOUND', message: 'Verification link not found' });
+      if (link.status !== 'active') throw new TRPCError({ code: 'FORBIDDEN', message: `Link is ${link.status}` });
+      if (new Date() > link.expiresAt) throw new TRPCError({ code: 'FORBIDDEN', message: 'Verification link has expired' });
+
+      // Create a KYC record from the submitted data
+      const subjectRef = `hosted-${link.token}`;
+      const [kycRecord] = await db.insert(kycRecords).values({
+        subjectName: input.subjectName,
+        nin: input.nin ?? null,
+        bvn: input.bvn ?? null,
+        dob: input.dob ?? null,
+        phone: input.phone ?? null,
+        status: 'pending',
+        subjectRef,
+        createdBy: link.createdBy ?? 0,
+      }).returning({ id: kycRecords.id, subjectRef: kycRecords.subjectRef });
+
+      // Mark the link as completed
+      await db.update(hostedVerificationLinks)
+        .set({ status: 'completed', completedAt: new Date(), resultRef: subjectRef })
+        .where(eq(hostedVerificationLinks.id, link.id));
+
+      return { success: true, kycRecordId: kycRecord?.id, subjectRef };
     }),
 });
 

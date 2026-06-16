@@ -2324,3 +2324,17 @@
 - [x] Confirmed no remaining "Feature coming soon" placeholder toasts in client code
 - [x] ENV registry now covers 65+ typed environment variables with safe defaults
 - [x] TypeScript: 0 errors; Tests: 489/612 pass (123 pre-existing ECONNREFUSED — unchanged)
+
+## Sprint v24 — KYC/KYB Onboarding Integration + ClickHouse + goAML + Webhook Retry
+
+- [x] KYC/KYB audit: confirmed onboarding → KYC → tenant flow was incomplete
+- [x] Auto-KYC record creation: onboarding.updateStatus(approved) now auto-creates kycRecords for all stakeholders + primary contact (idempotent subjectRef dedup)
+- [x] Auto-tenant provisioning: onboarding approval auto-inserts a tenants row (idempotent slug-based dedup)
+- [x] Public hostedLinks.resolve procedure: returns link metadata without auth for /verify/:token page
+- [x] Public hostedLinks.submit procedure: creates KYC record from submitted data, marks link completed
+- [x] /verify/:token React page (VerifyKYC.tsx): full self-service KYC portal with NIN/BVN/DOB/phone fields, expiry display, success/error/loading states, NDPR/GDPR consent notice
+- [x] ClickHouse warm-tier: replaced S3-JSONL stub with real @clickhouse/client INSERT (CREATE TABLE IF NOT EXISTS + INSERT JSONEachRow), S3 JSONL kept as backup/audit trail
+- [x] goAML production API: submitToNfiu() helper calls POST /api/report with Bearer token; graceful fallback to simulated ref if GOAML_API_KEY not set
+- [x] Webhook retry queue: deliverWithRetry() helper (5 attempts, exponential backoff, ±20% jitter, 4xx permanent fail) added to aml.ts and tenants.ts
+- [x] CLICKHOUSE_URL, GOAML_API_URL, GOAML_API_KEY added to ENV registry
+- [x] TypeScript: 0 errors; Tests: 489/612 pass (123 pre-existing ECONNREFUSED)

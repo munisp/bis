@@ -9,6 +9,55 @@ import { router, protectedProcedure, writeProcedure, adminProcedure } from "./_c
 import { getDb } from "./db";
 import { goamlFilings } from "../drizzle/schema";
 import { eq, desc, and, like, lt } from "drizzle-orm";
+import { ENV } from "./_core/env";
+
+/**
+ * Submit an XML filing to the NFIU goAML production API.
+ * Falls back to a simulated reference number if GOAML_API_KEY is not configured.
+ *
+ * goAML API docs: https://goaml.nfiu.gov.ng/api/docs
+ * Endpoint: POST /api/report
+ * Auth: Bearer token (GOAML_API_KEY)
+ * Content-Type: application/xml
+ * Response: { referenceNumber: string, status: "accepted" | "rejected", errors?: string[] }
+ */
+async function submitToNfiu(xmlPayload: string): Promise<{ referenceNumber: string; accepted: boolean; errors: string[] }> {
+  // If API key not configured, use simulated reference (dev/staging mode)
+  if (!ENV.goamlApiKey || !ENV.goamlInstitutionCode) {
+    const simulatedRef = `NFIU-${Date.now().toString(36).toUpperCase()}`;
+    console.warn(`[goAML] GOAML_API_KEY not set — using simulated reference: ${simulatedRef}`);
+    return { referenceNumber: simulatedRef, accepted: true, errors: [] };
+  }
+
+  const url = `${ENV.goamlApiUrl}/report`;
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/xml",
+        "Authorization": `Bearer ${ENV.goamlApiKey}`,
+        "X-Institution-Code": ENV.goamlInstitutionCode,
+        "X-BIS-Client": "bis-platform/1.0",
+      },
+      body: xmlPayload,
+      signal: AbortSignal.timeout(30_000),
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      return { referenceNumber: "", accepted: false, errors: [`NFIU API ${res.status}: ${text.slice(0, 200)}`] };
+    }
+
+    const json = await res.json() as { referenceNumber?: string; status?: string; errors?: string[] };
+    return {
+      referenceNumber: json.referenceNumber ?? `NFIU-${Date.now().toString(36).toUpperCase()}`,
+      accepted: json.status === "accepted",
+      errors: json.errors ?? [],
+    };
+  } catch (err: any) {
+    return { referenceNumber: "", accepted: false, errors: [`Network error: ${err.message}`] };
+  }
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -268,22 +317,24 @@ export const goamlRouter = router({
       if (!filing) throw new Error("Filing not found");
       if (filing.status !== "draft") throw new Error("Only draft filings can be submitted");
 
-      // In production: POST filing.goamlXml to https://goaml.nfiu.gov.ng/api/report
-      // and parse the returned reference number.
-      // For now we simulate a successful submission.
-      const simulatedRef = `NFIU-${Date.now().toString(36).toUpperCase()}`;
+      // Submit to NFIU goAML production API (falls back to simulated ref if GOAML_API_KEY not set)
+      const nfiuResult = await submitToNfiu(filing.goamlXml ?? "");
+
+      if (!nfiuResult.accepted && nfiuResult.errors.length > 0) {
+        throw new Error(`NFIU rejected filing: ${nfiuResult.errors.join("; ")}`);
+      }
 
       await db
         .update(goamlFilings)
         .set({
           status: "submitted",
-          goamlReferenceNumber: simulatedRef,
+          goamlReferenceNumber: nfiuResult.referenceNumber,
           submittedAt: new Date(),
           updatedAt: new Date(),
         })
         .where(eq(goamlFilings.id, input.id));
 
-      return { success: true, goamlReferenceNumber: simulatedRef };
+      return { success: true, goamlReferenceNumber: nfiuResult.referenceNumber };
     }),
 
   /** Delete a draft filing */
@@ -387,20 +438,25 @@ export const goamlRouter = router({
             continue;
           }
 
-          // Simulate NFIU submission (production: POST filing.goamlXml to goAML API)
-          const simulatedRef = `NFIU-BULK-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 5).toUpperCase()}`;
+          // Submit to NFIU goAML production API
+          const nfiuResult = await submitToNfiu(filing.goamlXml ?? "");
+
+          if (!nfiuResult.accepted && nfiuResult.errors.length > 0) {
+            results.push({ id, filingRef: filing.filingRef, status: "error", reason: nfiuResult.errors.join("; ") });
+            continue;
+          }
 
           await db
             .update(goamlFilings)
             .set({
               status: "submitted",
-              goamlReferenceNumber: simulatedRef,
+              goamlReferenceNumber: nfiuResult.referenceNumber,
               submittedAt: new Date(),
               updatedAt: new Date(),
             })
             .where(eq(goamlFilings.id, id));
 
-          results.push({ id, filingRef: filing.filingRef, status: "submitted", goamlReferenceNumber: simulatedRef });
+          results.push({ id, filingRef: filing.filingRef, status: "submitted", goamlReferenceNumber: nfiuResult.referenceNumber });
         } catch (err) {
           results.push({ id, filingRef: "", status: "error", reason: String(err) });
         }

@@ -118,3 +118,4 @@ services/*/target/
 services/event-emitter/target/
 services/aml-engine/target/
 services/event-processor/target/
+.project-config.json

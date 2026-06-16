@@ -35,6 +35,9 @@ importers:
       '@aws-sdk/s3-request-presigner':
         specifier: ^3.693.0
         version: 3.1015.0
+      '@clickhouse/client':
+        specifier: ^1.20.0
+        version: 1.20.0
       '@hookform/resolvers':
         specifier: ^5.2.2
         version: 5.2.2(react-hook-form@7.64.0(react@19.2.1))
@@ -1143,6 +1146,13 @@ packages:
 
   '@chevrotain/utils@11.0.3':
     resolution: {integrity: sha512-YslZMgtJUyuMbZ+aKvfF3x1f5liK4mWNxghFRv7jqRR9C3R3fAOGTTKvxXDa2Y1s9zSbcpuO0cAxDYsc9SrXoQ==}
+
+  '@clickhouse/client-common@1.20.0':
+    resolution: {integrity: sha512-s0oDSwxQyJO/Xwne6sNE7xTAlms72Hq2AHzHAB9oSOBfiaXTzQOyHQrhufJ9ldPJTwr4L47/RxG1i6I0I8Xy9A==}
+
+  '@clickhouse/client@1.20.0':
+    resolution: {integrity: sha512-LfHZ9bZZhc7KrNFVa9v73JMqwsP+m/5SgwdKMmxze4Urcw6pE0F7RNog3Lzx3GKRnJr3Hd15uDlIbqaDa9BbgA==}
+    engines: {node: '>=16'}
 
   '@date-fns/tz@1.4.1':
     resolution: {integrity: sha512-P5LUNhtbj6YfI3iJjw5EL9eUAG6OitD0W3fWQcpQjDRc/QIsL0tRNuO1PcDvPccWL1fSTXXdE1ds+l95DV/OFA==}
@@ -7092,6 +7102,12 @@ snapshots:
   '@chevrotain/types@11.0.3': {}
 
   '@chevrotain/utils@11.0.3': {}
+
+  '@clickhouse/client-common@1.20.0': {}
+
+  '@clickhouse/client@1.20.0':
+    dependencies:
+      '@clickhouse/client-common': 1.20.0
 
   '@date-fns/tz@1.4.1': {}
 

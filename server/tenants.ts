@@ -10,6 +10,38 @@ import { eq, desc, and, count } from "drizzle-orm";
 import crypto from "crypto";
 import { storagePut } from "./storage";
 
+// ─── Webhook Retry Helper ──────────────────────────────────────────────────────
+async function deliverWithRetry(
+  url: string,
+  headers: Record<string, string>,
+  body: string,
+  maxAttempts = 4,
+): Promise<{ ok: boolean; status: number; attempts: number }> {
+  let lastStatus = 0;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...headers },
+        body,
+        signal: AbortSignal.timeout(8_000),
+      });
+      if (res.ok) return { ok: true, status: res.status, attempts: attempt };
+      lastStatus = res.status;
+      if (res.status >= 400 && res.status < 500) break;
+    } catch {
+      lastStatus = 0;
+    }
+    if (attempt < maxAttempts) {
+      const baseMs = (2 ** (attempt - 1)) * 1_000;
+      const jitter = baseMs * 0.2 * (Math.random() * 2 - 1);
+      await new Promise(r => setTimeout(r, Math.max(100, baseMs + jitter)));
+    }
+  }
+  return { ok: false, status: lastStatus, attempts: maxAttempts };
+}
+
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function generateApiKey(): { raw: string; prefix: string; hash: string } {
@@ -268,26 +300,20 @@ export const tenantsRouter = router({
       if (!db) throw new Error("Database unavailable");
       const [wh] = await db.select().from(webhooks).where(eq(webhooks.id, input.id));
       if (!wh) throw new Error("Webhook not found");
-      try {
-        const res = await fetch(wh.url, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-BIS-Signature": `sha256=${crypto.createHmac("sha256", wh.secret ?? "").update(JSON.stringify({ event: "ping" })).digest("hex")}`,
-          },
-          body: JSON.stringify({ event: "ping", timestamp: new Date().toISOString() }),
-          signal: AbortSignal.timeout(5000),
-        });
-        await db.update(webhooks)
-          .set({ lastDeliveredAt: new Date(), failureCount: 0 })
-          .where(eq(webhooks.id, input.id));
-        return { success: res.ok, status: res.status };
-      } catch (err) {
-        await db.update(webhooks)
-          .set({ failureCount: (wh.failureCount ?? 0) + 1 })
-          .where(eq(webhooks.id, input.id));
-        return { success: false, status: 0 };
+      const body = JSON.stringify({ event: "ping", timestamp: new Date().toISOString() });
+      const sig = `sha256=${crypto.createHmac("sha256", wh.secret ?? "").update(body).digest("hex")}`;
+      const result = await deliverWithRetry(
+        wh.url,
+        { "X-BIS-Signature": sig, "X-BIS-Event": "ping" },
+        body,
+        3, // 3 attempts for manual test pings
+      );
+      if (result.ok) {
+        await db.update(webhooks).set({ lastDeliveredAt: new Date(), failureCount: 0 }).where(eq(webhooks.id, input.id));
+      } else {
+        await db.update(webhooks).set({ failureCount: (wh.failureCount ?? 0) + result.attempts }).where(eq(webhooks.id, input.id));
       }
+      return { success: result.ok, status: result.status, attempts: result.attempts };
     }),
 
   // ── Branding Settings ───────────────────────────────────────────────────────

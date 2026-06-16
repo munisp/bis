@@ -8,11 +8,48 @@ import {
 } from "../drizzle/schema";
 import { eq, desc, and, gte, lte, like, or, sql, count, sum } from "drizzle-orm";
 
+// ─── Webhook Retry Helper ─────────────────────────────────────────────────────
+/**
+ * Deliver a webhook payload with exponential backoff retry.
+ * Attempts: 1, 2, 4, 8, 16 seconds (5 attempts, max ~31s total).
+ * Adds ±20% jitter to each delay to prevent thundering herd.
+ */
+async function deliverWithRetry(
+  url: string,
+  headers: Record<string, string>,
+  body: string,
+  maxAttempts = 5,
+): Promise<{ ok: boolean; status: number; attempts: number }> {
+  let lastStatus = 0;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...headers },
+        body,
+        signal: AbortSignal.timeout(8_000),
+      });
+      if (res.ok) return { ok: true, status: res.status, attempts: attempt };
+      lastStatus = res.status;
+      // 4xx errors are permanent — do not retry
+      if (res.status >= 400 && res.status < 500) break;
+    } catch {
+      lastStatus = 0;
+    }
+    if (attempt < maxAttempts) {
+      const baseMs = (2 ** (attempt - 1)) * 1_000; // 1s, 2s, 4s, 8s
+      const jitter = baseMs * 0.2 * (Math.random() * 2 - 1); // ±20%
+      await new Promise(r => setTimeout(r, Math.max(100, baseMs + jitter)));
+    }
+  }
+  return { ok: false, status: lastStatus, attempts: maxAttempts };
+}
+
 // ─── AML Webhook Fan-out ──────────────────────────────────────────────────────
 /**
  * Dispatch an AML alert event to all active tenant webhooks subscribed to
  * "aml.alert" events. Non-blocking — failures are logged but do not affect
- * the main transaction flow.
+ * the main transaction flow. Uses exponential backoff retry (5 attempts).
  */
 async function dispatchAmlWebhook(payload: {
   event: string;
@@ -41,25 +78,17 @@ async function dispatchAmlWebhook(payload: {
     const body = JSON.stringify(payload);
     await Promise.allSettled(amlWebhooks.map(async (wh) => {
       const sig = `sha256=${crypto.createHmac("sha256", wh.secret ?? "").update(body).digest("hex")}`;
-      try {
-        const res = await fetch(wh.url, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-BIS-Signature": sig,
-            "X-BIS-Event": payload.event,
-          },
-          body,
-          signal: AbortSignal.timeout(8_000),
-        });
-        // Update delivery status
-        if (res.ok) {
-          await db.update(webhooks).set({ lastDeliveredAt: new Date(), failureCount: 0 }).where(eq(webhooks.id, wh.id));
-        } else {
-          await db.update(webhooks).set({ failureCount: (wh.failureCount ?? 0) + 1 }).where(eq(webhooks.id, wh.id));
-        }
-      } catch {
-        await db.update(webhooks).set({ failureCount: (wh.failureCount ?? 0) + 1 }).where(eq(webhooks.id, wh.id)).catch(() => {});
+      const result = await deliverWithRetry(
+        wh.url,
+        { "X-BIS-Signature": sig, "X-BIS-Event": payload.event },
+        body,
+      );
+      if (result.ok) {
+        await db.update(webhooks).set({ lastDeliveredAt: new Date(), failureCount: 0 }).where(eq(webhooks.id, wh.id)).catch(() => {});
+      } else {
+        const newFailCount = (wh.failureCount ?? 0) + result.attempts;
+        await db.update(webhooks).set({ failureCount: newFailCount }).where(eq(webhooks.id, wh.id)).catch(() => {});
+        console.warn(`[AML Webhook] Delivery failed after ${result.attempts} attempts for webhook ${wh.id} (${wh.url}) — status ${result.status}`);
       }
     }));
   } catch (err) {

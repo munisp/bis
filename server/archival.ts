@@ -22,6 +22,26 @@ import { transactions } from "../drizzle/schema";
 import { lt, and, isNull, eq, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { storagePut } from "./storage";
+import { createClient as createClickHouseClient } from "@clickhouse/client";
+import { ENV } from "./_core/env";
+
+/**
+ * Get a ClickHouse client configured from ENV.
+ * Returns null if CLICKHOUSE_URL is not set (dev/sandbox mode).
+ */
+function getClickHouseClient() {
+  if (!ENV.clickhouseUrl || ENV.clickhouseUrl.includes("localhost")) {
+    return null; // Not configured — fall back to S3 JSONL
+  }
+  return createClickHouseClient({
+    url: ENV.clickhouseUrl,
+    database: ENV.clickhouseDatabase,
+    username: ENV.clickhouseUser,
+    password: ENV.clickhousePassword,
+    request_timeout: 60_000,
+    compression: { request: true, response: true },
+  });
+}
 
 // ─── Tiering constants ────────────────────────────────────────────────────────
 
@@ -124,13 +144,59 @@ export async function archiveToWarm(dryRun = false): Promise<ArchivalResult> {
     return { tier: "warm", rowsArchived: 0, bytesWritten: 0, durationMs: Date.now() - start, errors };
   }
 
-  // Stub: In production, INSERT INTO clickhouse.transactions SELECT * FROM mysql.transactions WHERE ...
-  // For now, we write a JSONL file to S3 as the warm archive
   const jsonl = rows.map(r => JSON.stringify(r)).join("\n");
   const bytes = Buffer.byteLength(jsonl, "utf8");
-
   let s3Key: string | undefined;
+
   if (!dryRun) {
+    const ch = getClickHouseClient();
+    if (ch) {
+      // ── ClickHouse warm-tier INSERT ────────────────────────────────────────
+      // Ensure the target table exists (idempotent CREATE TABLE IF NOT EXISTS)
+      try {
+        await ch.command({
+          query: `
+            CREATE TABLE IF NOT EXISTS bis_transactions_warm (
+              id          UInt64,
+              txRef       String,
+              type        String,
+              status      String,
+              amount      Float64,
+              currency    String,
+              originatorName String,
+              beneficiaryName String,
+              createdAt   DateTime64(3, 'UTC'),
+              archivedAt  DateTime64(3, 'UTC') DEFAULT now()
+            ) ENGINE = MergeTree()
+            ORDER BY (createdAt, id)
+            PARTITION BY toYYYYMM(createdAt)
+            TTL createdAt + INTERVAL 1 YEAR DELETE
+          `,
+        });
+        await ch.insert({
+          table: "bis_transactions_warm",
+          values: rows.map(r => ({
+            id: r.id,
+            txRef: r.txRef ?? "",
+            type: r.type ?? "",
+            status: r.status ?? "",
+            amount: Number(r.amount ?? 0),
+            currency: r.currency ?? "NGN",
+            originatorName: r.originatorName ?? "",
+            beneficiaryName: r.beneficiaryName ?? "",
+            createdAt: r.createdAt ? r.createdAt.toISOString().replace("T", " ").replace("Z", "") : null,
+          })),
+          format: "JSONEachRow",
+        });
+        await ch.close();
+      } catch (err: any) {
+        errors.push(`ClickHouse INSERT failed: ${err.message}`);
+        await ch.close().catch(() => {});
+        // Fall through to S3 JSONL backup
+      }
+    }
+
+    // Always write S3 JSONL as backup / audit trail
     try {
       const date = new Date().toISOString().slice(0, 10);
       s3Key = `archival/warm/${date}/transactions-${Date.now()}.jsonl`;

@@ -109,6 +109,15 @@ export const ENV = {
   redisSentinels: process.env.REDIS_SENTINELS ?? "",
   redisSentinelName: process.env.REDIS_SENTINEL_NAME ?? "mymaster",
 
+  // ClickHouse OLAP warm-tier
+  clickhouseUrl: process.env.CLICKHOUSE_URL ?? "http://localhost:8123",
+  clickhouseDatabase: process.env.CLICKHOUSE_DATABASE ?? "bis_warehouse",
+  clickhouseUser: process.env.CLICKHOUSE_USER ?? "default",
+  clickhousePassword: process.env.CLICKHOUSE_PASSWORD ?? "",
+  // goAML / NFIU production API
+  goamlApiUrl: process.env.GOAML_API_URL ?? "https://goaml.nfiu.gov.ng/api",
+  goamlApiKey: process.env.GOAML_API_KEY ?? "",
+  goamlInstitutionCode: process.env.GOAML_INSTITUTION_CODE ?? "",
   // Notifications
   slackWebhookUrl: process.env.SLACK_WEBHOOK_URL ?? "",
   smtpHost: process.env.SMTP_HOST ?? "smtp.sendgrid.net",
@@ -139,6 +148,9 @@ export function validateEnv(): void {
     ["RISK_ENGINE_URL", ENV.riskEngineUrl, "Risk engine defaults to localhost:8082"],
     ["LAKEHOUSE_URL", ENV.lakehouseUrl, "Lakehouse writer defaults to localhost:8085"],
     ["OLLAMA_URL", ENV.ollamaUrl, "Ollama LLM defaults to localhost:11434"],
+    ["CLICKHOUSE_URL", ENV.clickhouseUrl, "ClickHouse warm-tier archival defaults to localhost:8123"],
+    ["GOAML_API_KEY", ENV.goamlApiKey, "goAML NFIU submissions will use simulated reference numbers"],
+    ["GOAML_INSTITUTION_CODE", ENV.goamlInstitutionCode, "goAML institution code not set — NFIU submissions will fail"],
     ["SLACK_WEBHOOK_URL", ENV.slackWebhookUrl, "Slack deploy/alert notifications disabled"],
     ["SMTP_USER", ENV.smtpUser, "Email notifications disabled"],
     ["SMTP_PASS", ENV.smtpPass, "Email notifications disabled"],

@@ -18,6 +18,7 @@ const Alerts                 = lazy(() => import("@/pages/Alerts"));
 const Tenants                = lazy(() => import("@/pages/Tenants"));
 const Settings               = lazy(() => import("@/pages/Settings"));
 const NotFound               = lazy(() => import("@/pages/NotFound"));
+const VerifyKYC              = lazy(() => import("@/pages/VerifyKYC"));
 
 const BiometricEnrollmentPage   = lazy(() => import("@/pages/bis/BiometricEnrollmentPage"));
 const BiometricSessionLogPage   = lazy(() => import("@/pages/bis/BiometricSessionLogPage"));
@@ -193,6 +194,7 @@ function Router() {
         <Route path="/infra/gateway" component={GatewayHealthPage} />
         <Route path="/infra/health" component={SystemHealthDashboard} />
         {/* Fallback */}
+        <Route path="/verify/:token" component={VerifyKYC} />
         <Route path="/404" component={NotFound} />
         <Route component={NotFound} />
       </Switch>
