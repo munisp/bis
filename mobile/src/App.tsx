@@ -10,7 +10,7 @@
  */
 
 import React from 'react';
-import { StatusBar, useColorScheme } from 'react-native';
+import { StatusBar, View, useColorScheme } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -19,6 +19,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 import { store } from './store';
 import { RootNavigator } from './navigation/RootNavigator';
+import { OfflineBanner } from './components/OfflineBanner';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -37,13 +38,17 @@ export default function App() {
       <SafeAreaProvider>
         <ReduxProvider store={store}>
           <QueryClientProvider client={queryClient}>
-            <NavigationContainer>
-              <StatusBar
-                barStyle={isDarkMode ? 'light-content' : 'dark-content'}
-                backgroundColor={isDarkMode ? '#0f172a' : '#ffffff'}
-              />
-              <RootNavigator />
-            </NavigationContainer>
+            <View style={{ flex: 1 }}>
+              {/* OfflineBanner sits above the navigator so it is visible on all screens */}
+              <OfflineBanner />
+              <NavigationContainer style={{ flex: 1 }}>
+                <StatusBar
+                  barStyle={isDarkMode ? 'light-content' : 'dark-content'}
+                  backgroundColor={isDarkMode ? '#0f172a' : '#ffffff'}
+                />
+                <RootNavigator />
+              </NavigationContainer>
+            </View>
           </QueryClientProvider>
         </ReduxProvider>
       </SafeAreaProvider>

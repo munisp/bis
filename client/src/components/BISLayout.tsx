@@ -20,6 +20,7 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { trpc } from '@/lib/trpc';
 import { useAuth } from '@/_core/hooks/useAuth';
 import { useEventStream } from '@/hooks/useEventStream';
+import { GlobalSearchBar } from '@/components/GlobalSearchBar';
 
 // ─── Nav config ───────────────────────────────────────────────────────────────
 
@@ -549,13 +550,16 @@ export default function BISLayout({ children, title, subtitle, actions }: BISLay
             {sidebarOpen ? <X size={14} /> : <Menu size={14} />}
           </Button>
 
-          <div className="flex-1 flex items-center gap-2">
+          <div className="flex-1 flex items-center gap-3 min-w-0">
             {title && (
-              <>
+              <div className="flex items-center gap-2 shrink-0">
                 <span className="text-sm font-semibold text-foreground">{title}</span>
-                {subtitle && <span className="text-xs text-muted-foreground">{subtitle}</span>}
-              </>
+                {subtitle && <span className="text-xs text-muted-foreground hidden sm:inline">{subtitle}</span>}
+              </div>
             )}
+            <div className="flex-1 max-w-xs hidden md:block">
+              <GlobalSearchBar />
+            </div>
           </div>
 
           <div className="flex items-center gap-2">

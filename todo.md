@@ -2469,3 +2469,14 @@
 - [x] TypeScript: bis-mobile offline queue — IndexedDB pending mutations with sync-on-reconnect
 - [x] TypeScript: bis-mobile useOfflineQueue hook
 - [x] TypeScript: bis-mobile OfflineBanner component
+
+## Phase v33 — Next Steps (Round 11)
+
+- [ ] Global search bar in DashboardLayout.tsx wired to trpc.search.crossEntitySearch
+- [ ] GlobalSearchBar component with debounced input, result grouping (investigations/alerts/KYC), keyboard navigation
+- [ ] Search results panel with click-through navigation to entity detail pages
+- [ ] Mobile: useOfflineQueue hook (enqueue, drain, size, pending, remove)
+- [ ] Mobile: OfflineBanner component (shows when offline, displays pending count, retry button)
+- [ ] Mobile: wire OfflineBanner into App.tsx navigation shell
+- [ ] Admin role promotion SQL + webdev_execute_sql verification
+- [ ] Verify admin panel routes are gated by role === 'admin' in frontend

@@ -5,25 +5,25 @@ Real-time payment velocity checks using a sliding-window algorithm.
 
 ## Architecture
 
-```
+```text
 Fluvio topic: bis.payment.events
-        │
-        ▼
-┌─────────────────────────────┐
-│  VelocityEngine             │
-│  ┌──────────────────────┐   │
-│  │  SlidingWindow       │   │  per (accountId, windowSecs)
-│  │  VecDeque<Timestamp> │   │
-│  └──────────────────────┘   │
-│  ┌──────────────────────┐   │
-│  │  RuleSet             │   │
-│  │  - count_limit       │   │
-│  │  - amount_limit_kobo │   │
-│  │  - window_secs       │   │
-│  └──────────────────────┘   │
-└─────────────────────────────┘
-        │ breach
-        ▼
+        |
+        v
++-----------------------------+
+|  VelocityEngine             |
+|  +----------------------+   |
+|  |  SlidingWindow       |   |  per (accountId, windowSecs)
+|  |  VecDeque<Timestamp> |   |
+|  +----------------------+   |
+|  +----------------------+   |
+|  |  RuleSet             |   |
+|  |  - count_limit       |   |
+|  |  - amount_limit_kobo |   |
+|  |  - window_secs       |   |
+|  +----------------------+   |
++-----------------------------+
+        | breach
+        v
   POST /v1/velocity/alert  (BIS Gateway)
 ```
 

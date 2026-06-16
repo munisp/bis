@@ -4,6 +4,7 @@ import { lazy, Suspense } from "react";
 import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
+import { AdminRoute } from "@/components/AdminRoute";
 
 // ─── Lazy-loaded pages ────────────────────────────────────────────────────────
 // Each route chunk is loaded on demand, cutting initial bundle by ~60%.
@@ -145,8 +146,8 @@ function Router() {
         <Route path="/messaging-channels" component={MessagingChannelsPage} />
         <Route path="/social-monitoring" component={SocialMonitoringDashboard} />
         <Route path="/onboarding" component={StakeholderOnboardingWizard} />
-        <Route path="/admin/onboarding" component={OnboardingAdminPage} />
-        <Route path="/admin/users" component={UsersAdminPage} />
+        <Route path="/admin/onboarding" component={() => <AdminRoute><OnboardingAdminPage /></AdminRoute>} />
+        <Route path="/admin/users" component={() => <AdminRoute><UsersAdminPage /></AdminRoute>} />
         <Route path="/screening-records" component={ScreeningRecordsPage} />
         <Route path="/alert-rules" component={AlertRulesPage} />
         <Route path="/developer" component={DeveloperPortal} />
@@ -164,7 +165,7 @@ function Router() {
         <Route path="/ollama" component={OllamaManagementPage} />
         {/* LEX — Law Enforcement Extension */}
         <Route path="/lex/submit" component={LexSubmitPage} />
-        <Route path="/lex/admin" component={LexAdminPage} />
+        <Route path="/lex/admin" component={() => <AdminRoute><LexAdminPage /></AdminRoute>} />
         <Route path="/lex/review" component={LexReviewPage} />
         <Route path="/lex/analytics" component={LexAnalyticsPage} />
         <Route path="/lex/supervisor" component={LexSupervisorPage} />
