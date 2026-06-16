@@ -2513,3 +2513,22 @@
 - [x] push.deregisterToken tRPC mutation (deactivate on logout)
 - [x] push.listMyTokens tRPC query (list active subscriptions)
 - [x] Push Sprint v36 to GitHub
+
+## Sprint v37
+
+- [x] push.sendToUser tRPC mutation (FCM HTTP v1 + Web Push delivery to all active tokens for a user)
+- [x] push.broadcastToAll tRPC mutation (admin-only broadcast to all active subscriptions)
+- [x] server/pushNotify.ts helper (sendPushToUser, broadcastPush with FCM + WebPush transport)
+- [x] Wire push dispatch into alert creation (critical/high risk scores trigger push to investigation creator)
+- [x] Wire push dispatch into KYC status changes (failed/review triggers push to record creator)
+- [x] kyc.uploadDocument — call invokeLLM on uploaded image to extract document fields (name, DOB, ID number)
+- [x] Persist extracted OCR fields to kycRecords.documentOcrData (fire-and-forget async)
+- [x] Surface OCR data in DocumentReviewQueue drawer (OcrDataPanel read-only field preview)
+- [x] POST /api/webhooks/sanctions-refresh Express route (signed payload from gateway)
+- [x] Verify HMAC-SHA256 signature on sanctions-refresh webhook (timing-safe comparison)
+- [x] Call notifyOwner on sanctions list update
+- [x] Broadcast push to all admin users on sanctions list update
+- [x] Write audit log entry on sanctions list update (category=system)
+- [x] server/pushNotify.test.ts (12 tests)
+- [x] server/sanctionsWebhook.test.ts (10 tests)
+- [x] Push Sprint v37 to GitHub

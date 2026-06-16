@@ -62,6 +62,7 @@ interface DocRow {
   doc: KycDoc;
   subjectName: string | null;
   kycStatus: string | null;
+  documentOcrData: Record<string, string | null> | null;
 }
 
 // ─── Status config ────────────────────────────────────────────────────────────
@@ -105,9 +106,9 @@ function DocumentCard({
   onReview,
 }: {
   row: DocRow;
-  onReview: (doc: KycDoc, decision: Decision) => void;
+  onReview: (doc: KycDoc, decision: Decision, ocrData?: Record<string, string | null> | null) => void;
 }) {
-  const { doc, subjectName, kycStatus } = row;
+  const { doc, subjectName, kycStatus, documentOcrData } = row;
   const statusCfg = STATUS_CONFIG[doc.reviewStatus];
   const docLabel = DOCUMENT_TYPE_LABELS[doc.documentType] ?? doc.documentType;
   const isImage = doc.mimeType?.startsWith("image/") ?? false;
@@ -183,7 +184,7 @@ function DocumentCard({
               size="sm"
               variant="outline"
               className="flex-1 text-[10px] h-7 border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10"
-              onClick={() => onReview(doc, "approved")}
+              onClick={() => onReview(doc, "approved", documentOcrData)}
             >
               <CheckCircle2 size={11} className="mr-1" /> Approve
             </Button>
@@ -191,7 +192,7 @@ function DocumentCard({
               size="sm"
               variant="outline"
               className="flex-1 text-[10px] h-7 border-red-500/40 text-red-400 hover:bg-red-500/10"
-              onClick={() => onReview(doc, "rejected")}
+              onClick={() => onReview(doc, "rejected", documentOcrData)}
             >
               <XCircle size={11} className="mr-1" /> Reject
             </Button>
@@ -199,7 +200,7 @@ function DocumentCard({
               size="sm"
               variant="outline"
               className="text-[10px] h-7 px-2 border-blue-500/40 text-blue-400 hover:bg-blue-500/10"
-              onClick={() => onReview(doc, "reupload_requested")}
+              onClick={() => onReview(doc, "reupload_requested", documentOcrData)}
               title="Request re-upload"
             >
               <RotateCcw size={11} />
@@ -223,15 +224,49 @@ function DocumentCard({
 
 // ─── Review Dialog ────────────────────────────────────────────────────────────
 
+function OcrDataPanel({ ocrData }: { ocrData: Record<string, string | null> | null | undefined }) {
+  if (!ocrData) return null;
+  const entries = Object.entries(ocrData).filter(([, v]) => v !== null && v !== undefined && v !== "");
+  if (entries.length === 0) return null;
+  const LABELS: Record<string, string> = {
+    fullName: "Full Name", surname: "Surname", firstName: "First Name",
+    middleName: "Middle Name", dateOfBirth: "Date of Birth", gender: "Gender",
+    idNumber: "ID Number", documentNumber: "Document No.", nationality: "Nationality",
+    expiryDate: "Expiry Date", issueDate: "Issue Date", address: "Address",
+    placeOfBirth: "Place of Birth", mrz: "MRZ",
+  };
+  return (
+    <div className="mt-3 rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-3">
+      <p className="text-[10px] font-mono font-semibold text-emerald-400 mb-2 flex items-center gap-1">
+        <span>🔍</span> OCR Extracted Fields
+      </p>
+      <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+        {entries.map(([k, v]) => (
+          <div key={k} className="flex flex-col">
+            <span className="text-[9px] font-mono text-muted-foreground uppercase tracking-wide">
+              {LABELS[k] ?? k}
+            </span>
+            <span className="text-[11px] font-mono text-foreground truncate" title={v ?? ""}>
+              {v}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function ReviewDialog({
   doc,
   decision,
+  ocrData,
   onConfirm,
   onCancel,
   isPending,
 }: {
   doc: KycDoc | null;
   decision: Decision | null;
+  ocrData?: Record<string, string | null> | null;
   onConfirm: (note: string) => void;
   onCancel: () => void;
   isPending: boolean;
@@ -257,6 +292,9 @@ function ReviewDialog({
         </DialogHeader>
 
         <div className="space-y-3 py-2">
+          {/* OCR extracted fields — read-only preview */}
+          <OcrDataPanel ocrData={ocrData} />
+
           {requireNote && (
             <div className="space-y-1.5">
               <label className="text-xs font-mono text-muted-foreground">
@@ -313,7 +351,7 @@ export default function DocumentReviewQueue() {
   const [statusFilter, setStatusFilter] = useState<ReviewStatus>("pending");
   const [cursor, setCursor] = useState<number | undefined>(undefined);
   const [cursorStack, setCursorStack] = useState<number[]>([]);
-  const [reviewTarget, setReviewTarget] = useState<{ doc: KycDoc; decision: Decision } | null>(null);
+  const [reviewTarget, setReviewTarget] = useState<{ doc: KycDoc; decision: Decision; ocrData?: Record<string, string | null> | null } | null>(null);
 
   const utils = trpc.useUtils();
 
@@ -334,8 +372,8 @@ export default function DocumentReviewQueue() {
     },
   });
 
-  function handleReview(doc: KycDoc, decision: Decision) {
-    setReviewTarget({ doc, decision });
+  function handleReview(doc: KycDoc, decision: Decision, ocrData?: Record<string, string | null> | null) {
+    setReviewTarget({ doc, decision, ocrData });
   }
 
   function handleConfirm(note: string) {
@@ -473,6 +511,7 @@ export default function DocumentReviewQueue() {
       <ReviewDialog
         doc={reviewTarget?.doc ?? null}
         decision={reviewTarget?.decision ?? null}
+        ocrData={reviewTarget?.ocrData}
         onConfirm={handleConfirm}
         onCancel={() => setReviewTarget(null)}
         isPending={reviewMutation.isPending}
