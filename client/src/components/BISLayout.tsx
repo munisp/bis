@@ -64,6 +64,7 @@ const BASE_NAV_GROUPS: NavGroup[] = [
       { label: 'Biometric Session Logs', href: '/biometric-sessions', icon: <ShieldCheck size={15} /> },
       { label: 'Onboarding', href: '/onboarding', icon: <UserCheck size={15} /> },
       { label: 'Onboarding Admin', href: '/admin/onboarding', icon: <ClipboardList size={15} /> },
+      { label: 'Document Review Queue', href: '/admin/documents', icon: <ClipboardCheck size={15} />, adminOnly: true },
     ],
   },
   {
@@ -464,6 +465,7 @@ export default function BISLayout({ children, title, subtitle, actions }: BISLay
   const ADMIN_ONLY_HREFS = new Set([
     "/admin/onboarding",
     "/admin/users",
+    "/admin/documents",
     ...BASE_NAV_GROUPS.flatMap(g => g.items.filter(i => i.adminOnly).map(i => i.href)),
   ]);
 

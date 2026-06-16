@@ -75,6 +75,8 @@ import {
   nigerianDataBundleRuns,
   dataSourceHealthLogs,
   kycScheduledReruns,
+  kycDocuments,
+  pushSubscriptions,
 } from "../drizzle/schema";
 import {
   getDashboardStats,
@@ -869,10 +871,55 @@ const lookupRouter = router({
         db.select().from(nigerianDataBundleRuns).where(where).orderBy(desc(nigerianDataBundleRuns.createdAt)).limit(input.limit).offset(input.offset),
         db.select({ count: sql<number>`count(*)` }).from(nigerianDataBundleRuns).where(where),
       ]);
-      return { items, total: Number(countResult[0]?.count ?? 0) };
+            return { items, total: Number(countResult[0]?.count ?? 0) };
     }),
-});
 
+  // ── AML Sanctions Status ─────────────────────────────────────────────────
+  // Returns a summary of sanctions list freshness and hit counts from the gateway
+  sanctionsStatus: protectedProcedure.query(async () => {
+    try {
+      const res = await fetch(`${GATEWAY_URL}/v1/sanctions/status`, {
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!res.ok) return { status: 'degraded', listName: 'UN/OFAC/EU', lastUpdated: null, hitCount: 0, totalEntries: 0 };
+      const data = await res.json();
+      return {
+        status: data.status ?? 'ok',
+        listName: data.listName ?? 'UN/OFAC/EU',
+        lastUpdated: data.lastUpdated ?? null,
+        hitCount: data.hitCount ?? 0,
+        totalEntries: data.totalEntries ?? 0,
+      };
+    } catch {
+      // Gateway unreachable — return a degraded status so the UI can show a warning
+      return { status: 'unreachable', listName: 'UN/OFAC/EU', lastUpdated: null, hitCount: 0, totalEntries: 0 };
+    }
+  }),
+
+  // ── Refresh Sanctions List ────────────────────────────────────────────────
+  // Triggers a manual refresh of the sanctions list on the gateway
+  refreshSanctions: protectedProcedure.mutation(async ({ ctx }) => {
+    const db = await getDb();
+    try {
+      const res = await fetch(`${GATEWAY_URL}/v1/sanctions/refresh`, {
+        method: 'POST',
+        signal: AbortSignal.timeout(10000),
+      });
+      const ok = res.ok;
+      if (db) {
+        await writeAuditLog(db, {
+          userId: ctx.user!.id,
+          category: 'system',
+          action: ok ? 'Sanctions list refresh triggered' : 'Sanctions list refresh failed',
+          targetRef: 'sanctions-list',
+        });
+      }
+      return { success: ok, message: ok ? 'Refresh triggered successfully' : 'Gateway returned an error' };
+    } catch {
+      return { success: false, message: 'Gateway unreachable' };
+    }
+  }),
+});
 // ─── Alerts Router ────────────────────────────────────────────────────────────
 
 const alertsRouter = router({
@@ -1382,6 +1429,123 @@ const kycRouter = router({
         .where(where)
         .orderBy(desc(kycScheduledReruns.scheduledAt))
         .limit(input?.limit ?? 50);
+    }),
+
+  /**
+   * uploadDocument: called by the mobile KYCDocumentCaptureScreen after S3 upload.
+   * Stores document metadata (URL, key, type) linked to a KYC record.
+   */
+  uploadDocument: writeProcedure
+    .input(z.object({
+      kycRecordId: z.number().int().positive(),
+      documentType: z.string().min(1).max(64),
+      fileName: z.string().min(1).max(255),
+      fileKey: z.string().min(1).max(512),
+      fileUrl: z.string().url(),
+      fileSizeBytes: z.number().int().optional(),
+      mimeType: z.string().max(64).optional(),
+      capturedAt: z.date().optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Database unavailable' });
+      // Verify the KYC record belongs to the caller's tenant
+      const conditions = [eq(kycRecords.id, input.kycRecordId)];
+      if (ctx.tenantId !== null) conditions.push(eq(kycRecords.tenantId, ctx.tenantId));
+      const [record] = await db.select({ id: kycRecords.id, tenantId: kycRecords.tenantId })
+        .from(kycRecords).where(and(...conditions)).limit(1);
+      if (!record) throw new TRPCError({ code: 'NOT_FOUND', message: 'KYC record not found' });
+      const [doc] = await db.insert(kycDocuments).values({
+        kycRecordId: input.kycRecordId,
+        tenantId: record.tenantId,
+        documentType: input.documentType,
+        fileName: input.fileName,
+        fileKey: input.fileKey,
+        fileUrl: input.fileUrl,
+        fileSizeBytes: input.fileSizeBytes,
+        mimeType: input.mimeType,
+        reviewStatus: 'pending',
+        uploadedBy: ctx.user!.id,
+        capturedAt: input.capturedAt,
+      }).returning();
+      await writeAuditLog(db, {
+        userId: ctx.user!.id,
+        category: 'kyc',
+        action: `Document uploaded: ${input.documentType}`,
+        targetRef: `kyc-${input.kycRecordId}`,
+        detail: { documentId: doc.id, fileName: input.fileName },
+      });
+      return { id: doc.id, reviewStatus: doc.reviewStatus };
+    }),
+
+  /**
+   * listPendingDocuments: admin-only paginated list of documents awaiting review.
+   */
+  listPendingDocuments: adminProcedure
+    .input(z.object({
+      status: z.enum(['pending', 'approved', 'rejected', 'reupload_requested']).optional().default('pending'),
+      limit: z.number().min(1).max(100).default(50),
+      cursor: z.number().optional(),
+    }))
+    .query(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) return { items: [], nextCursor: null };
+      const conditions: any[] = [eq(kycDocuments.reviewStatus, input.status as any)];
+      if (ctx.tenantId !== null) conditions.push(eq(kycDocuments.tenantId, ctx.tenantId));
+      if (input.cursor) conditions.push(sql`${kycDocuments.id} < ${input.cursor}`);
+      const items = await db
+        .select({
+          doc: kycDocuments,
+          subjectName: kycRecords.subjectName,
+          kycStatus: kycRecords.status,
+        })
+        .from(kycDocuments)
+        .leftJoin(kycRecords, eq(kycDocuments.kycRecordId, kycRecords.id))
+        .where(and(...conditions))
+        .orderBy(desc(kycDocuments.id))
+        .limit(input.limit + 1);
+      const hasMore = items.length > input.limit;
+      const page = hasMore ? items.slice(0, input.limit) : items;
+      return {
+        items: page,
+        nextCursor: hasMore ? page[page.length - 1]?.doc.id ?? null : null,
+      };
+    }),
+
+  /**
+   * reviewDocument: admin-only — approve, reject, or request re-upload of a document.
+   */
+  reviewDocument: adminProcedure
+    .input(z.object({
+      documentId: z.number().int().positive(),
+      decision: z.enum(['approved', 'rejected', 'reupload_requested']),
+      reviewNote: z.string().max(1000).optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Database unavailable' });
+      const conditions: any[] = [eq(kycDocuments.id, input.documentId)];
+      if (ctx.tenantId !== null) conditions.push(eq(kycDocuments.tenantId, ctx.tenantId));
+      const [existing] = await db.select().from(kycDocuments).where(and(...conditions)).limit(1);
+      if (!existing) throw new TRPCError({ code: 'NOT_FOUND', message: 'Document not found' });
+      const [updated] = await db.update(kycDocuments)
+        .set({
+          reviewStatus: input.decision as any,
+          reviewedBy: ctx.user!.id,
+          reviewNote: input.reviewNote,
+          reviewedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(kycDocuments.id, input.documentId))
+        .returning();
+      await writeAuditLog(db, {
+        userId: ctx.user!.id,
+        category: 'kyc',
+        action: `Document ${input.decision}: ${existing.documentType}`,
+        targetRef: `kyc-${existing.kycRecordId}`,
+        detail: { documentId: input.documentId, decision: input.decision, note: input.reviewNote },
+      });
+      return { id: updated.id, reviewStatus: updated.reviewStatus };
     }),
 });
 // ─── Audit Log Routerr ─────────────────────────────────────────────────────────
@@ -4392,6 +4556,75 @@ const ollamaRouter = router({
     }),
 });
 
+// ─── Push Notification Router ────────────────────────────────────────────────
+// Manages FCM / Web Push token registration for mobile and browser clients.
+
+const pushRouter = router({
+  // Register or refresh a push token for the current user
+  registerToken: protectedProcedure
+    .input(z.object({
+      token: z.string().min(10),
+      platform: z.enum(['fcm', 'webpush']).default('fcm'),
+      deviceLabel: z.string().max(128).optional(),
+      // Web Push specific keys
+      p256dh: z.string().optional(),
+      auth: z.string().optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
+      // Upsert: if the same token already exists for this user, just update the label
+      const existing = await db.select({ id: pushSubscriptions.id })
+        .from(pushSubscriptions)
+        .where(and(eq(pushSubscriptions.userId, ctx.user!.id), eq(pushSubscriptions.token, input.token)))
+        .limit(1);
+      if (existing.length > 0) {
+        await db.update(pushSubscriptions)
+          .set({ active: true, deviceLabel: input.deviceLabel ?? null, updatedAt: new Date() })
+          .where(eq(pushSubscriptions.id, existing[0].id));
+        return { registered: true, updated: true };
+      }
+      await db.insert(pushSubscriptions).values({
+        userId: ctx.user!.id,
+        token: input.token,
+        platform: input.platform,
+        deviceLabel: input.deviceLabel ?? null,
+        p256dh: input.p256dh ?? null,
+        auth: input.auth ?? null,
+        active: true,
+      });
+      return { registered: true, updated: false };
+    }),
+
+  // Deactivate a push token (e.g., on logout or permission revocation)
+  deregisterToken: protectedProcedure
+    .input(z.object({ token: z.string() }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) return { success: false };
+      await db.update(pushSubscriptions)
+        .set({ active: false, updatedAt: new Date() })
+        .where(and(eq(pushSubscriptions.userId, ctx.user!.id), eq(pushSubscriptions.token, input.token)));
+      return { success: true };
+    }),
+
+  // List all active push subscriptions for the current user
+  listMyTokens: protectedProcedure.query(async ({ ctx }) => {
+    const db = await getDb();
+    if (!db) return [];
+    return db.select({
+      id: pushSubscriptions.id,
+      platform: pushSubscriptions.platform,
+      deviceLabel: pushSubscriptions.deviceLabel,
+      active: pushSubscriptions.active,
+      createdAt: pushSubscriptions.createdAt,
+    })
+      .from(pushSubscriptions)
+      .where(and(eq(pushSubscriptions.userId, ctx.user!.id), eq(pushSubscriptions.active, true)))
+      .orderBy(desc(pushSubscriptions.createdAt));
+  }),
+});
+
 export const appRouter = router({
   system: systemRouter,
   auth: router({
@@ -4453,5 +4686,7 @@ export const appRouter = router({
   documentVault: documentVaultRouter,
   riskDashboard: riskDashboardRouter,
   search: searchRouter,
+  push: pushRouter,
 });
 export type AppRouter = typeof appRouter;
+

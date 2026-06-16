@@ -46,6 +46,7 @@ const SocialMonitoringDashboard = lazy(() => import("@/pages/monitoring/SocialMo
 const StakeholderOnboardingWizard = lazy(() => import("@/pages/onboarding/StakeholderOnboardingWizard"));
 const OnboardingAdminPage         = lazy(() => import("@/pages/admin/OnboardingAdminPage"));
 const UsersAdminPage              = lazy(() => import("@/pages/admin/UsersAdminPage"));
+const DocumentReviewQueue         = lazy(() => import("@/pages/admin/DocumentReviewQueue"));
 const ScreeningRecordsPage        = lazy(() => import("@/pages/screening/ScreeningRecordsPage"));
 const AlertRulesPage               = lazy(() => import("@/pages/AlertRulesPage"));
 const DeveloperPortal = lazy(() => import("./pages/DeveloperPortal"));
@@ -150,6 +151,7 @@ function Router() {
         <Route path="/onboarding" component={StakeholderOnboardingWizard} />
         <Route path="/admin/onboarding" component={() => <AdminRoute><OnboardingAdminPage /></AdminRoute>} />
         <Route path="/admin/users" component={() => <AdminRoute><UsersAdminPage /></AdminRoute>} />
+        <Route path="/admin/documents" component={() => <AdminRoute><DocumentReviewQueue /></AdminRoute>} />
         <Route path="/screening-records" component={ScreeningRecordsPage} />
         <Route path="/alert-rules" component={AlertRulesPage} />
         <Route path="/developer" component={DeveloperPortal} />

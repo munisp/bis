@@ -1,0 +1,176 @@
+name: CI — Go Services
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'services/gateway/**'
+      - 'services/case-manager/**'
+      - 'services/lex-intake/**'
+      - 'services/ollama-adapter/**'
+      - 'services/payment-rails/**'
+      - '.github/workflows/ci-go.yml'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'services/gateway/**'
+      - 'services/case-manager/**'
+      - 'services/lex-intake/**'
+      - 'services/ollama-adapter/**'
+      - 'services/payment-rails/**'
+      - '.github/workflows/ci-go.yml'
+
+env:
+  GO_VERSION: '1.22'
+
+jobs:
+  # ─── Gateway (bis/gateway) ────────────────────────────────────────────────
+  gateway:
+    name: Gateway
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/gateway
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go ${{ env.GO_VERSION }}
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: services/gateway/go.sum
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Build
+        run: go build ./...
+
+      - name: Test
+        run: go test ./... -v -race -count=1 -timeout=60s
+
+      - name: Test coverage
+        run: go test ./... -coverprofile=coverage.out -covermode=atomic
+        continue-on-error: true
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: gateway-coverage
+          path: services/gateway/coverage.out
+        if: always()
+
+  # ─── Case Manager ─────────────────────────────────────────────────────────
+  case-manager:
+    name: Case Manager
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/case-manager
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go ${{ env.GO_VERSION }}
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: services/case-manager/go.sum
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Build
+        run: go build ./...
+
+      - name: Test
+        run: go test ./... -v -race -count=1 -timeout=60s
+
+  # ─── LEX Intake ───────────────────────────────────────────────────────────
+  lex-intake:
+    name: LEX Intake
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/lex-intake
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go ${{ env.GO_VERSION }}
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: services/lex-intake/go.sum
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Build
+        run: go build ./...
+
+      - name: Test
+        run: go test ./... -v -race -count=1 -timeout=60s
+
+  # ─── Ollama Adapter ───────────────────────────────────────────────────────
+  ollama-adapter:
+    name: Ollama Adapter
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/ollama-adapter
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go ${{ env.GO_VERSION }}
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: services/ollama-adapter/go.sum
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Build
+        run: go build ./...
+
+      - name: Test
+        run: go test ./... -v -race -count=1 -timeout=60s
+
+  # ─── Payment Rails ────────────────────────────────────────────────────────
+  payment-rails:
+    name: Payment Rails
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/payment-rails
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go ${{ env.GO_VERSION }}
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: services/payment-rails/go.sum
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Build
+        run: go build ./...
+
+      - name: Test
+        run: go test ./... -v -race -count=1 -timeout=60s

@@ -12,8 +12,10 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   AlertTriangle, TrendingUp, Shield, DollarSign, Search,
-  Plus, Eye, ChevronLeft, ChevronRight, RefreshCw, CheckCircle
+  Plus, Eye, ChevronLeft, ChevronRight, RefreshCw, CheckCircle,
+  ShieldAlert, RotateCcw, Clock, List
 } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 const RISK_COLORS: Record<string, string> = {
   low: "bg-green-500/20 text-green-400 border-green-500/30",
@@ -53,6 +55,16 @@ export default function AMLTransactionsPage() {
   const utils = trpc.useUtils();
 
   const { data: stats } = trpc.transactions.stats.useQuery();
+  const { data: sanctionsStatus, isLoading: sanctionsLoading } = trpc.lookup.sanctionsStatus.useQuery(undefined, {
+    refetchInterval: 5 * 60 * 1000, // refresh every 5 min
+  });
+  const refreshSanctionsMutation = trpc.lookup.refreshSanctions.useMutation({
+    onSuccess: (res) => {
+      toast[res.success ? 'success' : 'error'](res.message);
+      utils.lookup.sanctionsStatus.invalidate();
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
   const { data: txData, isLoading } = trpc.transactions.list.useQuery({
     limit,
     offset: page * limit,
@@ -144,6 +156,80 @@ export default function AMLTransactionsPage() {
             </Card>
           ))}
         </div>
+
+        {/* AML Sanctions Status Card */}
+        <Card className={cn(
+          "border",
+          sanctionsStatus?.status === 'ok' ? "border-emerald-500/30 bg-emerald-500/5" :
+          sanctionsStatus?.status === 'degraded' ? "border-amber-500/30 bg-amber-500/5" :
+          "border-red-500/30 bg-red-500/5"
+        )}>
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <ShieldAlert className={cn(
+                  "w-7 h-7",
+                  sanctionsStatus?.status === 'ok' ? "text-emerald-400" :
+                  sanctionsStatus?.status === 'degraded' ? "text-amber-400" : "text-red-400"
+                )} />
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-mono font-bold text-foreground">AML Sanctions List</span>
+                    <span className={cn(
+                      "text-[9px] font-mono font-bold px-1.5 py-0.5 rounded border",
+                      sanctionsStatus?.status === 'ok' ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30" :
+                      sanctionsStatus?.status === 'degraded' ? "bg-amber-500/15 text-amber-400 border-amber-500/30" :
+                      "bg-red-500/15 text-red-400 border-red-500/30"
+                    )}>
+                      {sanctionsStatus?.status?.toUpperCase() ?? 'LOADING'}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                    {sanctionsStatus?.listName ?? 'UN/OFAC/EU'}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-6 text-center">
+                <div>
+                  <div className="text-lg font-mono font-bold text-foreground">
+                    {sanctionsStatus?.totalEntries?.toLocaleString() ?? '—'}
+                  </div>
+                  <div className="flex items-center gap-1 text-[9px] text-muted-foreground">
+                    <List size={9} /> Total Entries
+                  </div>
+                </div>
+                <div>
+                  <div className="text-lg font-mono font-bold text-foreground">
+                    {sanctionsStatus?.hitCount?.toLocaleString() ?? '—'}
+                  </div>
+                  <div className="flex items-center gap-1 text-[9px] text-muted-foreground">
+                    <AlertTriangle size={9} /> Hits (30d)
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[10px] font-mono text-muted-foreground">
+                    {sanctionsStatus?.lastUpdated
+                      ? new Date(sanctionsStatus.lastUpdated).toLocaleString()
+                      : '—'}
+                  </div>
+                  <div className="flex items-center gap-1 text-[9px] text-muted-foreground">
+                    <Clock size={9} /> Last Updated
+                  </div>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-[10px] font-mono h-7 gap-1"
+                  disabled={refreshSanctionsMutation.isPending || sanctionsLoading}
+                  onClick={() => refreshSanctionsMutation.mutate()}
+                >
+                  <RotateCcw size={10} className={refreshSanctionsMutation.isPending ? 'animate-spin' : ''} />
+                  Refresh
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
         {/* Tabs */}
         <Tabs value={tab} onValueChange={setTab}>

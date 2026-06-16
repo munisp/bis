@@ -295,6 +295,20 @@
       "when": 1781640926723,
       "tag": "0041_chief_thunderbird",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1781651503179,
+      "tag": "0042_noisy_mister_sinister",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1781652325986,
+      "tag": "0043_aspiring_iceman",
+      "breakpoints": true
     }
   ]
 }
