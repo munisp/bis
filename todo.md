@@ -2558,3 +2558,20 @@
 - [x] DocumentReviewQueue: Re-run OCR button in ReviewDialog (visible when ocrData present), calls kyc.rerunOcr, invalidates list after 3s
 - [x] server/sprint39.test.ts: 26 tests (injectServerMeta, broadcastForm validation, rerunOcr schema, broadcastToAll schema, invalidation timing)
 - [x] Push Sprint v39 to GitHub
+
+## Sprint v40
+
+- [x] kycDocuments: previousOcrData json column added (migration 0044)
+- [x] kyc.rerunOcr: snapshots kycRecord.documentOcrData to kycDocuments.previousOcrData before triggering re-run
+- [x] listPendingDocuments: returns previousOcrData alongside documentOcrData
+- [x] OcrDiffPanel component: side-by-side before/after confidence comparison, improved/degraded badges, per-field strikethrough
+- [x] DocumentReviewQueue ReviewDialog: shows OcrDiffPanel when previousOcrData present, falls back to OcrDataPanel otherwise
+- [x] DocRow type updated with previousOcrData; handleReview and DocumentCard thread it through
+- [x] push_broadcasts table (migration 0044): id, title, body, url, tag, sentCount, failedCount, deactivatedCount, createdBy, sentAt
+- [x] push.broadcastToAll: persists broadcast record to push_broadcasts after dispatch (best-effort)
+- [x] push.listBroadcasts tRPC query (adminProcedure, paginated limit/offset, returns total count)
+- [x] PushSettingsPage: Broadcast History card with paginated table (title, body, sent, failed, date)
+- [x] server/vapidRotationReminder.ts: runVapidRotationCheck() + startVapidRotationReminderScheduler() (5min startup delay, 24h repeat)
+- [x] server/_core/index.ts: startVapidRotationReminderScheduler() wired into startup block
+- [x] server/sprint40.test.ts: 26 tests (OCR diff, normaliseOcrField, push_broadcasts schema, VAPID rotation, listBroadcasts pagination)
+- [x] Push Sprint v40 to GitHub

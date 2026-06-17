@@ -19,7 +19,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import {
   Bell, BellOff, CheckCircle2, XCircle, RefreshCw, Loader2,
-  Copy, Check, Zap, Key, Smartphone, Globe, Send,
+  Copy, Check, Zap, Key, Smartphone, Globe, Send, History, ChevronLeft, ChevronRight,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -77,6 +77,10 @@ export default function PushSettingsPage() {
   const [broadcastBody, setBroadcastBody] = useState("");
   const [broadcastUrl, setBroadcastUrl] = useState("");
 
+  // Broadcast history pagination
+  const [historyOffset, setHistoryOffset] = useState(0);
+  const HISTORY_PAGE_SIZE = 10;
+
   const utils = trpc.useUtils();
 
   // ── Queries ──────────────────────────────────────────────────────────────────
@@ -87,6 +91,11 @@ export default function PushSettingsPage() {
   const { data: myTokens, isLoading: tokensLoading } = trpc.push.listMyTokens.useQuery(undefined, {
     enabled: isAuthenticated,
   });
+
+  const { data: broadcastHistory, isLoading: historyLoading } = trpc.push.listBroadcasts.useQuery(
+    { limit: HISTORY_PAGE_SIZE, offset: historyOffset },
+    { enabled: isAuthenticated && user?.role === "admin" }
+  );
 
   // ── Mutations ─────────────────────────────────────────────────────────────────
   const generateMutation = trpc.push.generateVapidKeys.useMutation({
@@ -356,6 +365,90 @@ export default function PushSettingsPage() {
             )}
           </CardContent>
         </Card>
+
+        {/* Broadcast History */}
+        {user?.role === "admin" && (
+          <Card className="border-border">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-mono flex items-center gap-2">
+                <History size={14} className="text-primary" />
+                Broadcast History
+              </CardTitle>
+              <CardDescription className="text-xs">
+                Audit log of all platform-wide push broadcasts sent from this page.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {historyLoading ? (
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Loader2 size={12} className="animate-spin" /> Loading history…
+                </div>
+              ) : !broadcastHistory || broadcastHistory.items.length === 0 ? (
+                <div className="text-center py-6">
+                  <History size={24} className="text-muted-foreground mx-auto mb-2" />
+                  <p className="text-xs font-mono text-muted-foreground">No broadcasts sent yet.</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-[10px] font-mono">
+                      <thead>
+                        <tr className="border-b border-border text-muted-foreground">
+                          <th className="text-left pb-2 pr-3">Title</th>
+                          <th className="text-left pb-2 pr-3">Body</th>
+                          <th className="text-right pb-2 pr-3">Sent</th>
+                          <th className="text-right pb-2 pr-3">Failed</th>
+                          <th className="text-right pb-2">Date</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {broadcastHistory.items.map((bc) => (
+                          <tr key={bc.id} className="border-b border-border/40 hover:bg-muted/10">
+                            <td className="py-1.5 pr-3 max-w-[120px] truncate" title={bc.title}>{bc.title}</td>
+                            <td className="py-1.5 pr-3 max-w-[160px] truncate text-muted-foreground" title={bc.body}>{bc.body}</td>
+                            <td className="py-1.5 pr-3 text-right text-emerald-400">{bc.sentCount}</td>
+                            <td className="py-1.5 pr-3 text-right text-red-400">{bc.failedCount}</td>
+                            <td className="py-1.5 text-right text-muted-foreground whitespace-nowrap">
+                              {new Date(bc.sentAt).toLocaleDateString()}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {/* Pagination */}
+                  {broadcastHistory.total > HISTORY_PAGE_SIZE && (
+                    <div className="flex items-center justify-between pt-2">
+                      <span className="text-[9px] font-mono text-muted-foreground">
+                        {historyOffset + 1}–{Math.min(historyOffset + HISTORY_PAGE_SIZE, broadcastHistory.total)} of {broadcastHistory.total}
+                      </span>
+                      <div className="flex gap-1">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-6 px-2"
+                          disabled={historyOffset === 0}
+                          onClick={() => setHistoryOffset(Math.max(0, historyOffset - HISTORY_PAGE_SIZE))}
+                        >
+                          <ChevronLeft size={12} />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-6 px-2"
+                          disabled={historyOffset + HISTORY_PAGE_SIZE >= broadcastHistory.total}
+                          onClick={() => setHistoryOffset(historyOffset + HISTORY_PAGE_SIZE)}
+                        >
+                          <ChevronRight size={12} />
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         {/* Send Broadcast */}
         <Card className="border-border">

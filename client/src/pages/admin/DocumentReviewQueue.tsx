@@ -66,6 +66,7 @@ interface DocRow {
   subjectName: string | null;
   kycStatus: string | null;
   documentOcrData: Record<string, OcrFieldValue> | null;
+  previousOcrData?: Record<string, OcrFieldValue> | null;
 }
 
 // ─── Status config ────────────────────────────────────────────────────────────
@@ -109,9 +110,9 @@ function DocumentCard({
   onReview,
 }: {
   row: DocRow;
-  onReview: (doc: KycDoc, decision: Decision, ocrData?: Record<string, OcrFieldValue> | null) => void;
+  onReview: (doc: KycDoc, decision: Decision, ocrData?: Record<string, OcrFieldValue> | null, previousOcrData?: Record<string, OcrFieldValue> | null) => void;
 }) {
-  const { doc, subjectName, kycStatus, documentOcrData } = row;
+  const { doc, subjectName, kycStatus, documentOcrData, previousOcrData } = row;
   const statusCfg = STATUS_CONFIG[doc.reviewStatus];
   const docLabel = DOCUMENT_TYPE_LABELS[doc.documentType] ?? doc.documentType;
   const isImage = doc.mimeType?.startsWith("image/") ?? false;
@@ -187,7 +188,7 @@ function DocumentCard({
               size="sm"
               variant="outline"
               className="flex-1 text-[10px] h-7 border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10"
-              onClick={() => onReview(doc, "approved", documentOcrData)}
+              onClick={() => onReview(doc, "approved", documentOcrData, previousOcrData)}
             >
               <CheckCircle2 size={11} className="mr-1" /> Approve
             </Button>
@@ -195,7 +196,7 @@ function DocumentCard({
               size="sm"
               variant="outline"
               className="flex-1 text-[10px] h-7 border-red-500/40 text-red-400 hover:bg-red-500/10"
-              onClick={() => onReview(doc, "rejected", documentOcrData)}
+              onClick={() => onReview(doc, "rejected", documentOcrData, previousOcrData)}
             >
               <XCircle size={11} className="mr-1" /> Reject
             </Button>
@@ -203,7 +204,7 @@ function DocumentCard({
               size="sm"
               variant="outline"
               className="text-[10px] h-7 px-2 border-blue-500/40 text-blue-400 hover:bg-blue-500/10"
-              onClick={() => onReview(doc, "reupload_requested", documentOcrData)}
+              onClick={() => onReview(doc, "reupload_requested", documentOcrData, previousOcrData)}
               title="Request re-upload"
             >
               <RotateCcw size={11} />
@@ -317,10 +318,130 @@ function OcrDataPanel({ ocrData }: { ocrData: Record<string, OcrFieldValue> | nu
   );
 }
 
+// ─── OCR Diff Panel ───────────────────────────────────────────────────────────
+
+const OCR_LABELS: Record<string, string> = {
+  fullName: 'Full Name', surname: 'Surname', firstName: 'First Name',
+  middleName: 'Middle Name', dateOfBirth: 'Date of Birth', gender: 'Gender',
+  idNumber: 'ID Number', documentNumber: 'Document No.', nationality: 'Nationality',
+  expiryDate: 'Expiry Date', issueDate: 'Issue Date', address: 'Address',
+  placeOfBirth: 'Place of Birth', mrz: 'MRZ',
+};
+
+function OcrDiffPanel({
+  before,
+  after,
+}: {
+  before: Record<string, OcrFieldValue> | null | undefined;
+  after: Record<string, OcrFieldValue> | null | undefined;
+}) {
+  if (!before || !after) return null;
+
+  // Collect all keys from both snapshots
+  const allKeys = Array.from(new Set([...Object.keys(before), ...Object.keys(after)]));
+
+  // Only show fields where value or confidence changed
+  const changedFields = allKeys.filter(k => {
+    const b = normaliseOcrField(before[k] ?? null);
+    const a = normaliseOcrField(after[k] ?? null);
+    return b.value !== a.value || Math.abs(b.confidence - a.confidence) > 0.01;
+  });
+
+  if (changedFields.length === 0) {
+    return (
+      <div className="mt-2 rounded-lg border border-border bg-muted/5 p-3">
+        <p className="text-[10px] font-mono text-muted-foreground flex items-center gap-1">
+          <span>✓</span> OCR re-run produced identical results — no field changes detected.
+        </p>
+      </div>
+    );
+  }
+
+  const improved = changedFields.filter(k => {
+    const b = normaliseOcrField(before[k] ?? null);
+    const a = normaliseOcrField(after[k] ?? null);
+    return a.confidence > b.confidence;
+  }).length;
+
+  const degraded = changedFields.filter(k => {
+    const b = normaliseOcrField(before[k] ?? null);
+    const a = normaliseOcrField(after[k] ?? null);
+    return a.confidence < b.confidence;
+  }).length;
+
+  return (
+    <div className="mt-2 rounded-lg border border-blue-500/20 bg-blue-500/5 p-3">
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-[10px] font-mono font-semibold text-blue-400 flex items-center gap-1">
+          <span>⟳</span> OCR Re-run Diff
+        </p>
+        <div className="flex items-center gap-1.5">
+          {improved > 0 && (
+            <span className="text-[9px] font-mono px-1.5 py-0.5 rounded border bg-emerald-500/10 text-emerald-400 border-emerald-500/30">
+              ↑ {improved} improved
+            </span>
+          )}
+          {degraded > 0 && (
+            <span className="text-[9px] font-mono px-1.5 py-0.5 rounded border bg-red-500/10 text-red-400 border-red-500/30">
+              ↓ {degraded} degraded
+            </span>
+          )}
+        </div>
+      </div>
+      <div className="space-y-1.5">
+        {changedFields.map(k => {
+          const b = normaliseOcrField(before[k] ?? null);
+          const a = normaliseOcrField(after[k] ?? null);
+          const confidenceUp = a.confidence > b.confidence;
+          const confidenceDown = a.confidence < b.confidence;
+          return (
+            <div key={k} className="rounded border border-border bg-muted/10 px-2 py-1.5">
+              <div className="flex items-center justify-between mb-0.5">
+                <span className="text-[9px] font-mono text-muted-foreground uppercase tracking-wide">
+                  {OCR_LABELS[k] ?? k}
+                </span>
+                <div className="flex items-center gap-1">
+                  <span className={cn('text-[8px] font-mono px-1 py-0.5 rounded border', confidenceClass(b.confidence))}>
+                    {Math.round(b.confidence * 100)}%
+                  </span>
+                  <span className="text-[8px] text-muted-foreground">→</span>
+                  <span className={cn('text-[8px] font-mono px-1 py-0.5 rounded border', confidenceClass(a.confidence))}>
+                    {Math.round(a.confidence * 100)}%
+                    {confidenceUp && ' ↑'}
+                    {confidenceDown && ' ↓'}
+                  </span>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <p className="text-[8px] font-mono text-muted-foreground mb-0.5">Before</p>
+                  <p className="text-[10px] font-mono text-muted-foreground line-through truncate" title={b.value ?? ''}>
+                    {b.value ?? <em>empty</em>}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[8px] font-mono text-muted-foreground mb-0.5">After</p>
+                  <p className={cn(
+                    'text-[10px] font-mono truncate',
+                    confidenceUp ? 'text-emerald-400' : confidenceDown ? 'text-red-400' : 'text-foreground'
+                  )} title={a.value ?? ''}>
+                    {a.value ?? <em>empty</em>}
+                  </p>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function ReviewDialog({
   doc,
   decision,
   ocrData,
+  previousOcrData,
   onConfirm,
   onCancel,
   isPending,
@@ -330,6 +451,7 @@ function ReviewDialog({
   doc: KycDoc | null;
   decision: Decision | null;
   ocrData?: Record<string, OcrFieldValue> | null;
+  previousOcrData?: Record<string, OcrFieldValue> | null;
   onConfirm: (note: string) => void;
   onCancel: () => void;
   isPending: boolean;
@@ -356,9 +478,12 @@ function ReviewDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-3 py-2">
-          {/* OCR extracted fields — read-only preview */}
-          <OcrDataPanel ocrData={ocrData} />
+        <div className="space-y-3 py-2 max-h-[60vh] overflow-y-auto">
+          {/* OCR diff view — shown when previousOcrData exists (after a re-run) */}
+          {previousOcrData && ocrData
+            ? <OcrDiffPanel before={previousOcrData} after={ocrData} />
+            : <OcrDataPanel ocrData={ocrData} />
+          }
           {onRerunOcr && (
             <div className="flex justify-end">
               <Button
@@ -433,7 +558,7 @@ export default function DocumentReviewQueue() {
   const [statusFilter, setStatusFilter] = useState<ReviewStatus>("pending");
   const [cursor, setCursor] = useState<number | undefined>(undefined);
   const [cursorStack, setCursorStack] = useState<number[]>([]);
-  const [reviewTarget, setReviewTarget] = useState<{ doc: KycDoc; decision: Decision; ocrData?: Record<string, OcrFieldValue> | null } | null>(null);
+  const [reviewTarget, setReviewTarget] = useState<{ doc: KycDoc; decision: Decision; ocrData?: Record<string, OcrFieldValue> | null; previousOcrData?: Record<string, OcrFieldValue> | null } | null>(null);
 
   const utils = trpc.useUtils();
 
@@ -463,8 +588,8 @@ export default function DocumentReviewQueue() {
     },
   });
 
-  function handleReview(doc: KycDoc, decision: Decision, ocrData?: Record<string, OcrFieldValue> | null) {
-    setReviewTarget({ doc, decision, ocrData });
+  function handleReview(doc: KycDoc, decision: Decision, ocrData?: Record<string, OcrFieldValue> | null, previousOcrData?: Record<string, OcrFieldValue> | null) {
+    setReviewTarget({ doc, decision, ocrData, previousOcrData });
   }
 
   function handleConfirm(note: string) {
@@ -603,6 +728,7 @@ export default function DocumentReviewQueue() {
         doc={reviewTarget?.doc ?? null}
         decision={reviewTarget?.decision ?? null}
         ocrData={reviewTarget?.ocrData}
+        previousOcrData={reviewTarget?.previousOcrData}
         onConfirm={handleConfirm}
         onCancel={() => setReviewTarget(null)}
         isPending={reviewMutation.isPending}

@@ -78,6 +78,7 @@ import {
   kycScheduledReruns,
   kycDocuments,
   pushSubscriptions,
+  pushBroadcasts,
 } from "../drizzle/schema";
 import {
   getDashboardStats,
@@ -1615,6 +1616,7 @@ const kycRouter = router({
           subjectName: kycRecords.subjectName,
           kycStatus: kycRecords.status,
           documentOcrData: kycRecords.documentOcrData,
+          previousOcrData: kycDocuments.previousOcrData,
         })
         .from(kycDocuments)
         .leftJoin(kycRecords, eq(kycDocuments.kycRecordId, kycRecords.id))
@@ -1678,6 +1680,19 @@ const kycRouter = router({
       if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Database unavailable' });
       const [doc] = await db.select().from(kycDocuments).where(eq(kycDocuments.id, input.documentId)).limit(1);
       if (!doc) throw new TRPCError({ code: 'NOT_FOUND', message: 'Document not found' });
+
+      // Snapshot current OCR data to previousOcrData before overwriting
+      // (used for before/after diff view in DocumentReviewQueue)
+      const currentOcrData = (doc as any).previousOcrData ?? null;
+      // Fetch the linked kycRecord to get its current documentOcrData
+      const [linkedRecord] = await db.select({ documentOcrData: kycRecords.documentOcrData })
+        .from(kycRecords).where(eq(kycRecords.id, doc.kycRecordId)).limit(1);
+      const snapshotData = linkedRecord?.documentOcrData ?? null;
+      if (snapshotData) {
+        await db.update(kycDocuments)
+          .set({ previousOcrData: snapshotData, updatedAt: new Date() })
+          .where(eq(kycDocuments.id, input.documentId));
+      }
 
       // Trigger OCR asynchronously — same logic as uploadDocument
       ;(async () => {
@@ -4905,7 +4920,7 @@ const pushRouter = router({
       url: z.string().optional(),
       tag: z.string().optional(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) return { sent: 0, failed: 0, deactivated: 0 };
       // Collect distinct user IDs with active subscriptions
@@ -4920,7 +4935,44 @@ const pushRouter = router({
         url: input.url,
         tag: input.tag,
       });
+      // Persist broadcast record for audit history
+      try {
+        await db.insert(pushBroadcasts).values({
+          title: input.title,
+          body: input.body,
+          url: input.url ?? null,
+          tag: input.tag ?? null,
+          sentCount: result.sent,
+          failedCount: result.failed,
+          deactivatedCount: result.deactivated,
+          createdBy: ctx.user?.id ?? null,
+          sentAt: new Date(),
+        });
+      } catch {
+        // Persistence is best-effort — don't fail the broadcast
+      }
       return result;
+    }),
+
+  /**
+   * listBroadcasts: admin-only paginated list of past broadcasts.
+   */
+  listBroadcasts: adminProcedure
+    .input(z.object({
+      limit: z.number().min(1).max(100).default(20),
+      offset: z.number().default(0),
+    }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return { items: [], total: 0 };
+      const [items, countResult] = await Promise.all([
+        db.select().from(pushBroadcasts)
+          .orderBy(desc(pushBroadcasts.sentAt))
+          .limit(input.limit)
+          .offset(input.offset),
+        db.select({ count: sql<number>`count(*)` }).from(pushBroadcasts),
+      ]);
+      return { items, total: Number(countResult[0]?.count ?? 0) };
     }),
 });
 
