@@ -1788,6 +1788,9 @@ export const kycDocuments = pgTable("kyc_documents", {
   reviewedAt: timestamp("reviewedAt"),
   uploadedBy: integer("uploadedBy").notNull(),
   capturedAt: timestamp("capturedAt"),
+  // previousOcrData: snapshot of documentOcrData taken before the most recent re-run,
+  // used to render a before/after diff view in the DocumentReviewQueue ReviewDialog.
+  previousOcrData: json("previousOcrData"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
 },
@@ -1828,3 +1831,25 @@ export const pushSubscriptions = pgTable("push_subscriptions", {
   }));
 export type PushSubscription = typeof pushSubscriptions.$inferSelect;
 export type InsertPushSubscription = typeof pushSubscriptions.$inferInsert;
+
+// ─── Push Broadcasts ──────────────────────────────────────────────────────────
+// Audit log for admin-initiated platform-wide push broadcasts.
+// Each row represents one call to push.broadcastToAll.
+export const pushBroadcasts = pgTable("push_broadcasts", {
+  id: serial("id").primaryKey(),
+  title: varchar("title", { length: 128 }).notNull(),
+  body: varchar("body", { length: 512 }).notNull(),
+  url: text("url"),
+  tag: varchar("tag", { length: 64 }),
+  sentCount: integer("sentCount").notNull().default(0),
+  failedCount: integer("failedCount").notNull().default(0),
+  deactivatedCount: integer("deactivatedCount").notNull().default(0),
+  createdBy: integer("createdBy").references(() => users.id, { onDelete: "set null" }),
+  sentAt: timestamp("sentAt").defaultNow().notNull(),
+},
+  (table) => ({
+    push_bc_sent_at_idx:    index("push_bc_sent_at_idx").on(table.sentAt),
+    push_bc_created_by_idx: index("push_bc_created_by_idx").on(table.createdBy),
+  }));
+export type PushBroadcast = typeof pushBroadcasts.$inferSelect;
+export type InsertPushBroadcast = typeof pushBroadcasts.$inferInsert;

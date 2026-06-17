@@ -37,6 +37,7 @@ import { startKycExpiryDigestScheduler } from "../kycExpiryDigest";
 import { startRiskThresholdDigestScheduler } from "../riskThresholdDigest";
 import { startBiometricSpoofAlertScheduler } from "../biometricSpoofAlertScheduler";
 import { startBiometricSessionLogArchiver } from "../biometricSessionLogArchiver";
+import { startVapidRotationReminderScheduler } from "../vapidRotationReminder";
 import { validateEnv } from "../envValidation";
 import { ENV } from "./env";
 
@@ -986,6 +987,7 @@ startServer()
     startKycScheduledRerunExecutor(); // 5-min poll for pending KYC scheduled re-runs
     startBiometricSpoofAlertScheduler(); // Hourly biometric spoof-attack alert (ISO 30107-3)
     startBiometricSessionLogArchiver();   // Weekly biometric session log archival (90d hot→cold S3)
+    startVapidRotationReminderScheduler(); // Daily VAPID key age check — notifies owner after 90 days
     return srv;
   })
   .catch((err) => {
