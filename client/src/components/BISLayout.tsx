@@ -112,6 +112,7 @@ const BASE_NAV_GROUPS: NavGroup[] = [
       { label: 'Reconciliation', href: '/payment-rails/reconciliation', icon: <ArrowLeftRight size={15} /> },
       { label: 'Notifications', href: '/notifications', icon: <BellRing size={15} /> },
       { label: 'Settings', href: '/settings', icon: <Settings size={15} /> },
+      { label: 'Push Notifications', href: '/admin/settings/push', icon: <Bell size={15} />, adminOnly: true },
       { label: 'Audit Log', href: '/audit-log', icon: <ClipboardList size={15} /> },
       { label: 'Developer Portal', href: '/developer', icon: <Key size={15} /> },
       { label: 'Ollama AI Engine', href: '/ollama', icon: <Brain size={15} /> },
@@ -442,6 +443,57 @@ export default function BISLayout({ children, title, subtitle, actions }: BISLay
     },
   });
 
+  // ── Web Push: register SW + request permission + register token ────────────
+  const registerTokenMutation = trpc.push.registerToken.useMutation();
+
+  useEffect(() => {
+    if (!isAuthenticated || !('serviceWorker' in navigator) || !('PushManager' in window)) return;
+
+    async function setupPush() {
+      try {
+        // Register the service worker
+        const registration = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+        await navigator.serviceWorker.ready;
+
+        // Only request permission if not already granted/denied
+        if (Notification.permission === 'default') {
+          const permission = await Notification.requestPermission();
+          if (permission !== 'granted') return;
+        }
+        if (Notification.permission !== 'granted') return;
+
+        // Get the VAPID public key from the server
+        // We read it from a meta tag set by the server, or skip if not configured
+        const vapidMeta = document.querySelector<HTMLMetaElement>('meta[name="vapid-public-key"]');
+        const vapidPublicKey = vapidMeta?.content;
+        if (!vapidPublicKey) return; // VAPID not configured — skip Web Push subscription
+
+        // Subscribe to push — pass the VAPID key as a URL-safe base64 string
+        const subscription = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: vapidPublicKey,
+        });
+
+        const p256dh = subscription.getKey('p256dh');
+        const auth = subscription.getKey('auth');
+        if (!p256dh || !auth) return;
+
+        registerTokenMutation.mutate({
+          token: JSON.stringify(subscription),
+          platform: 'webpush',
+          p256dh: btoa(String.fromCharCode(...Array.from(new Uint8Array(p256dh)))),
+          auth: btoa(String.fromCharCode(...Array.from(new Uint8Array(auth)))),
+          deviceLabel: `Browser — ${navigator.userAgent.slice(0, 60)}`,
+        });
+      } catch {
+        // Push setup failed silently — non-critical
+      }
+    }
+
+    setupPush();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated]);
+
   // ── Mark alert read via tRPC ──────────────────────────────────────────────
   const markReadMutation = trpc.alerts.acknowledge.useMutation({
     onSuccess: () => utils.alerts.list.invalidate(),
@@ -466,6 +518,7 @@ export default function BISLayout({ children, title, subtitle, actions }: BISLay
     "/admin/onboarding",
     "/admin/users",
     "/admin/documents",
+    "/admin/settings/push",
     ...BASE_NAV_GROUPS.flatMap(g => g.items.filter(i => i.adminOnly).map(i => i.href)),
   ]);
 

@@ -94,22 +94,78 @@ self.addEventListener('sync', (event) => {
 
 // ─── Push Notifications ───────────────────────────────────────────────────────
 self.addEventListener('push', (event) => {
-  const data = event.data ? event.data.json() : {};
-  event.waitUntil(
-    self.registration.showNotification(data.title || 'BIS Alert', {
-      body: data.body || 'You have a new notification',
-      icon: '/icon-192.png',
-      badge: '/icon-192.png',
-      tag: data.tag || 'bis-notification',
-      data: data.url || '/',
-    })
-  );
+  let payload = {};
+  try {
+    if (event.data) payload = event.data.json();
+  } catch {
+    payload = { title: 'BIS Alert', body: event.data ? event.data.text() : 'New notification' };
+  }
+
+  const title = payload.title || 'BIS Platform';
+  const isCritical = payload.tag === 'critical-alert';
+  const options = {
+    body: payload.body || '',
+    icon: payload.icon || '/favicon.ico',
+    badge: '/favicon.ico',
+    tag: payload.tag || 'bis-notification',
+    data: { url: payload.url || '/', timestamp: Date.now() },
+    vibrate: [200, 100, 200],
+    requireInteraction: isCritical,
+    actions: isCritical
+      ? [{ action: 'view', title: 'View Alert' }, { action: 'dismiss', title: 'Dismiss' }]
+      : [],
+  };
+
+  event.waitUntil(self.registration.showNotification(title, options));
 });
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
+  if (event.action === 'dismiss') return;
+
+  const targetUrl = event.notification.data?.url || '/';
   event.waitUntil(
-    clients.openWindow(event.notification.data || '/')
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
+      for (const client of windowClients) {
+        if (client.url.includes(self.location.origin) && 'focus' in client) {
+          client.focus();
+          client.navigate(targetUrl);
+          return;
+        }
+      }
+      if (clients.openWindow) return clients.openWindow(targetUrl);
+    })
+  );
+});
+
+// ─── Push Subscription Change ─────────────────────────────────────────────────
+// Fired when the browser rotates the push subscription (key refresh).
+// Re-registers the new subscription with the BIS server.
+self.addEventListener('pushsubscriptionchange', (event) => {
+  event.waitUntil(
+    self.registration.pushManager
+      .subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: event.oldSubscription?.options?.applicationServerKey,
+      })
+      .then((subscription) => {
+        const p256dhArray = new Uint8Array(subscription.getKey('p256dh'));
+        const authArray = new Uint8Array(subscription.getKey('auth'));
+        return fetch('/api/trpc/push.registerToken', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            json: {
+              token: JSON.stringify(subscription),
+              platform: 'webpush',
+              p256dh: btoa(String.fromCharCode(...p256dhArray)),
+              auth: btoa(String.fromCharCode(...authArray)),
+              deviceLabel: 'Browser (auto-renewed)',
+            },
+          }),
+        });
+      })
   );
 });
 
