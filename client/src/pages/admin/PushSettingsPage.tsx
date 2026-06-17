@@ -61,6 +61,233 @@ function StatusBadge({ ok, label }: { ok: boolean; label: string }) {
   );
 }
 
+// ─── Schedule Broadcast Form ─────────────────────────────────────────────────
+
+function ScheduleBroadcastForm({ utils, broadcastTags }: { utils: ReturnType<typeof trpc.useUtils>; broadcastTags: string[] }) {
+  const [title, setTitle] = useState("");
+  const [body, setBody] = useState("");
+  const [url, setUrl] = useState("");
+  const [tag, setTag] = useState("");
+  const [scheduledAt, setScheduledAt] = useState(""); // datetime-local string
+
+  const scheduleMutation = trpc.push.scheduleBroadcast.useMutation({
+    onSuccess: (data) => {
+      toast.success(`Broadcast scheduled for ${new Date(data.scheduledAt).toLocaleString()}`);
+      setTitle(""); setBody(""); setUrl(""); setTag(""); setScheduledAt("");
+      utils.push.listScheduledBroadcasts.invalidate();
+    },
+    onError: (err) => toast.error(`Schedule failed: ${err.message}`),
+  });
+
+  function handleSchedule() {
+    if (!title.trim() || !body.trim() || !scheduledAt) {
+      toast.error("Title, body, and scheduled time are required");
+      return;
+    }
+    const ts = new Date(scheduledAt).getTime();
+    if (ts <= Date.now()) {
+      toast.error("Scheduled time must be in the future");
+      return;
+    }
+    scheduleMutation.mutate({ title: title.trim(), body: body.trim(), url: url.trim() || undefined, tag: tag.trim() || undefined, scheduledAt: ts });
+  }
+
+  return (
+    <div className="space-y-3 border border-dashed border-border rounded-md p-3">
+      <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-wide">New Scheduled Broadcast</p>
+      <div className="grid grid-cols-2 gap-2">
+        <div className="space-y-1 col-span-2">
+          <Label className="text-[10px] font-mono text-muted-foreground uppercase tracking-wide">Title</Label>
+          <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Broadcast title" className="text-xs font-mono h-8" maxLength={128} />
+        </div>
+        <div className="space-y-1 col-span-2">
+          <Label className="text-[10px] font-mono text-muted-foreground uppercase tracking-wide">Body</Label>
+          <Textarea value={body} onChange={(e) => setBody(e.target.value)} placeholder="Notification body" className="text-xs font-mono min-h-[60px] resize-none" maxLength={512} />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-[10px] font-mono text-muted-foreground uppercase tracking-wide">URL (optional)</Label>
+          <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…" className="text-xs font-mono h-8" />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-[10px] font-mono text-muted-foreground uppercase tracking-wide">Scheduled At</Label>
+          <Input type="datetime-local" value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)} className="text-xs font-mono h-8" />
+        </div>
+      </div>
+      <div className="space-y-1">
+        <Label className="text-[10px] font-mono text-muted-foreground uppercase tracking-wide">Tag (optional)</Label>
+        <div className="flex flex-wrap gap-1.5">
+          {broadcastTags.map((t) => (
+            <button key={t} type="button" onClick={() => setTag(tag === t ? "" : t)}
+              className={cn("text-[10px] font-mono px-2 py-0.5 rounded-full border transition-colors",
+                tag === t ? "bg-primary/20 text-primary border-primary/40" : "border-border text-muted-foreground hover:border-primary/30")}>
+              {t}
+            </button>
+          ))}
+        </div>
+      </div>
+      <Button size="sm" className="gap-1.5 text-xs font-mono" onClick={handleSchedule}
+        disabled={scheduleMutation.isPending || !title.trim() || !body.trim() || !scheduledAt}>
+        {scheduleMutation.isPending ? <Loader2 size={12} className="animate-spin" /> : <History size={12} />}
+        Schedule Broadcast
+      </Button>
+    </div>
+  );
+}
+
+// ─── Scheduled Broadcast List ─────────────────────────────────────────────────
+
+function ScheduledBroadcastList() {
+  const [offset, setOffset] = useState(0);
+  const [statusFilter, setStatusFilter] = useState<"scheduled" | "sent" | "cancelled" | undefined>("scheduled");
+  const PAGE = 5;
+  const utils = trpc.useUtils();
+
+  const { data, isLoading } = trpc.push.listScheduledBroadcasts.useQuery(
+    { limit: PAGE, offset, status: statusFilter },
+    { refetchInterval: 30_000 }
+  );
+
+  const cancelMutation = trpc.push.cancelScheduledBroadcast.useMutation({
+    onSuccess: () => { toast.success("Broadcast cancelled"); utils.push.listScheduledBroadcasts.invalidate(); },
+    onError: (err) => toast.error(`Cancel failed: ${err.message}`),
+  });
+
+  const STATUS_COLORS: Record<string, string> = {
+    scheduled: "bg-amber-500/10 text-amber-400 border-amber-500/30",
+    sent:      "bg-emerald-500/10 text-emerald-400 border-emerald-500/30",
+    cancelled: "bg-red-500/10 text-red-400 border-red-500/30",
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-wide flex-1">Scheduled Queue</p>
+        {(["scheduled", "sent", "cancelled"] as const).map((s) => (
+          <button key={s} onClick={() => { setStatusFilter(statusFilter === s ? undefined : s); setOffset(0); }}
+            className={cn("text-[10px] font-mono px-2 py-0.5 rounded-full border transition-colors",
+              statusFilter === s ? "bg-primary/20 text-primary border-primary/40" : "border-border text-muted-foreground hover:border-primary/30")}>
+            {s}
+          </button>
+        ))}
+      </div>
+      {isLoading ? (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground py-2"><Loader2 size={12} className="animate-spin" /> Loading…</div>
+      ) : !data?.items.length ? (
+        <p className="text-xs text-muted-foreground py-2">No scheduled broadcasts.</p>
+      ) : (
+        <div className="divide-y divide-border">
+          {data.items.map((item) => (
+            <div key={item.id} className="py-2 flex items-start gap-2">
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-mono font-semibold truncate">{item.title}</p>
+                <p className="text-[10px] text-muted-foreground truncate">{item.body}</p>
+                <p className="text-[10px] font-mono text-muted-foreground mt-0.5">
+                  {new Date(Number(item.scheduledAt)).toLocaleString()}
+                  {item.tag && <span className="ml-2 text-primary/70">[{item.tag}]</span>}
+                </p>
+              </div>
+              <span className={cn("text-[10px] font-mono px-1.5 py-0.5 rounded-full border shrink-0", STATUS_COLORS[item.status] ?? "")}>{item.status}</span>
+              {item.status === "scheduled" && (
+                <button onClick={() => cancelMutation.mutate({ id: item.id })} disabled={cancelMutation.isPending}
+                  className="text-[10px] font-mono text-red-400 hover:text-red-300 shrink-0">
+                  Cancel
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      {data && data.total > PAGE && (
+        <div className="flex items-center gap-2 pt-1">
+          <button onClick={() => setOffset(Math.max(0, offset - PAGE))} disabled={offset === 0}
+            className="text-muted-foreground hover:text-foreground disabled:opacity-30">
+            <ChevronLeft size={14} />
+          </button>
+          <span className="text-[10px] font-mono text-muted-foreground">{offset + 1}–{Math.min(offset + PAGE, data.total)} of {data.total}</span>
+          <button onClick={() => setOffset(offset + PAGE)} disabled={offset + PAGE >= data.total}
+            className="text-muted-foreground hover:text-foreground disabled:opacity-30">
+            <ChevronRight size={14} />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Delivery Stats Card ──────────────────────────────────────────────────────
+
+function DeliveryStatsCard() {
+  const { data, isLoading } = trpc.push.getDeliveryStats.useQuery(undefined, { refetchInterval: 60_000 });
+
+  if (isLoading) {
+    return (
+      <Card className="border-border">
+        <CardContent className="pt-4 flex items-center gap-2 text-xs text-muted-foreground">
+          <Loader2 size={12} className="animate-spin" /> Loading delivery stats…
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (!data) return null;
+
+  const maxSent = Math.max(...data.daily.map((d) => d.sent + d.failed), 1);
+
+  return (
+    <Card className="border-border">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm font-mono flex items-center gap-2">
+          <Zap size={14} className="text-primary" />
+          Delivery Stats (30 days)
+        </CardTitle>
+        <CardDescription className="text-xs">
+          Push delivery success rate across all broadcasts in the last 30 days.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {/* Summary row */}
+        <div className="grid grid-cols-4 gap-3">
+          {[
+            { label: "Sent", value: data.totals.sent, color: "text-emerald-400" },
+            { label: "Failed", value: data.totals.failed, color: "text-red-400" },
+            { label: "Deactivated", value: data.totals.deactivated, color: "text-amber-400" },
+            { label: "Success Rate", value: `${data.successRate}%`, color: data.successRate >= 90 ? "text-emerald-400" : data.successRate >= 70 ? "text-amber-400" : "text-red-400" },
+          ].map((stat) => (
+            <div key={stat.label} className="rounded-md border border-border p-2 text-center">
+              <p className={cn("text-base font-mono font-bold", stat.color)}>{stat.value}</p>
+              <p className="text-[10px] text-muted-foreground">{stat.label}</p>
+            </div>
+          ))}
+        </div>
+        {/* Daily bar chart */}
+        {data.daily.length > 0 ? (
+          <div className="space-y-1">
+            <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-wide">Daily Delivery</p>
+            <div className="flex items-end gap-0.5 h-16">
+              {data.daily.map((d) => {
+                const total = d.sent + d.failed;
+                const barH = Math.round((total / maxSent) * 100);
+                const successPct = total > 0 ? Math.round((d.sent / total) * 100) : 100;
+                return (
+                  <div key={d.date} className="flex-1 flex flex-col items-center gap-0.5" title={`${d.date}: ${d.sent} sent, ${d.failed} failed`}>
+                    <div className="w-full rounded-sm" style={{ height: `${barH}%`, background: successPct >= 90 ? "oklch(0.65 0.15 145)" : successPct >= 70 ? "oklch(0.75 0.15 80)" : "oklch(0.55 0.2 25)" }} />
+                  </div>
+                );
+              })}
+            </div>
+            <div className="flex justify-between text-[9px] font-mono text-muted-foreground">
+              <span>{data.daily[0]?.date}</span>
+              <span>{data.daily[data.daily.length - 1]?.date}</span>
+            </div>
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground">No broadcast data in the last 30 days.</p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function PushSettingsPage() {
@@ -661,6 +888,26 @@ export default function PushSettingsPage() {
             </Button>
           </CardContent>
         </Card>
+
+        {/* Scheduled Broadcasts */}
+        <Card className="border-border">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-mono flex items-center gap-2">
+              <History size={14} className="text-primary" />
+              Schedule a Broadcast
+            </CardTitle>
+            <CardDescription className="text-xs">
+              Queue a broadcast for future delivery. The server dispatches it within 1 minute of the scheduled time.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <ScheduleBroadcastForm utils={utils} broadcastTags={BROADCAST_TAGS} />
+            <ScheduledBroadcastList />
+          </CardContent>
+        </Card>
+
+        {/* Delivery Stats */}
+        <DeliveryStatsCard />
 
         {/* How it works */}
         <Card className="border-border bg-muted/5">

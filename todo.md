@@ -2591,3 +2591,22 @@
 - [x] PushSettingsPage: Subscription Analytics card (total count, platform chips, text-bar histogram, top device list)
 - [x] server/sprint41.test.ts: 22 tests (broadcast tagging, reextractField schema, stats aggregation, histogram bucketing)
 - [x] Push Sprint v41 to GitHub
+
+## Sprint v42
+
+- [x] scheduled_broadcasts table (migration 0045): id, title, body, url, tag, scheduledAt, status, broadcastId, dispatchedAt, createdBy, createdAt, updatedAt
+- [x] kyc_ocr_history table (migration 0045): id, documentId, fieldName, oldValue, oldConfidence, newValue, newConfidence, triggeredBy, createdAt
+- [x] push.scheduleBroadcast adminProcedure (validates scheduledAt > now, inserts to scheduled_broadcasts)
+- [x] push.cancelScheduledBroadcast adminProcedure (only cancels status=scheduled, throws BAD_REQUEST otherwise)
+- [x] push.listScheduledBroadcasts adminProcedure (paginated, filterable by status, returns total count)
+- [x] push.getDeliveryStats adminProcedure (30-day daily aggregation from push_broadcasts, success rate)
+- [x] server/broadcastScheduler.ts: runScheduledBroadcastDispatch() + startBroadcastScheduler() (10s startup, 1-min poll, optimistic lock via update.returning)
+- [x] server/_core/index.ts: startBroadcastScheduler() wired into startup block
+- [x] PushSettingsPage: ScheduleBroadcastForm sub-component (title, body, url, tag chips, datetime-local picker)
+- [x] PushSettingsPage: ScheduledBroadcastList sub-component (paginated, status filter chips, cancel button, 30s refetch)
+- [x] PushSettingsPage: DeliveryStatsCard sub-component (4-metric summary row + daily bar chart with OKLCH color coding)
+- [x] kyc.getOcrHistory adminProcedure (returns history rows for a documentId, ordered by createdAt desc)
+- [x] kyc.reextractField: persists history row to kyc_ocr_history before overwriting field value
+- [x] server/sprint42.test.ts: 30 tests (scheduler status transitions, delivery stats aggregation, OCR history schema, scheduled_broadcasts schema)
+- [x] Pre-existing test failures in phase22.test.ts and next-steps.test.ts confirmed unrelated to Sprint v42 (same 123 failures on baseline)
+- [x] Push Sprint v42 to GitHub

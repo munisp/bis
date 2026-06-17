@@ -10,6 +10,7 @@ import {
   json,
   serial,
   index,
+  bigint,
 } from "drizzle-orm/pg-core";
 
 // ─── Enums ────────────────────────────────────────────────────────────────────
@@ -1853,3 +1854,56 @@ export const pushBroadcasts = pgTable("push_broadcasts", {
   }));
 export type PushBroadcast = typeof pushBroadcasts.$inferSelect;
 export type InsertPushBroadcast = typeof pushBroadcasts.$inferInsert;
+
+// ─── Push Broadcast Status Enum ───────────────────────────────────────────────
+export const pushBroadcastStatusEnum = pgEnum("push_broadcast_status", [
+  "scheduled",
+  "sent",
+  "cancelled",
+]);
+
+// ─── Scheduled Broadcasts ─────────────────────────────────────────────────────
+// Stores broadcasts queued for future delivery.
+// The heartbeat scheduler dispatches rows where scheduledAt <= now() and status = 'scheduled'.
+export const scheduledBroadcasts = pgTable("scheduled_broadcasts", {
+  id: serial("id").primaryKey(),
+  title: varchar("title", { length: 128 }).notNull(),
+  body: varchar("body", { length: 512 }).notNull(),
+  url: text("url"),
+  tag: varchar("tag", { length: 64 }),
+  scheduledAt: bigint("scheduledAt", { mode: "number" }).notNull(),
+  status: pushBroadcastStatusEnum("status").notNull().default("scheduled"),
+  createdBy: integer("createdBy").references(() => users.id, { onDelete: "set null" }),
+  dispatchedAt: bigint("dispatchedAt", { mode: "number" }),
+  broadcastId: integer("broadcastId").references(() => pushBroadcasts.id, { onDelete: "set null" }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+},
+  (table) => ({
+    sched_bc_status_idx:     index("sched_bc_status_idx").on(table.status),
+    sched_bc_scheduled_idx:  index("sched_bc_scheduled_idx").on(table.scheduledAt),
+    sched_bc_created_by_idx: index("sched_bc_created_by_idx").on(table.createdBy),
+  }));
+export type ScheduledBroadcast = typeof scheduledBroadcasts.$inferSelect;
+export type InsertScheduledBroadcast = typeof scheduledBroadcasts.$inferInsert;
+
+// ─── KYC OCR History ─────────────────────────────────────────────────────────
+// Audit trail for every field-level OCR re-extraction via kyc.reextractField.
+export const kycOcrHistory = pgTable("kyc_ocr_history", {
+  id: serial("id").primaryKey(),
+  documentId: integer("documentId").notNull().references(() => kycDocuments.id, { onDelete: "cascade" }),
+  fieldName: varchar("fieldName", { length: 64 }).notNull(),
+  oldValue: text("oldValue"),
+  oldConfidence: real("oldConfidence"),
+  newValue: text("newValue"),
+  newConfidence: real("newConfidence"),
+  triggeredBy: integer("triggeredBy").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+},
+  (table) => ({
+    kyc_ocr_hist_doc_idx:   index("kyc_ocr_hist_doc_idx").on(table.documentId),
+    kyc_ocr_hist_field_idx: index("kyc_ocr_hist_field_idx").on(table.fieldName),
+    kyc_ocr_hist_by_idx:    index("kyc_ocr_hist_by_idx").on(table.triggeredBy),
+  }));
+export type KycOcrHistory = typeof kycOcrHistory.$inferSelect;
+export type InsertKycOcrHistory = typeof kycOcrHistory.$inferInsert;
