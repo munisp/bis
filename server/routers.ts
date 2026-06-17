@@ -1507,11 +1507,23 @@ const kycRouter = router({
       ;(async () => {
         try {
           const { invokeLLM } = await import('./_core/llm');
+          // Build a field schema factory that includes a confidence score (0–1 float)
+          // per extracted field so the reviewer can see which values need manual check.
+          const fieldWithConfidence = (description: string) => ({
+            type: 'object',
+            properties: {
+              value:      { type: ['string', 'null'], description },
+              confidence: { type: 'number', description: 'Extraction confidence 0–1. 1 = certain, 0 = not found/unreadable.' },
+            },
+            required: ['value', 'confidence'],
+            additionalProperties: false,
+          });
+
           const ocrResponse = await invokeLLM({
             messages: [
               {
                 role: 'system',
-                content: 'You are a document OCR assistant. Extract structured data from identity documents. Always respond with valid JSON only — no markdown, no explanation.',
+                content: 'You are a document OCR assistant. Extract structured data from identity documents. For each field, return an object with "value" (the extracted string or null) and "confidence" (a float 0–1 indicating how certain you are). Always respond with valid JSON only — no markdown, no explanation.',
               },
               {
                 role: 'user',
@@ -1522,7 +1534,7 @@ const kycRouter = router({
                   },
                   {
                     type: 'text',
-                    text: `Extract all readable fields from this ${input.documentType} document. Return a JSON object with any of these keys that are present: fullName, surname, firstName, middleName, dateOfBirth, gender, idNumber, documentNumber, nationality, expiryDate, issueDate, address, placeOfBirth, mrz. Use null for missing fields.`,
+                    text: `Extract all readable fields from this ${input.documentType} document. For each field return {value, confidence}. Fields: fullName, surname, firstName, middleName, dateOfBirth, gender, idNumber, documentNumber, nationality, expiryDate, issueDate, address, placeOfBirth, mrz. Use null value and 0 confidence for missing/unreadable fields.`,
                   },
                 ],
               },
@@ -1530,25 +1542,25 @@ const kycRouter = router({
             response_format: {
               type: 'json_schema',
               json_schema: {
-                name: 'document_ocr',
+                name: 'document_ocr_v2',
                 strict: true,
                 schema: {
                   type: 'object',
                   properties: {
-                    fullName:       { type: ['string', 'null'] },
-                    surname:        { type: ['string', 'null'] },
-                    firstName:      { type: ['string', 'null'] },
-                    middleName:     { type: ['string', 'null'] },
-                    dateOfBirth:    { type: ['string', 'null'] },
-                    gender:         { type: ['string', 'null'] },
-                    idNumber:       { type: ['string', 'null'] },
-                    documentNumber: { type: ['string', 'null'] },
-                    nationality:    { type: ['string', 'null'] },
-                    expiryDate:     { type: ['string', 'null'] },
-                    issueDate:      { type: ['string', 'null'] },
-                    address:        { type: ['string', 'null'] },
-                    placeOfBirth:   { type: ['string', 'null'] },
-                    mrz:            { type: ['string', 'null'] },
+                    fullName:       fieldWithConfidence('Full legal name as printed'),
+                    surname:        fieldWithConfidence('Family / last name'),
+                    firstName:      fieldWithConfidence('Given / first name'),
+                    middleName:     fieldWithConfidence('Middle name(s)'),
+                    dateOfBirth:    fieldWithConfidence('Date of birth in ISO 8601 format'),
+                    gender:         fieldWithConfidence('Gender: M, F, or X'),
+                    idNumber:       fieldWithConfidence('National ID or NIN number'),
+                    documentNumber: fieldWithConfidence('Passport or document number'),
+                    nationality:    fieldWithConfidence('ISO 3166-1 alpha-3 country code'),
+                    expiryDate:     fieldWithConfidence('Document expiry date in ISO 8601'),
+                    issueDate:      fieldWithConfidence('Document issue date in ISO 8601'),
+                    address:        fieldWithConfidence('Residential address as printed'),
+                    placeOfBirth:   fieldWithConfidence('Place of birth city/country'),
+                    mrz:            fieldWithConfidence('Full MRZ line(s) verbatim'),
                   },
                   required: ['fullName','surname','firstName','middleName','dateOfBirth','gender','idNumber','documentNumber','nationality','expiryDate','issueDate','address','placeOfBirth','mrz'],
                   additionalProperties: false,
@@ -4747,6 +4759,58 @@ const pushRouter = router({
       });
       return result;
     }),
+
+  // Get VAPID key configuration status (admin-only)
+  getVapidStatus: adminProcedure.query(() => {
+    const hasPublic = !!ENV.vapidPublicKey;
+    const hasPrivate = !!ENV.vapidPrivateKey;
+    const hasFcm = !!ENV.fcmServerKey;
+    const isConfigured = hasPublic && hasPrivate;
+    return {
+      isConfigured,
+      hasFcmKey: hasFcm,
+      vapidPublicKey: isConfigured ? ENV.vapidPublicKey : null,
+      subject: ENV.vapidSubject,
+    };
+  }),
+
+  // Generate a fresh VAPID keypair (admin-only)
+  // Returns the keys so the admin can copy them into secrets.
+  // Does NOT persist them — they must be set as env vars.
+  generateVapidKeys: adminProcedure.mutation(async () => {
+    const webpush = (await import('web-push')).default;
+    const keys = webpush.generateVAPIDKeys();
+    return {
+      publicKey: keys.publicKey,
+      privateKey: keys.privateKey,
+      subject: ENV.vapidSubject,
+      instructions: [
+        'Copy these values into your project Secrets (Settings → Secrets):',
+        `VAPID_PUBLIC_KEY = ${keys.publicKey}`,
+        `VAPID_PRIVATE_KEY = ${keys.privateKey}`,
+        `VAPID_SUBJECT = ${ENV.vapidSubject}`,
+        'Then restart the server for the new keys to take effect.',
+      ].join('\n'),
+    };
+  }),
+
+  // Send a test push notification to all admin tokens (admin-only)
+  testBroadcast: adminProcedure.mutation(async ({ ctx }) => {
+    const db = await getDb();
+    if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
+    const adminUsers = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.role, 'admin'));
+    if (adminUsers.length === 0) return { sent: 0, failed: 0, deactivated: 0 };
+    const result = await broadcastPush(adminUsers.map(u => u.id), {
+      title: '🔔 BIS Push Test',
+      body: `Push notifications are working correctly. Triggered by ${ctx.user!.email ?? 'admin'}.`,
+      url: '/admin/settings/push',
+      tag: 'push-test',
+    });
+    return result;
+  }),
 
   // Broadcast a push notification to all users with active subscriptions (admin-only)
   broadcastToAll: adminProcedure

@@ -58,11 +58,14 @@ interface KycDoc {
   updatedAt: Date;
 }
 
+// OCR field can be a plain string (v1 schema) or a {value, confidence} object (v2 schema)
+type OcrFieldValue = string | null | { value: string | null; confidence: number };
+
 interface DocRow {
   doc: KycDoc;
   subjectName: string | null;
   kycStatus: string | null;
-  documentOcrData: Record<string, string | null> | null;
+  documentOcrData: Record<string, OcrFieldValue> | null;
 }
 
 // ─── Status config ────────────────────────────────────────────────────────────
@@ -106,7 +109,7 @@ function DocumentCard({
   onReview,
 }: {
   row: DocRow;
-  onReview: (doc: KycDoc, decision: Decision, ocrData?: Record<string, string | null> | null) => void;
+  onReview: (doc: KycDoc, decision: Decision, ocrData?: Record<string, OcrFieldValue> | null) => void;
 }) {
   const { doc, subjectName, kycStatus, documentOcrData } = row;
   const statusCfg = STATUS_CONFIG[doc.reviewStatus];
@@ -224,30 +227,88 @@ function DocumentCard({
 
 // ─── Review Dialog ────────────────────────────────────────────────────────────
 
-function OcrDataPanel({ ocrData }: { ocrData: Record<string, string | null> | null | undefined }) {
+// Normalise an OCR field value to {value, confidence} regardless of schema version
+function normaliseOcrField(raw: OcrFieldValue): { value: string | null; confidence: number } {
+  if (raw === null || raw === undefined) return { value: null, confidence: 0 };
+  if (typeof raw === 'string') return { value: raw, confidence: 1 }; // v1 schema — assume full confidence
+  return { value: raw.value, confidence: raw.confidence ?? 0 };
+}
+
+// Returns Tailwind classes for a confidence badge
+function confidenceClass(c: number): string {
+  if (c >= 0.85) return 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30';
+  if (c >= 0.5)  return 'bg-amber-500/15 text-amber-400 border-amber-500/30';
+  return 'bg-red-500/15 text-red-400 border-red-500/30';
+}
+
+function OcrDataPanel({ ocrData }: { ocrData: Record<string, OcrFieldValue> | null | undefined }) {
   if (!ocrData) return null;
-  const entries = Object.entries(ocrData).filter(([, v]) => v !== null && v !== undefined && v !== "");
-  if (entries.length === 0) return null;
+
   const LABELS: Record<string, string> = {
-    fullName: "Full Name", surname: "Surname", firstName: "First Name",
-    middleName: "Middle Name", dateOfBirth: "Date of Birth", gender: "Gender",
-    idNumber: "ID Number", documentNumber: "Document No.", nationality: "Nationality",
-    expiryDate: "Expiry Date", issueDate: "Issue Date", address: "Address",
-    placeOfBirth: "Place of Birth", mrz: "MRZ",
+    fullName: 'Full Name', surname: 'Surname', firstName: 'First Name',
+    middleName: 'Middle Name', dateOfBirth: 'Date of Birth', gender: 'Gender',
+    idNumber: 'ID Number', documentNumber: 'Document No.', nationality: 'Nationality',
+    expiryDate: 'Expiry Date', issueDate: 'Issue Date', address: 'Address',
+    placeOfBirth: 'Place of Birth', mrz: 'MRZ',
   };
+
+  const entries = Object.entries(ocrData)
+    .map(([k, raw]) => ({ key: k, ...normaliseOcrField(raw) }))
+    .filter(e => e.value !== null && e.value !== '');
+
+  if (entries.length === 0) return null;
+
+  const lowConfidenceCount = entries.filter(e => e.confidence < 0.5).length;
+  const medConfidenceCount = entries.filter(e => e.confidence >= 0.5 && e.confidence < 0.85).length;
+
   return (
     <div className="mt-3 rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-3">
-      <p className="text-[10px] font-mono font-semibold text-emerald-400 mb-2 flex items-center gap-1">
-        <span>🔍</span> OCR Extracted Fields
-      </p>
-      <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-        {entries.map(([k, v]) => (
-          <div key={k} className="flex flex-col">
-            <span className="text-[9px] font-mono text-muted-foreground uppercase tracking-wide">
-              {LABELS[k] ?? k}
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-[10px] font-mono font-semibold text-emerald-400 flex items-center gap-1">
+          <span>🔍</span> OCR Extracted Fields
+        </p>
+        <div className="flex items-center gap-1">
+          {lowConfidenceCount > 0 && (
+            <span className={cn('text-[9px] font-mono px-1.5 py-0.5 rounded border', confidenceClass(0))}>
+              {lowConfidenceCount} low
             </span>
-            <span className="text-[11px] font-mono text-foreground truncate" title={v ?? ""}>
-              {v}
+          )}
+          {medConfidenceCount > 0 && (
+            <span className={cn('text-[9px] font-mono px-1.5 py-0.5 rounded border', confidenceClass(0.6))}>
+              {medConfidenceCount} medium
+            </span>
+          )}
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+        {entries.map(({ key, value, confidence }) => (
+          <div key={key} className={cn(
+            'flex flex-col rounded px-1.5 py-1',
+            confidence < 0.5 ? 'bg-red-500/5 border border-red-500/20' :
+            confidence < 0.85 ? 'bg-amber-500/5 border border-amber-500/20' :
+            'bg-transparent border border-transparent'
+          )}>
+            <div className="flex items-center justify-between">
+              <span className="text-[9px] font-mono text-muted-foreground uppercase tracking-wide">
+                {LABELS[key] ?? key}
+              </span>
+              <span className={cn(
+                'text-[8px] font-mono px-1 py-0.5 rounded border',
+                confidenceClass(confidence)
+              )}>
+                {Math.round(confidence * 100)}%
+              </span>
+            </div>
+            <span
+              className={cn(
+                'text-[11px] font-mono truncate mt-0.5',
+                confidence < 0.5 ? 'text-red-300' :
+                confidence < 0.85 ? 'text-amber-300' :
+                'text-foreground'
+              )}
+              title={value ?? ''}
+            >
+              {value}
             </span>
           </div>
         ))}
@@ -266,7 +327,7 @@ function ReviewDialog({
 }: {
   doc: KycDoc | null;
   decision: Decision | null;
-  ocrData?: Record<string, string | null> | null;
+  ocrData?: Record<string, OcrFieldValue> | null;
   onConfirm: (note: string) => void;
   onCancel: () => void;
   isPending: boolean;
@@ -351,7 +412,7 @@ export default function DocumentReviewQueue() {
   const [statusFilter, setStatusFilter] = useState<ReviewStatus>("pending");
   const [cursor, setCursor] = useState<number | undefined>(undefined);
   const [cursorStack, setCursorStack] = useState<number[]>([]);
-  const [reviewTarget, setReviewTarget] = useState<{ doc: KycDoc; decision: Decision; ocrData?: Record<string, string | null> | null } | null>(null);
+  const [reviewTarget, setReviewTarget] = useState<{ doc: KycDoc; decision: Decision; ocrData?: Record<string, OcrFieldValue> | null } | null>(null);
 
   const utils = trpc.useUtils();
 
@@ -372,7 +433,7 @@ export default function DocumentReviewQueue() {
     },
   });
 
-  function handleReview(doc: KycDoc, decision: Decision, ocrData?: Record<string, string | null> | null) {
+  function handleReview(doc: KycDoc, decision: Decision, ocrData?: Record<string, OcrFieldValue> | null) {
     setReviewTarget({ doc, decision, ocrData });
   }
 

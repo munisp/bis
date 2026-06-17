@@ -2532,3 +2532,19 @@
 - [x] server/pushNotify.test.ts (12 tests)
 - [x] server/sanctionsWebhook.test.ts (10 tests)
 - [x] Push Sprint v37 to GitHub
+
+## Sprint v38
+
+- [x] push.generateVapidKeys tRPC mutation (admin-only, generates VAPID keypair)
+- [x] push.getVapidStatus tRPC query (returns whether VAPID keys are configured, never exposes private key)
+- [x] push.testBroadcast tRPC mutation (admin-only, sends a test push to all admin tokens)
+- [x] /admin/settings/push page (VAPID key status card, generate button, copy-to-clipboard, test broadcast, active tokens list, how-it-works guide)
+- [x] Add /admin/settings/push to BISLayout PLATFORM nav and ADMIN_ONLY_HREFS
+- [x] client/public/sw.js: enhanced push event handler (rich options, requireInteraction for critical, action buttons)
+- [x] client/public/sw.js: pushsubscriptionchange handler (auto-renews subscription with BIS server)
+- [x] BISLayout: register SW + request Notification permission + call push.registerToken on mount
+- [x] OCR LLM schema v2: per-field {value, confidence} objects replacing flat string values
+- [x] OcrDataPanel: per-field confidence badge (emerald/amber/red), row background tinting, low/medium count summary
+- [x] OcrFieldValue union type + normaliseOcrField() for backward-compatible v1/v2 schema handling
+- [x] server/vapidAdmin.test.ts (20 tests: VAPID generation, normaliseOcrField, confidenceClass, deactivation logic, status helper)
+- [x] Push Sprint v38 to GitHub
