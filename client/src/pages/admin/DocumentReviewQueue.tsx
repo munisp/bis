@@ -324,6 +324,8 @@ function ReviewDialog({
   onConfirm,
   onCancel,
   isPending,
+  onRerunOcr,
+  isRerunningOcr,
 }: {
   doc: KycDoc | null;
   decision: Decision | null;
@@ -331,6 +333,8 @@ function ReviewDialog({
   onConfirm: (note: string) => void;
   onCancel: () => void;
   isPending: boolean;
+  onRerunOcr?: () => void;
+  isRerunningOcr?: boolean;
 }) {
   const [note, setNote] = useState("");
 
@@ -355,6 +359,23 @@ function ReviewDialog({
         <div className="space-y-3 py-2">
           {/* OCR extracted fields — read-only preview */}
           <OcrDataPanel ocrData={ocrData} />
+          {onRerunOcr && (
+            <div className="flex justify-end">
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1.5 text-[10px] font-mono h-6 px-2"
+                onClick={onRerunOcr}
+                disabled={isRerunningOcr}
+                title="Re-extract document fields with AI OCR"
+              >
+                {isRerunningOcr
+                  ? <Loader2 size={10} className="animate-spin" />
+                  : <RefreshCw size={10} />}
+                Re-run OCR
+              </Button>
+            </div>
+          )}
 
           {requireNote && (
             <div className="space-y-1.5">
@@ -415,6 +436,15 @@ export default function DocumentReviewQueue() {
   const [reviewTarget, setReviewTarget] = useState<{ doc: KycDoc; decision: Decision; ocrData?: Record<string, OcrFieldValue> | null } | null>(null);
 
   const utils = trpc.useUtils();
+
+  const rerunOcrMutation = trpc.kyc.rerunOcr.useMutation({
+    onSuccess: () => {
+      toast.success("OCR re-run queued — results will appear in a few seconds");
+      // Refresh the list after a short delay to pick up updated OCR data
+      setTimeout(() => utils.kyc.listPendingDocuments.invalidate(), 3000);
+    },
+    onError: (err) => toast.error(`OCR re-run failed: ${err.message}`),
+  });
 
   const { data, isLoading, isError } = trpc.kyc.listPendingDocuments.useQuery({
     status: statusFilter,
@@ -576,6 +606,11 @@ export default function DocumentReviewQueue() {
         onConfirm={handleConfirm}
         onCancel={() => setReviewTarget(null)}
         isPending={reviewMutation.isPending}
+        onRerunOcr={reviewTarget?.doc
+          ? () => rerunOcrMutation.mutate({ documentId: reviewTarget.doc.id })
+          : undefined
+        }
+        isRerunningOcr={rerunOcrMutation.isPending}
       />
     </BISLayout>
   );

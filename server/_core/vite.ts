@@ -5,6 +5,24 @@ import { nanoid } from "nanoid";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import viteConfig from "../../vite.config";
+import { ENV } from "./env";
+
+/**
+ * Inject server-side runtime values as <meta> tags into the HTML shell.
+ * Currently injects:
+ *   - vapid-public-key: VAPID public key for Web Push subscription in the browser
+ */
+function injectServerMeta(html: string): string {
+  const metas: string[] = [];
+  if (ENV.vapidPublicKey) {
+    // Escape any quotes in the key (should not occur for base64url, but defensive)
+    const safeKey = ENV.vapidPublicKey.replace(/"/g, '&quot;');
+    metas.push(`<meta name="vapid-public-key" content="${safeKey}" />`);
+  }
+  if (metas.length === 0) return html;
+  // Insert before </head>
+  return html.replace('</head>', `${metas.join('\n  ')}\n</head>`);
+}
 
 export async function setupVite(app: Express, server: Server) {
   const serverOptions = {
@@ -38,6 +56,7 @@ export async function setupVite(app: Express, server: Server) {
         `src="/src/main.tsx"`,
         `src="/src/main.tsx?v=${nanoid()}"`
       );
+      template = injectServerMeta(template);
       const page = await vite.transformIndexHtml(url, template);
       res.status(200).set({ "Content-Type": "text/html" }).end(page);
     } catch (e) {
@@ -69,6 +88,8 @@ export function serveStatic(app: Express) {
     if (nonce) {
       html = html.replace(/<script/g, `<script nonce="${nonce}"`);
     }
+    // Inject server-side runtime meta tags (VAPID key, etc.)
+    html = injectServerMeta(html);
     res.setHeader("Content-Type", "text/html");
     res.send(html);
   });

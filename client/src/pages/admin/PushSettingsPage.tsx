@@ -14,10 +14,12 @@ import BISLayout from "@/components/BISLayout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
 import {
   Bell, BellOff, CheckCircle2, XCircle, RefreshCw, Loader2,
-  Copy, Check, Zap, Key, Smartphone, Globe,
+  Copy, Check, Zap, Key, Smartphone, Globe, Send,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -70,6 +72,11 @@ export default function PushSettingsPage() {
     instructions: string;
   } | null>(null);
 
+  // Broadcast form state
+  const [broadcastTitle, setBroadcastTitle] = useState("");
+  const [broadcastBody, setBroadcastBody] = useState("");
+  const [broadcastUrl, setBroadcastUrl] = useState("");
+
   const utils = trpc.useUtils();
 
   // ── Queries ──────────────────────────────────────────────────────────────────
@@ -104,6 +111,28 @@ export default function PushSettingsPage() {
     },
     onError: (err) => toast.error(`Deregister failed: ${err.message}`),
   });
+
+  const broadcastMutation = trpc.push.broadcastToAll.useMutation({
+    onSuccess: (result) => {
+      toast.success(`Broadcast sent — ${result.sent} delivered, ${result.failed} failed`);
+      setBroadcastTitle("");
+      setBroadcastBody("");
+      setBroadcastUrl("");
+    },
+    onError: (err) => toast.error(`Broadcast failed: ${err.message}`),
+  });
+
+  function handleBroadcast() {
+    if (!broadcastTitle.trim() || !broadcastBody.trim()) {
+      toast.error("Title and body are required");
+      return;
+    }
+    broadcastMutation.mutate({
+      title: broadcastTitle.trim(),
+      body: broadcastBody.trim(),
+      url: broadcastUrl.trim() || undefined,
+    });
+  }
 
   // ── Guard ─────────────────────────────────────────────────────────────────────
   if (!isAuthenticated || user?.role !== "admin") {
@@ -325,6 +354,61 @@ export default function PushSettingsPage() {
                 ))}
               </div>
             )}
+          </CardContent>
+        </Card>
+
+        {/* Send Broadcast */}
+        <Card className="border-border">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-mono flex items-center gap-2">
+              <Send size={14} className="text-primary" />
+              Send Platform Broadcast
+            </CardTitle>
+            <CardDescription className="text-xs">
+              Push an ad-hoc notification to all active push subscriptions across the platform.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="space-y-1">
+              <Label className="text-[10px] font-mono text-muted-foreground uppercase tracking-wide">Title *</Label>
+              <Input
+                value={broadcastTitle}
+                onChange={(e) => setBroadcastTitle(e.target.value)}
+                placeholder="e.g. Platform maintenance in 30 minutes"
+                className="text-xs font-mono h-8"
+                maxLength={80}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-[10px] font-mono text-muted-foreground uppercase tracking-wide">Body *</Label>
+              <Textarea
+                value={broadcastBody}
+                onChange={(e) => setBroadcastBody(e.target.value)}
+                placeholder="Notification message body…"
+                className="text-xs font-mono min-h-[70px] resize-none"
+                maxLength={200}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-[10px] font-mono text-muted-foreground uppercase tracking-wide">Action URL (optional)</Label>
+              <Input
+                value={broadcastUrl}
+                onChange={(e) => setBroadcastUrl(e.target.value)}
+                placeholder="https://… or /dashboard"
+                className="text-xs font-mono h-8"
+              />
+            </div>
+            <Button
+              size="sm"
+              className="gap-1.5 text-xs font-mono"
+              onClick={handleBroadcast}
+              disabled={broadcastMutation.isPending || !broadcastTitle.trim() || !broadcastBody.trim()}
+            >
+              {broadcastMutation.isPending
+                ? <Loader2 size={12} className="animate-spin" />
+                : <Send size={12} />}
+              Send Broadcast
+            </Button>
           </CardContent>
         </Card>
 
