@@ -79,6 +79,8 @@ import {
   kycDocuments,
   pushSubscriptions,
   pushBroadcasts,
+  scheduledBroadcasts,
+  kycOcrHistory,
 } from "../drizzle/schema";
 import {
   getDashboardStats,
@@ -1840,10 +1842,25 @@ const kycRouter = router({
       const [linkedRecord] = await db.select({ documentOcrData: kycRecords.documentOcrData })
         .from(kycRecords).where(eq(kycRecords.id, doc.kycRecordId)).limit(1);
       const existing = (linkedRecord?.documentOcrData as Record<string, unknown>) ?? {};
+      // Capture old value for history before overwriting
+      const oldField = existing[input.fieldName] as { value?: string | null; confidence?: number } | string | null | undefined;
+      const oldValue = typeof oldField === 'object' && oldField !== null ? (oldField as any).value ?? null : (oldField as string | null | undefined) ?? null;
+      const oldConfidence = typeof oldField === 'object' && oldField !== null ? (oldField as any).confidence ?? null : null;
       const merged = { ...existing, [input.fieldName]: extracted };
       await db.update(kycRecords)
         .set({ documentOcrData: merged, updatedAt: new Date() })
         .where(eq(kycRecords.id, doc.kycRecordId));
+
+      // Persist OCR history entry
+      await db.insert(kycOcrHistory).values({
+        documentId: input.documentId,
+        fieldName: input.fieldName,
+        oldValue: oldValue ? String(oldValue) : null,
+        oldConfidence: oldConfidence != null ? Number(oldConfidence) : null,
+        newValue: extracted.value ? String(extracted.value) : null,
+        newConfidence: extracted.confidence != null ? Number(extracted.confidence) : null,
+        triggeredBy: ctx.user!.id,
+      });
 
       await writeAuditLog(db, {
         userId: ctx.user!.id,
@@ -1854,6 +1871,20 @@ const kycRouter = router({
       });
 
       return { fieldName: input.fieldName, result: extracted };
+    }),
+
+  /**
+   * getOcrHistory: returns the OCR re-extraction history for a document.
+   */
+  getOcrHistory: protectedProcedure
+    .input(z.object({ documentId: z.number().int().positive() }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return [];
+      return db.select().from(kycOcrHistory)
+        .where(eq(kycOcrHistory.documentId, input.documentId))
+        .orderBy(desc(kycOcrHistory.createdAt))
+        .limit(200);
     }),
 });
 // ─── Audit Log Routerr ─────────────────────────────────────────────────────────
@@ -5129,6 +5160,118 @@ const pushRouter = router({
         byBrowser: browserRows.slice(0, 10).map(r => ({ label: r.deviceLabel ?? "Unknown", count: Number(r.count) })),
         recentRegistrations,
       };
+    }),
+
+  // ── Scheduled Broadcasts ───────────────────────────────────────────────────
+  scheduleBroadcast: adminProcedure
+    .input(z.object({
+      title: z.string().min(1).max(128),
+      body: z.string().min(1).max(512),
+      url: z.string().url().optional(),
+      tag: z.string().max(64).optional(),
+      scheduledAt: z.number().int().positive(), // Unix ms timestamp
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
+      const now = Date.now();
+      if (input.scheduledAt <= now) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'scheduledAt must be in the future' });
+      }
+      const [row] = await db.insert(scheduledBroadcasts).values({
+        title: input.title,
+        body: input.body,
+        url: input.url ?? null,
+        tag: input.tag ?? null,
+        scheduledAt: input.scheduledAt,
+        status: 'scheduled',
+        createdBy: ctx.user!.id,
+      }).returning();
+      return { id: row.id, scheduledAt: row.scheduledAt, status: row.status };
+    }),
+
+  cancelScheduledBroadcast: adminProcedure
+    .input(z.object({ id: z.number().int().positive() }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
+      const [row] = await db.select().from(scheduledBroadcasts)
+        .where(eq(scheduledBroadcasts.id, input.id));
+      if (!row) throw new TRPCError({ code: 'NOT_FOUND', message: 'Scheduled broadcast not found' });
+      if (row.status !== 'scheduled') {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: `Cannot cancel a broadcast with status '${row.status}'` });
+      }
+      await db.update(scheduledBroadcasts)
+        .set({ status: 'cancelled', updatedAt: new Date() })
+        .where(eq(scheduledBroadcasts.id, input.id));
+      return { id: input.id, status: 'cancelled' };
+    }),
+
+  listScheduledBroadcasts: adminProcedure
+    .input(z.object({
+      status: z.enum(['scheduled', 'sent', 'cancelled']).optional(),
+      limit: z.number().int().min(1).max(100).default(20),
+      offset: z.number().int().min(0).default(0),
+    }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return { items: [], total: 0 };
+      const conditions = input.status
+        ? [eq(scheduledBroadcasts.status, input.status)]
+        : [];
+      const [rows, totalRows] = await Promise.all([
+        db.select().from(scheduledBroadcasts)
+          .where(conditions.length ? and(...conditions) : undefined)
+          .orderBy(desc(scheduledBroadcasts.scheduledAt))
+          .limit(input.limit)
+          .offset(input.offset),
+        db.select({ count: sql<number>`count(*)` }).from(scheduledBroadcasts)
+          .where(conditions.length ? and(...conditions) : undefined),
+      ]);
+      return { items: rows, total: Number(totalRows[0]?.count ?? 0) };
+    }),
+
+  // ── Delivery Stats ─────────────────────────────────────────────────────────
+  getDeliveryStats: adminProcedure
+    .query(async () => {
+      const db = await getDb();
+      if (!db) return { daily: [], totals: { sent: 0, failed: 0, deactivated: 0 }, successRate: 100 };
+      const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      const rows = await db
+        .select({
+          sentAt: pushBroadcasts.sentAt,
+          sentCount: pushBroadcasts.sentCount,
+          failedCount: pushBroadcasts.failedCount,
+          deactivatedCount: pushBroadcasts.deactivatedCount,
+        })
+        .from(pushBroadcasts)
+        .where(sql`${pushBroadcasts.sentAt} >= ${thirtyDaysAgo}`)
+        .orderBy(asc(pushBroadcasts.sentAt));
+
+      // Aggregate per day
+      const buckets: Record<string, { sent: number; failed: number; deactivated: number }> = {};
+      for (const row of rows) {
+        const day = new Date(row.sentAt).toISOString().slice(0, 10);
+        if (!buckets[day]) buckets[day] = { sent: 0, failed: 0, deactivated: 0 };
+        buckets[day].sent += row.sentCount ?? 0;
+        buckets[day].failed += row.failedCount ?? 0;
+        buckets[day].deactivated += row.deactivatedCount ?? 0;
+      }
+
+      const daily = Object.entries(buckets)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([date, v]) => ({ date, ...v }));
+
+      const totals = daily.reduce(
+        (acc, d) => ({ sent: acc.sent + d.sent, failed: acc.failed + d.failed, deactivated: acc.deactivated + d.deactivated }),
+        { sent: 0, failed: 0, deactivated: 0 },
+      );
+
+      const successRate = totals.sent + totals.failed > 0
+        ? Math.round((totals.sent / (totals.sent + totals.failed)) * 100)
+        : 100;
+
+      return { daily, totals, successRate };
     }),
 });
 

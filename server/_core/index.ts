@@ -38,6 +38,7 @@ import { startRiskThresholdDigestScheduler } from "../riskThresholdDigest";
 import { startBiometricSpoofAlertScheduler } from "../biometricSpoofAlertScheduler";
 import { startBiometricSessionLogArchiver } from "../biometricSessionLogArchiver";
 import { startVapidRotationReminderScheduler } from "../vapidRotationReminder";
+import { startBroadcastScheduler } from "../broadcastScheduler";
 import { validateEnv } from "../envValidation";
 import { ENV } from "./env";
 
@@ -988,6 +989,7 @@ startServer()
     startBiometricSpoofAlertScheduler(); // Hourly biometric spoof-attack alert (ISO 30107-3)
     startBiometricSessionLogArchiver();   // Weekly biometric session log archival (90d hot→cold S3)
     startVapidRotationReminderScheduler(); // Daily VAPID key age check — notifies owner after 90 days
+    startBroadcastScheduler(); // 1-min poll for overdue scheduled broadcasts
     return srv;
   })
   .catch((err) => {

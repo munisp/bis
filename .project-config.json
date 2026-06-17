@@ -12,10 +12,10 @@
   "experiments": null,
   "git_remote": {
     "repo_url": "s3://vida-prod-gitrepo/webdev-git/310519663412555753/NigNpTxRrpwoLqf7dXXspm",
-    "access_key_id": "ASIAZV3A2ECZL7OA7W5L",
-    "secret_access_key": "4XLrWXDUThfnxmoC5F9Yt/hPPlqLlgMqzkow2QRt",
-    "session_token": "IQoJb3JpZ2luX2VjELT//////////wEaCXVzLWVhc3QtMSJHMEUCIH5UCmayJS3vTP+Nd8Uy9MMUlNpRC8n0aW3YhnRk1lveAiEAgY6wmeHCi40+qoAHHbdZA2LZW365k7SEVZmhDBDJr4Eq9gMIfRAEGgw2NjUzODYwOTg4NjYiDFb0L22N0op2Pr88ECrTA4Pkdy4rTeJWOFFAJ1IQNNqwH9qDGLGVNqD3eNu21xHOtZH4zHx6GqOSHCF9YWqxl29tsbVk7XCn07Q2QP6aopViIw0DP2F6vu+zEAbxIfm4chthXDWMWOVnX2dPwrVwodHBjUoqBfutpFyHAEwaddY1nLtWLq3FqTBmZ/dfJDamqfSgr1a3atJz9cny7je0QJQzS1zsFEsjEFRZ3n+xxxc7V57ykCk6JAVFDUYd4OuOug4F6chkCui++1d+rSe54tvxitq29pK4ibW21RLg7BbEEVt/8ZkS+sJ34d9ujJHn1zsLLjqU/7zffcOB9MqaXcX6YEviItcRS94JAgQP55fj0at8eb26tCziM1LnRstFY8r23hSQNVbF0/ctb0MGRQLSRff2a/VSWbGq4JhIx6En7Y3zS0yXXl1rM9Gp0ffhwafENKsqYI61apRyFQ4Ois8j3lp2+E8HMM5IVgSYqFF99gclHcW8O3DtPbonQavY49xtzJFl1Za++/p02DTqNSjPntLomNOBhaUbni+0gymZC54jRGv2yJoULZaorAVVKwMFFZZmszCPbPMhHAgqZHfvKRXuTsBoceAS61KBxANiAuU5hFvwcWIeGahIQWKmE0NUMP/HxtEGOp0BojCsZlWFWE2nmkceo8dEwb+XzMcHDEJuqnvtQvfefN0h87BeRXZ3IeL6+6hchBkUaNm6Vqs9WrVhGjfrwGcAIFo8eA4BwLJyrGpEdx1sFOpJmtLDhsO4tiJLJEhLi4AOWwwnO5ZAcefA05DP7Z3CuUr6PJ4sVgSeH7DhoKEIwufFwzOTGFea28ciTu5uPj1A22nNL0gA3w6C9e8Xqg==",
-    "expiration": "2026-06-17T07:29:03.000Z"
+    "access_key_id": "ASIAZV3A2ECZC5WW4HGT",
+    "secret_access_key": "XJ+6DpJMOfuOvE6eaII3U+ttVBvFZ5CBaAxxua/h",
+    "session_token": "IQoJb3JpZ2luX2VjEMH//////////wEaCXVzLWVhc3QtMSJGMEQCIEjKvz8mWM7OAn0T9TAAwricpql2Ini57RsmMa7zqSObAiBdAJkFdWC7l59wZuwcw0TsAD2HDGyT0SFp8vWJYI1C7Sr/AwiK//////////8BEAQaDDY2NTM4NjA5ODg2NiIM5sQCxy6+8QqNLPl5KtMDCB9jv8Bcki3UsBIrLCfSI9qacKdnWY84HTFR/lMZCFTcu9iHqQbw4rPVWqztnG1Yn/d+i2T6bkMNTn14kYIWeatb9iHQIxIC+sn6dZm0uyHw8VkYCf2F5xr/fMjbwr4sYIt5R7vqiEj+nZd9GkY9Bwg4O4fkUjl2aXYEQawf4jiIaQFXKS7nJkI7oI6n1iUDLZacaxCHPuprGy42/v7uF6TmTbI7y6LsD7e2yjGKJ1V7Gnh/POPnU+pgioG8mu1m3Qrqb+fr9dI8ZHlL66rKn4U5nkjsTdf/dyl13QrFJwW0YEegpUeL6+sfMeQw5h62Du+jfqfsF503A5N3SdpvtcuF+HKL7A7FVhdVmIXl54ycfuJvaEdAcT2h4fvxVksjN29IDeexD9yEJJRJoPAzL7pFE4unsUYLifMqlkhhJAA8rfVPifeObHHR8lFdEa0dztewy2ihINragdFui7bzaWeReqygMKKGWEEO4oPR9KaUzWasiUKZXYkXr3NN99/zMsqE5phf03f+IRMoCtqZMVv/SsyNc5cm4NIijYwyZsCGnrYARYdx8OJlSkDTR9pdb+GtqjLfaNEseDNeyLdobzqFY9Svz2TJpH3QLBb8K/GZlcIws7bJ0QY6ngE5kUXk/Fb/3rSc3B2gE/+1oI6+fEGEpVQGMvQ674L7sWnqq3AlvTwUSjBIyhdhtZ2as0cqcHsDpW3h5Z/sMuSsjluDIpbSJclQJHYsrB/pJm0h5zI1giFXVhplCqVoTzVa+z+7HV9oT8dX470ve64zZHy6W74ZjKPaF7XK15lvwvmu8UCf3TSvAoxeiUGn+3YRnskzHRVMcsHQguzVfg==",
+    "expiration": "2026-06-17T20:30:43.000Z"
   },
   "name": "bis-pwa",
   "path": "/home/ubuntu/bis-pwa",
