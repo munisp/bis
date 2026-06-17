@@ -76,10 +76,14 @@ export default function PushSettingsPage() {
   const [broadcastTitle, setBroadcastTitle] = useState("");
   const [broadcastBody, setBroadcastBody] = useState("");
   const [broadcastUrl, setBroadcastUrl] = useState("");
+  const [broadcastTag, setBroadcastTag] = useState("");
 
-  // Broadcast history pagination
+  // Broadcast history pagination + tag filter
   const [historyOffset, setHistoryOffset] = useState(0);
+  const [historyTagFilter, setHistoryTagFilter] = useState("");
   const HISTORY_PAGE_SIZE = 10;
+
+  const BROADCAST_TAGS = ["maintenance", "compliance", "alert", "update", "security"];
 
   const utils = trpc.useUtils();
 
@@ -93,9 +97,13 @@ export default function PushSettingsPage() {
   });
 
   const { data: broadcastHistory, isLoading: historyLoading } = trpc.push.listBroadcasts.useQuery(
-    { limit: HISTORY_PAGE_SIZE, offset: historyOffset },
+    { limit: HISTORY_PAGE_SIZE, offset: historyOffset, tagFilter: historyTagFilter || undefined },
     { enabled: isAuthenticated && user?.role === "admin" }
   );
+
+  const { data: subStats, isLoading: statsLoading } = trpc.push.getSubscriptionStats.useQuery(undefined, {
+    enabled: isAuthenticated && user?.role === "admin",
+  });
 
   // ── Mutations ─────────────────────────────────────────────────────────────────
   const generateMutation = trpc.push.generateVapidKeys.useMutation({
@@ -127,6 +135,8 @@ export default function PushSettingsPage() {
       setBroadcastTitle("");
       setBroadcastBody("");
       setBroadcastUrl("");
+      setBroadcastTag("");
+      utils.push.listBroadcasts.invalidate();
     },
     onError: (err) => toast.error(`Broadcast failed: ${err.message}`),
   });
@@ -140,6 +150,7 @@ export default function PushSettingsPage() {
       title: broadcastTitle.trim(),
       body: broadcastBody.trim(),
       url: broadcastUrl.trim() || undefined,
+      tag: broadcastTag.trim() || undefined,
     });
   }
 
@@ -366,6 +377,86 @@ export default function PushSettingsPage() {
           </CardContent>
         </Card>
 
+        {/* Subscription Analytics */}
+        {user?.role === "admin" && (
+          <Card className="border-border">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-mono flex items-center gap-2">
+                <Zap size={14} className="text-primary" />
+                Subscription Analytics
+              </CardTitle>
+              <CardDescription className="text-xs">
+                Active push subscriptions by platform and 30-day registration trend.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {statsLoading ? (
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Loader2 size={12} className="animate-spin" /> Loading stats…
+                </div>
+              ) : !subStats ? (
+                <p className="text-xs font-mono text-muted-foreground">No data available.</p>
+              ) : (
+                <div className="space-y-4">
+                  {/* Total + platform breakdown */}
+                  <div className="flex items-center gap-4 flex-wrap">
+                    <div className="flex flex-col">
+                      <span className="text-2xl font-mono font-bold text-foreground">{subStats.total}</span>
+                      <span className="text-[10px] font-mono text-muted-foreground">total active</span>
+                    </div>
+                    <div className="flex gap-2 flex-wrap">
+                      {subStats.byPlatform.map((p) => (
+                        <div key={p.platform} className="flex items-center gap-1.5 rounded-lg border border-border bg-muted/10 px-3 py-1.5">
+                          {p.platform === "fcm"
+                            ? <Smartphone size={12} className="text-primary" />
+                            : <Globe size={12} className="text-blue-400" />}
+                          <span className="text-[11px] font-mono text-foreground">{p.count}</span>
+                          <span className="text-[10px] font-mono text-muted-foreground">{p.platform}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  {/* 30-day registration sparkline (text-based bar chart) */}
+                  {subStats.recentRegistrations.length > 0 && (
+                    <div>
+                      <p className="text-[10px] font-mono text-muted-foreground mb-1.5">Registrations — last 30 days</p>
+                      <div className="flex items-end gap-0.5 h-12">
+                        {(() => {
+                          const max = Math.max(...subStats.recentRegistrations.map(r => r.count), 1);
+                          return subStats.recentRegistrations.map((r) => (
+                            <div
+                              key={r.date}
+                              title={`${r.date}: ${r.count}`}
+                              className="flex-1 bg-primary/40 rounded-sm min-h-[2px] hover:bg-primary/70 transition-colors"
+                              style={{ height: `${Math.max(4, (r.count / max) * 48)}px` }}
+                            />
+                          ));
+                        })()}
+                      </div>
+                    </div>
+                  )}
+                  {/* Top browsers */}
+                  {subStats.byBrowser.length > 0 && (
+                    <div>
+                      <p className="text-[10px] font-mono text-muted-foreground mb-1.5">Top devices/browsers</p>
+                      <div className="space-y-1">
+                        {subStats.byBrowser.slice(0, 5).map((b) => (
+                          <div key={b.label} className="flex items-center gap-2">
+                            <span className="text-[10px] font-mono text-foreground truncate flex-1" title={b.label}>
+                              {b.label}
+                            </span>
+                            <span className="text-[10px] font-mono text-muted-foreground">{b.count}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
         {/* Broadcast History */}
         {user?.role === "admin" && (
           <Card className="border-border">
@@ -378,7 +469,38 @@ export default function PushSettingsPage() {
                 Audit log of all platform-wide push broadcasts sent from this page.
               </CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-3">
+              {/* Tag filter chips */}
+              <div className="flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => { setHistoryTagFilter(""); setHistoryOffset(0); }}
+                  className={cn(
+                    "text-[10px] font-mono px-2 py-0.5 rounded-full border transition-colors",
+                    !historyTagFilter
+                      ? "bg-primary/20 text-primary border-primary/40"
+                      : "border-border text-muted-foreground hover:border-primary/30"
+                  )}
+                >
+                  All
+                </button>
+                {BROADCAST_TAGS.map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => { setHistoryTagFilter(historyTagFilter === t ? "" : t); setHistoryOffset(0); }}
+                    className={cn(
+                      "text-[10px] font-mono px-2 py-0.5 rounded-full border transition-colors",
+                      historyTagFilter === t
+                        ? "bg-primary/20 text-primary border-primary/40"
+                        : "border-border text-muted-foreground hover:border-primary/30"
+                    )}
+                  >
+                    {t}
+                  </button>
+                ))}
+              </div>
+
               {historyLoading ? (
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
                   <Loader2 size={12} className="animate-spin" /> Loading history…
@@ -396,6 +518,7 @@ export default function PushSettingsPage() {
                         <tr className="border-b border-border text-muted-foreground">
                           <th className="text-left pb-2 pr-3">Title</th>
                           <th className="text-left pb-2 pr-3">Body</th>
+                          <th className="text-left pb-2 pr-3">Tag</th>
                           <th className="text-right pb-2 pr-3">Sent</th>
                           <th className="text-right pb-2 pr-3">Failed</th>
                           <th className="text-right pb-2">Date</th>
@@ -406,6 +529,13 @@ export default function PushSettingsPage() {
                           <tr key={bc.id} className="border-b border-border/40 hover:bg-muted/10">
                             <td className="py-1.5 pr-3 max-w-[120px] truncate" title={bc.title}>{bc.title}</td>
                             <td className="py-1.5 pr-3 max-w-[160px] truncate text-muted-foreground" title={bc.body}>{bc.body}</td>
+                            <td className="py-1.5 pr-3">
+                              {bc.tag && (
+                                <span className="inline-flex text-[9px] font-mono px-1.5 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
+                                  {bc.tag}
+                                </span>
+                              )}
+                            </td>
                             <td className="py-1.5 pr-3 text-right text-emerald-400">{bc.sentCount}</td>
                             <td className="py-1.5 pr-3 text-right text-red-400">{bc.failedCount}</td>
                             <td className="py-1.5 text-right text-muted-foreground whitespace-nowrap">
@@ -490,6 +620,33 @@ export default function PushSettingsPage() {
                 placeholder="https://… or /dashboard"
                 className="text-xs font-mono h-8"
               />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-[10px] font-mono text-muted-foreground uppercase tracking-wide">Tag (optional)</Label>
+              <div className="flex flex-wrap gap-1.5">
+                {BROADCAST_TAGS.map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => setBroadcastTag(broadcastTag === t ? "" : t)}
+                    className={cn(
+                      "text-[10px] font-mono px-2 py-0.5 rounded-full border transition-colors",
+                      broadcastTag === t
+                        ? "bg-primary/20 text-primary border-primary/40"
+                        : "border-border text-muted-foreground hover:border-primary/30"
+                    )}
+                  >
+                    {t}
+                  </button>
+                ))}
+                <Input
+                  value={BROADCAST_TAGS.includes(broadcastTag) ? "" : broadcastTag}
+                  onChange={(e) => setBroadcastTag(e.target.value)}
+                  placeholder="custom tag…"
+                  className="text-[10px] font-mono h-6 w-28 px-2"
+                  maxLength={32}
+                />
+              </div>
             </div>
             <Button
               size="sm"
