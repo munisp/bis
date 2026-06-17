@@ -2575,3 +2575,19 @@
 - [x] server/_core/index.ts: startVapidRotationReminderScheduler() wired into startup block
 - [x] server/sprint40.test.ts: 26 tests (OCR diff, normaliseOcrField, push_broadcasts schema, VAPID rotation, listBroadcasts pagination)
 - [x] Push Sprint v40 to GitHub
+
+## Sprint v41
+
+- [x] push.broadcastToAll: tag field already present in schema — wired through from form to DB
+- [x] PushSettingsPage: tag selector with 5 preset chips (maintenance/compliance/alert/update/security) + free-text input
+- [x] push.listBroadcasts: tagFilter param added — filters by exact tag match with correct count
+- [x] PushSettingsPage: tag filter chip row in Broadcast History (All + preset tags, resets offset on change)
+- [x] Broadcast History table: Tag column added
+- [x] push.broadcastToAll onSuccess: invalidates listBroadcasts cache
+- [x] kyc.reextractField adminProcedure: targeted LLM prompt for single field, merges into kycRecords.documentOcrData, writes audit log
+- [x] OcrDataPanel: per-field ↺ re-extract button (hover-reveal, spinner while pending, updates ocrData in-place on success)
+- [x] DocumentReviewQueue: reextractFieldMutation + handleReextractField + reextractingField state wired through to ReviewDialog → OcrDataPanel
+- [x] push.getSubscriptionStats adminProcedure: total active, byPlatform, byBrowser (top 10), 30-day registration histogram
+- [x] PushSettingsPage: Subscription Analytics card (total count, platform chips, text-bar histogram, top device list)
+- [x] server/sprint41.test.ts: 22 tests (broadcast tagging, reextractField schema, stats aggregation, histogram bucketing)
+- [x] Push Sprint v41 to GitHub

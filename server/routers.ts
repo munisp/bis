@@ -1764,6 +1764,97 @@ const kycRouter = router({
       });
       return { queued: true, documentId: input.documentId };
     }),
+
+  /**
+   * reextractField: admin-only — targeted LLM re-extraction for a single OCR field.
+   * Useful when one specific field has low confidence but the rest are fine.
+   * Returns the updated {value, confidence} for the requested field and persists
+   * the merged result back to kycRecords.documentOcrData.
+   */
+  reextractField: adminProcedure
+    .input(z.object({
+      documentId: z.number().int().positive(),
+      fieldName: z.string().min(1).max(64),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Database unavailable' });
+      const [doc] = await db.select().from(kycDocuments).where(eq(kycDocuments.id, input.documentId)).limit(1);
+      if (!doc) throw new TRPCError({ code: 'NOT_FOUND', message: 'Document not found' });
+
+      const { invokeLLM } = await import('./_core/llm');
+
+      // Build a targeted prompt for just the requested field
+      const fieldDescriptions: Record<string, string> = {
+        fullName: 'full legal name (first + middle + last)',
+        surname: 'family/last name only',
+        firstName: 'given/first name only',
+        middleName: 'middle name only',
+        dateOfBirth: 'date of birth in ISO 8601 format (YYYY-MM-DD)',
+        gender: 'gender (M, F, or X)',
+        idNumber: 'national ID number',
+        documentNumber: 'document/passport number',
+        nationality: 'nationality as ISO 3166-1 alpha-3 code',
+        expiryDate: 'document expiry date in ISO 8601 format',
+        issueDate: 'document issue date in ISO 8601 format',
+        address: 'full residential address',
+        placeOfBirth: 'place of birth (city/country)',
+        mrz: 'machine-readable zone (MRZ) line(s)',
+      };
+      const fieldDesc = fieldDescriptions[input.fieldName] ?? input.fieldName;
+
+      const ocrResponse = await invokeLLM({
+        messages: [
+          { role: 'system', content: 'You are a document OCR assistant. Extract a single field from an identity document. Respond with valid JSON only.' },
+          {
+            role: 'user',
+            content: [
+              { type: 'image_url', image_url: { url: doc.fileUrl, detail: 'high' } },
+              { type: 'text', text: `Extract ONLY the "${input.fieldName}" field (${fieldDesc}) from this document. Return JSON: {"value": "...", "confidence": 0.0-1.0}. Use null value and 0 confidence if the field is not visible or unreadable.` },
+            ],
+          },
+        ],
+        response_format: {
+          type: 'json_schema',
+          json_schema: {
+            name: 'single_field_ocr',
+            strict: true,
+            schema: {
+              type: 'object',
+              properties: {
+                value:      { type: ['string', 'null'], description: fieldDesc },
+                confidence: { type: 'number', description: 'Extraction confidence 0–1.' },
+              },
+              required: ['value', 'confidence'],
+              additionalProperties: false,
+            },
+          },
+        },
+      });
+
+      const raw = ocrResponse?.choices?.[0]?.message?.content;
+      if (!raw) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'LLM returned no content' });
+      const extracted = typeof raw === 'string' ? JSON.parse(raw) : raw;
+
+      // Merge the updated field into the existing documentOcrData
+      const [linkedRecord] = await db.select({ documentOcrData: kycRecords.documentOcrData })
+        .from(kycRecords).where(eq(kycRecords.id, doc.kycRecordId)).limit(1);
+      const existing = (linkedRecord?.documentOcrData as Record<string, unknown>) ?? {};
+      const merged = { ...existing, [input.fieldName]: extracted };
+      await db.update(kycRecords)
+        .set({ documentOcrData: merged, updatedAt: new Date() })
+        .where(eq(kycRecords.id, doc.kycRecordId));
+
+      await writeAuditLog(db, {
+        userId: ctx.user!.id,
+        category: 'kyc',
+        action: `OCR field re-extracted: ${input.fieldName}`,
+        targetRef: `kyc-${doc.kycRecordId}`,
+        detail: { documentId: input.documentId, fieldName: input.fieldName, result: extracted },
+      });
+
+      return { fieldName: input.fieldName, result: extracted };
+    }),
 });
 // ─── Audit Log Routerr ─────────────────────────────────────────────────────────
 
@@ -4961,18 +5052,83 @@ const pushRouter = router({
     .input(z.object({
       limit: z.number().min(1).max(100).default(20),
       offset: z.number().default(0),
+      tagFilter: z.string().optional(),
     }))
     .query(async ({ input }) => {
       const db = await getDb();
       if (!db) return { items: [], total: 0 };
+      const whereClause = input.tagFilter
+        ? eq(pushBroadcasts.tag, input.tagFilter)
+        : undefined;
       const [items, countResult] = await Promise.all([
         db.select().from(pushBroadcasts)
+          .where(whereClause)
           .orderBy(desc(pushBroadcasts.sentAt))
           .limit(input.limit)
           .offset(input.offset),
-        db.select({ count: sql<number>`count(*)` }).from(pushBroadcasts),
+        db.select({ count: sql<number>`count(*)` }).from(pushBroadcasts)
+          .where(whereClause),
       ]);
       return { items, total: Number(countResult[0]?.count ?? 0) };
+    }),
+
+  /**
+   * getSubscriptionStats: admin-only stats on active push subscriptions.
+   * Returns platform breakdown (webpush vs fcm), browser distribution,
+   * and a 30-day registration histogram.
+   */
+  getSubscriptionStats: adminProcedure
+    .query(async () => {
+      const db = await getDb();
+      if (!db) return { total: 0, byPlatform: [], byBrowser: [], recentRegistrations: [] };
+
+      const [allActive, platformRows, browserRows] = await Promise.all([
+        // Total active subscriptions
+        db.select({ count: sql<number>`count(*)` })
+          .from(pushSubscriptions)
+          .where(eq(pushSubscriptions.active, true)),
+        // Group by platform
+        db.select({
+          platform: pushSubscriptions.platform,
+          count: sql<number>`count(*)`,
+        })
+          .from(pushSubscriptions)
+          .where(eq(pushSubscriptions.active, true))
+          .groupBy(pushSubscriptions.platform),
+        // Group by browser (deviceLabel heuristic)
+        db.select({
+          deviceLabel: pushSubscriptions.deviceLabel,
+          count: sql<number>`count(*)`,
+        })
+          .from(pushSubscriptions)
+          .where(eq(pushSubscriptions.active, true))
+          .groupBy(pushSubscriptions.deviceLabel)
+          .orderBy(desc(sql<number>`count(*)`)),
+      ]);
+
+      // 30-day registration histogram (one bucket per day)
+      const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      const recentRows = await db
+        .select({ createdAt: pushSubscriptions.createdAt })
+        .from(pushSubscriptions)
+        .where(sql`${pushSubscriptions.createdAt} >= ${thirtyDaysAgo}`);
+
+      // Build day buckets
+      const buckets: Record<string, number> = {};
+      for (const row of recentRows) {
+        const day = new Date(row.createdAt).toISOString().slice(0, 10);
+        buckets[day] = (buckets[day] ?? 0) + 1;
+      }
+      const recentRegistrations = Object.entries(buckets)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([date, count]) => ({ date, count }));
+
+      return {
+        total: Number(allActive[0]?.count ?? 0),
+        byPlatform: platformRows.map(r => ({ platform: r.platform, count: Number(r.count) })),
+        byBrowser: browserRows.slice(0, 10).map(r => ({ label: r.deviceLabel ?? "Unknown", count: Number(r.count) })),
+        recentRegistrations,
+      };
     }),
 });
 

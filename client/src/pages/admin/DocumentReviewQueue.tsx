@@ -242,7 +242,17 @@ function confidenceClass(c: number): string {
   return 'bg-red-500/15 text-red-400 border-red-500/30';
 }
 
-function OcrDataPanel({ ocrData }: { ocrData: Record<string, OcrFieldValue> | null | undefined }) {
+function OcrDataPanel({
+  ocrData,
+  documentId,
+  onReextract,
+  reextractingField,
+}: {
+  ocrData: Record<string, OcrFieldValue> | null | undefined;
+  documentId?: number;
+  onReextract?: (fieldName: string) => void;
+  reextractingField?: string | null;
+}) {
   if (!ocrData) return null;
 
   const LABELS: Record<string, string> = {
@@ -284,7 +294,7 @@ function OcrDataPanel({ ocrData }: { ocrData: Record<string, OcrFieldValue> | nu
       <div className="grid grid-cols-2 gap-x-4 gap-y-2">
         {entries.map(({ key, value, confidence }) => (
           <div key={key} className={cn(
-            'flex flex-col rounded px-1.5 py-1',
+            'flex flex-col rounded px-1.5 py-1 group',
             confidence < 0.5 ? 'bg-red-500/5 border border-red-500/20' :
             confidence < 0.85 ? 'bg-amber-500/5 border border-amber-500/20' :
             'bg-transparent border border-transparent'
@@ -293,12 +303,31 @@ function OcrDataPanel({ ocrData }: { ocrData: Record<string, OcrFieldValue> | nu
               <span className="text-[9px] font-mono text-muted-foreground uppercase tracking-wide">
                 {LABELS[key] ?? key}
               </span>
-              <span className={cn(
-                'text-[8px] font-mono px-1 py-0.5 rounded border',
-                confidenceClass(confidence)
-              )}>
-                {Math.round(confidence * 100)}%
-              </span>
+              <div className="flex items-center gap-1">
+                {onReextract && documentId && (
+                  <button
+                    type="button"
+                    title={`Re-extract ${LABELS[key] ?? key} with AI`}
+                    onClick={() => onReextract(key)}
+                    disabled={!!reextractingField}
+                    className={cn(
+                      'opacity-0 group-hover:opacity-100 transition-opacity text-[8px] font-mono px-1 py-0.5 rounded border',
+                      'border-primary/30 text-primary hover:bg-primary/10 disabled:opacity-30',
+                      reextractingField === key && 'opacity-100'
+                    )}
+                  >
+                    {reextractingField === key
+                      ? <Loader2 size={8} className="animate-spin inline" />
+                      : '↺'}
+                  </button>
+                )}
+                <span className={cn(
+                  'text-[8px] font-mono px-1 py-0.5 rounded border',
+                  confidenceClass(confidence)
+                )}>
+                  {Math.round(confidence * 100)}%
+                </span>
+              </div>
             </div>
             <span
               className={cn(
@@ -447,6 +476,8 @@ function ReviewDialog({
   isPending,
   onRerunOcr,
   isRerunningOcr,
+  onReextract,
+  reextractingField,
 }: {
   doc: KycDoc | null;
   decision: Decision | null;
@@ -457,6 +488,8 @@ function ReviewDialog({
   isPending: boolean;
   onRerunOcr?: () => void;
   isRerunningOcr?: boolean;
+  onReextract?: (fieldName: string) => void;
+  reextractingField?: string | null;
 }) {
   const [note, setNote] = useState("");
 
@@ -482,7 +515,12 @@ function ReviewDialog({
           {/* OCR diff view — shown when previousOcrData exists (after a re-run) */}
           {previousOcrData && ocrData
             ? <OcrDiffPanel before={previousOcrData} after={ocrData} />
-            : <OcrDataPanel ocrData={ocrData} />
+            : <OcrDataPanel
+                ocrData={ocrData}
+                documentId={doc?.id}
+                onReextract={onReextract}
+                reextractingField={reextractingField}
+              />
           }
           {onRerunOcr && (
             <div className="flex justify-end">
@@ -562,6 +600,8 @@ export default function DocumentReviewQueue() {
 
   const utils = trpc.useUtils();
 
+  const [reextractingField, setReextractingField] = useState<string | null>(null);
+
   const rerunOcrMutation = trpc.kyc.rerunOcr.useMutation({
     onSuccess: () => {
       toast.success("OCR re-run queued — results will appear in a few seconds");
@@ -570,6 +610,30 @@ export default function DocumentReviewQueue() {
     },
     onError: (err) => toast.error(`OCR re-run failed: ${err.message}`),
   });
+
+  const reextractFieldMutation = trpc.kyc.reextractField.useMutation({
+    onSuccess: (data) => {
+      const conf = Math.round((data.result.confidence ?? 0) * 100);
+      toast.success(`Re-extracted "${data.fieldName}" — confidence ${conf}%`);
+      setReextractingField(null);
+      // Update the reviewTarget ocrData in-place so the panel refreshes immediately
+      setReviewTarget(prev => {
+        if (!prev) return prev;
+        const updatedOcrData = { ...(prev.ocrData ?? {}), [data.fieldName]: data.result };
+        return { ...prev, ocrData: updatedOcrData };
+      });
+    },
+    onError: (err) => {
+      toast.error(`Re-extraction failed: ${err.message}`);
+      setReextractingField(null);
+    },
+  });
+
+  function handleReextractField(fieldName: string) {
+    if (!reviewTarget?.doc?.id) return;
+    setReextractingField(fieldName);
+    reextractFieldMutation.mutate({ documentId: reviewTarget.doc.id, fieldName });
+  }
 
   const { data, isLoading, isError } = trpc.kyc.listPendingDocuments.useQuery({
     status: statusFilter,
@@ -737,6 +801,8 @@ export default function DocumentReviewQueue() {
           : undefined
         }
         isRerunningOcr={rerunOcrMutation.isPending}
+        onReextract={reviewTarget?.doc ? handleReextractField : undefined}
+        reextractingField={reextractingField}
       />
     </BISLayout>
   );
