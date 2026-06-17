@@ -2548,3 +2548,13 @@
 - [x] OcrFieldValue union type + normaliseOcrField() for backward-compatible v1/v2 schema handling
 - [x] server/vapidAdmin.test.ts (20 tests: VAPID generation, normaliseOcrField, confidenceClass, deactivation logic, status helper)
 - [x] Push Sprint v38 to GitHub
+
+## Sprint v39
+
+- [x] server/_core/vite.ts: injectServerMeta() helper injects <meta name="vapid-public-key"> before </head> in both dev (setupVite) and prod (serveStatic) HTML shells
+- [x] BISLayout: reads vapid-public-key meta tag — Web Push subscription now works end-to-end without extra API round-trip
+- [x] /admin/settings/push: Send Platform Broadcast card with title, body, optional action URL — calls push.broadcastToAll, clears form on success
+- [x] kyc.rerunOcr tRPC mutation (adminProcedure): re-triggers async LLM OCR on existing document fileUrl, writes audit log, returns { queued, documentId }
+- [x] DocumentReviewQueue: Re-run OCR button in ReviewDialog (visible when ocrData present), calls kyc.rerunOcr, invalidates list after 3s
+- [x] server/sprint39.test.ts: 26 tests (injectServerMeta, broadcastForm validation, rerunOcr schema, broadcastToAll schema, invalidation timing)
+- [x] Push Sprint v39 to GitHub

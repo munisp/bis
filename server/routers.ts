@@ -1664,6 +1664,91 @@ const kycRouter = router({
       });
       return { id: updated.id, reviewStatus: updated.reviewStatus };
     }),
+
+  /**
+   * rerunOcr: admin-only — re-triggers LLM OCR on an existing document's fileUrl.
+   * Useful when the first OCR attempt returned low-confidence fields.
+   */
+  rerunOcr: adminProcedure
+    .input(z.object({
+      documentId: z.number().int().positive(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Database unavailable' });
+      const [doc] = await db.select().from(kycDocuments).where(eq(kycDocuments.id, input.documentId)).limit(1);
+      if (!doc) throw new TRPCError({ code: 'NOT_FOUND', message: 'Document not found' });
+
+      // Trigger OCR asynchronously — same logic as uploadDocument
+      ;(async () => {
+        try {
+          const { invokeLLM } = await import('./_core/llm');
+          const fieldWithConfidence = (description: string) => ({
+            type: 'object',
+            properties: {
+              value:      { type: ['string', 'null'], description },
+              confidence: { type: 'number', description: 'Extraction confidence 0–1.' },
+            },
+            required: ['value', 'confidence'],
+            additionalProperties: false,
+          });
+          const ocrResponse = await invokeLLM({
+            messages: [
+              { role: 'system', content: 'You are a document OCR assistant. Extract structured data from identity documents. For each field, return {value, confidence}. Always respond with valid JSON only.' },
+              {
+                role: 'user',
+                content: [
+                  { type: 'image_url', image_url: { url: doc.fileUrl, detail: 'high' } },
+                  { type: 'text', text: `Extract all readable fields from this ${doc.documentType} document. For each field return {value, confidence}. Fields: fullName, surname, firstName, middleName, dateOfBirth, gender, idNumber, documentNumber, nationality, expiryDate, issueDate, address, placeOfBirth, mrz. Use null value and 0 confidence for missing/unreadable fields.` },
+                ],
+              },
+            ],
+            response_format: {
+              type: 'json_schema',
+              json_schema: {
+                name: 'document_ocr_v2',
+                strict: true,
+                schema: {
+                  type: 'object',
+                  properties: {
+                    fullName: fieldWithConfidence('Full legal name'), surname: fieldWithConfidence('Family name'),
+                    firstName: fieldWithConfidence('Given name'), middleName: fieldWithConfidence('Middle name'),
+                    dateOfBirth: fieldWithConfidence('Date of birth ISO 8601'), gender: fieldWithConfidence('M/F/X'),
+                    idNumber: fieldWithConfidence('National ID number'), documentNumber: fieldWithConfidence('Document number'),
+                    nationality: fieldWithConfidence('ISO 3166-1 alpha-3'), expiryDate: fieldWithConfidence('Expiry ISO 8601'),
+                    issueDate: fieldWithConfidence('Issue date ISO 8601'), address: fieldWithConfidence('Address'),
+                    placeOfBirth: fieldWithConfidence('Place of birth'), mrz: fieldWithConfidence('MRZ line(s)'),
+                  },
+                  required: ['fullName','surname','firstName','middleName','dateOfBirth','gender','idNumber','documentNumber','nationality','expiryDate','issueDate','address','placeOfBirth','mrz'],
+                  additionalProperties: false,
+                },
+              },
+            },
+          });
+          const raw = ocrResponse?.choices?.[0]?.message?.content;
+          if (raw) {
+            const ocrData = typeof raw === 'string' ? JSON.parse(raw) : raw;
+            const db2 = await getDb();
+            if (db2) {
+              await db2.update(kycRecords)
+                .set({ documentOcrData: ocrData, updatedAt: new Date() })
+                .where(eq(kycRecords.id, doc.kycRecordId));
+            }
+          }
+        } catch {
+          // OCR is best-effort
+        }
+      })();
+
+      await writeAuditLog(db, {
+        userId: ctx.user!.id,
+        category: 'kyc',
+        action: `OCR re-run triggered: ${doc.documentType}`,
+        targetRef: `kyc-${doc.kycRecordId}`,
+        detail: { documentId: input.documentId },
+      });
+      return { queued: true, documentId: input.documentId };
+    }),
 });
 // ─── Audit Log Routerr ─────────────────────────────────────────────────────────
 
