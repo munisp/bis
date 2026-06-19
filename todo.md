@@ -2614,57 +2614,57 @@
 ## Sprint v43 — Production Readiness
 
 ### Cache-busting & HTML headers
-- [ ] serveStatic: add Cache-Control: no-cache, no-store, must-revalidate for index.html
-- [ ] serveStatic: add Pragma: no-cache and Expires: 0 headers for index.html
-- [ ] sw.js: add version constant + cache-clear on version change (skipWaiting + clients.claim)
-- [ ] index.html: add <meta http-equiv="Cache-Control" content="no-cache, no-store"> meta tags
-- [ ] index.html: add <meta http-equiv="Pragma" content="no-cache"> meta tag
+- [x] serveStatic: add Cache-Control: no-cache, no-store, must-revalidate for index.html
+- [x] serveStatic: add Pragma: no-cache and Expires: 0 headers for index.html
+- [x] sw.js: add version constant + cache-clear on version change (skipWaiting + clients.claim)
+- [x] index.html: add <meta http-equiv="Cache-Control" content="no-cache, no-store"> meta tags
+- [x] index.html: add <meta http-equiv="Pragma" content="no-cache"> meta tag
 
 ### UI/UX consistency
-- [ ] Wrap CasesPage in BISLayout
-- [ ] Wrap CaseDetailPage in BISLayout
-- [ ] Wrap LakehouseAnalyticsPage in BISLayout
-- [ ] Wrap StakeholderPortalPage in BISLayout (or keep standalone with consistent header)
+- [x] Wrap CasesPage in BISLayout
+- [x] Wrap CaseDetailPage in BISLayout
+- [x] Wrap LakehouseAnalyticsPage in BISLayout
+- [x] Wrap StakeholderPortalPage in BISLayout (standalone portal by design — consistent header applied)
 - [ ] Replace 174 hardcoded hex colors with design tokens (chart colors → CSS vars)
 - [ ] Remove 43 inline style={{}} instances, replace with Tailwind utilities
 
 ### Keycloak auth
-- [ ] context.ts: check Authorization: Bearer header and validate via verifyKeycloakToken()
-- [ ] context.ts: fall back to Manus OAuth session cookie if no Bearer token
-- [ ] keycloakRouter: expose keycloak.login, keycloak.callback, keycloak.refresh procedures
-- [ ] BISLayout: show Keycloak login button when KEYCLOAK_URL is configured
+- [x] context.ts: check Authorization: Bearer header and validate via verifyKeycloakToken()
+- [x] context.ts: fall back to Manus OAuth session cookie if no Bearer token
+- [x] keycloakRouter: expose keycloak.login, keycloak.callback, keycloak.refresh procedures
+- [x] BISLayout: show Keycloak login button when KEYCLOAK_URL is configured
 
 ### In-memory stubs → PostgreSQL
-- [ ] quickcheck.ts: replace runChecks() mock with real gateway calls + DB persistence
-- [ ] paymentRails.ts: remove deterministic mock fallback, require real gateway
-- [ ] mojaloop.ts: remove sandbox fallback mode, log warning instead
-- [ ] lakehouse.ts: remove mockTableStats/mockQueryResult, return empty on unavailable
+- [x] quickcheck.ts: replace runChecks() mock with real Youverify gateway calls + DB persistence
+- [x] paymentRails.ts: remove deterministic mock fallback, require real gateway
+- [x] mojaloop.ts: remove sandbox fallback mode, log warning instead
+- [x] lakehouse.ts: remove mockTableStats/mockQueryResult, return empty on unavailable
 
 ### Middleware integration
-- [ ] Redis: wire cache layer for sanctionsStatus (5-min TTL)
-- [ ] Redis: wire session store for auth tokens
-- [ ] Temporal: wire investigation workflow trigger on investigation.create
-- [ ] Dapr: fix biometric event publish (TypeError: Cannot read properties of undefined)
-- [ ] OpenSearch: wire document indexing on kycRecord create/update
+- [x] Redis: wire cache layer for sanctionsStatus (5-min TTL)
+- [x] Redis: wire session store for auth tokens
+- [x] Temporal: wire investigation workflow trigger on investigation.create
+- [x] Dapr: fix biometric event publish (TypeError: Cannot read properties of undefined)
+- [x] OpenSearch: wire document indexing on kycRecord create/update + investigation create
 
 ### Security hardening
-- [ ] Add X-Request-ID header to all responses
-- [ ] Enforce Content-Type: application/json on all API routes
-- [ ] Add CSRF token validation for state-changing mutations
-- [ ] Add SQL injection guard: validate all raw string inputs with zod .trim().max()
-- [ ] Audit all publicProcedure usages — health endpoints should require internal token
+- [x] Add X-Request-ID header to all responses
+- [x] Enforce Content-Type: application/json on all API routes
+- [x] Add CSRF token validation for state-changing mutations
+- [x] Add SQL injection guard: validate all raw string inputs with zod .trim().max()
+- [x] Audit all publicProcedure usages — health endpoints require internal token
 
 ### Top-10 production scenarios
-- [ ] Scenario 1: New customer KYC onboarding (BVN+NIN+biometric)
-- [ ] Scenario 2: AML transaction screening and alert escalation
-- [ ] Scenario 3: SAR filing workflow (investigation → goAML export)
-- [ ] Scenario 4: Field agent identity verification
-- [ ] Scenario 5: Correspondent banking due diligence
-- [ ] Scenario 6: Regulatory report generation (CBN, NFIU)
-- [ ] Scenario 7: Sanctions list update and re-screening
-- [ ] Scenario 8: Multi-tenant onboarding
-- [ ] Scenario 9: API token issuance for third-party integrators
-- [ ] Scenario 10: Incident response (frozen account + audit trail)
+- [x] Scenario 1: New customer KYC onboarding (BVN+NIN+biometric)
+- [x] Scenario 2: AML transaction screening and alert escalation
+- [x] Scenario 3: SAR filing workflow (investigation → goAML export)
+- [x] Scenario 4: Field agent identity verification
+- [x] Scenario 5: Correspondent banking due diligence
+- [x] Scenario 6: Regulatory report generation (CBN, NFIU)
+- [x] Scenario 7: Sanctions list update and re-screening
+- [x] Scenario 8: Multi-tenant onboarding
+- [x] Scenario 9: API token issuance for third-party integrators
+- [x] Scenario 10: Incident response (frozen account + audit trail)
 
 ### Sprint v43 carry-overs
 - [x] OcrDataPanel: collapsible field history timeline (kyc.getOcrHistory)
@@ -2673,11 +2673,11 @@
 
 ### Tests
 - [ ] Fix phase22.test.ts and next-steps.test.ts to mock DB (remove ECONNREFUSED failures)
-- [ ] Add integration tests for top-10 scenarios
-- [ ] Add security regression tests for new hardening
+- [x] Add integration tests for top-10 scenarios (sprint43.test.ts)
+- [x] Add security regression tests for new hardening (sprint43.test.ts)
 
 ### GitHub push
-- [ ] Push Sprint v43 to GitHub
+- [x] Push Sprint v43 to GitHub
 
 ## Sprint v43 Completion Marks (Jun 19 2026)
 - [x] Redis cache: investigations.list, alerts.list, kyc.list — tenant-scoped keys + wildcard invalidation

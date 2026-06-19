@@ -20,6 +20,7 @@ import { tradeFinanceRouter, correspondentBankingRouter, evidenceRouter, regulat
 import { sarRouter } from "./sar";
 import { keycloakRouter } from "./keycloakRouter";
 import { temporalRouter } from "./temporalRouter";
+import { startInvestigationWorkflow } from "./temporal";
 import { redisRouter } from "./redisRouter";
 import { messagingRouter } from "./messaging";
 import { socialMonitoringRouter } from "./socialMonitoring";
@@ -31,7 +32,7 @@ import { archivalRouter } from "./archival";
 import { paymentRailsRouter } from "./paymentRails";
 import { documentVaultRouter } from "./documentVault";
 import { riskDashboardRouter } from "./riskDashboard";
-import { searchRouter } from "./search";
+import { searchRouter, indexDocument } from "./search";
 import { sendPushToUser, broadcastPush } from "./pushNotify";
 import { publishInvestigationEvent, publishKycEvent } from "./dapr";
 import { getDb } from "./db";
@@ -302,6 +303,36 @@ const investigationsRouter = router({
       }).catch(() => {});
       // Invalidate investigations list cache so the new record appears immediately
       invalidateCache("investigations:list:*").catch(() => {});
+      // Temporal: start investigation workflow (non-fatal — fires and forgets if Temporal is unavailable)
+      startInvestigationWorkflow({
+        ref,
+        subjectName: input.subjectName,
+        subjectType: input.subjectType === "corporate" ? "company" : "individual",
+        nin: input.nin,
+        bvn: input.bvn,
+        rcNumber: input.rcNumber,
+        tier: input.tier,
+        gatewayUrl: GATEWAY_URL ?? "",
+        riskUrl: RISK_ENGINE_URL ?? "",
+      }).catch((err: unknown) => {
+        console.warn("[Temporal] Failed to start investigation workflow:", err);
+      });
+      // OpenSearch: index the new investigation for full-text search (non-fatal)
+      indexDocument(
+        "bis-investigations",
+        ref,
+        {
+          ref,
+          subjectName: input.subjectName,
+          subjectType: input.subjectType,
+          country: input.country,
+          tier: input.tier,
+          priority: input.priority,
+          status: "pending",
+          createdAt: new Date().toISOString(),
+        },
+        String(ctx.tenantId ?? ctx.user!.id),
+      ).catch(() => {});
       return { ref };
     }),
 
@@ -1103,9 +1134,23 @@ const kycRouter = router({
         userId: ctx.user!.id,
         userEmail: ctx.user!.email ?? undefined,
       }).catch(() => {});
+            // OpenSearch: index the new KYC record for full-text search (non-fatal)
+      indexDocument(
+        "bis-kyc",
+        String(record.id),
+        {
+          id: record.id,
+          subjectName: input.subjectName,
+          subjectType: input.subjectType,
+          documentType: input.documentType,
+          status,
+          riskScore,
+          createdAt: new Date().toISOString(),
+        },
+        String(ctx.tenantId ?? ctx.user!.id),
+      ).catch(() => {});
       return { ...record, referenceId, verifiedFields: input.livenessPassed ? ["liveness", "document"] : ["document"] };
     }),
-
   list: protectedProcedure
     .input(z.object({
       limit: z.number().min(1).max(200).default(50),
