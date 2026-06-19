@@ -108,35 +108,35 @@ function BalanceChart({ series }: { series: DaySeries[] }) {
       <AreaChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
         <defs>
           <linearGradient id="creditsGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="5%" stopColor="#22c55e" stopOpacity={0.3} />
-            <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
+            <stop offset="5%" stopColor="var(--risk-low)" stopOpacity={0.3} />
+            <stop offset="95%" stopColor="var(--risk-low)" stopOpacity={0} />
           </linearGradient>
           <linearGradient id="debitsGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="5%" stopColor="#ef4444" stopOpacity={0.3} />
-            <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
+            <stop offset="5%" stopColor="var(--risk-critical)" stopOpacity={0.3} />
+            <stop offset="95%" stopColor="var(--risk-critical)" stopOpacity={0} />
           </linearGradient>
           <linearGradient id="netGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="5%" stopColor="#6366f1" stopOpacity={0.4} />
-            <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
+            <stop offset="5%" stopColor="var(--chart-indigo)" stopOpacity={0.4} />
+            <stop offset="95%" stopColor="var(--chart-indigo)" stopOpacity={0} />
           </linearGradient>
         </defs>
-        <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--color-slate-700)" />
         <XAxis
           dataKey="day"
-          tick={{ fontSize: 9, fill: "#64748b" }}
+          tick={{ fontSize: 9, fill: "var(--muted-foreground)" }}
           tickFormatter={v => v.slice(5)} // MM-DD
           interval="preserveStartEnd"
         />
-        <YAxis tick={{ fontSize: 9, fill: "#64748b" }} tickFormatter={formatYAxis} width={55} />
+        <YAxis tick={{ fontSize: 9, fill: "var(--muted-foreground)" }} tickFormatter={formatYAxis} width={55} />
         <Tooltip
-          contentStyle={{ backgroundColor: "#0f172a", border: "1px solid #1e293b", borderRadius: 6, fontSize: 11 }}
-          labelStyle={{ color: "#94a3b8" }}
+          contentStyle={{ backgroundColor: "var(--color-muted-bg)", border: "1px solid var(--color-muted-bg)", borderRadius: 6, fontSize: 11 }}
+          labelStyle={{ color: "var(--color-slate-400)" }}
           formatter={(value: number, name: string) => [formatTooltip(value), name]}
         />
-        <Legend wrapperStyle={{ fontSize: 10, color: "#94a3b8" }} />
-        <Area type="monotone" dataKey="Credits" stroke="#22c55e" strokeWidth={1.5} fill="url(#creditsGrad)" dot={false} />
-        <Area type="monotone" dataKey="Debits"  stroke="#ef4444" strokeWidth={1.5} fill="url(#debitsGrad)"  dot={false} />
-        <Area type="monotone" dataKey="Net"     stroke="#6366f1" strokeWidth={2}   fill="url(#netGrad)"     dot={false} />
+        <Legend wrapperStyle={{ fontSize: 10, color: "var(--color-slate-400)" }} />
+        <Area type="monotone" dataKey="Credits" stroke="var(--risk-low)" strokeWidth={1.5} fill="url(#creditsGrad)" dot={false} />
+        <Area type="monotone" dataKey="Debits"  stroke="var(--risk-critical)" strokeWidth={1.5} fill="url(#debitsGrad)"  dot={false} />
+        <Area type="monotone" dataKey="Net"     stroke="var(--chart-indigo)" strokeWidth={2}   fill="url(#netGrad)"     dot={false} />
       </AreaChart>
     </ResponsiveContainer>
   );

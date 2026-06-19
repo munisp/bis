@@ -10,11 +10,11 @@ import { eq, desc, and, ilike, gte, lte, sql, count, or } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 
 function txRef(): string {
-  return `TXN-${new Date().getFullYear()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+  return `TXN-${new Date().getFullYear()}-${crypto.randomUUID().replace(/-/g,'').slice(0,8).toUpperCase()}`;
 }
 
 function alertRef(): string {
-  return `ALT-${new Date().getFullYear()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+  return `ALT-${new Date().getFullYear()}-${crypto.randomUUID().replace(/-/g,'').slice(0,8).toUpperCase()}`;
 }
 
 const HIGH_RISK_COUNTRIES = new Set([

@@ -71,6 +71,37 @@ function emptySearchResponse(): CrossEntitySearchResponse {
 
 // ─── Router ───────────────────────────────────────────────────────────────────
 
+// ─── Document Indexing Helper ─────────────────────────────────────────────────
+
+/**
+ * Index a document into OpenSearch via the Go gateway.
+ * Non-fatal: failures are logged but do not break the main flow.
+ */
+export async function indexDocument(
+  index: "bis-investigations" | "bis-alerts" | "bis-kyc",
+  id: string,
+  doc: Record<string, unknown>,
+  tenantId: string,
+): Promise<void> {
+  try {
+    const resp = await fetch(`${GATEWAY_URL}/v1/search/index`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Gateway-Key": GATEWAY_KEY,
+      },
+      body: JSON.stringify({ index, id, doc: { ...doc, tenantId }, tenantId }),
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => "");
+      console.warn(`[OpenSearch] Index ${index}/${id} failed: ${resp.status} ${text}`);
+    }
+  } catch (err) {
+    console.warn(`[OpenSearch] Index ${index}/${id} error:`, err);
+  }
+}
+
 export const searchRouter = router({
   /**
    * cross: Full-text search across investigations, alerts, and KYC records.

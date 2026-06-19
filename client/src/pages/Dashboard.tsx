@@ -67,7 +67,7 @@ function RiskRing({ score, size = 56 }: { score: number; size?: number }) {
   const r = (size - 8) / 2;
   const circ = 2 * Math.PI * r;
   const dash = (score / 100) * circ;
-  const color = score >= 80 ? "#f87171" : score >= 60 ? "#fb923c" : score >= 30 ? "#fbbf24" : "#34d399";
+  const color = score >= 80 ? "var(--risk-critical)" : score >= 60 ? "var(--chart-orange)" : score >= 30 ? "var(--risk-medium)" : "var(--risk-low)";
   return (
     <svg width={size} height={size} className="shrink-0">
       <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="var(--border)" strokeWidth={4} />
@@ -92,9 +92,9 @@ const riskTrend = [
 ];
 
 const tierBreakdown = [
-  { tier: "Basic", count: 1203, color: "#60a5fa" },
-  { tier: "Standard", count: 987, color: "#a78bfa" },
-  { tier: "Comprehensive", count: 657, color: "#34d399" },
+  { tier: "Basic", count: 1203, color: "var(--risk-none)" },
+  { tier: "Standard", count: 987, color: "var(--chart-violet)" },
+  { tier: "Comprehensive", count: 657, color: "var(--risk-low)" },
 ];
 
 const sourceActivity = [
@@ -705,8 +705,8 @@ export default function Dashboard() {
               <AreaChart data={riskAnalyticsData.score_trend} margin={{ top: 4, right: 4, bottom: 0, left: -20 }}>
                 <defs>
                   <linearGradient id="riskGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#ef4444" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
+                    <stop offset="5%" stopColor="var(--risk-critical)" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="var(--risk-critical)" stopOpacity={0} />
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke={chartGrid} vertical={false} />
@@ -716,10 +716,10 @@ export default function Dashboard() {
                   contentStyle={{ background: chartBg, border: `1px solid ${chartBorder}`, borderRadius: 6, fontSize: 11 }}
                   formatter={(v: any, _: any, p: any) => [`${v} avg · ${p.payload.count} entities`, "Risk Score"]}
                 />
-                <Area type="monotone" dataKey="avg_score" stroke="#ef4444" strokeWidth={2} fill="url(#riskGrad)" dot={{ r: 2, fill: '#ef4444' }} />
+                <Area type="monotone" dataKey="avg_score" stroke="var(--risk-critical)" strokeWidth={2} fill="url(#riskGrad)" dot={{ r: 2, fill: 'var(--risk-critical)' }} />
                 {thresholdConfig && (
-                  <ReferenceLine y={thresholdConfig.threshold} stroke="#f97316" strokeDasharray="4 2" strokeWidth={1.5}
-                    label={{ value: `Threshold ${thresholdConfig.threshold}`, position: 'right', fontSize: 8, fill: '#f97316' }} />
+                  <ReferenceLine y={thresholdConfig.threshold} stroke="var(--risk-high)" strokeDasharray="4 2" strokeWidth={1.5}
+                    label={{ value: `Threshold ${thresholdConfig.threshold}`, position: 'right', fontSize: 8, fill: 'var(--risk-high)' }} />
                 )}
               </AreaChart>
             </ResponsiveContainer>

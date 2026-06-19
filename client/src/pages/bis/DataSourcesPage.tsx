@@ -448,12 +448,12 @@ function HealthSparkline({ dataSourceId }: { dataSourceId: number }) {
   }).join(' ');
 
   const statusColors: Record<string, string> = {
-    active: '#34d399',
-    degraded: '#fbbf24',
-    offline: '#f87171',
+    active: 'var(--risk-low)',
+    degraded: 'var(--risk-medium)',
+    offline: 'var(--risk-critical)',
   };
   const lastStatus = logs[logs.length - 1]?.status ?? 'active';
-  const lineColor = statusColors[lastStatus] ?? '#34d399';
+  const lineColor = statusColors[lastStatus] ?? 'var(--risk-low)';
 
   return (
     <div className="mb-2">
@@ -491,9 +491,9 @@ function HealthHistoryDialog({ dataSourceId, dataSourceName, open, onClose }: {
   );
 
   const statusColors: Record<string, string> = {
-    active: '#34d399',
-    degraded: '#fbbf24',
-    offline: '#f87171',
+    active: 'var(--risk-low)',
+    degraded: 'var(--risk-medium)',
+    offline: 'var(--risk-critical)',
   };
 
   const values = logs?.map(l => l.responseMs) ?? [];
@@ -506,7 +506,7 @@ function HealthHistoryDialog({ dataSourceId, dataSourceName, open, onClose }: {
     return `${x.toFixed(1)},${y.toFixed(1)}`;
   }).join(' ');
   const lastStatus = logs?.[logs.length - 1]?.status ?? 'active';
-  const lineColor = statusColors[lastStatus] ?? '#34d399';
+  const lineColor = statusColors[lastStatus] ?? 'var(--risk-low)';
   const avgMs = values.length ? Math.round(values.reduce((a, b) => a + b, 0) / values.length) : 0;
   const p95 = values.length ? values.slice().sort((a, b) => a - b)[Math.floor(values.length * 0.95)] ?? 0 : 0;
 
@@ -574,7 +574,7 @@ function HealthHistoryDialog({ dataSourceId, dataSourceName, open, onClose }: {
                       </td>
                       <td className="px-3 py-1.5">
                         <span className={`inline-block w-2 h-2 rounded-full mr-1.5`}
-                          style={{ backgroundColor: statusColors[l.status] ?? '#34d399' }} />
+                          style={{ backgroundColor: statusColors[l.status] ?? 'var(--risk-low)' }} />
                         {l.status}
                       </td>
                       <td className="px-3 py-1.5 text-right font-mono">{l.responseMs}ms</td>

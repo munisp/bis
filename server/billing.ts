@@ -90,7 +90,7 @@ export async function creditTenantAccount(opts: {
   amountKobo: number;
   reference: string;
 }): Promise<{ transferId: string; recorded: boolean }> {
-  const transferId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const transferId = `${Date.now()}-${crypto.randomUUID().replace(/-/g,'').slice(0,8)}`;
   if (!TB_URL) {
     console.warn("[Billing] TIGERBEETLE_URL not set — credit not recorded in ledger");
     return { transferId, recorded: false };
@@ -414,7 +414,7 @@ export const billingRouter = router({
 
       // Upload to S3
       const dateStr = new Date().toISOString().slice(0, 10);
-      const suffix = Math.random().toString(36).slice(2, 8);
+      const suffix = crypto.randomUUID().replace(/-/g,'').slice(0,8);
       const fileKey = `billing-exports/${input.tenantId}/${dateStr}-ledger-${suffix}.csv`;
 
       try {
@@ -460,7 +460,7 @@ export const billingRouter = router({
 
       if (!PAYSTACK_KEY) {
         // Simulated response for development / demo environments
-        const ref = `BIS-SIM-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+        const ref = `BIS-SIM-${Date.now()}-${crypto.randomUUID().replace(/-/g,'').slice(0,8).toUpperCase()}`;
         return {
           authorizationUrl: `https://checkout.paystack.com/demo?reference=${ref}`,
           accessCode: `demo_${ref}`,
@@ -603,7 +603,7 @@ export const billingRouter = router({
       // Credit the TigerBeetle account
       try {
         await ensureAccount(input.tenantId);
-        const transferId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const transferId = `${Date.now()}-${crypto.randomUUID().replace(/-/g,'').slice(0,8)}`;
         await tbPost("/transfers/create", [
           {
             id: transferId,

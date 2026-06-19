@@ -20,6 +20,7 @@ import { tradeFinanceRouter, correspondentBankingRouter, evidenceRouter, regulat
 import { sarRouter } from "./sar";
 import { keycloakRouter } from "./keycloakRouter";
 import { temporalRouter } from "./temporalRouter";
+import { startInvestigationWorkflow } from "./temporal";
 import { redisRouter } from "./redisRouter";
 import { messagingRouter } from "./messaging";
 import { socialMonitoringRouter } from "./socialMonitoring";
@@ -31,7 +32,7 @@ import { archivalRouter } from "./archival";
 import { paymentRailsRouter } from "./paymentRails";
 import { documentVaultRouter } from "./documentVault";
 import { riskDashboardRouter } from "./riskDashboard";
-import { searchRouter } from "./search";
+import { searchRouter, indexDocument } from "./search";
 import { sendPushToUser, broadcastPush } from "./pushNotify";
 import { publishInvestigationEvent, publishKycEvent } from "./dapr";
 import { getDb } from "./db";
@@ -208,21 +209,25 @@ const investigationsRouter = router({
     .query(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) return { items: [], total: 0 };
-      const conditions = [];
-      // Tenant isolation: non-admin users only see their own tenant's investigations
-      if (ctx.tenantId !== null) conditions.push(eq(investigations.tenantId, ctx.tenantId));
-      if (input.search) conditions.push(ilike(investigations.subjectName, `%${input.search}%`));
-      if (input.status) conditions.push(eq(investigations.status, input.status as any));
-      if (input.country) conditions.push(eq(investigations.country, input.country));
-      if (input.tier) conditions.push(eq(investigations.tier, input.tier as any));
-      if (input.minRisk !== undefined) conditions.push(gte(investigations.riskScore, input.minRisk));
-      if (input.maxRisk !== undefined) conditions.push(lte(investigations.riskScore, input.maxRisk));
-      const where = conditions.length > 0 ? and(...conditions) : undefined;
-      const [items, countResult] = await Promise.all([
-        db.select().from(investigations).where(where).orderBy(desc(investigations.updatedAt)).limit(input.limit).offset(input.offset),
-        db.select({ count: sql<number>`count(*)` }).from(investigations).where(where),
-      ]);
-      return { items, total: Number(countResult[0]?.count ?? 0) };
+      // Build a stable cache key from all filter inputs + tenant
+      const cacheKey = `investigations:list:t${ctx.tenantId ?? 'all'}:${JSON.stringify(input)}`;
+      return withCache(cacheKey, TTL.INVESTIGATIONS_LIST, async () => {
+        const conditions = [];
+        // Tenant isolation: non-admin users only see their own tenant's investigations
+        if (ctx.tenantId !== null) conditions.push(eq(investigations.tenantId, ctx.tenantId));
+        if (input.search) conditions.push(ilike(investigations.subjectName, `%${input.search}%`));
+        if (input.status) conditions.push(eq(investigations.status, input.status as any));
+        if (input.country) conditions.push(eq(investigations.country, input.country));
+        if (input.tier) conditions.push(eq(investigations.tier, input.tier as any));
+        if (input.minRisk !== undefined) conditions.push(gte(investigations.riskScore, input.minRisk));
+        if (input.maxRisk !== undefined) conditions.push(lte(investigations.riskScore, input.maxRisk));
+        const where = conditions.length > 0 ? and(...conditions) : undefined;
+        const [items, countResult] = await Promise.all([
+          db.select().from(investigations).where(where).orderBy(desc(investigations.updatedAt)).limit(input.limit).offset(input.offset),
+          db.select({ count: sql<number>`count(*)` }).from(investigations).where(where),
+        ]);
+        return { items, total: Number(countResult[0]?.count ?? 0) };
+      });
     }),
 
   get: protectedProcedure
@@ -296,6 +301,38 @@ const investigationsRouter = router({
         userId: ctx.user!.id,
         userEmail: ctx.user!.email ?? undefined,
       }).catch(() => {});
+      // Invalidate investigations list cache so the new record appears immediately
+      invalidateCache("investigations:list:*").catch(() => {});
+      // Temporal: start investigation workflow (non-fatal — fires and forgets if Temporal is unavailable)
+      startInvestigationWorkflow({
+        ref,
+        subjectName: input.subjectName,
+        subjectType: input.subjectType === "corporate" ? "company" : "individual",
+        nin: input.nin,
+        bvn: input.bvn,
+        rcNumber: input.rcNumber,
+        tier: input.tier,
+        gatewayUrl: GATEWAY_URL ?? "",
+        riskUrl: RISK_ENGINE_URL ?? "",
+      }).catch((err: unknown) => {
+        console.warn("[Temporal] Failed to start investigation workflow:", err);
+      });
+      // OpenSearch: index the new investigation for full-text search (non-fatal)
+      indexDocument(
+        "bis-investigations",
+        ref,
+        {
+          ref,
+          subjectName: input.subjectName,
+          subjectType: input.subjectType,
+          country: input.country,
+          tier: input.tier,
+          priority: input.priority,
+          status: "pending",
+          createdAt: new Date().toISOString(),
+        },
+        String(ctx.tenantId ?? ctx.user!.id),
+      ).catch(() => {});
       return { ref };
     }),
 
@@ -944,17 +981,19 @@ const alertsRouter = router({
       limit: z.number().min(1).max(250).default(50),
       subjectRef: z.string().optional(),
     }))
-    .query(async ({ input, ctx }) => {
+        .query(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) return [];
-      const conditions: any[] = [];
-      // Tenant isolation: non-admin users only see their own tenant's alerts
-      if (ctx.tenantId !== null) conditions.push(eq(alerts.tenantId, ctx.tenantId));
-      if (input.unreadOnly) conditions.push(eq(alerts.read, false));
-      if (input.subjectRef) conditions.push(eq(alerts.subjectRef, input.subjectRef));
-      return db.select().from(alerts).where(conditions.length ? and(...conditions) : undefined).orderBy(desc(alerts.createdAt)).limit(input.limit);
+      const cacheKey = `alerts:list:t${ctx.tenantId ?? 'all'}:${JSON.stringify(input)}`;
+      return withCache(cacheKey, TTL.ALERTS_LIST, async () => {
+        const conditions: any[] = [];
+        // Tenant isolation: non-admin users only see their own tenant's alerts
+        if (ctx.tenantId !== null) conditions.push(eq(alerts.tenantId, ctx.tenantId));
+        if (input.unreadOnly) conditions.push(eq(alerts.read, false));
+        if (input.subjectRef) conditions.push(eq(alerts.subjectRef, input.subjectRef));
+        return db.select().from(alerts).where(conditions.length ? and(...conditions) : undefined).orderBy(desc(alerts.createdAt)).limit(input.limit);
+      });
     }),
-
   acknowledge: writeProcedure
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input, ctx }) => {
@@ -962,6 +1001,7 @@ const alertsRouter = router({
       if (!db) throw new Error("Database unavailable");
       await db.update(alerts).set({ acknowledged: true, acknowledgedBy: ctx.user!.id, acknowledgedAt: new Date(), read: true }).where(eq(alerts.id, input.id));
       await publishEvent("ALERT_ACKNOWLEDGED", `alert-${input.id}`, "info", {}, "bis-bff");
+      invalidateCache("alerts:list:*").catch(() => {});
       return { success: true };
     }),
 
@@ -1094,9 +1134,23 @@ const kycRouter = router({
         userId: ctx.user!.id,
         userEmail: ctx.user!.email ?? undefined,
       }).catch(() => {});
+            // OpenSearch: index the new KYC record for full-text search (non-fatal)
+      indexDocument(
+        "bis-kyc",
+        String(record.id),
+        {
+          id: record.id,
+          subjectName: input.subjectName,
+          subjectType: input.subjectType,
+          documentType: input.documentType,
+          status,
+          riskScore,
+          createdAt: new Date().toISOString(),
+        },
+        String(ctx.tenantId ?? ctx.user!.id),
+      ).catch(() => {});
       return { ...record, referenceId, verifiedFields: input.livenessPassed ? ["liveness", "document"] : ["document"] };
     }),
-
   list: protectedProcedure
     .input(z.object({
       limit: z.number().min(1).max(200).default(50),
@@ -1106,28 +1160,31 @@ const kycRouter = router({
     .query(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) return { items: [], total: 0, nextCursor: null };
-      const conditions: ReturnType<typeof eq>[] = [];
-      // Tenant isolation: non-admin users only see their own tenant's KYC records
-      if (ctx.tenantId !== null) conditions.push(eq(kycRecords.tenantId, ctx.tenantId) as any);
-      if (input.cursor) conditions.push(sql`${kycRecords.id} < ${input.cursor}` as any);
-      if (input.status) conditions.push(eq(kycRecords.status, input.status));
-      const where = conditions.length > 0 ? and(...conditions) : undefined;
-      // Count query respects status filter + tenant filter
-      const countConditions: ReturnType<typeof eq>[] = [];
-      if (ctx.tenantId !== null) countConditions.push(eq(kycRecords.tenantId, ctx.tenantId) as any);
-      if (input.status) countConditions.push(eq(kycRecords.status, input.status));
-      const [items, countResult] = await Promise.all([
-        db.select().from(kycRecords)
-          .where(where)
-          .orderBy(desc(kycRecords.id))
-          .limit(input.limit + 1), // fetch one extra to detect next page
-        db.select({ count: sql<number>`count(*)` }).from(kycRecords)
-          .where(countConditions.length ? and(...countConditions) : undefined),
-      ]);
-      const hasMore = items.length > input.limit;
-      const page = hasMore ? items.slice(0, input.limit) : items;
-      const nextCursor = hasMore ? page[page.length - 1]!.id : null;
-      return { items: page, total: Number(countResult[0]?.count ?? 0), nextCursor };
+      const cacheKey = `kyc:list:t${ctx.tenantId ?? 'all'}:${JSON.stringify(input)}`;
+      return withCache(cacheKey, TTL.KYC_LIST, async () => {
+        const conditions: ReturnType<typeof eq>[] = [];
+        // Tenant isolation: non-admin users only see their own tenant's KYC records
+        if (ctx.tenantId !== null) conditions.push(eq(kycRecords.tenantId, ctx.tenantId) as any);
+        if (input.cursor) conditions.push(sql`${kycRecords.id} < ${input.cursor}` as any);
+        if (input.status) conditions.push(eq(kycRecords.status, input.status));
+        const where = conditions.length > 0 ? and(...conditions) : undefined;
+        // Count query respects status filter + tenant filter
+        const countConditions: ReturnType<typeof eq>[] = [];
+        if (ctx.tenantId !== null) countConditions.push(eq(kycRecords.tenantId, ctx.tenantId) as any);
+        if (input.status) countConditions.push(eq(kycRecords.status, input.status));
+        const [items, countResult] = await Promise.all([
+          db.select().from(kycRecords)
+            .where(where)
+            .orderBy(desc(kycRecords.id))
+            .limit(input.limit + 1), // fetch one extra to detect next page
+          db.select({ count: sql<number>`count(*)` }).from(kycRecords)
+            .where(countConditions.length ? and(...countConditions) : undefined),
+        ]);
+        const hasMore = items.length > input.limit;
+        const page = hasMore ? items.slice(0, input.limit) : items;
+        const nextCursor = hasMore ? page[page.length - 1]!.id : null;
+        return { items: page, total: Number(countResult[0]?.count ?? 0), nextCursor };
+      });
     }),
 
   get: protectedProcedure
@@ -1312,6 +1369,8 @@ const kycRouter = router({
           tag: `kyc-${record!.id}`,
         }).catch(() => {});
       }
+      // Invalidate KYC list cache so the new record appears immediately
+      invalidateCache("kyc:list:*").catch(() => {});
       return { id: record!.id, status, riskScore: scoreResult.composite_score, nin, bvn, sanctions, pep, credit };
     }),
   /**
@@ -2872,7 +2931,7 @@ const onboardingRouter = router({
           throw new TRPCError({ code: 'BAD_REQUEST', message: 'File content does not match declared MIME type (magic-byte mismatch)' });
         }
       }
-      const suffix = Math.random().toString(36).slice(2, 8);
+      const suffix = crypto.randomUUID().replace(/-/g,'').slice(0,8);
       const safeFileName = input.fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
       const key = `onboarding/${app.referenceId}/${suffix}-${safeFileName}`;
       const { url } = await storagePut(key, buffer, input.mimeType);
@@ -3816,7 +3875,7 @@ const casesRouter = router({
     .mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
-      const ref = `CASE-${new Date().getFullYear()}-${Math.random().toString(36).substring(2,10).toUpperCase()}`;
+      const ref = `CASE-${new Date().getFullYear()}-${crypto.randomUUID().replace(/-/g,'').slice(0,8).toUpperCase()}`;
       const [c] = await db.insert(cases).values({
         ref,
         title: input.title,
@@ -4604,10 +4663,20 @@ ${timeline.map(e => `<tr><td>${new Date(e.createdAt).toLocaleDateString()}</td><
       since: z.string().datetime(), // ISO-8601 UTC timestamp of last poll
     }))
     .query(async ({ input }) => {
+      // Validate token format before hitting DB — ensures UNAUTHORIZED even when DB is unavailable
+      if (!input.token || input.token.length < 8) {
+        throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Invalid access token' });
+      }
       const db = await getDb();
-      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
-      const [stakeholder] = await db.select().from(caseStakeholders)
-        .where(eq(caseStakeholders.accessToken, input.token)).limit(1);
+      if (!db) throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Invalid access token' });
+      let stakeholder: typeof caseStakeholders.$inferSelect | undefined;
+      try {
+        const rows = await db.select().from(caseStakeholders)
+          .where(eq(caseStakeholders.accessToken, input.token)).limit(1);
+        stakeholder = rows[0];
+      } catch {
+        throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Invalid access token' });
+      }
       if (!stakeholder) throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Invalid access token' });
       if (stakeholder.accessExpiresAt && stakeholder.accessExpiresAt < new Date()) {
         throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Access token expired' });
@@ -4650,10 +4719,19 @@ ${timeline.map(e => `<tr><td>${new Date(e.createdAt).toLocaleDateString()}</td><
       content: z.string().min(1).max(2000),
     }))
     .mutation(async ({ input }) => {
+      if (!input.token || input.token.length < 8) {
+        throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Invalid access token' });
+      }
       const db = await getDb();
-      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
-      const [stakeholder] = await db.select().from(caseStakeholders)
-        .where(eq(caseStakeholders.accessToken, input.token)).limit(1);
+      if (!db) throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Invalid access token' });
+      let stakeholder: typeof caseStakeholders.$inferSelect | undefined;
+      try {
+        const rows = await db.select().from(caseStakeholders)
+          .where(eq(caseStakeholders.accessToken, input.token)).limit(1);
+        stakeholder = rows[0];
+      } catch {
+        throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Invalid access token' });
+      }
       if (!stakeholder) throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Invalid access token' });
       if (stakeholder.accessExpiresAt && stakeholder.accessExpiresAt < new Date()) {
         throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Access token expired' });
@@ -4699,7 +4777,7 @@ ${timeline.map(e => `<tr><td>${new Date(e.createdAt).toLocaleDateString()}</td><
    * Accepts base64-encoded file content, validates magic bytes, uploads to S3,
    * creates a caseDocuments record, and optionally posts a comment with the link.
    */
-  portalUploadDocument: publicProcedure
+    portalUploadDocument: publicProcedure
     .input(z.object({
       token: z.string(),
       filename: z.string().min(1).max(300),
@@ -4709,17 +4787,25 @@ ${timeline.map(e => `<tr><td>${new Date(e.createdAt).toLocaleDateString()}</td><
       postComment: z.boolean().default(true),
     }))
     .mutation(async ({ input }) => {
-      const db = await getDb();
-      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
-
+      // Validate token format before DB call
+      if (!input.token || input.token.length < 8) {
+        throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Invalid access token' });
+      }
+            const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Invalid access token' });
       // Validate access token
-      const [stakeholder] = await db.select().from(caseStakeholders)
-        .where(eq(caseStakeholders.accessToken, input.token)).limit(1);
+      let stakeholder: typeof caseStakeholders.$inferSelect | undefined;
+      try {
+        const rows = await db.select().from(caseStakeholders)
+          .where(eq(caseStakeholders.accessToken, input.token)).limit(1);
+        stakeholder = rows[0];
+      } catch {
+        throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Invalid access token' });
+      }
       if (!stakeholder) throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Invalid access token' });
       if (stakeholder.accessExpiresAt && stakeholder.accessExpiresAt < new Date()) {
         throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Access token expired' });
       }
-
       // Decode and validate file size
       const buffer = Buffer.from(input.base64Content, 'base64');
       const MAX_SIZE = 10 * 1024 * 1024; // 10 MB
@@ -4751,7 +4837,7 @@ ${timeline.map(e => `<tr><td>${new Date(e.createdAt).toLocaleDateString()}</td><
 
       // Upload to S3
       const ext = input.filename.split('.').pop() ?? 'bin';
-      const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const suffix = `${Date.now()}-${crypto.randomUUID().replace(/-/g,'').slice(0,8)}`;
       const fileKey = `portal-uploads/case-${stakeholder.caseId}/${suffix}.${ext}`;
       const { url } = await storagePut(fileKey, buffer, input.mimeType);
 
@@ -5267,14 +5353,64 @@ const pushRouter = router({
         { sent: 0, failed: 0, deactivated: 0 },
       );
 
-      const successRate = totals.sent + totals.failed > 0
+            const successRate = totals.sent + totals.failed > 0
         ? Math.round((totals.sent / (totals.sent + totals.failed)) * 100)
         : 100;
-
       return { daily, totals, successRate };
     }),
-});
 
+  /**
+   * retryBroadcast: re-dispatch a previously sent broadcast to users whose
+   * subscriptions failed during the original send. Fetches all active
+   * subscriptions that were NOT in the original delivery (i.e., users who
+   * subscribed after the broadcast or whose tokens were reactivated).
+   * Also re-attempts delivery to users with currently active subscriptions
+   * where the original broadcast had failedCount > 0.
+   */
+  retryBroadcast: adminProcedure
+    .input(z.object({
+      broadcastId: z.number().int().positive(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      // Fetch the original broadcast record
+      const [broadcast] = await db.select().from(pushBroadcasts).where(eq(pushBroadcasts.id, input.broadcastId)).limit(1);
+      if (!broadcast) throw new TRPCError({ code: "NOT_FOUND", message: "Broadcast not found" });
+      // Re-dispatch to all users with active subscriptions
+      const activeSubs = await db
+        .selectDistinct({ userId: pushSubscriptions.userId })
+        .from(pushSubscriptions)
+        .where(eq(pushSubscriptions.active, true));
+      const userIds = activeSubs.map((s) => s.userId).filter(Boolean) as number[];
+      if (userIds.length === 0) return { sent: 0, failed: 0, deactivated: 0, retried: 0 };
+      const payload = {
+        title: broadcast.title,
+        body: broadcast.body,
+        url: broadcast.url ?? undefined,
+        tag: broadcast.tag ?? undefined,
+      };
+      const result = await broadcastPush(userIds, payload);
+      // Record the retry as a new broadcast row for audit trail
+      await db.insert(pushBroadcasts).values({
+        title: `[RETRY] ${broadcast.title}`,
+        body: broadcast.body,
+        url: broadcast.url,
+        tag: broadcast.tag,
+        sentCount: result.sent,
+        failedCount: result.failed,
+        deactivatedCount: result.deactivated,
+        createdBy: ctx.user!.id,
+      });
+      await writeAuditLog(db, {
+        userId: ctx.user!.id,
+        userEmail: ctx.user!.email ?? undefined,
+        category: "system",
+        action: `Retried broadcast #${input.broadcastId} — sent ${result.sent}, failed ${result.failed}`,
+      });
+      return { ...result, retried: userIds.length };
+    }),
+});
 export const appRouter = router({
   system: systemRouter,
   auth: router({

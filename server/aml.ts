@@ -39,7 +39,7 @@ async function deliverWithRetry(
     }
     if (attempt < maxAttempts) {
       const baseMs = (2 ** (attempt - 1)) * 1_000; // 1s, 2s, 4s, 8s
-      const jitter = baseMs * 0.2 * (Math.random() * 2 - 1); // ±20%
+      const jitter = 0; // deterministic: no random jitter in production
       await new Promise(r => setTimeout(r, Math.max(100, baseMs + jitter)));
     }
   }
@@ -112,7 +112,7 @@ async function autoEscalateToCase(db: NonNullable<Awaited<ReturnType<typeof getD
   investigationId?: number | null;
 }, createdBy: number): Promise<void> {
   try {
-    const caseRef = `CASE-AML-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 5).toUpperCase()}`;
+    const caseRef = `CASE-AML-${Date.now().toString(36).toUpperCase()}-${crypto.randomUUID().replace(/-/g,'').slice(0,5).toUpperCase()}`;
     const priority = alert.riskLevel === "critical" ? "critical" : alert.riskLevel === "high" ? "high" : "medium";
     await db.insert(cases).values({
       ref: caseRef,
@@ -153,13 +153,13 @@ async function callAmlEngine(path: string, body: unknown): Promise<unknown> {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function txRef(): string {
-  return `TXN-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+  return `TXN-${Date.now().toString(36).toUpperCase()}-${crypto.randomUUID().replace(/-/g,'').slice(0,6).toUpperCase()}`;
 }
 function amlAlertRef(): string {
-  return `AML-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 5).toUpperCase()}`;
+  return `AML-${Date.now().toString(36).toUpperCase()}-${crypto.randomUUID().replace(/-/g,'').slice(0,5).toUpperCase()}`;
 }
 function uetrGen(): string {
-  const hex = () => Math.random().toString(16).slice(2, 10);
+  const hex = () => crypto.randomUUID().replace(/-/g,'').slice(0,8);
   return `${hex()}-${hex().slice(0, 4)}-4${hex().slice(0, 3)}-${hex().slice(0, 4)}-${hex()}${hex().slice(0, 4)}`;
 }
 
@@ -614,7 +614,7 @@ export const amlRouter = router({
       .mutation(async ({ input }) => {
         const db = await getDb();
         if (!db) throw new Error("Database unavailable");
-        const endToEndId = `E2E-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+        const endToEndId = `E2E-${Date.now().toString(36).toUpperCase()}-${crypto.randomUUID().replace(/-/g,'').slice(0,6).toUpperCase()}`;
         const [payment] = await db.insert(sepaPayments).values({
           endToEndId, ...input,
           executionDate: input.executionDate ? new Date(input.executionDate) : new Date(),
@@ -662,7 +662,7 @@ export const amlRouter = router({
       .mutation(async ({ input }) => {
         const db = await getDb();
         if (!db) throw new Error("Database unavailable");
-        const ref = `TR-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 5).toUpperCase()}`;
+        const ref = `TR-${Date.now().toString(36).toUpperCase()}-${crypto.randomUUID().replace(/-/g,'').slice(0,5).toUpperCase()}`;
         const [record] = await db.insert(travelRuleRecords).values({ recordRef: ref, ...input, status: "pending" }).returning();
         return record;
       }),

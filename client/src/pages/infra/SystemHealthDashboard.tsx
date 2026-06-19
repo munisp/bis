@@ -162,15 +162,15 @@ function LatencyHistoryChart({ history }: { history: LatencyPoint[] }) {
   return (
     <ResponsiveContainer width="100%" height={180}>
       <LineChart data={history} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-        <XAxis dataKey="time" tick={{ fill: "#94a3b8", fontSize: 10 }} />
-        <YAxis tick={{ fill: "#94a3b8", fontSize: 10 }} unit="ms" />
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--color-slate-700)" />
+        <XAxis dataKey="time" tick={{ fill: "var(--color-slate-400)", fontSize: 10 }} />
+        <YAxis tick={{ fill: "var(--color-slate-400)", fontSize: 10 }} unit="ms" />
         <Tooltip
-          contentStyle={{ background: "#1e293b", border: "1px solid #334155", borderRadius: 6 }}
-          labelStyle={{ color: "#94a3b8" }}
-          itemStyle={{ color: "#6366f1" }}
+          contentStyle={{ background: "var(--color-slate-700)", border: "1px solid var(--color-slate-700)", borderRadius: 6 }}
+          labelStyle={{ color: "var(--color-slate-400)" }}
+          itemStyle={{ color: "var(--chart-indigo)" }}
         />
-        <Line type="monotone" dataKey="latencyMs" stroke="#6366f1" strokeWidth={2} dot={false} />
+        <Line type="monotone" dataKey="latencyMs" stroke="var(--chart-indigo)" strokeWidth={2} dot={false} />
       </LineChart>
     </ResponsiveContainer>
   );
@@ -401,17 +401,17 @@ export default function SystemHealthDashboard() {
                       data={services.filter(s => s.latencyMs).map(s => ({ name: s.displayName, latencyMs: s.latencyMs }))}
                       margin={{ top: 5, right: 10, left: -20, bottom: 30 }}
                     >
-                      <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                      <XAxis dataKey="name" tick={{ fill: "#94a3b8", fontSize: 10 }} angle={-30} textAnchor="end" />
-                      <YAxis tick={{ fill: "#94a3b8", fontSize: 10 }} unit="ms" />
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--color-slate-700)" />
+                      <XAxis dataKey="name" tick={{ fill: "var(--color-slate-400)", fontSize: 10 }} angle={-30} textAnchor="end" />
+                      <YAxis tick={{ fill: "var(--color-slate-400)", fontSize: 10 }} unit="ms" />
                       <Tooltip
-                        contentStyle={{ background: "#1e293b", border: "1px solid #334155", borderRadius: 6 }}
-                        labelStyle={{ color: "#94a3b8" }}
-                        itemStyle={{ color: "#6366f1" }}
+                        contentStyle={{ background: "var(--color-slate-700)", border: "1px solid var(--color-slate-700)", borderRadius: 6 }}
+                        labelStyle={{ color: "var(--color-slate-400)" }}
+                        itemStyle={{ color: "var(--chart-indigo)" }}
                       />
                       <Bar dataKey="latencyMs" radius={[4, 4, 0, 0]}>
                         {services.filter(s => s.latencyMs).map((s, i) => (
-                          <Cell key={i} fill={(s.latencyMs ?? 0) > 500 ? "#f97316" : "#6366f1"} />
+                          <Cell key={i} fill={(s.latencyMs ?? 0) > 500 ? "var(--risk-high)" : "var(--chart-indigo)"} />
                         ))}
                       </Bar>
                     </BarChart>

@@ -1133,8 +1133,8 @@ export default function DeveloperPortal() {
                         <XAxis dataKey="date" tick={{ fontSize: 11 }} />
                         <YAxis tick={{ fontSize: 11 }} />
                         <Tooltip />
-                        <Line type="monotone" dataKey="requests" stroke="#3b82f6" strokeWidth={2} dot={false} />
-                        <Line type="monotone" dataKey="errors" stroke="#ef4444" strokeWidth={1.5} dot={false} />
+                        <Line type="monotone" dataKey="requests" stroke="var(--risk-none)" strokeWidth={2} dot={false} />
+                        <Line type="monotone" dataKey="errors" stroke="var(--risk-critical)" strokeWidth={1.5} dot={false} />
                       </LineChart>
                     </ResponsiveContainer>
                   ) : (
@@ -1191,8 +1191,8 @@ export default function DeveloperPortal() {
                       <YAxis tick={{ fontSize: 10 }} />
                       <Tooltip />
                       <Legend wrapperStyle={{ fontSize: 11 }} />
-                      <Bar dataKey="calls" fill="#8b5cf6" name="Total Calls" radius={[3, 3, 0, 0]} />
-                      <Bar dataKey="limit" fill="#d1d5db" name="Max Allowed" radius={[3, 3, 0, 0]} />
+                      <Bar dataKey="calls" fill="var(--chart-violet)" name="Total Calls" radius={[3, 3, 0, 0]} />
+                      <Bar dataKey="limit" fill="var(--color-slate-200)" name="Max Allowed" radius={[3, 3, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </CardContent>

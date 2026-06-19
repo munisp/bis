@@ -1,4 +1,5 @@
 import { useState } from "react";
+import BISLayout from "@/components/BISLayout";
 import { trpc } from "@/lib/trpc";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -15,13 +16,13 @@ import { Database, BarChart2, AlertTriangle, FileSearch, Globe, Terminal } from 
 
 // ── Colour palette ─────────────────────────────────────────────────────────────
 const SEVERITY_COLORS: Record<string, string> = {
-  critical: "#ef4444",
-  high: "#f97316",
-  medium: "#eab308",
-  low: "#22c55e",
+  critical: "var(--risk-critical)",
+  high: "var(--risk-high)",
+  medium: "var(--risk-medium)",
+  low: "var(--risk-low)",
 };
-const PIE_COLORS = ["#6366f1", "#8b5cf6", "#a78bfa", "#c4b5fd", "#ddd6fe"];
-const LINE_COLOR = "#6366f1";
+const PIE_COLORS = ["var(--chart-indigo)", "var(--chart-violet)", "var(--chart-violet)", "var(--chart-violet)", "var(--chart-violet)"];
+const LINE_COLOR = "var(--chart-indigo)";
 
 // ── Table stats card ──────────────────────────────────────────────────────────
 function TableStatsCard() {
@@ -42,8 +43,14 @@ function TableStatsCard() {
             {[1, 2, 3].map(i => <Skeleton key={i} className="h-10 w-full" />)}
           </div>
         ) : (
+          <>
+          {data && !data.service_available && (
+            <div className="text-xs text-amber-500 mb-2 px-1">
+              Lakehouse service unavailable — configure LAKEHOUSE_URL for live data.
+            </div>
+          )}
           <div className="divide-y divide-border">
-            {(data ?? []).map((t: any) => (
+            {(data?.tables ?? []).map((t: any) => (
               <div key={t.table} className="flex items-center justify-between py-2.5">
                 <div>
                   <span className="font-mono text-sm font-medium">{t.table}</span>
@@ -58,6 +65,7 @@ function TableStatsCard() {
               </div>
             ))}
           </div>
+          </>
         )}
       </CardContent>
     </Card>
@@ -91,7 +99,7 @@ function InvestigationsByMonthChart() {
                 contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 6 }}
                 labelStyle={{ color: "hsl(var(--foreground))" }}
               />
-              <Bar dataKey="count" fill="#6366f1" radius={[3, 3, 0, 0]} name="Investigations" />
+              <Bar dataKey="count" fill="var(--chart-indigo)" radius={[3, 3, 0, 0]} name="Investigations" />
             </BarChart>
           </ResponsiveContainer>
         )}
@@ -127,7 +135,7 @@ function AlertsBySeverityChart() {
               />
               <Bar dataKey="count" radius={[0, 3, 3, 0]} name="Alerts">
                 {rows.map((r, i) => (
-                  <Cell key={i} fill={SEVERITY_COLORS[r.severity] ?? "#6366f1"} />
+                  <Cell key={i} fill={SEVERITY_COLORS[r.severity] ?? "var(--chart-indigo)"} />
                 ))}
               </Bar>
             </BarChart>
@@ -203,7 +211,7 @@ function TopCountriesChart() {
               <Tooltip
                 contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 6 }}
               />
-              <Bar dataKey="count" fill="#10b981" radius={[3, 3, 0, 0]} name="Investigations" />
+              <Bar dataKey="count" fill="var(--risk-low)" radius={[3, 3, 0, 0]} name="Investigations" />
             </BarChart>
           </ResponsiveContainer>
         )}
@@ -301,6 +309,7 @@ function DuckDBConsole() {
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function LakehouseAnalyticsPage() {
   return (
+    <BISLayout title="Lakehouse Analytics" subtitle="Delta Lake + DuckDB — immutable event store with ad-hoc SQL analytics">
     <div className="space-y-6 p-6">
       {/* Header */}
       <div className="flex items-start justify-between">
@@ -339,5 +348,6 @@ export default function LakehouseAnalyticsPage() {
         </TabsContent>
       </Tabs>
     </div>
+    </BISLayout>
   );
 }

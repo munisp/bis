@@ -142,7 +142,8 @@ export const lexRouter = router({
       const { randomUUID, createHash } = await import("crypto");
       const submitterId = randomUUID();
       // Generate a 6-digit PIN and hash it (SHA-256 with submitterId as salt)
-      const pin = String(Math.floor(100000 + Math.random() * 900000));
+      const pinNum = parseInt(crypto.randomUUID().replace(/-/g,'').slice(0,6), 16) % 900000 + 100000;
+      const pin = String(pinNum);
       const pinHash = createHash("sha256").update(pin + submitterId).digest("hex");
       const [submitter] = await db.insert(lexSubmitters).values({
         submitterId,

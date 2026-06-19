@@ -18,8 +18,16 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import {
   Bell, BellOff, CheckCircle2, XCircle, RefreshCw, Loader2,
-  Copy, Check, Zap, Key, Smartphone, Globe, Send, History, ChevronLeft, ChevronRight,
+  Copy, Check, Zap, Key, Smartphone, Globe, Send, History, ChevronLeft, ChevronRight, Eye,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -69,11 +77,12 @@ function ScheduleBroadcastForm({ utils, broadcastTags }: { utils: ReturnType<typ
   const [url, setUrl] = useState("");
   const [tag, setTag] = useState("");
   const [scheduledAt, setScheduledAt] = useState(""); // datetime-local string
+  const [showPreview, setShowPreview] = useState(false);
 
   const scheduleMutation = trpc.push.scheduleBroadcast.useMutation({
     onSuccess: (data) => {
       toast.success(`Broadcast scheduled for ${new Date(data.scheduledAt).toLocaleString()}`);
-      setTitle(""); setBody(""); setUrl(""); setTag(""); setScheduledAt("");
+      setTitle(""); setBody(""); setUrl(""); setTag(""); setScheduledAt(""); setShowPreview(false);
       utils.push.listScheduledBroadcasts.invalidate();
     },
     onError: (err) => toast.error(`Schedule failed: ${err.message}`),
@@ -92,7 +101,63 @@ function ScheduleBroadcastForm({ utils, broadcastTags }: { utils: ReturnType<typ
     scheduleMutation.mutate({ title: title.trim(), body: body.trim(), url: url.trim() || undefined, tag: tag.trim() || undefined, scheduledAt: ts });
   }
 
+  function handlePreview() {
+    if (!title.trim() || !body.trim()) {
+      toast.error("Enter a title and body to preview");
+      return;
+    }
+    setShowPreview(true);
+  }
+
   return (
+    <>
+    {/* Preview modal */}
+    <Dialog open={showPreview} onOpenChange={setShowPreview}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle className="font-mono text-sm flex items-center gap-2">
+            <Eye size={14} className="text-primary" />
+            Broadcast Preview
+          </DialogTitle>
+          <DialogDescription className="text-xs text-muted-foreground">
+            This is how the push notification will appear on the recipient’s device.
+          </DialogDescription>
+        </DialogHeader>
+        {/* Simulated OS notification card */}
+        <div className="rounded-xl border border-border bg-card p-4 space-y-2 shadow-md">
+          <div className="flex items-start gap-3">
+            <div className="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center shrink-0">
+              <Bell size={16} className="text-primary" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold font-mono truncate">{title || 'Notification Title'}</p>
+              <p className="text-xs text-muted-foreground mt-0.5 line-clamp-3">{body || 'Notification body text.'}</p>
+            </div>
+          </div>
+          {url && (
+            <p className="text-[10px] font-mono text-primary/70 truncate pl-11">{url}</p>
+          )}
+          {tag && (
+            <div className="pl-11">
+              <span className="text-[9px] font-mono px-1.5 py-0.5 rounded-full border border-primary/30 text-primary/70">{tag}</span>
+            </div>
+          )}
+          {scheduledAt && (
+            <p className="text-[10px] font-mono text-muted-foreground pl-11">
+              Scheduled: {new Date(scheduledAt).toLocaleString()}
+            </p>
+          )}
+        </div>
+        <DialogFooter className="gap-2">
+          <Button variant="outline" size="sm" onClick={() => setShowPreview(false)}>Edit</Button>
+          <Button size="sm" className="gap-1.5" onClick={() => { setShowPreview(false); handleSchedule(); }}
+            disabled={scheduleMutation.isPending || !scheduledAt}>
+            {scheduleMutation.isPending ? <Loader2 size={12} className="animate-spin" /> : <History size={12} />}
+            Confirm Schedule
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
     <div className="space-y-3 border border-dashed border-border rounded-md p-3">
       <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-wide">New Scheduled Broadcast</p>
       <div className="grid grid-cols-2 gap-2">
@@ -125,15 +190,21 @@ function ScheduleBroadcastForm({ utils, broadcastTags }: { utils: ReturnType<typ
           ))}
         </div>
       </div>
-      <Button size="sm" className="gap-1.5 text-xs font-mono" onClick={handleSchedule}
-        disabled={scheduleMutation.isPending || !title.trim() || !body.trim() || !scheduledAt}>
-        {scheduleMutation.isPending ? <Loader2 size={12} className="animate-spin" /> : <History size={12} />}
-        Schedule Broadcast
-      </Button>
+            <div className="flex items-center gap-2">
+        <Button size="sm" variant="outline" className="gap-1.5 text-xs font-mono" onClick={handlePreview}
+          disabled={!title.trim() || !body.trim()}>
+          <Eye size={12} /> Preview
+        </Button>
+        <Button size="sm" className="gap-1.5 text-xs font-mono" onClick={handleSchedule}
+          disabled={scheduleMutation.isPending || !title.trim() || !body.trim() || !scheduledAt}>
+          {scheduleMutation.isPending ? <Loader2 size={12} className="animate-spin" /> : <History size={12} />}
+          Schedule Broadcast
+        </Button>
+      </div>
     </div>
+    </>
   );
 }
-
 // ─── Scheduled Broadcast List ─────────────────────────────────────────────────
 
 function ScheduledBroadcastList() {
@@ -381,6 +452,13 @@ export default function PushSettingsPage() {
     });
   }
 
+  const retryBroadcastMutation = trpc.push.retryBroadcast.useMutation({
+    onSuccess: (result) => {
+      toast.success(`Retry complete — ${result.sent} delivered, ${result.failed} failed out of ${result.retried} subscribers`);
+      utils.push.listBroadcasts.invalidate();
+    },
+    onError: (err) => toast.error(`Retry failed: ${err.message}`),
+  });
   // ── Guard ─────────────────────────────────────────────────────────────────────
   if (!isAuthenticated || user?.role !== "admin") {
     return (
@@ -767,6 +845,17 @@ export default function PushSettingsPage() {
                             <td className="py-1.5 pr-3 text-right text-red-400">{bc.failedCount}</td>
                             <td className="py-1.5 text-right text-muted-foreground whitespace-nowrap">
                               {new Date(bc.sentAt).toLocaleDateString()}
+                            </td>
+                            <td className="py-1.5 text-right">
+                              <button
+                                type="button"
+                                title="Retry broadcast to all active subscribers"
+                                onClick={() => retryBroadcastMutation.mutate({ broadcastId: bc.id })}
+                                disabled={retryBroadcastMutation.isPending}
+                                className="text-[10px] font-mono text-primary/60 hover:text-primary transition-colors disabled:opacity-30"
+                              >
+                                {retryBroadcastMutation.isPending ? <Loader2 size={10} className="animate-spin inline" /> : <RefreshCw size={10} className="inline" />}
+                              </button>
                             </td>
                           </tr>
                         ))}

@@ -249,7 +249,7 @@ export default function InvestigationDetail() {
     toast.success(`Status updated to ${STATUS_FLOW[newStatus]?.label ?? newStatus}`);
   };
 
-  const riskColor = inv.riskScore >= 80 ? "#f87171" : inv.riskScore >= 60 ? "#fb923c" : inv.riskScore >= 30 ? "#fbbf24" : "#34d399";
+  const riskColor = inv.riskScore >= 80 ? "var(--risk-critical)" : inv.riskScore >= 60 ? "var(--chart-orange)" : inv.riskScore >= 30 ? "var(--risk-medium)" : "var(--risk-low)";
 
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [editNoteText, setEditNoteText] = useState("");
@@ -1210,7 +1210,7 @@ export default function InvestigationDetail() {
 
       {/* ── goAML STR Wizard Modal ─────────────────────────────────────────── */}
       <Dialog open={goamlOpen} onOpenChange={setGoamlOpen}>
-        <DialogContent className="max-w-lg bg-[#0f0f1a] border-border">
+        <DialogContent className="max-w-lg bg-[var(--color-surface2)] border-border">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-sm font-mono">
               <Shield size={14} className="text-amber-400" />

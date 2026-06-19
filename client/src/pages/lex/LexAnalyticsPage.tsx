@@ -44,12 +44,12 @@ const STATE_CENTROIDS: Record<string, [number, number]> = {
 };
 
 const INCIDENT_COLORS: Record<string, string> = {
-  arrest: "#3b82f6", seizure: "#8b5cf6", witness_statement: "#10b981",
-  court_order: "#f59e0b", intel_tip: "#ef4444", missing_person: "#ec4899",
-  homicide: "#dc2626", fraud: "#f97316", cybercrime: "#06b6d4", other: "#6b7280",
+  arrest: "var(--risk-none)", seizure: "var(--chart-violet)", witness_statement: "var(--risk-low)",
+  court_order: "var(--risk-medium)", intel_tip: "var(--risk-critical)", missing_person: "var(--chart-pink)",
+  homicide: "var(--risk-critical)", fraud: "var(--risk-high)", cybercrime: "var(--chart-cyan)", other: "var(--muted-foreground)",
 };
 
-const PIE_COLORS = ["#3b82f6", "#8b5cf6", "#10b981", "#f59e0b", "#ef4444", "#ec4899", "#dc2626", "#f97316", "#06b6d4", "#6b7280"];
+const PIE_COLORS = ["var(--risk-none)", "var(--chart-violet)", "var(--risk-low)", "var(--risk-medium)", "var(--risk-critical)", "var(--chart-pink)", "var(--risk-critical)", "var(--risk-high)", "var(--chart-cyan)", "var(--muted-foreground)"];
 
 const INCIDENT_LABELS: Record<string, string> = {
   arrest: "Arrest", seizure: "Seizure", witness_statement: "Witness Statement",
@@ -124,9 +124,9 @@ export default function LexAnalyticsPage() {
         map,
         center: { lat: centroid[0], lng: centroid[1] },
         radius,
-        fillColor: s.pending > 0 ? "#ef4444" : "#3b82f6",
+        fillColor: s.pending > 0 ? "var(--risk-critical)" : "var(--risk-none)",
         fillOpacity: opacity,
-        strokeColor: "#1e40af",
+        strokeColor: "var(--chart-blue2)",
         strokeOpacity: 0.4,
         strokeWeight: 1,
       });
@@ -268,9 +268,9 @@ export default function LexAnalyticsPage() {
                     formatter={(v, name) => [v, name]}
                     labelFormatter={(label) => NIGERIAN_STATES.find(s => s.code === label)?.name ?? label}
                   />
-                  <Bar dataKey="validated" stackId="a" fill="#10b981" name="Validated" />
-                  <Bar dataKey="pending" stackId="a" fill="#f59e0b" name="Pending" />
-                  <Bar dataKey="rejected" stackId="a" fill="#ef4444" name="Rejected" radius={[0, 4, 4, 0]} />
+                  <Bar dataKey="validated" stackId="a" fill="var(--risk-low)" name="Validated" />
+                  <Bar dataKey="pending" stackId="a" fill="var(--risk-medium)" name="Pending" />
+                  <Bar dataKey="rejected" stackId="a" fill="var(--risk-critical)" name="Rejected" radius={[0, 4, 4, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             )}
@@ -334,9 +334,9 @@ export default function LexAnalyticsPage() {
                   <YAxis tick={{ fontSize: 11 }} />
                   <Tooltip />
                   <Legend />
-                  <Line type="monotone" dataKey="Total" stroke="#3b82f6" strokeWidth={2} dot={false} />
-                  <Line type="monotone" dataKey="Validated" stroke="#10b981" strokeWidth={2} dot={false} />
-                  <Line type="monotone" dataKey="Rejected" stroke="#ef4444" strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="Total" stroke="var(--risk-none)" strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="Validated" stroke="var(--risk-low)" strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="Rejected" stroke="var(--risk-critical)" strokeWidth={2} dot={false} />
                 </LineChart>
               </ResponsiveContainer>
             )}
