@@ -20,6 +20,7 @@ import { storagePut } from "./storage";
 import { ENV } from "./_core/env";
 import { initiateInterBankTransfer, pollTransferStatus, getActiveRail } from "./mojaloop";
 import { publishPaymentEvent } from "./dapr";
+import { fluvioPublishPaymentEvent } from "./fluvio";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -149,6 +150,16 @@ export const paymentRailsRouter = router({
         .returning();
       // Dapr pub/sub: publish payment event (non-blocking)
       publishPaymentEvent({ eventType: "initiated", txRef, amountKobo, currency: input.currency, rail: activeRail }).catch(() => {});
+      // Fluvio velocity processor: publish payment event for sliding-window velocity checks (non-blocking)
+      fluvioPublishPaymentEvent({
+        event_type: "initiated",
+        tx_ref: txRef,
+        account_id: input.originatorAccountId,
+        amount_kobo: amountKobo,
+        currency: input.currency,
+        rail: activeRail,
+        tenant_id: String((ctx.user as { tenantId?: string | number } | null)?.tenantId ?? "default"),
+      }).catch(() => {});
       return { success: true, txRef, id: created.id, status: dbStatus, rail: activeRail };
     }),
 

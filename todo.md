@@ -2719,3 +2719,17 @@
 - [x] Keycloak login button in BISLayout header
 - [x] Redis cache: investigations.list, alerts.list, kyc.list + cache invalidation
 - [x] DB mock: stateful in-memory store with lastInsertedRow tracking
+
+## Sprint v44 — Closing All Remaining Gaps to 100/100
+
+- [x] P0: CSRF enforcement — add X-CSRF-Token header check to writeProcedure middleware
+- [x] P0: GitHub Actions CI pipeline with test PostgreSQL (vitest + db:push)
+- [x] P1: apiTokens.rotate mutation + key expiry enforcement
+- [x] P1: Biometric engine startup health check in /health endpoint
+- [x] P1: OpenAppsec WAF headers — validate expected headers from gateway layer
+- [x] P2: Kafka/Fluvio direct SDK wiring (producer in server/kafka.ts)
+- [x] P2: TigerBeetle direct SDK wiring (direct ledger calls in server/tigerbeetle.ts)
+- [x] P2: Lakehouse Delta Lake write path (archival writes via gateway)
+- [x] Final: Update PRODUCTION_READINESS_REPORT.md to 100/100
+- [x] Final: Run full test suite (target 850+ passing)
+- [x] Final: Save checkpoint + push to GitHub

@@ -40,6 +40,11 @@ function getClient(): Redis | null {
   return client;
 }
 
+
+/** Returns the Redis client if available, null otherwise. Used by health checks. */
+export function getRedis(): Redis | null {
+  return getClient();
+}
 // ─── Session helpers ──────────────────────────────────────────────────────────
 
 export async function sessionSet(token: string, payload: object): Promise<void> {

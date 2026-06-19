@@ -172,6 +172,47 @@ async function startServer() {
     next();
   });
 
+  // ── OpenAppsec WAF header detection ────────────────────────────────────────
+  // When APISIX + OpenAppsec is deployed in front of the BFF, it injects
+  // X-Appsec-Mode and X-Appsec-Status headers into every request.
+  // The BFF reads these headers and:
+  //   1. Logs WAF enforcement decisions for audit purposes.
+  //   2. Rejects requests that OpenAppsec has marked as "block" but somehow
+  //      reached the BFF (defense-in-depth — should not happen in production).
+  //   3. Exposes WAF status in the /api/health endpoint.
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    const appsecMode = req.headers["x-appsec-mode"] as string | undefined;
+    const appsecStatus = req.headers["x-appsec-status"] as string | undefined;
+    const appsecAttackType = req.headers["x-appsec-attack-type"] as string | undefined;
+    // If OpenAppsec is active and has blocked this request, reject it here as well.
+    // In normal operation APISIX would have already dropped the request; this is
+    // a defense-in-depth layer in case the WAF is in detect-only mode.
+    if (appsecStatus === "block") {
+      log("warn", "[WAF] OpenAppsec blocked request", {
+        path: req.path,
+        method: req.method,
+        ip: req.ip,
+        appsecMode,
+        appsecAttackType,
+        reqId: (req as Request & { id?: string }).id,
+      });
+      res.status(403).json({ error: "Request blocked by WAF", code: "WAF_BLOCKED" });
+      return;
+    }
+    // Log WAF detection events (non-blocking)
+    if (appsecStatus === "detect" && appsecAttackType) {
+      log("warn", "[WAF] OpenAppsec detected potential attack (detect mode)", {
+        path: req.path,
+        method: req.method,
+        ip: req.ip,
+        appsecMode,
+        appsecAttackType,
+        reqId: (req as Request & { id?: string }).id,
+      });
+    }
+    next();
+  });
+
   // ── CORS ───────────────────────────────────────────────────────────────────
   // Allow the frontend origin (same host in dev, explicit in prod).
   // Credentials (session cookies) require explicit origin — no wildcard.
@@ -199,7 +240,7 @@ async function startServer() {
       },
       credentials: true,
       methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-      allowedHeaders: ["Content-Type", "Authorization", "x-paystack-signature"],
+      allowedHeaders: ["Content-Type", "Authorization", "x-paystack-signature", "x-csrf-token", "x-request-id"],
       maxAge: 86400, // 24h preflight cache
     });
   app.use(corsMiddleware);
@@ -471,6 +512,67 @@ async function startServer() {
       }
     } catch {
       checks.llm = { status: "degraded", latencyMs: Date.now() - llmStart };
+    }
+
+    // Redis check
+    const redisStart = Date.now();
+    try {
+      const { getRedis } = await import("../redis");
+      const redis = await getRedis();
+      if (redis) {
+        await redis.ping();
+        checks.redis = { status: "ok", latencyMs: Date.now() - redisStart };
+      } else {
+        checks.redis = { status: "degraded" };
+      }
+    } catch {
+      checks.redis = { status: "degraded", latencyMs: Date.now() - redisStart };
+    }
+
+    // Biometric engine check
+    const bioStart = Date.now();
+    try {
+      const bioUrl = ENV.biometricEngineUrl;
+      if (bioUrl) {
+        const r = await fetch(`${bioUrl}/health`, { signal: AbortSignal.timeout(3000) });
+        checks.biometric = { status: r.ok ? "ok" : "degraded", latencyMs: Date.now() - bioStart };
+      } else {
+        checks.biometric = { status: "degraded" }; // URL not configured
+      }
+    } catch {
+      checks.biometric = { status: "degraded", latencyMs: Date.now() - bioStart };
+    }
+
+    // Temporal check
+    const temporalStart = Date.now();
+    try {
+      const temporalHost = ENV.temporalHost;
+      if (temporalHost) {
+        // Simple TCP connectivity check to Temporal frontend service (port 7233)
+        const [host] = temporalHost.split(":");
+        const port = parseInt(temporalHost.split(":")[1] ?? "7233", 10);
+        await new Promise<void>((resolve, reject) => {
+          const socket = net.createConnection({ host, port, timeout: 3000 });
+          socket.on("connect", () => { socket.destroy(); resolve(); });
+          socket.on("error", reject);
+          socket.on("timeout", () => { socket.destroy(); reject(new Error("timeout")); });
+        });
+        checks.temporal = { status: "ok", latencyMs: Date.now() - temporalStart };
+      } else {
+        checks.temporal = { status: "degraded" }; // Host not configured
+      }
+    } catch {
+      checks.temporal = { status: "degraded", latencyMs: Date.now() - temporalStart };
+    }
+
+    // Fluvio velocity processor check
+    const fluvioStart = Date.now();
+    try {
+      const { fluvioHealthCheck } = await import("../fluvio");
+      const fluvioResult = await fluvioHealthCheck();
+      checks.fluvio = { status: fluvioResult.ok ? "ok" : "degraded", latencyMs: Date.now() - fluvioStart };
+    } catch {
+      checks.fluvio = { status: "degraded", latencyMs: Date.now() - fluvioStart };
     }
 
     const allOk = Object.values(checks).every(c => c.status === "ok");
@@ -846,6 +948,11 @@ async function startServer() {
         return;
       }
       const apiToken = rows[0];
+      // Check token expiry
+      if (apiToken.expiresAt && apiToken.expiresAt < new Date()) {
+        res.status(401).json({ error: "API token has expired", code: "TOKEN_EXPIRED" });
+        return;
+      }
       // Check token quota
       if (apiToken.tokenQuota !== null && apiToken.usageCount >= apiToken.tokenQuota) {
         res.status(429).json({ error: "Token quota exceeded", code: "QUOTA_EXCEEDED" });
@@ -894,8 +1001,18 @@ async function startServer() {
       const cookieHeader = req.headers["cookie"] ?? "";
       const csrfCookieMatch = cookieHeader.match(/(?:^|;\s*)_csrf=([^;]+)/);
       const csrfCookie = csrfCookieMatch ? decodeURIComponent(csrfCookieMatch[1]) : undefined;
-      // If no CSRF cookie exists yet (first visit), allow through
-      if (!csrfCookie) return next();
+      // If no CSRF cookie exists yet, check whether the user has a session.
+      // Authenticated users MUST have fetched a CSRF token — reject to prevent bypass.
+      // Unauthenticated first-visit requests are allowed through.
+      if (!csrfCookie) {
+        const sessionCookieMatch = cookieHeader.match(/(?:^|;\s*)app_session_id=([^;]+)/);
+        if (sessionCookieMatch) {
+          log("warn", "CSRF cookie missing for authenticated user", { path: req.path, ip: req.ip });
+          res.status(403).json({ error: "CSRF token required" });
+          return;
+        }
+        return next();
+      }
       // Validate token matches cookie using timing-safe comparison
       if (!csrfHeader) {
         log("warn", "CSRF token missing", { path: req.path, ip: req.ip });

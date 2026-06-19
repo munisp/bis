@@ -327,30 +327,8 @@ export const billingRouter = router({
       let rows: LedgerRow[] = [];
 
       if (!TB_URL) {
-        // Simulated data when TigerBeetle is not configured
-        const now = Date.now();
-        const tiers = ["basic", "standard", "premium"] as const;
-        const descs = [
-          "Investigation debit",
-          "Account top-up",
-          "Investigation debit",
-          "Investigation debit",
-          "Account top-up",
-        ];
-        rows = Array.from({ length: 20 }, (_, i) => {
-          const isCredit = i % 4 === 1;
-          const tier = tiers[i % 3];
-          const amountKobo = isCredit ? 500_000 : TIER_AMOUNTS[tier];
-          return {
-            id: `sim-${i.toString().padStart(4, "0")}`,
-            timestamp: now - i * 3_600_000,
-            type: isCredit ? "credit" : "debit",
-            description: descs[i % descs.length],
-            amountNGN: amountKobo / 100,
-            reference: isCredit ? `TOPUP-${i}` : `INV-${1000 + i}`,
-            tier: isCredit ? "" : tier,
-          };
-        });
+        // TigerBeetle not configured — return empty ledger (no mock data in production)
+        rows = [];
       } else {
         try {
           const transfers = (await tbGet(

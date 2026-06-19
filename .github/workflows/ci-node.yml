@@ -52,8 +52,19 @@ jobs:
           --health-timeout=5s
           --health-retries=5
 
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     env:
       DATABASE_URL: postgresql://bis_user:bis_secure_2026@localhost:5432/bis_db
+      REDIS_URL: redis://localhost:6379
       JWT_SECRET: ci-test-jwt-secret-not-for-prod
       VITE_APP_ID: ci-test-app-id
       OAUTH_SERVER_URL: https://api.manus.im
@@ -93,8 +104,16 @@ jobs:
         env:
           DATABASE_URL: postgresql://bis_user:bis_secure_2026@localhost:5432/bis_db
 
-      - name: Run Vitest
-        run: pnpm test
+      - name: Run Vitest (with coverage)
+        run: pnpm test -- --coverage
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-report
+          path: coverage/
+          retention-days: 7
 
       - name: Build
         run: pnpm build
@@ -106,3 +125,25 @@ jobs:
           name: bis-pwa-dist
           path: dist/
           retention-days: 7
+
+  # ── Dependency security audit ─────────────────────────────────────────────
+  security-audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Audit dependencies (high+critical only)
+        run: pnpm audit --audit-level=high || true

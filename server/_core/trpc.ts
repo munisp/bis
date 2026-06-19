@@ -2,6 +2,7 @@ import { NOT_ADMIN_ERR_MSG, UNAUTHED_ERR_MSG } from '@shared/const';
 import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import type { TrpcContext } from "./context";
+import { permifyCheck } from "../permify";
 
 const t = initTRPC.context<TrpcContext>().create({
   transformer: superjson,
@@ -27,11 +28,32 @@ const requireUser = t.middleware(async opts => {
 
 export const protectedProcedure = t.procedure.use(requireUser);
 
+/**
+ * Admin procedure — two-layer authorization:
+ *   Layer 1: DB role check (ctx.user.role === 'admin') — fast, no network call.
+ *   Layer 2: Permify RBAC check (user has 'admin' permission on 'platform:bis') —
+ *            defense-in-depth, ensures the external authorization engine agrees.
+ *            Fails CLOSED in production; fails OPEN in dev/test when Permify is
+ *            not configured (PERMIFY_URL is empty).
+ */
 export const adminProcedure = t.procedure.use(
   t.middleware(async opts => {
     const { ctx, next } = opts;
 
+    // Layer 1: local role check (fast path)
     if (!ctx.user || ctx.user.role !== 'admin') {
+      throw new TRPCError({ code: "FORBIDDEN", message: NOT_ADMIN_ERR_MSG });
+    }
+
+    // Layer 2: Permify RBAC check (defense-in-depth)
+    // permifyCheck fails-closed in production; fails-open in dev/test.
+    const allowed = await permifyCheck(
+      "platform",
+      "bis",
+      "admin",
+      String(ctx.user.id)
+    );
+    if (!allowed) {
       throw new TRPCError({ code: "FORBIDDEN", message: NOT_ADMIN_ERR_MSG });
     }
 

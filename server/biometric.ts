@@ -22,6 +22,7 @@ import { invokeLLM } from "./_core/llm";
 import { notifyOwner } from "./_core/notification";
 import { auditLog } from "../drizzle/schema";
 import * as crypto from "crypto";
+import { fluvioPublishBiometricEvent } from "./fluvio";
 
 const EVENT_PROCESSOR_URL = ENV.eventProcessorUrl;
 
@@ -609,6 +610,14 @@ export const biometricRouter = router({
         { score: result.score, challenge: input.challenge, passed: result.live, sessionId },
         result.live ? "info" : "medium"
       );
+      // Fluvio velocity processor: publish biometric event for spoof-velocity checks (non-blocking)
+      fluvioPublishBiometricEvent({
+        event_type: result.live ? "verified" : "spoof_detected",
+        subject_ref: input.subjectRef ?? "unknown",
+        score: result.score,
+        spoof_type: result.live ? undefined : "active_liveness_fail",
+        tenant_id: "default",
+      }).catch(() => {});
       if (activeLivenessPublished && sessionId) { markBiometricSessionKafkaPublished(sessionId as any).catch(() => {}); }
 
       return result;

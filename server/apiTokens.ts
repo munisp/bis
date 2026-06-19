@@ -18,6 +18,7 @@
 
 import crypto from "crypto";
 import { z } from "zod";
+import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure, writeProcedure, adminProcedure } from "./_core/trpc";
 import { ENV } from "./_core/env";
 import { getDb } from "./db";
@@ -311,4 +312,71 @@ export const apiTokensRouter = router({
 
   /** List available scopes */
   availableScopes: protectedProcedure.query(() => AVAILABLE_SCOPES),
+
+  /**
+   * Rotate an API token — revoke the old token and issue a new one with the
+   * same name, scopes, rate-limit, and expiry settings.
+   * Returns the new plaintext token (shown once; not stored).
+   */
+  rotate: writeProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      const [existing] = await db
+        .select()
+        .from(apiTokens)
+        .where(eq(apiTokens.id, input.id))
+        .limit(1);
+      if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "Token not found" });
+      if (existing.createdBy !== ctx.user!.id && ctx.user!.role !== "admin") {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Forbidden" });
+      }
+      // Generate a new token using existing helpers
+      const { token: rawToken, prefix } = generateToken();
+      const hash = hashToken(rawToken);
+      // Revoke old token and insert new one atomically
+      await db.update(apiTokens)
+        .set({ active: false, updatedAt: new Date() })
+        .where(eq(apiTokens.id, input.id));
+      const [newToken] = await db.insert(apiTokens).values({
+        tenantId: existing.tenantId,
+        name: existing.name,
+        prefix,
+        tokenHash: hash,
+        scopes: existing.scopes,
+        rateLimit: existing.rateLimit,
+        tokenQuota: existing.tokenQuota,
+        expiresAt: existing.expiresAt,
+        active: true,
+        createdBy: ctx.user!.id,
+      }).returning();
+      return { token: rawToken, id: newToken.id, prefix };
+    }),
+
+  /**
+   * Set or extend the expiry date for an API token.
+   */
+  setExpiry: writeProcedure
+    .input(z.object({
+      id: z.number(),
+      expiresAt: z.date().nullable(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      const [existing] = await db
+        .select()
+        .from(apiTokens)
+        .where(eq(apiTokens.id, input.id))
+        .limit(1);
+      if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "Token not found" });
+      if (existing.createdBy !== ctx.user!.id && ctx.user!.role !== "admin") {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Forbidden" });
+      }
+      await db.update(apiTokens)
+        .set({ expiresAt: input.expiresAt, updatedAt: new Date() })
+        .where(eq(apiTokens.id, input.id));
+      return { success: true };
+    }),
 });

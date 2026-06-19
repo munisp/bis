@@ -4,6 +4,7 @@ import { router, protectedProcedure, writeProcedure, adminProcedure } from "./_c
 import { ENV } from "./_core/env";
 import { getDb } from "./db";
 import { publishAmlAlert } from "./dapr";
+import { fluvioPublishAmlEvent } from "./fluvio";
 import {
   transactions, amlRules, amlAlerts, swiftMessages, sepaPayments, travelRuleRecords, cases, alertRules, webhooks,
 } from "../drizzle/schema";
@@ -307,6 +308,15 @@ export const amlRouter = router({
             riskScore: score,
             transactionRef: tx.txRef,
             autoEscalated: score >= 70,
+          }).catch(() => {});
+          // Fluvio velocity processor: publish AML event for real-time velocity checks (non-blocking)
+          fluvioPublishAmlEvent({
+            alert_id: newAlert.id,
+            alert_type: riskLevel,
+            risk_score: score,
+            transaction_ref: tx.txRef,
+            tenant_id: String((ctx.user as { tenantId?: string | number } | null)?.tenantId ?? "default"),
+            auto_escalated: score >= 70,
           }).catch(() => {});
           // Webhook fan-out: notify all subscribed tenants (non-blocking)
           dispatchAmlWebhook({
