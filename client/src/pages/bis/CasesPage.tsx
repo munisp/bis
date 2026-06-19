@@ -1,6 +1,7 @@
 import { useState, useCallback } from "react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Link } from "wouter";
+import BISLayout from "@/components/BISLayout";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -238,6 +239,7 @@ export default function CasesPage() {
   const hasActiveFilters = search || statusFilter !== "all" || typeFilter !== "all" || priorityFilter !== "all" || dateFrom || dateTo || myCases;
 
   return (
+    <BISLayout title="Case Management" subtitle="Integrated compliance case lifecycle — from draft to closure">
     <div className="p-6 space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between gap-4 flex-wrap">
@@ -696,5 +698,6 @@ export default function CasesPage() {
         </DialogContent>
       </Dialog>
     </div>
+    </BISLayout>
   );
 }

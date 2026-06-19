@@ -1,4 +1,5 @@
 import { useState } from "react";
+import BISLayout from "@/components/BISLayout";
 import { trpc } from "@/lib/trpc";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -301,6 +302,7 @@ function DuckDBConsole() {
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function LakehouseAnalyticsPage() {
   return (
+    <BISLayout title="Lakehouse Analytics" subtitle="Delta Lake + DuckDB — immutable event store with ad-hoc SQL analytics">
     <div className="space-y-6 p-6">
       {/* Header */}
       <div className="flex items-start justify-between">
@@ -339,5 +341,6 @@ export default function LakehouseAnalyticsPage() {
         </TabsContent>
       </Tabs>
     </div>
+    </BISLayout>
   );
 }
