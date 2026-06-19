@@ -47,7 +47,7 @@ const PRIORITY_CONFIG: Record<string, { color: string; bg: string; label: string
 };
 
 const TASK_PIN_COLORS: Record<string, string> = {
-  critical: '#f87171', high: '#fb923c', medium: '#fbbf24', low: '#34d399',
+  critical: 'var(--risk-critical)', high: 'var(--chart-orange)', medium: 'var(--risk-medium)', low: 'var(--risk-low)',
 };
 
 function timeAgo(d: Date | string | null | undefined): string {
@@ -388,10 +388,10 @@ export default function FieldAgentsPage() {
       const el = document.createElement('div');
       el.style.cssText = [
         'width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;',
-        `background:${agent.status === 'active' ? '#22c55e' : '#6b7280'}22;`,
-        `border:2px solid ${agent.status === 'active' ? '#22c55e' : '#6b7280'};`,
+        `background:${agent.status === 'active' ? 'var(--risk-low)' : 'var(--muted-foreground)'}22;`,
+        `border:2px solid ${agent.status === 'active' ? 'var(--risk-low)' : 'var(--muted-foreground)'};`,
         "font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:700;",
-        `color:${agent.status === 'active' ? '#22c55e' : '#9ca3af'};`,
+        `color:${agent.status === 'active' ? 'var(--risk-low)' : 'var(--muted-foreground)'};`,
       ].join('');
       el.textContent = agent.name.split(' ').map((n: string) => n[0]).join('');
       el.title = `${agent.name} (${agent.agentCode}) — ${agent.state ?? ''}`;
@@ -402,7 +402,7 @@ export default function FieldAgentsPage() {
     });
     (activeTasks as any[]).forEach((task: any) => {
       if (!task.gpsLat || !task.gpsLng) return;
-      const c = TASK_PIN_COLORS[task.priority] ?? '#fbbf24';
+      const c = TASK_PIN_COLORS[task.priority] ?? 'var(--risk-medium)';
       const el = document.createElement('div');
       el.style.cssText = [
         'padding:3px 7px;border-radius:4px;',
@@ -530,7 +530,7 @@ export default function FieldAgentsPage() {
               </h3>
               <div className="grid grid-cols-2 gap-2">
                 {(activeTasks as any[]).map((task: any) => {
-                  const c = TASK_PIN_COLORS[task.priority] ?? '#fbbf24';
+                  const c = TASK_PIN_COLORS[task.priority] ?? 'var(--risk-medium)';
                   return (
                     <div key={task.id} className="p-3 rounded-lg border border-border/50 bg-muted/10">
                       <div className="flex items-center justify-between mb-1">

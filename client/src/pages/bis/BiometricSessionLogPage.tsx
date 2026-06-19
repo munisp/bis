@@ -89,14 +89,14 @@ import {
 } from 'lucide-react';
 
 const SPOOF_COLORS: Record<string, string> = {
-  printed_photo: '#ef4444',
-  screen_replay: '#f97316',
-  paper_mask: '#eab308',
-  '3d_mask': '#a855f7',
-  deepfake: '#6366f1',
-  high_quality_photo: '#06b6d4',
-  genuine: '#22c55e',
-  unknown: '#6b7280',
+  printed_photo: 'var(--risk-critical)',
+  screen_replay: 'var(--risk-high)',
+  paper_mask: 'var(--risk-medium)',
+  '3d_mask': 'var(--chart-purple)',
+  deepfake: 'var(--chart-indigo)',
+  high_quality_photo: 'var(--chart-cyan)',
+  genuine: 'var(--risk-low)',
+  unknown: 'var(--muted-foreground)',
 };
 
 const VERIFICATION_TYPES = [
@@ -692,8 +692,8 @@ export default function BiometricSessionLogPage() {
                       contentStyle={{ fontSize: 11, background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))' }}
                     />
                     <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }} />
-                    <Line type="monotone" dataKey="passed" stroke="#22c55e" strokeWidth={2} dot={false} name="Passed" />
-                    <Line type="monotone" dataKey="failed" stroke="#ef4444" strokeWidth={2} dot={false} name="Failed" />
+                    <Line type="monotone" dataKey="passed" stroke="var(--risk-low)" strokeWidth={2} dot={false} name="Passed" />
+                    <Line type="monotone" dataKey="failed" stroke="var(--risk-critical)" strokeWidth={2} dot={false} name="Failed" />
                   </LineChart>
                 </ResponsiveContainer>
               )}
@@ -732,7 +732,7 @@ export default function BiometricSessionLogPage() {
                       {(statsQuery.data?.spoofTypeBreakdown ?? []).map(entry => (
                         <Cell
                           key={entry.spoofType}
-                          fill={SPOOF_COLORS[entry.spoofType] ?? '#6b7280'}
+                          fill={SPOOF_COLORS[entry.spoofType] ?? 'var(--muted-foreground)'}
                         />
                       ))}
                     </Bar>
@@ -831,7 +831,7 @@ export default function BiometricSessionLogPage() {
                       <TableCell>
                         {log.antiSpoofType && log.antiSpoofType !== 'genuine' && log.antiSpoofType !== 'unknown' ? (
                           <Badge
-                            style={{ backgroundColor: (SPOOF_COLORS[log.antiSpoofType] ?? '#6b7280') + '20', color: SPOOF_COLORS[log.antiSpoofType] ?? '#6b7280', borderColor: (SPOOF_COLORS[log.antiSpoofType] ?? '#6b7280') + '40' }}
+                            style={{ backgroundColor: (SPOOF_COLORS[log.antiSpoofType] ?? 'var(--muted-foreground)') + '20', color: SPOOF_COLORS[log.antiSpoofType] ?? 'var(--muted-foreground)', borderColor: (SPOOF_COLORS[log.antiSpoofType] ?? 'var(--muted-foreground)') + '40' }}
                             className="text-xs border"
                           >
                             {log.antiSpoofType.replace(/_/g, ' ')}

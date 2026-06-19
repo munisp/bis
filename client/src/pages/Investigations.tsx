@@ -99,7 +99,7 @@ function Sparkline({ values, color }: { values: number[]; color: string }) {
           cx={W}
           cy={H - ((values[values.length - 1] - min) / range) * (H - 2) - 1}
           r={2}
-          fill={trend > 0 ? '#f87171' : trend < 0 ? '#34d399' : color}
+          fill={trend > 0 ? 'var(--risk-critical)' : trend < 0 ? 'var(--risk-low)' : color}
         />
       </svg>
       {/* Hover tooltip */}
@@ -109,7 +109,7 @@ function Sparkline({ values, color }: { values: number[]; color: string }) {
           <div className="grid grid-cols-7 gap-1">
             {values.map((v, i) => (
               <div key={i} className="text-center">
-                <div className="font-bold" style={{ color: v >= 80 ? '#f87171' : v >= 60 ? '#fb923c' : v >= 30 ? '#fbbf24' : '#34d399' }}>{v}</div>
+                <div className="font-bold" style={{ color: v >= 80 ? 'var(--risk-critical)' : v >= 60 ? 'var(--chart-orange)' : v >= 30 ? 'var(--risk-medium)' : 'var(--risk-low)' }}>{v}</div>
                 <div className="text-muted-foreground">{days[i]}</div>
               </div>
             ))}
@@ -346,7 +346,7 @@ export default function Investigations() {
   };
 
   const riskBar = (score: number, id: string) => {
-    const color = score >= 80 ? "#f87171" : score >= 60 ? "#fb923c" : score >= 30 ? "#fbbf24" : "#34d399";
+    const color = score >= 80 ? "var(--risk-critical)" : score >= 60 ? "var(--chart-orange)" : score >= 30 ? "var(--risk-medium)" : "var(--risk-low)";
     const history = seedHistory(id, score);
     const trend = history[history.length - 1] - history[0];
     return (

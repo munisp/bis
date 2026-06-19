@@ -16,13 +16,13 @@ import { Database, BarChart2, AlertTriangle, FileSearch, Globe, Terminal } from 
 
 // ── Colour palette ─────────────────────────────────────────────────────────────
 const SEVERITY_COLORS: Record<string, string> = {
-  critical: "#ef4444",
-  high: "#f97316",
-  medium: "#eab308",
-  low: "#22c55e",
+  critical: "var(--risk-critical)",
+  high: "var(--risk-high)",
+  medium: "var(--risk-medium)",
+  low: "var(--risk-low)",
 };
-const PIE_COLORS = ["#6366f1", "#8b5cf6", "#a78bfa", "#c4b5fd", "#ddd6fe"];
-const LINE_COLOR = "#6366f1";
+const PIE_COLORS = ["var(--chart-indigo)", "var(--chart-violet)", "var(--chart-violet)", "var(--chart-violet)", "var(--chart-violet)"];
+const LINE_COLOR = "var(--chart-indigo)";
 
 // ── Table stats card ──────────────────────────────────────────────────────────
 function TableStatsCard() {
@@ -99,7 +99,7 @@ function InvestigationsByMonthChart() {
                 contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 6 }}
                 labelStyle={{ color: "hsl(var(--foreground))" }}
               />
-              <Bar dataKey="count" fill="#6366f1" radius={[3, 3, 0, 0]} name="Investigations" />
+              <Bar dataKey="count" fill="var(--chart-indigo)" radius={[3, 3, 0, 0]} name="Investigations" />
             </BarChart>
           </ResponsiveContainer>
         )}
@@ -135,7 +135,7 @@ function AlertsBySeverityChart() {
               />
               <Bar dataKey="count" radius={[0, 3, 3, 0]} name="Alerts">
                 {rows.map((r, i) => (
-                  <Cell key={i} fill={SEVERITY_COLORS[r.severity] ?? "#6366f1"} />
+                  <Cell key={i} fill={SEVERITY_COLORS[r.severity] ?? "var(--chart-indigo)"} />
                 ))}
               </Bar>
             </BarChart>
@@ -211,7 +211,7 @@ function TopCountriesChart() {
               <Tooltip
                 contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 6 }}
               />
-              <Bar dataKey="count" fill="#10b981" radius={[3, 3, 0, 0]} name="Investigations" />
+              <Bar dataKey="count" fill="var(--risk-low)" radius={[3, 3, 0, 0]} name="Investigations" />
             </BarChart>
           </ResponsiveContainer>
         )}

@@ -203,28 +203,28 @@ export default function BatchMonitor() {
             ) : (
               <ResponsiveContainer width="100%" height={200}>
                 <AreaChart data={tpsHistory}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                  <XAxis dataKey="time" tick={{ fontSize: 10 }} stroke="#6b7280" />
-                  <YAxis yAxisId="tps" tick={{ fontSize: 10 }} stroke="#6b7280" />
-                  <YAxis yAxisId="sat" orientation="right" domain={[0, 100]} tick={{ fontSize: 10 }} stroke="#6b7280" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--muted-foreground)" />
+                  <XAxis dataKey="time" tick={{ fontSize: 10 }} stroke="var(--muted-foreground)" />
+                  <YAxis yAxisId="tps" tick={{ fontSize: 10 }} stroke="var(--muted-foreground)" />
+                  <YAxis yAxisId="sat" orientation="right" domain={[0, 100]} tick={{ fontSize: 10 }} stroke="var(--muted-foreground)" />
                   <Tooltip
-                    contentStyle={{ backgroundColor: "#1f2937", border: "1px solid #374151", borderRadius: 6 }}
-                    labelStyle={{ color: "#9ca3af" }}
+                    contentStyle={{ backgroundColor: "var(--color-muted-bg)", border: "1px solid var(--color-muted-bg)", borderRadius: 6 }}
+                    labelStyle={{ color: "var(--muted-foreground)" }}
                   />
                   <Area
                     yAxisId="tps"
                     type="monotone"
                     dataKey="tps"
-                    stroke="#34d399"
-                    fill="#34d39920"
+                    stroke="var(--risk-low)"
+                    fill="var(--risk-low)20"
                     name="TPS"
                   />
                   <Area
                     yAxisId="sat"
                     type="monotone"
                     dataKey="saturation"
-                    stroke="#60a5fa"
-                    fill="#60a5fa20"
+                    stroke="var(--risk-none)"
+                    fill="var(--risk-none)20"
                     name="Saturation %"
                   />
                 </AreaChart>

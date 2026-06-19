@@ -33,12 +33,12 @@ export function ScoreGauge({ score, label, size = 120 }: { score: number; label?
   const radius = (size / 2) - 10;
   const circumference = 2 * Math.PI * radius;
   const progress = (score / 100) * circumference;
-  const color = score >= 70 ? "#10b981" : score >= 50 ? "#f59e0b" : score >= 30 ? "#f97316" : "#ef4444";
+  const color = score >= 70 ? "var(--risk-low)" : score >= 50 ? "var(--risk-medium)" : score >= 30 ? "var(--risk-high)" : "var(--risk-critical)";
 
   return (
     <div className="flex flex-col items-center gap-1">
       <svg width={size} height={size} className="-rotate-90">
-        <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke="#e2e8f0" strokeWidth={8} />
+        <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke="var(--color-slate-200)" strokeWidth={8} />
         <circle
           cx={size / 2} cy={size / 2} r={radius}
           fill="none" stroke={color} strokeWidth={8}

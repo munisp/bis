@@ -104,7 +104,7 @@ export default function SocialMonitoringDashboard() {
     score >= 80 ? 'text-red-400' : score >= 60 ? 'text-amber-400' : score >= 30 ? 'text-yellow-400' : 'text-emerald-400';
 
   const riskBg = (score: number) =>
-    score >= 80 ? '#f87171' : score >= 60 ? '#fb923c' : score >= 30 ? '#fbbf24' : '#34d399';
+    score >= 80 ? 'var(--risk-critical)' : score >= 60 ? 'var(--chart-orange)' : score >= 30 ? 'var(--risk-medium)' : 'var(--risk-low)';
 
   const timeAgo = (val: Date | string) => {
     const diff = Date.now() - new Date(val).getTime();
