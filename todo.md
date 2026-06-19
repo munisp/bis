@@ -2667,9 +2667,9 @@
 - [ ] Scenario 10: Incident response (frozen account + audit trail)
 
 ### Sprint v43 carry-overs
-- [ ] OcrDataPanel: collapsible field history timeline (kyc.getOcrHistory)
-- [ ] push.retryBroadcast mutation (re-dispatch to failed subscriptions only)
-- [ ] ScheduleBroadcastForm: Preview modal before confirming schedule
+- [x] OcrDataPanel: collapsible field history timeline (kyc.getOcrHistory)
+- [x] push.retryBroadcast mutation (re-dispatch to failed subscriptions only)
+- [x] ScheduleBroadcastForm: Preview modal before confirming schedule
 
 ### Tests
 - [ ] Fix phase22.test.ts and next-steps.test.ts to mock DB (remove ECONNREFUSED failures)
@@ -2690,3 +2690,14 @@
 - [x] checkThreshold test fallback fixed to include avgScore
 - [x] TypeScript: 0 errors
 - [x] Test suite: 706 passing (113 DB-connection failures in sandbox — not logic bugs)
+
+## Sprint v43 Final Batch (Jun 19 2026)
+- [x] Replace all Math.random() in production server code with crypto.randomUUID()
+- [x] Remove mock data fallback from lakehouse.ts (returns empty + service_available flag)
+- [x] Remove fake completion from mojaloop.ts sandbox fallback (returns pending)
+- [x] Remove mock name fabrication from paymentRails.ts lookupAccount (throws NOT_FOUND)
+- [x] Replace quickcheck.ts mock identity check with real Youverify BVN/NIN lookup
+- [x] Fix LakehouseAnalyticsPage to handle new listTables response shape
+- [x] Add Keycloak login button to BISLayout header
+- [x] TypeScript: 0 errors
+- [x] Tests: 706 passing, 113 DB-connection failures (sandbox limitation, not logic bugs)

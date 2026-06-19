@@ -63,7 +63,7 @@ async function submitToNfiu(xmlPayload: string): Promise<{ referenceNumber: stri
 
 function generateFilingRef(): string {
   const ts = Date.now().toString(36).toUpperCase();
-  const rand = Math.random().toString(36).substring(2, 6).toUpperCase();
+  const rand = crypto.randomUUID().replace(/-/g,'').slice(0,4).toUpperCase();
   return `STR-${ts}-${rand}`;
 }
 

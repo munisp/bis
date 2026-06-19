@@ -2886,7 +2886,7 @@ const onboardingRouter = router({
           throw new TRPCError({ code: 'BAD_REQUEST', message: 'File content does not match declared MIME type (magic-byte mismatch)' });
         }
       }
-      const suffix = Math.random().toString(36).slice(2, 8);
+      const suffix = crypto.randomUUID().replace(/-/g,'').slice(0,8);
       const safeFileName = input.fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
       const key = `onboarding/${app.referenceId}/${suffix}-${safeFileName}`;
       const { url } = await storagePut(key, buffer, input.mimeType);
@@ -3830,7 +3830,7 @@ const casesRouter = router({
     .mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
-      const ref = `CASE-${new Date().getFullYear()}-${Math.random().toString(36).substring(2,10).toUpperCase()}`;
+      const ref = `CASE-${new Date().getFullYear()}-${crypto.randomUUID().replace(/-/g,'').slice(0,8).toUpperCase()}`;
       const [c] = await db.insert(cases).values({
         ref,
         title: input.title,
@@ -4792,7 +4792,7 @@ ${timeline.map(e => `<tr><td>${new Date(e.createdAt).toLocaleDateString()}</td><
 
       // Upload to S3
       const ext = input.filename.split('.').pop() ?? 'bin';
-      const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const suffix = `${Date.now()}-${crypto.randomUUID().replace(/-/g,'').slice(0,8)}`;
       const fileKey = `portal-uploads/case-${stakeholder.caseId}/${suffix}.${ext}`;
       const { url } = await storagePut(fileKey, buffer, input.mimeType);
 

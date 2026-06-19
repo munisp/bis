@@ -381,6 +381,11 @@ export default function BISLayout({ children, title, subtitle, actions }: BISLay
   const { user, isAuthenticated } = useAuth();
   // Keep session alive while the user is actively using the app
   useSessionHeartbeat(isAuthenticated);
+  // ── Keycloak SSO status (non-blocking, retry: false) ────────────────────────────
+  const { data: keycloakStatus } = trpc.keycloak.status.useQuery(undefined, {
+    staleTime: 60_000,
+    retry: false,
+  });
 
   // ── Live dashboard stats for nav badges ──────────────────────────────────
   const { data: stats } = trpc.dashboard.stats.useQuery(undefined, {
@@ -633,6 +638,23 @@ export default function BISLayout({ children, title, subtitle, actions }: BISLay
                 title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
               >
                 {theme === 'dark' ? <Sun size={13} /> : <Moon size={13} />}
+              </Button>
+            )}
+
+            {/* Keycloak SSO login button — shown when Keycloak is configured and user is not authenticated via Keycloak */}
+            {keycloakStatus?.configured && !isAuthenticated && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 text-[11px] font-mono border-primary/40 text-primary hover:bg-primary/10"
+                onClick={() => {
+                  const loginUrl = `${keycloakStatus.issuer?.replace('/realms/', '/realms/')}/protocol/openid-connect/auth?client_id=${keycloakStatus.clientId}&response_type=code&scope=openid+profile+email&redirect_uri=${encodeURIComponent(window.location.origin + '/api/oauth/callback')}`;
+                  window.location.href = loginUrl;
+                }}
+                title="Sign in with Keycloak SSO"
+              >
+                <Server size={11} className="mr-1" />
+                SSO Login
               </Button>
             )}
 

@@ -4,7 +4,7 @@
  * Provides interbank transfer initiation and status polling via:
  *   1. Mojaloop (ISO 20022 / ILP-based) when MOJALOOP_HUB_URL is set
  *   2. NIBSS NIP gateway when NIBSS_NIP_URL is set
- *   3. Deterministic sandbox fallback when neither is configured
+ *   3. Pending/manual mode when neither is configured (no fake completions)
  *
  * All amounts are in kobo (NGN × 100).
  */
@@ -143,20 +143,6 @@ async function nipInitiate(req: TransferRequest): Promise<TransferResult> {
   };
 }
 
-// ── Sandbox fallback ─────────────────────────────────────────────────────────
-
-function sandboxInitiate(req: TransferRequest): TransferResult {
-  // Deterministic sandbox: always succeeds, external ref is predictable
-  const externalRef = `SANDBOX-${req.txRef}-${Date.now()}`;
-  return {
-    txRef: req.txRef,
-    externalRef,
-    status: "completed",
-    mode: "sandbox",
-    message: "Sandbox transfer — no real funds moved",
-  };
-}
-
 // ── Status polling ───────────────────────────────────────────────────────────
 
 async function mojaloopStatus(txRef: string): Promise<TransferStatusResult> {
@@ -221,7 +207,8 @@ async function nipStatus(txRef: string): Promise<TransferStatusResult> {
 
 /**
  * Initiate an interbank transfer.
- * Routes to Mojaloop → NIBSS NIP → Sandbox based on available env vars.
+ * Routes to Mojaloop → NIBSS NIP → pending/manual mode based on available env vars.
+ * No fake completions — if no rail is configured, the transfer is recorded as pending.
  */
 export async function initiateInterBankTransfer(req: TransferRequest): Promise<TransferResult> {
   if (process.env.MOJALOOP_HUB_URL) {
@@ -230,8 +217,20 @@ export async function initiateInterBankTransfer(req: TransferRequest): Promise<T
   if (process.env.NIBSS_NIP_URL) {
     return nipInitiate(req);
   }
-  // Sandbox fallback
-  return sandboxInitiate(req);
+  // No payment rail configured — record as pending for manual processing
+  console.warn(
+    `[Mojaloop] No payment rail configured (MOJALOOP_HUB_URL or NIBSS_NIP_URL). ` +
+    `Transfer ${req.txRef} recorded as pending for manual processing.`
+  );
+  return {
+    txRef: req.txRef,
+    externalRef: `MANUAL-${req.txRef}`,
+    status: "pending",
+    mode: "sandbox",
+    message:
+      "No payment rail configured — transfer queued for manual processing. " +
+      "Configure MOJALOOP_HUB_URL or NIBSS_NIP_URL to enable live transfers.",
+  };
 }
 
 /**
@@ -244,8 +243,8 @@ export async function pollTransferStatus(txRef: string): Promise<TransferStatusR
   if (process.env.NIBSS_NIP_URL) {
     return nipStatus(txRef);
   }
-  // Sandbox: always completed
-  return { txRef, externalRef: `SANDBOX-${txRef}`, status: "completed" };
+  // No rail configured — return pending (do not fabricate completion)
+  return { txRef, externalRef: `MANUAL-${txRef}`, status: "pending" };
 }
 
 /**

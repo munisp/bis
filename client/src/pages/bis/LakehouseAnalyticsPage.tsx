@@ -43,8 +43,14 @@ function TableStatsCard() {
             {[1, 2, 3].map(i => <Skeleton key={i} className="h-10 w-full" />)}
           </div>
         ) : (
+          <>
+          {data && !data.service_available && (
+            <div className="text-xs text-amber-500 mb-2 px-1">
+              Lakehouse service unavailable — configure LAKEHOUSE_URL for live data.
+            </div>
+          )}
           <div className="divide-y divide-border">
-            {(data ?? []).map((t: any) => (
+            {(data?.tables ?? []).map((t: any) => (
               <div key={t.table} className="flex items-center justify-between py-2.5">
                 <div>
                   <span className="font-mono text-sm font-medium">{t.table}</span>
@@ -59,6 +65,7 @@ function TableStatsCard() {
               </div>
             ))}
           </div>
+          </>
         )}
       </CardContent>
     </Card>

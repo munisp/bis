@@ -592,7 +592,7 @@ export const biometricRouter = router({
 
       // Persist session log
       const sessionId = await insertBiometricSessionLog({
-        sessionId: `bio-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        sessionId: `bio-${Date.now()}-${crypto.randomUUID().replace(/-/g,'').slice(0,8)}`,
         subjectRef: input.subjectRef ?? "unknown",
         activeLivenessScore: result.score ?? null,
         activeLivenessLive: result.live ?? result.challenge_completed ?? true,
@@ -642,7 +642,7 @@ export const biometricRouter = router({
 
       // Persist session log
       const sessionId = await insertBiometricSessionLog({
-        sessionId: `bio-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        sessionId: `bio-${Date.now()}-${crypto.randomUUID().replace(/-/g,'').slice(0,8)}`,
         subjectRef: input.subjectRef ?? "unknown",
         antiSpoofScore: result.score ?? null,
         antiSpoofGenuine: result.genuine ?? true,
@@ -694,7 +694,7 @@ export const biometricRouter = router({
 
       // Persist session log
       const sessionId = await insertBiometricSessionLog({
-        sessionId: `bio-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        sessionId: `bio-${Date.now()}-${crypto.randomUUID().replace(/-/g,'').slice(0,8)}`,
         subjectRef: input.subjectRef ?? "unknown",
         matchScore: result.score ?? null,
         matchCosineSimilarity: result.cosine_similarity ?? null,
@@ -821,7 +821,7 @@ export const biometricRouter = router({
 
       // Persist session log
       const sessionId = await insertBiometricSessionLog({
-        sessionId: `bio-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        sessionId: `bio-${Date.now()}-${crypto.randomUUID().replace(/-/g,'').slice(0,8)}`,
         subjectRef: input.subjectRef ?? "unknown",
         kycRecordId: input.kycRecordId ?? null,
         livenessScore: result.liveness?.score ?? null,
@@ -1094,7 +1094,7 @@ export const biometricRouter = router({
         const pdfBuffer = readFileSync(tmpPdf);
         try { unlinkSync(tmpPdf); } catch {}
         const timestamp2 = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-        const fileKey2 = `biometric-exports/audit-report-${timestamp2}-${Math.random().toString(36).slice(2, 8)}.pdf`;
+        const fileKey2 = `biometric-exports/audit-report-${timestamp2}-${crypto.randomUUID().replace(/-/g,'').slice(0,8)}.pdf`;
         const { url: pdfUrl } = await storagePut(fileKey2, pdfBuffer, "application/pdf");
         return { url: pdfUrl, rowCount: rows.length, format: "pdf" as const, generatedAt: new Date() };
       } else {
@@ -1104,7 +1104,7 @@ export const biometricRouter = router({
       }
 
       const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-      const fileKey = `biometric-exports/session-logs-${timestamp}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+      const fileKey = `biometric-exports/session-logs-${timestamp}-${crypto.randomUUID().replace(/-/g,'').slice(0,8)}.${ext}`;
       const { url } = await storagePut(fileKey, Buffer.from(content, "utf-8"), contentType);
 
       return {
