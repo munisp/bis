@@ -95,6 +95,10 @@ const DocumentVaultPage          = lazy(() => import("@/pages/DocumentVaultPage"
 const RiskDashboardPage          = lazy(() => import("@/pages/RiskDashboardPage"));
 const TransferAnalyticsDashboard = lazy(() => import("@/pages/TransferAnalyticsDashboard"));
 const ReconciliationReportPage   = lazy(() => import("@/pages/ReconciliationReportPage"));
+// Insider Threat pages
+const InsiderThreatDashboard     = lazy(() => import("@/pages/InsiderThreatDashboard"));
+const UEBAProfilePage            = lazy(() => import("@/pages/UEBAProfilePage"));
+const AccessReviewPanel          = lazy(() => import("@/pages/AccessReviewPanel"));
 
 // ─── Page loading skeleton ────────────────────────────────────────────────────
 
@@ -192,6 +196,10 @@ function Router() {
         {/* v62 New Pages */}
         <Route path="/document-vault" component={DocumentVaultPage} />
         <Route path="/risk-dashboard" component={RiskDashboardPage} />
+        {/* Insider Threat */}
+        <Route path="/insider-threat" component={InsiderThreatDashboard} />
+        <Route path="/insider-threat/ueba" component={UEBAProfilePage} />
+        <Route path="/insider-threat/access-reviews" component={AccessReviewPanel} />
         <Route path="/payment-rails/analytics" component={TransferAnalyticsDashboard} />
         <Route path="/payment-rails/reconciliation" component={ReconciliationReportPage} />
         {/* Infrastructure */}

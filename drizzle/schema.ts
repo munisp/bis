@@ -1955,3 +1955,128 @@ export const velocityBlocks = pgTable("velocity_blocks", {
   }));
 export type VelocityBlock = typeof velocityBlocks.$inferSelect;
 export type InsertVelocityBlock = typeof velocityBlocks.$inferInsert;
+
+// ─── Insider Threat ───────────────────────────────────────────────────────────
+
+// Severity levels for insider-threat events
+export const insiderSeverityEnum = pgEnum("insider_severity", [
+  "info", "low", "medium", "high", "critical",
+]);
+
+// Category of insider-threat signal
+export const insiderCategoryEnum = pgEnum("insider_category", [
+  "data_exfiltration",
+  "privilege_abuse",
+  "off_hours_access",
+  "peer_anomaly",
+  "dead_man_switch",
+  "failed_auth_spike",
+  "unusual_ip",
+  "bulk_download",
+  "policy_violation",
+  "access_review_overdue",
+]);
+
+// Status of an insider-threat event
+export const insiderEventStatusEnum = pgEnum("insider_event_status", [
+  "open", "under_review", "escalated", "dismissed", "resolved",
+]);
+
+// Status of an access-review task
+export const accessReviewStatusEnum = pgEnum("access_review_status", [
+  "pending", "approved", "revoked", "escalated", "expired",
+]);
+
+/**
+ * insider_events — one row per detected insider-threat signal.
+ * Populated by: Go gateway middleware, Rust event processor, TypeScript BFF.
+ */
+export const insiderEvents = pgTable("insider_events", {
+  id:           serial("id").primaryKey(),
+  subjectId:    varchar("subjectId", { length: 128 }).notNull(),
+  tenantId:     varchar("tenantId", { length: 64 }),
+  category:     insiderCategoryEnum("category").notNull(),
+  severity:     insiderSeverityEnum("severity").notNull().default("medium"),
+  status:       insiderEventStatusEnum("status").notNull().default("open"),
+  anomalyScore: real("anomalyScore"),
+  driftScore:   real("driftScore"),
+  sourceIp:     varchar("sourceIp", { length: 64 }),
+  userAgent:    text("userAgent"),
+  resourcePath: text("resourcePath"),
+  payloadBytes: bigint("payloadBytes", { mode: "number" }),
+  ruleId:       varchar("ruleId", { length: 64 }),
+  evidence:     json("evidence"),
+  assignedTo:   integer("assignedTo").references(() => users.id, { onDelete: "set null" }),
+  resolvedAt:   timestamp("resolvedAt"),
+  resolvedBy:   integer("resolvedBy").references(() => users.id, { onDelete: "set null" }),
+  resolution:   text("resolution"),
+  createdAt:    timestamp("createdAt").defaultNow().notNull(),
+  updatedAt:    timestamp("updatedAt").defaultNow().notNull(),
+}, (t) => ({
+  ie_subject_idx:  index("ie_subject_idx").on(t.subjectId),
+  ie_tenant_idx:   index("ie_tenant_idx").on(t.tenantId),
+  ie_status_idx:   index("ie_status_idx").on(t.status),
+  ie_severity_idx: index("ie_severity_idx").on(t.severity),
+  ie_created_idx:  index("ie_created_idx").on(t.createdAt),
+}));
+export type InsiderEvent       = typeof insiderEvents.$inferSelect;
+export type InsertInsiderEvent = typeof insiderEvents.$inferInsert;
+
+/**
+ * ueba_profiles — persisted snapshot of each user's UEBA behaviour profile.
+ * The Python ML engine is the authoritative source; this table caches the
+ * latest snapshot for fast dashboard queries.
+ */
+export const uebaProfiles = pgTable("ueba_profiles", {
+  id:              serial("id").primaryKey(),
+  subjectId:       varchar("subjectId", { length: 128 }).notNull().unique(),
+  tenantId:        varchar("tenantId", { length: 64 }),
+  eventCount:      integer("eventCount").notNull().default(0),
+  anomalyScore:    real("anomalyScore").notNull().default(0),
+  driftScore:      real("driftScore").notNull().default(0),
+  riskLevel:       insiderSeverityEnum("riskLevel").notNull().default("info"),
+  hourHistogram:   json("hourHistogram"),
+  dayHistogram:    json("dayHistogram"),
+  uniqueIpCount:   integer("uniqueIpCount").notNull().default(0),
+  offHoursRatio:   real("offHoursRatio").notNull().default(0),
+  privChangeCount: integer("privChangeCount").notNull().default(0),
+  failedAuthCount: integer("failedAuthCount").notNull().default(0),
+  baselineReady:   boolean("baselineReady").notNull().default(false),
+  lastScoredAt:    timestamp("lastScoredAt"),
+  createdAt:       timestamp("createdAt").defaultNow().notNull(),
+  updatedAt:       timestamp("updatedAt").defaultNow().notNull(),
+}, (t) => ({
+  up_subject_idx: index("up_subject_idx").on(t.subjectId),
+  up_tenant_idx:  index("up_tenant_idx").on(t.tenantId),
+  up_risk_idx:    index("up_risk_idx").on(t.riskLevel),
+}));
+export type UebaProfile       = typeof uebaProfiles.$inferSelect;
+export type InsertUebaProfile = typeof uebaProfiles.$inferInsert;
+
+/**
+ * access_reviews — periodic least-privilege review tasks.
+ * Created by the Temporal scheduler; resolved by supervisors via the dashboard.
+ */
+export const accessReviews = pgTable("access_reviews", {
+  id:             serial("id").primaryKey(),
+  subjectId:      varchar("subjectId", { length: 128 }).notNull(),
+  tenantId:       varchar("tenantId", { length: 64 }),
+  reviewType:     varchar("reviewType", { length: 64 }).notNull().default("periodic"),
+  status:         accessReviewStatusEnum("status").notNull().default("pending"),
+  triggeredBy:    varchar("triggeredBy", { length: 64 }),
+  insiderEventId: integer("insiderEventId").references(() => insiderEvents.id, { onDelete: "set null" }),
+  assignedTo:     integer("assignedTo").references(() => users.id, { onDelete: "set null" }),
+  dueAt:          timestamp("dueAt").notNull(),
+  completedAt:    timestamp("completedAt"),
+  completedBy:    integer("completedBy").references(() => users.id, { onDelete: "set null" }),
+  decision:       text("decision"),
+  permifyChanges: json("permifyChanges"),
+  createdAt:      timestamp("createdAt").defaultNow().notNull(),
+  updatedAt:      timestamp("updatedAt").defaultNow().notNull(),
+}, (t) => ({
+  ar_subject_idx: index("ar_subject_idx").on(t.subjectId),
+  ar_status_idx:  index("ar_status_idx").on(t.status),
+  ar_due_idx:     index("ar_due_idx").on(t.dueAt),
+}));
+export type AccessReview       = typeof accessReviews.$inferSelect;
+export type InsertAccessReview = typeof accessReviews.$inferInsert;

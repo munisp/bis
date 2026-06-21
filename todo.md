@@ -2745,3 +2745,93 @@
 - [x] Temporal saga integration test (compensation path on submitToRail failure)
 - [x] Cancel button in TransferStatusPoller wired to cancelPaymentTransferWorkflow
 - [x] velocity_blocks panel in AML dashboard
+
+## Test Coverage Sprint
+
+- [x] velocity_blocks vitest — assert block decision inserts row with correct fields
+- [x] getWorkflowStatus vitest — assert RUNNING/COMPLETED/FAILED/CANCELED status mapping
+- [x] VelocityBlocksPanel integration smoke test — DB insert → aml.listVelocityBlocks assertion
+
+## Insider Threat Prevention & Mitigation Sprint
+
+### Architecture & Design
+- [ ] Document insider-threat threat model (data exfiltration, privilege abuse, lateral movement, sabotage)
+- [ ] Define UEBA (User and Entity Behaviour Analytics) data model: baseline, deviation score, risk tier
+- [ ] Define access_reviews, insider_events, ueba_profiles DB tables
+
+### Go Gateway (insider threat controls)
+- [ ] Privileged-access time-window enforcement — block privileged routes outside approved hours
+- [ ] mTLS peer certificate validation for inter-service calls (mutual TLS)
+- [ ] Anomalous-IP / geolocation blocking middleware (Redis-backed allowlist)
+- [ ] Enriched audit-log emission to Kafka bis.insider topic on every privileged action
+- [ ] Rate-limit per-user on sensitive endpoints (download, bulk export, admin) via Redis
+- [ ] Dead-man-switch: flag sessions with >N bulk-export calls in sliding window
+
+### Rust Event Processor (behaviour stream analytics)
+- [ ] Subscribe to bis.insider Kafka topic
+- [ ] Peer-comparison alert: flag user whose action rate exceeds 3σ above role cohort
+- [ ] Exfiltration detector: sliding-window counter for bulk-download events per user
+- [ ] Off-hours access detector: emit alert when privileged action occurs outside schedule
+- [ ] Publish insider_alert events to bis.alerts Kafka topic
+
+### Python ML Engine (UEBA)
+- [ ] User behaviour baseline model: rolling 30-day feature vector per user (action counts, time-of-day, data volume)
+- [ ] Anomaly scoring endpoint POST /ueba/score — returns deviation score 0–100
+- [ ] Peer-group clustering: group users by role, compare individual vs cohort baseline
+- [ ] Risk-tier classification: LOW / MEDIUM / HIGH / CRITICAL based on composite score
+- [ ] Retrain endpoint POST /ueba/retrain — updates baseline from last 30 days of audit_log
+
+### TypeScript BFF (tRPC procedures + DB)
+- [ ] DB schema: insider_events table (userId, eventType, severity, metadata, createdAt)
+- [ ] DB schema: ueba_profiles table (userId, baselineVector, deviationScore, riskTier, updatedAt)
+- [ ] DB schema: access_reviews table (userId, reviewerId, status, notes, scheduledAt, completedAt)
+- [ ] Migration: pnpm db:push for all three new tables
+- [ ] insiderRouter: listEvents, getUebaProfile, triggerReview, listAccessReviews, completeReview
+- [ ] Scheduled job: daily UEBA score refresh via Temporal heartbeat
+- [ ] Wire insiderRouter into appRouter
+- [ ] Session anomaly middleware: flag concurrent sessions from different IPs
+- [ ] Data-loss prevention (DLP) hook: intercept bulk-export mutations, log to insider_events
+
+### Middleware Integration
+- [ ] Redis: per-user sliding-window counters for bulk-export and admin actions
+- [ ] Temporal: AccessReviewWorkflow — assign reviewer, 48h deadline, escalate on timeout
+- [ ] Permify: enforce least-privilege — no user can access data outside their tenant scope
+- [ ] Kafka: bis.insider topic for privileged-action events; bis.ueba topic for score updates
+- [ ] Fluvio: real-time UEBA score stream to PWA dashboard
+
+### PWA UI
+- [ ] /insider-threat dashboard page — risk tier heatmap, top risky users, recent insider events
+- [ ] UEBA profile drawer — per-user behaviour baseline chart, deviation score gauge, risk tier badge
+- [ ] Access review panel — list pending reviews, approve/reject with notes
+- [ ] Real-time alert feed — Fluvio-backed live stream of insider_alert events
+- [ ] Bulk-export warning modal — confirm intent before large data downloads
+- [ ] Session anomaly banner — warn when concurrent sessions detected
+- [ ] Wire /insider-threat route into App.tsx and sidebar nav (admin-only)
+
+### Native Mobile Parity (Capacitor / React Native)
+- [ ] Insider Threat summary card on mobile dashboard
+- [ ] UEBA profile screen (mobile-optimised risk gauge + event list)
+- [ ] Access review action sheet (approve/reject with biometric confirmation)
+- [ ] Push notification for HIGH/CRITICAL risk tier changes
+- [ ] Mobile session anomaly alert (native dialog)
+
+### Tests
+- [ ] insiderRouter vitest — listEvents, getUebaProfile, triggerReview procedures
+- [ ] UEBA scoring unit test — baseline deviation calculation
+- [ ] AccessReviewWorkflow Temporal integration test
+- [ ] Go middleware unit test — privileged-access time-window enforcement
+- [ ] Rust exfiltration detector unit test — sliding-window counter logic
+
+## Insider Threat Prevention & Mitigation (Latest)
+
+- [x] server/insiderThreat.ts — tRPC router with 9 procedures (ingestEvent, listEvents, getEvent, updateEventStatus, dashboardSummary, listUebaProfiles, refreshUebaProfile, listAccessReviews, createAccessReview, completeAccessReview, escalateAccessReview)
+- [x] drizzle/schema.ts — 3 new tables: insider_events, ueba_profiles, access_reviews
+- [x] insiderThreatRouter registered in routers.ts appRouter
+- [x] client/src/pages/InsiderThreatDashboard.tsx — KPI cards, severity/category bar charts, open events feed, status breakdown
+- [x] client/src/pages/UEBAProfilePage.tsx — UEBA profile browser with anomaly/drift score bars, ML refresh action
+- [x] client/src/pages/AccessReviewPanel.tsx — Access review task manager with approve/revoke/escalate dialogs and SLA indicators
+- [x] BISLayout.tsx — INSIDER THREAT nav group added (Threat Dashboard, UEBA Profiles, Access Reviews)
+- [x] App.tsx — 3 new lazy routes registered (/insider-threat, /insider-threat/ueba, /insider-threat/access-reviews)
+- [x] server/insiderThreat.test.ts — 35 unit tests covering Zod validation, business logic guards, status transitions, UEBA scoring
+- [x] TypeScript: 0 errors
+- [x] Tests: 908/908 passing

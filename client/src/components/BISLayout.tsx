@@ -165,6 +165,15 @@ const BASE_NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
+    label: 'INSIDER THREAT',
+    defaultOpen: true,
+    items: [
+      { label: 'Threat Dashboard', href: '/insider-threat', icon: <ShieldAlert size={15} />, adminOnly: true },
+      { label: 'UEBA Profiles', href: '/insider-threat/ueba', icon: <Eye size={15} />, adminOnly: true },
+      { label: 'Access Reviews', href: '/insider-threat/access-reviews', icon: <UserCheck size={15} />, adminOnly: true },
+    ],
+  },
+  {
     label: 'LAW ENFORCEMENT (LEX)',
     defaultOpen: true,
     items: [

@@ -32,6 +32,7 @@ import { archivalRouter } from "./archival";
 import { paymentRailsRouter } from "./paymentRails";
 import { documentVaultRouter } from "./documentVault";
 import { riskDashboardRouter } from "./riskDashboard";
+import { insiderThreatRouter } from "./insiderThreat";
 import { searchRouter, indexDocument } from "./search";
 import { sendPushToUser, broadcastPush } from "./pushNotify";
 import { publishInvestigationEvent, publishKycEvent } from "./dapr";
@@ -5473,6 +5474,7 @@ export const appRouter = router({
   riskDashboard: riskDashboardRouter,
   search: searchRouter,
   push: pushRouter,
+  insiderThreat: insiderThreatRouter,
 });
 export type AppRouter = typeof appRouter;
 
