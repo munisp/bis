@@ -947,19 +947,19 @@ async function seedBiometricSessionLogs(kycIds: number[]) {
 async function seedPlatformSettings() {
   console.log("  Seeding platform settings…");
   const defaults = [
-    { key: "biometric_spoof_alert_threshold", value: "5", description: "Number of spoof detections per hour before alert fires" },
-    { key: "biometric_retention_days", value: "90", description: "Days before biometric session logs are moved to cold storage" },
-    { key: "biometric_archive_s3_prefix", value: "biometric-archive/", description: "S3 key prefix for archived biometric session logs" },
-    { key: "kyc_auto_approve_threshold", value: "85", description: "Risk score below which KYC records are auto-approved" },
-    { key: "investigation_max_open_days", value: "30", description: "Maximum days an investigation can remain open before escalation" },
-    { key: "alert_auto_close_days", value: "7", description: "Days before unacknowledged low-severity alerts are auto-closed" },
-    { key: "slack_webhook_enabled", value: "false", description: "Whether Slack webhook notifications are enabled" },
-    { key: "osint_max_pillars", value: "6", description: "Maximum number of OSINT pillars per zero-footprint investigation" },
+    { key: "biometric_spoof_alert_threshold", value: "5" },
+    { key: "biometric_retention_days", value: "90" },
+    { key: "biometric_archive_s3_prefix", value: '"biometric-archive/"' },
+    { key: "kyc_auto_approve_threshold", value: "85" },
+    { key: "investigation_max_open_days", value: "30" },
+    { key: "alert_auto_close_days", value: "7" },
+    { key: "slack_webhook_enabled", value: "false" },
+    { key: "osint_max_pillars", value: "6" },
   ];
   for (const setting of defaults) {
     await db.execute(
-      sql`INSERT INTO platform_settings (key, value, description, "updatedAt")
-          VALUES (${setting.key}, ${setting.value}, ${setting.description}, NOW())
+      sql`INSERT INTO platform_settings (key, value, "updatedAt")
+          VALUES (${setting.key}, ${setting.value}, NOW())
           ON CONFLICT (key) DO NOTHING`
     );
   }
