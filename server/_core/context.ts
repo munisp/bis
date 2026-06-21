@@ -117,7 +117,10 @@ export async function createContext(
   }
 
   // 3. Fall back to demo admin so the platform is fully explorable without login.
-  if (!user) {
+  // SECURITY: Demo mode is disabled in production (NODE_ENV=production) to prevent
+  // unauthenticated access. In production, unauthenticated requests will have user=null
+  // and protectedProcedure will return UNAUTHORIZED.
+  if (!user && process.env.NODE_ENV !== 'production') {
     user = DEMO_USER;
     isDemo = true;
     authMethod = "demo";
@@ -125,7 +128,7 @@ export async function createContext(
 
   // Expose tenantId at context level for convenient use in all procedures.
   // Platform admins (role === "admin") have tenantId = null and can see all data.
-  const tenantId = user.tenantId ?? null;
+  const tenantId = user?.tenantId ?? null;
 
   return {
     req: opts.req,
