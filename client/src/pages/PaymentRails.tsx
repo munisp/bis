@@ -318,6 +318,166 @@ function TransferDetailDrawer({ txRef, open, onClose }: TransferDetailDrawerProp
   );
 }
 
+// ── Transfer Status Poller ────────────────────────────────────────────────────
+/**
+ * Real-time transfer progress poller.
+ * Polls paymentRails.getWorkflowStatus every 3 s and renders a timeline of
+ * stages: Processing → Submitted to Rail → Confirmed / Failed.
+ * Stops polling when the transfer reaches a terminal state.
+ */
+function TransferStatusPoller({ txRef, onClose }: { txRef: string; onClose: () => void }) {
+  const TERMINAL = new Set<string>(["posted", "voided", "failed", "reversed"]);
+
+  const { data, isLoading, error } = trpc.paymentRails.getWorkflowStatus.useQuery(
+    { txRef },
+    {
+      refetchInterval: (query) => {
+        const status = query.state.data?.dbStatus;
+        return status && TERMINAL.has(status) ? false : 3_000;
+      },
+    }
+  );
+
+  const stages: Array<{ key: string; icon: React.ReactNode; color: string }> = [
+    { key: "Processing",                    icon: <Clock size={14} />,        color: "text-yellow-400" },
+    { key: "Under Review",                  icon: <AlertCircle size={14} />,  color: "text-orange-400" },
+    { key: "Flagged — Compliance Review",  icon: <AlertCircle size={14} />,  color: "text-orange-500" },
+    { key: "Confirmed",                     icon: <CheckCircle2 size={14} />, color: "text-emerald-400" },
+    { key: "Failed",                        icon: <XCircle size={14} />,      color: "text-red-400" },
+    { key: "Reversed",                      icon: <RefreshCw size={14} />,    color: "text-slate-400" },
+    { key: "Blocked",                       icon: <XCircle size={14} />,      color: "text-red-500" },
+  ];
+
+  const currentStage = data?.stage ?? "Processing";
+  const workflowStatus = data?.workflow?.status ?? "unknown";
+  const isTerminal = data ? TERMINAL.has(data.dbStatus) : false;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+      <div
+        className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-md mx-4 p-6 space-y-5"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-start justify-between">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-100 flex items-center gap-2">
+              <Activity size={14} className="text-indigo-400" />
+              Transfer Progress
+            </h2>
+            <p className="text-[10px] font-mono text-slate-500 mt-0.5 break-all">{txRef}</p>
+          </div>
+          <button onClick={onClose} className="text-slate-500 hover:text-slate-300 transition-colors">
+            <X size={16} />
+          </button>
+        </div>
+
+        {isLoading && (
+          <div className="space-y-3">
+            {[1, 2, 3].map(i => <Skeleton key={i} className="h-10 w-full bg-slate-800" />)}
+          </div>
+        )}
+
+        {error && (
+          <Alert className="bg-red-900/20 border-red-700">
+            <AlertCircle size={14} className="text-red-400" />
+            <AlertDescription className="text-red-300 text-xs ml-2">{error.message}</AlertDescription>
+          </Alert>
+        )}
+
+        {data && !isLoading && (
+          <>
+            {/* Amount hero */}
+            <div className="flex items-center justify-between bg-slate-800/60 rounded-lg px-4 py-3">
+              <div>
+                <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-0.5">Amount</p>
+                <p className="text-xl font-mono font-bold text-emerald-400">{formatNGN(data.amount)}</p>
+              </div>
+              <div className="text-right">
+                <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-0.5">Stage</p>
+                <p className={`text-sm font-semibold ${
+                  currentStage === "Confirmed" ? "text-emerald-400" :
+                  currentStage === "Failed" || currentStage === "Blocked" ? "text-red-400" :
+                  "text-yellow-400"
+                }`}>{currentStage}</p>
+              </div>
+            </div>
+
+            {/* Stage timeline */}
+            <div className="space-y-1">
+              <p className="text-[10px] text-slate-500 uppercase tracking-wide font-semibold">Timeline</p>
+              {stages
+                .filter(s => ["Processing", "Confirmed", "Failed", "Reversed", "Blocked", currentStage].includes(s.key))
+                .map((s) => {
+                  const isActive = s.key === currentStage;
+                  const isPast = s.key === "Processing" &&
+                    ["Confirmed", "Failed", "Reversed", "Blocked"].includes(currentStage);
+                  return (
+                    <div
+                      key={s.key}
+                      className={`flex items-center gap-3 rounded-md px-3 py-2 transition-colors ${
+                        isActive ? "bg-slate-800 border border-slate-600" :
+                        isPast ? "opacity-50" : "opacity-30"
+                      }`}
+                    >
+                      <span className={isActive ? s.color : "text-slate-600"}>{s.icon}</span>
+                      <span className={`text-xs font-medium ${isActive ? "text-slate-100" : "text-slate-500"}`}>
+                        {s.key}
+                      </span>
+                      {isActive && !isTerminal && (
+                        <span className="ml-auto flex items-center gap-1 text-[10px] text-slate-500">
+                          <RefreshCw size={10} className="animate-spin" /> polling
+                        </span>
+                      )}
+                      {isActive && isTerminal && (
+                        <span className="ml-auto text-[10px] text-slate-500">terminal</span>
+                      )}
+                    </div>
+                  );
+                })}
+            </div>
+
+            {/* Temporal workflow status */}
+            <div className="flex items-center justify-between bg-slate-800/40 rounded px-3 py-2">
+              <p className="text-[10px] text-slate-500 uppercase tracking-wide">Temporal Saga</p>
+              <span className={`text-xs font-mono ${
+                workflowStatus === "COMPLETED" ? "text-emerald-400" :
+                workflowStatus === "FAILED" || workflowStatus === "TIMED_OUT" ? "text-red-400" :
+                workflowStatus === "RUNNING" ? "text-yellow-400" :
+                "text-slate-500"
+              }`}>{workflowStatus}</span>
+            </div>
+
+            {/* Parties */}
+            <div className="grid grid-cols-2 gap-2">
+              <div className="bg-slate-800/40 rounded px-3 py-2">
+                <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-0.5">From</p>
+                <p className="text-xs text-slate-200 truncate">{data.originatorName ?? "—"}</p>
+              </div>
+              <div className="bg-slate-800/40 rounded px-3 py-2">
+                <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-0.5">To</p>
+                <p className="text-xs text-slate-200 truncate">{data.beneficiaryName ?? "—"}</p>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="flex gap-2 pt-1">
+              <Button
+                size="sm"
+                variant="outline"
+                className="flex-1 text-xs border-slate-700 text-slate-400 hover:bg-slate-800"
+                onClick={onClose}
+              >
+                Close
+              </Button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Queue Stats Card ───────────────────────────────────────────────────────────
 
 function QueueStatsCard() {
@@ -593,6 +753,7 @@ function ArchivalResultCard({ result, onDismiss }: { result: ArchivalResultData;
 function TransferList() {
   const [statusFilter, setStatusFilter] = useState<"all" | TransferStatus>("all");
   const [drawerTxRef, setDrawerTxRef] = useState<string | null>(null);
+  const [pollerTxRef, setPollerTxRef] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -750,17 +911,29 @@ function TransferList() {
                         {formatRelativeTime(tx.createdAt)}
                       </TableCell>
                       <TableCell>
-                        <button
-                          onClick={e => {
-                            e.stopPropagation();
-                            const acct = (tx as any).originatorAccount ?? (tx as any).beneficiaryAccount;
-                            if (acct) navigate(`/payment-rails/accounts/${encodeURIComponent(acct)}`);
-                          }}
-                          title="View account detail"
-                          className="text-slate-600 hover:text-indigo-400 transition-colors"
-                        >
-                          <ExternalLink size={11} />
-                        </button>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={e => {
+                              e.stopPropagation();
+                              const acct = (tx as any).originatorAccount ?? (tx as any).beneficiaryAccount;
+                              if (acct) navigate(`/payment-rails/accounts/${encodeURIComponent(acct)}`);
+                            }}
+                            title="View account detail"
+                            className="text-slate-600 hover:text-indigo-400 transition-colors"
+                          >
+                            <ExternalLink size={11} />
+                          </button>
+                          <button
+                            onClick={e => {
+                              e.stopPropagation();
+                              setPollerTxRef(tx.txRef);
+                            }}
+                            title="Track transfer progress"
+                            className="text-slate-600 hover:text-yellow-400 transition-colors"
+                          >
+                            <Activity size={11} />
+                          </button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -788,6 +961,13 @@ function TransferList() {
         open={!!drawerTxRef}
         onClose={() => setDrawerTxRef(null)}
       />
+      {/* Transfer Status Poller */}
+      {pollerTxRef && (
+        <TransferStatusPoller
+          txRef={pollerTxRef}
+          onClose={() => setPollerTxRef(null)}
+        />
+      )}
     </>
   );
 }

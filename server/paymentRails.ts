@@ -21,7 +21,7 @@ import { ENV } from "./_core/env";
 import { initiateInterBankTransfer, pollTransferStatus, getActiveRail } from "./mojaloop";
 import { publishPaymentEvent } from "./dapr";
 import { fluvioPublishPaymentEvent, fluvioCheckVelocity } from "./fluvio";
-import { startPaymentTransferWorkflow } from "./temporal";
+import { startPaymentTransferWorkflow, getPaymentWorkflowStatus, cancelPaymentTransferWorkflow } from "./temporal";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -1264,5 +1264,99 @@ export const paymentRailsRouter = router({
         code: 'NOT_FOUND',
         message: 'Account not found. The NIP gateway is unavailable or this account number is not registered. Please verify the account number and try again.',
       });
+    }),
+
+  /**
+   * Get the real-time status of a Temporal PaymentTransferWorkflow saga.
+   *
+   * Returns the workflow status (RUNNING | COMPLETED | FAILED | CANCELLED | TIMED_OUT)
+   * along with the DB transfer record so the frontend can show a unified progress view.
+   *
+   * Polling interval: 3 s (see TransferStatusPoller component)
+   */
+  getWorkflowStatus: protectedProcedure
+    .input(z.object({ txRef: z.string().min(1) }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
+
+      // Fetch DB record for the transfer
+      const [row] = await db.select({
+        id: transactions.id,
+        txRef: transactions.txRef,
+        status: transactions.status,
+        amount: transactions.amount,
+        currency: transactions.currency,
+        originatorName: transactions.originatorName,
+        beneficiaryName: transactions.beneficiaryName,
+        tigerBeetleId: transactions.tigerBeetleId,
+        createdAt: transactions.createdAt,
+        updatedAt: transactions.updatedAt,
+      })
+        .from(transactions)
+        .where(eq(transactions.txRef, input.txRef))
+        .limit(1);
+
+      if (!row) throw new TRPCError({ code: 'NOT_FOUND', message: 'Transfer not found' });
+
+      // Fetch Temporal workflow status (non-blocking — returns 'unknown' if Temporal is down)
+      const workflowStatus = await getPaymentWorkflowStatus(input.txRef).catch(() => ({ status: 'unknown' as const }));
+
+      // Map DB status to a user-friendly stage label
+      const stageMap: Record<string, string> = {
+        pending: 'Processing',
+        under_review: 'Under Review',
+        flagged: 'Flagged — Compliance Review',
+        completed: 'Confirmed',
+        failed: 'Failed',
+        reversed: 'Reversed',
+        blocked: 'Blocked',
+      };
+      const stage = stageMap[row.status ?? 'pending'] ?? 'Processing';
+
+      return {
+        txRef: row.txRef,
+        id: row.id,
+        dbStatus: mapStatus(row.status ?? 'pending'),
+        stage,
+        amount: row.amount ?? 0,
+        currency: row.currency ?? 'NGN',
+        originatorName: row.originatorName,
+        beneficiaryName: row.beneficiaryName,
+        tigerBeetleId: row.tigerBeetleId,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+        workflow: {
+          status: workflowStatus.status,
+          result: ('result' in workflowStatus ? workflowStatus.result : null) ?? null,
+        },
+      };
+    }),
+
+  /**
+   * Cancel a pending Temporal PaymentTransferWorkflow saga.
+   * Only allowed for transfers in 'pending' or 'under_review' status.
+   */
+  cancelWorkflow: writeProcedure
+    .input(z.object({ txRef: z.string().min(1) }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
+
+      const [row] = await db.select({ id: transactions.id, status: transactions.status })
+        .from(transactions)
+        .where(eq(transactions.txRef, input.txRef))
+        .limit(1);
+
+      if (!row) throw new TRPCError({ code: 'NOT_FOUND', message: 'Transfer not found' });
+      if (!['pending', 'under_review'].includes(row.status ?? '')) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: `Cannot cancel a transfer in '${row.status}' status` });
+      }
+
+      await cancelPaymentTransferWorkflow(input.txRef).catch(err => {
+        console.warn(`[Temporal] cancelPaymentTransferWorkflow failed for ${input.txRef} (non-fatal):`, err);
+      });
+
+      return { success: true, txRef: input.txRef };
     }),
 });
