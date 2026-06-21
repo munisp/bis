@@ -2,7 +2,7 @@
  * Root Navigator — handles auth state and routes to the correct stack.
  *
  * Unauthenticated: AuthStack (Login, Biometric Setup)
- * Authenticated: MainTabs (Dashboard, Investigations, Alerts, QuickCheck, Profile)
+ * Authenticated: MainTabs (Dashboard, Investigations, Alerts, QuickCheck, InsiderThreat, Profile)
  */
 
 import React from 'react';
@@ -27,6 +27,11 @@ import { FieldAgentScreen } from '../screens/main/FieldAgentScreen';
 import { CaptureEvidenceScreen } from '../screens/main/CaptureEvidenceScreen';
 import { KYCDocumentCaptureScreen } from '../screens/main/KYCDocumentCaptureScreen';
 
+// Insider Threat screens
+import { InsiderThreatScreen } from '../screens/main/InsiderThreatScreen';
+import { UEBAScreen } from '../screens/main/UEBAScreen';
+import { AccessReviewScreen } from '../screens/main/AccessReviewScreen';
+
 export type AuthStackParamList = {
   Login: undefined;
   BiometricSetup: undefined;
@@ -37,6 +42,7 @@ export type MainTabParamList = {
   Investigations: undefined;
   Alerts: undefined;
   QuickCheck: undefined;
+  InsiderThreat: undefined;
   Profile: undefined;
 };
 
@@ -53,10 +59,17 @@ export type QuickCheckStackParamList = {
   QuickCheckResult: { requestId: string };
 };
 
+export type InsiderThreatStackParamList = {
+  InsiderThreatEvents: undefined;
+  UEBAProfiles: undefined;
+  AccessReviews: undefined;
+};
+
 const AuthStack = createNativeStackNavigator<AuthStackParamList>();
 const MainTab = createBottomTabNavigator<MainTabParamList>();
 const InvestigationsStack = createNativeStackNavigator<InvestigationsStackParamList>();
 const QuickCheckStack = createNativeStackNavigator<QuickCheckStackParamList>();
+const InsiderThreatStack = createNativeStackNavigator<InsiderThreatStackParamList>();
 
 function InvestigationsNavigator() {
   return (
@@ -107,6 +120,33 @@ function QuickCheckNavigator() {
   );
 }
 
+function InsiderThreatNavigator() {
+  return (
+    <InsiderThreatStack.Navigator
+      screenOptions={{
+        headerStyle: { backgroundColor: '#0f172a' },
+        headerTintColor: '#f8fafc',
+      }}
+    >
+      <InsiderThreatStack.Screen
+        name="InsiderThreatEvents"
+        component={InsiderThreatScreen}
+        options={{ title: 'Insider Threat' }}
+      />
+      <InsiderThreatStack.Screen
+        name="UEBAProfiles"
+        component={UEBAScreen}
+        options={{ title: 'UEBA Profiles' }}
+      />
+      <InsiderThreatStack.Screen
+        name="AccessReviews"
+        component={AccessReviewScreen}
+        options={{ title: 'Access Reviews' }}
+      />
+    </InsiderThreatStack.Navigator>
+  );
+}
+
 function MainNavigator() {
   return (
     <MainTab.Navigator
@@ -122,6 +162,11 @@ function MainNavigator() {
       <MainTab.Screen name="Investigations" component={InvestigationsNavigator} />
       <MainTab.Screen name="Alerts" component={AlertsScreen} />
       <MainTab.Screen name="QuickCheck" component={QuickCheckNavigator} />
+      <MainTab.Screen
+        name="InsiderThreat"
+        component={InsiderThreatNavigator}
+        options={{ title: 'Insider Threat', tabBarLabel: 'Insider' }}
+      />
       <MainTab.Screen name="Profile" component={ProfileScreen} />
     </MainTab.Navigator>
   );
