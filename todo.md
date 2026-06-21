@@ -2744,4 +2744,4 @@
 - [x] velocity_blocks audit table + migration + server-side recording in fluvioCheckVelocity
 - [x] Temporal saga integration test (compensation path on submitToRail failure)
 - [x] Cancel button in TransferStatusPoller wired to cancelPaymentTransferWorkflow
-- [ ] velocity_blocks panel in AML dashboard
+- [x] velocity_blocks panel in AML dashboard
