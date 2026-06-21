@@ -215,6 +215,89 @@ export async function fluvioPublishAmlEvent(opts: {
   }
 }
 
+// ─── Velocity Pre-flight Check ────────────────────────────────────────────────
+
+export interface FluvioVelocityCheckInput {
+  /** The account ID to check velocity for */
+  account_id: string;
+  /** Amount of the proposed transfer in kobo */
+  amount_kobo: number;
+  /** ISO-4217 currency code */
+  currency: string;
+  /** Tenant ID for multi-tenant velocity isolation */
+  tenant_id: string;
+}
+
+export interface FluvioVelocityDecision {
+  /** "allow" — transfer may proceed; "block" — transfer must be rejected */
+  decision: "allow" | "block";
+  /** Human-readable reason when decision is "block" */
+  reason?: string;
+  /** Whether the velocity processor was reachable */
+  service_available: boolean;
+}
+
+/**
+ * Query the Fluvio velocity processor for a pre-flight velocity decision.
+ *
+ * This is a **blocking** call — the result gates whether the transfer proceeds.
+ * If the velocity processor is unavailable (ECONNREFUSED / timeout), the call
+ * returns `{ decision: "allow", service_available: false }` so that a sidecar
+ * outage does not block all payments (fail-open for availability).
+ *
+ * In production, configure the velocity processor to return "block" when:
+ *   - The account has submitted >10 transfers in the last 60 seconds
+ *   - The account has transferred >₦5,000,000 in the last 5 minutes
+ *   - The account is on a real-time watchlist (EFCC / OFAC)
+ */
+export async function fluvioCheckVelocity(
+  input: FluvioVelocityCheckInput
+): Promise<FluvioVelocityDecision> {
+  try {
+    const res = await fetch(`${FLUVIO_VELOCITY_URL}/v1/velocity/check`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-BIS-Key": ENV.bisGatewayKey,
+      },
+      body: JSON.stringify(input),
+      // Hard timeout: 500 ms — must not slow down the payment path
+      signal: AbortSignal.timeout(500),
+    });
+
+    if (res.ok) {
+      const body = (await res.json()) as { decision: "allow" | "block"; reason?: string };
+      return {
+        decision: body.decision ?? "allow",
+        reason: body.reason,
+        service_available: true,
+      };
+    }
+
+    // Non-2xx from velocity processor: log and fail-open
+    const text = await res.text().catch(() => "");
+    console.warn(
+      `[Fluvio] velocity check returned HTTP ${res.status}: ${text.slice(0, 200)} — failing open`
+    );
+    return { decision: "allow", service_available: true };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    // ECONNREFUSED / timeout = velocity sidecar not running (expected in dev/test)
+    if (
+      msg.includes("ECONNREFUSED") ||
+      msg.includes("fetch failed") ||
+      msg.includes("AbortError") ||
+      (err as Error)?.name === "AbortError"
+    ) {
+      console.debug("[Fluvio] velocity processor unavailable — failing open:", msg);
+    } else {
+      console.warn("[Fluvio] unexpected error in velocity check — failing open:", msg);
+    }
+    // Fail-open: do not block payments when the sidecar is down
+    return { decision: "allow", service_available: false };
+  }
+}
+
 /**
  * Health check for the Fluvio velocity processor.
  * Returns { ok: true } if the sidecar is reachable.

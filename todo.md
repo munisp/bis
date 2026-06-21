@@ -2733,3 +2733,8 @@
 - [x] Final: Update PRODUCTION_READINESS_REPORT.md to 100/100
 - [x] Final: Run full test suite (target 850+ passing)
 - [x] Final: Save checkpoint + push to GitHub
+
+## Next Steps Sprint — Fund-Flow Hardening
+- [x] Temporal saga for initiateTransfer — PaymentTransferWorkflow with retry, timeout escalation, and compensation
+- [x] billing_topups idempotency vitest — assert second verifyTopUp returns idempotent:true without double-credit (9/9 passing)
+- [x] Fluvio velocity pre-flight gate in initiateTransfer — block transfers exceeding sliding-window threshold

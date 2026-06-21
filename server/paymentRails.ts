@@ -20,7 +20,8 @@ import { storagePut } from "./storage";
 import { ENV } from "./_core/env";
 import { initiateInterBankTransfer, pollTransferStatus, getActiveRail } from "./mojaloop";
 import { publishPaymentEvent } from "./dapr";
-import { fluvioPublishPaymentEvent } from "./fluvio";
+import { fluvioPublishPaymentEvent, fluvioCheckVelocity } from "./fluvio";
+import { startPaymentTransferWorkflow } from "./temporal";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -113,6 +114,25 @@ export const paymentRailsRouter = router({
         }
       }
 
+      // ── Fluvio velocity pre-flight gate ──────────────────────────────────────
+      // Query the sliding-window velocity processor before submitting to the rail.
+      // A BLOCK decision means the account has exceeded its transaction velocity
+      // threshold (e.g., >10 transfers in 60 s or >₦5M in 5 min) and the transfer
+      // is rejected before any money moves.
+      const tenantId = String((ctx.user as { tenantId?: string | number } | null)?.tenantId ?? "default");
+      const velocityDecision = await fluvioCheckVelocity({
+        account_id: input.originatorAccountId,
+        amount_kobo: Math.round(input.amount * 100),
+        currency: input.currency,
+        tenant_id: tenantId,
+      });
+      if (velocityDecision.decision === "block") {
+        throw new TRPCError({
+          code: "TOO_MANY_REQUESTS",
+          message: velocityDecision.reason ?? "Transfer blocked by velocity control — please try again later",
+        });
+      }
+
       // Initiate via Mojaloop → NIBSS NIP → Sandbox
       let externalRef: string | undefined;
       let finalStatus: "pending" | "completed" | "failed" = "pending";
@@ -167,8 +187,26 @@ export const paymentRailsRouter = router({
         amount_kobo: amountKobo,
         currency: input.currency,
         rail: activeRail,
-        tenant_id: String((ctx.user as { tenantId?: string | number } | null)?.tenantId ?? "default"),
+        tenant_id: tenantId,
       }).catch(() => {});
+      // Temporal saga: start PaymentTransferWorkflow for retry, timeout escalation, and compensation.
+      // Only start the saga for pending transfers — completed/failed transfers don't need it.
+      // Non-blocking: a Temporal outage must not block the payment response.
+      if (dbStatus === "pending") {
+        startPaymentTransferWorkflow({
+          txRef,
+          transactionId: created.id,
+          originatorAccountId: input.originatorAccountId,
+          beneficiaryAccountId: input.beneficiaryAccountId,
+          beneficiaryName: input.beneficiaryName,
+          amountKobo,
+          currency: input.currency,
+          rail: activeRail,
+          narration: input.narration,
+        }).catch(err => {
+          console.warn(`[Temporal] PaymentTransferWorkflow start failed for ${txRef} (non-fatal):`, err);
+        });
+      }
       return { success: true, txRef, id: created.id, status: dbStatus, rail: activeRail };
     }),
 
