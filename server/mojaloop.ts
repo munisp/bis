@@ -9,6 +9,7 @@
  * All amounts are in kobo (NGN × 100).
  */
 import { ENV } from "./_core/env";
+import { withCircuitBreaker } from "./circuitBreaker";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -212,10 +213,10 @@ async function nipStatus(txRef: string): Promise<TransferStatusResult> {
  */
 export async function initiateInterBankTransfer(req: TransferRequest): Promise<TransferResult> {
   if (process.env.MOJALOOP_HUB_URL) {
-    return mojaloopInitiate(req);
+    return withCircuitBreaker("mojaloop", () => mojaloopInitiate(req));
   }
   if (process.env.NIBSS_NIP_URL) {
-    return nipInitiate(req);
+    return withCircuitBreaker("nip", () => nipInitiate(req));
   }
   // No payment rail configured — record as pending for manual processing
   console.warn(

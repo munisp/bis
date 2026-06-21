@@ -683,6 +683,15 @@ export const amlRouter = router({
         const db = await getDb();
         if (!db) throw new Error("Database unavailable");
         const [record] = await db.update(travelRuleRecords).set({ status: "sent", sentAt: new Date() }).where(eq(travelRuleRecords.id, input.id)).returning();
+        // Publish Travel Rule sent event to Dapr pub/sub for compliance engine (non-blocking)
+        publishAmlAlert({
+          alertId: record?.id ?? 0,
+          alertType: "travel_rule_sent",
+          riskScore: 50,
+          subjectRef: record?.originatorName ?? undefined,
+          transactionRef: record?.recordRef ?? undefined,
+          timestamp: new Date().toISOString(),
+        }).catch(() => {});
         return record;
       }),
 
@@ -692,6 +701,15 @@ export const amlRouter = router({
         const db = await getDb();
         if (!db) throw new Error("Database unavailable");
         const [record] = await db.update(travelRuleRecords).set({ status: "acknowledged", acknowledgedAt: new Date() }).where(eq(travelRuleRecords.id, input.id)).returning();
+        // Publish Travel Rule acknowledged event to Dapr pub/sub for compliance engine (non-blocking)
+        publishAmlAlert({
+          alertId: record?.id ?? 0,
+          alertType: "travel_rule_acknowledged",
+          riskScore: 0,
+          subjectRef: record?.originatorName ?? undefined,
+          transactionRef: record?.recordRef ?? undefined,
+          timestamp: new Date().toISOString(),
+        }).catch(() => {});
         return record;
       }),
   }),

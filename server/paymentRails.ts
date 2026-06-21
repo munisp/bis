@@ -104,6 +104,15 @@ export const paymentRailsRouter = router({
       const txRef = input.reference ?? `TXN-${Date.now()}-${crypto.randomUUID().replace(/-/g, "").slice(0, 8).toUpperCase()}`;
       const amountKobo = Math.round(input.amount * 100);
 
+      // ── Idempotency: if a transaction with this reference already exists, return it ──
+      if (input.reference) {
+        const [existing] = await db.select().from(transactions)
+          .where(eq(transactions.txRef, input.reference)).limit(1);
+        if (existing) {
+          return { success: true, txRef: existing.txRef, id: existing.id, status: existing.status as any, rail: getActiveRail(), idempotent: true };
+        }
+      }
+
       // Initiate via Mojaloop → NIBSS NIP → Sandbox
       let externalRef: string | undefined;
       let finalStatus: "pending" | "completed" | "failed" = "pending";
@@ -573,6 +582,16 @@ export const paymentRailsRouter = router({
         affectedTransactions: affected,
         frozenAt: new Date(),
       });
+      // Publish freeze event to Dapr pub/sub for AML/compliance engine (non-blocking)
+      const { publishAmlAlert } = await import("./dapr");
+      publishAmlAlert({
+        alertId: 0,
+        alertType: "account_frozen",
+        riskScore: 100,
+        subjectRef: input.accountId,
+        transactionRef: `freeze-${input.accountId}-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+      }).catch(() => {});
       return {
         accountId: input.accountId,
         frozenAt: new Date(),
@@ -631,6 +650,16 @@ export const paymentRailsRouter = router({
           })
           .where(eq(frozenAccounts.id, latest.id));
       }
+      // Publish unfreeze event to Dapr pub/sub for AML/compliance engine (non-blocking)
+      const { publishAmlAlert } = await import("./dapr");
+      publishAmlAlert({
+        alertId: 0,
+        alertType: "account_unfrozen",
+        riskScore: 0,
+        subjectRef: input.accountId,
+        transactionRef: `unfreeze-${input.accountId}-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+      }).catch(() => {});
       return { accountId: input.accountId, unfrozenAt: new Date() };
     }),
 
@@ -785,6 +814,17 @@ export const paymentRailsRouter = router({
         category: "financial" as any,
         result: "success" as any,
         createdAt: new Date(),
+      }).catch(() => {});
+      // Publish reversal event to Dapr pub/sub and Fluvio velocity processor (non-blocking)
+      publishPaymentEvent({ eventType: "reversed", txRef: input.txRef, amountKobo: tx.amount ?? 0, currency: tx.currency ?? "NGN", rail: "reversal" }).catch(() => {});
+      fluvioPublishPaymentEvent({
+        event_type: "reversed",
+        tx_ref: input.txRef,
+        account_id: tx.originatorAccount ?? "",
+        amount_kobo: tx.amount ?? 0,
+        currency: tx.currency ?? "NGN",
+        rail: "reversal",
+        tenant_id: String((ctx.user as { tenantId?: string | number } | null)?.tenantId ?? "default"),
       }).catch(() => {});
       return { reversalRef, originalTxRef: input.txRef };
     }),

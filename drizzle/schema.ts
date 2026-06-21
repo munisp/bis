@@ -1223,6 +1223,9 @@ export const transactions = pgTable("transactions", {
   investigationId: integer("investigationId").references(() => investigations.id),
   goamlFilingId: integer("goamlFilingId").references(() => goamlFilings.id),
   valueDate: timestamp("valueDate"),
+  // Archival tier tracking — prevents double-archival in hot→warm→cold pipeline
+  archivedTier: varchar("archivedTier", { length: 8 }),  // 'warm' | 'cold' | null
+  archivedAt: timestamp("archivedAt"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
 },
@@ -1907,3 +1910,21 @@ export const kycOcrHistory = pgTable("kyc_ocr_history", {
   }));
 export type KycOcrHistory = typeof kycOcrHistory.$inferSelect;
 export type InsertKycOcrHistory = typeof kycOcrHistory.$inferInsert;
+
+// ─── Billing Top-ups (idempotency guard) ──────────────────────────────────────
+// One row per verified Paystack reference. UNIQUE(reference) prevents double-credit.
+export const billingTopups = pgTable("billing_topups", {
+  id: serial("id").primaryKey(),
+  tenantId: varchar("tenantId", { length: 64 }).notNull(),
+  reference: varchar("reference", { length: 256 }).notNull().unique(),
+  amountKobo: integer("amountKobo").notNull(),
+  channel: varchar("channel", { length: 64 }).notNull().default("unknown"),
+  tbTransferId: varchar("tbTransferId", { length: 64 }),
+  verifiedAt: timestamp("verifiedAt").defaultNow().notNull(),
+},
+  (table) => ({
+    billing_topups_ref_idx: index("billing_topups_ref_idx").on(table.reference),
+    billing_topups_tenant_idx: index("billing_topups_tenant_idx").on(table.tenantId),
+  }));
+export type BillingTopup = typeof billingTopups.$inferSelect;
+export type InsertBillingTopup = typeof billingTopups.$inferInsert;

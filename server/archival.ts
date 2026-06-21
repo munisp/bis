@@ -135,7 +135,9 @@ export async function archiveToWarm(dryRun = false): Promise<ArchivalResult> {
       and(
         lt(transactions.createdAt, cutoff),
         // Only archive completed/failed/reversed — not pending/under_review
-        sql`${transactions.status} IN ('completed', 'failed', 'reversed', 'blocked')`
+        sql`${transactions.status} IN ('completed', 'failed', 'reversed', 'blocked')`,
+        // ── Idempotency: skip rows already archived to warm or cold tier ──
+        isNull(transactions.archivedTier)
       )
     )
     .limit(10000); // Process in batches of 10K (1B payments lesson: batch everything)
@@ -204,6 +206,19 @@ export async function archiveToWarm(dryRun = false): Promise<ArchivalResult> {
     } catch (err: any) {
       errors.push(`S3 write failed: ${err.message}`);
     }
+
+    // ── Mark rows as archived to prevent double-archival on next run ──
+    if (errors.length === 0) {
+      const { inArray } = await import("drizzle-orm");
+      const ids = rows.map(r => r.id);
+      // Process in chunks of 1000 to avoid IN clause limits
+      for (let i = 0; i < ids.length; i += 1000) {
+        await db.update(transactions)
+          .set({ archivedTier: "warm" as any, archivedAt: new Date() })
+          .where(inArray(transactions.id, ids.slice(i, i + 1000)))
+          .catch((e: Error) => errors.push(`archivedTier update failed: ${e.message}`));
+      }
+    }
   }
 
   return {
@@ -235,7 +250,9 @@ export async function archiveToCold(dryRun = false): Promise<ArchivalResult> {
     .where(
       and(
         lt(transactions.createdAt, cutoff),
-        sql`${transactions.status} IN ('completed', 'failed', 'reversed', 'blocked')`
+        sql`${transactions.status} IN ('completed', 'failed', 'reversed', 'blocked')`,
+        // ── Idempotency: skip rows already archived to cold tier ──
+        sql`${transactions.archivedTier} IS NULL OR ${transactions.archivedTier} = 'warm'`
       )
     )
     .limit(50000); // Larger batch for cold archival
@@ -256,6 +273,18 @@ export async function archiveToCold(dryRun = false): Promise<ArchivalResult> {
       await storagePut(s3Key, Buffer.from(json), "application/json");
     } catch (err: any) {
       errors.push(`S3 write failed: ${err.message}`);
+    }
+
+    // ── Mark rows as cold-archived to prevent double-archival on next run ──
+    if (errors.length === 0) {
+      const { inArray } = await import("drizzle-orm");
+      const ids = rows.map(r => r.id);
+      for (let i = 0; i < ids.length; i += 1000) {
+        await db.update(transactions)
+          .set({ archivedTier: "cold" as any, archivedAt: new Date() })
+          .where(inArray(transactions.id, ids.slice(i, i + 1000)))
+          .catch((e: Error) => errors.push(`archivedTier cold update failed: ${e.message}`));
+      }
     }
   }
 

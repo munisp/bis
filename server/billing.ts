@@ -10,6 +10,10 @@ import { router, protectedProcedure, writeProcedure } from "./_core/trpc";
 import { TRPCError } from "@trpc/server";
 import { storagePut } from "./storage";
 import { ENV } from "./_core/env";
+import { getDb } from "./db";
+import { billingTopups } from "../drizzle/schema";
+import { eq } from "drizzle-orm";
+import { withCircuitBreaker } from "./circuitBreaker";
 
 const TB_URL = ENV.tigerBeetleUrl;
 const ACCOUNT_REVENUE = "1";
@@ -29,16 +33,18 @@ const TIER_AMOUNTS: Record<string, number> = {
 
 async function tbPost(path: string, payload: unknown): Promise<unknown> {
   if (!TB_URL) return null;
-  const res = await fetch(`${TB_URL}${path}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(5000),
+  return withCircuitBreaker("tigerbeetle", async () => {
+    const res = await fetch(`${TB_URL}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) {
+      throw new Error(`TigerBeetle POST ${path} returned ${res.status}`);
+    }
+    return res.json();
   });
-  if (!res.ok) {
-    throw new Error(`TigerBeetle POST ${path} returned ${res.status}`);
-  }
-  return res.json();
 }
 
 async function tbGet(path: string): Promise<unknown> {
@@ -578,6 +584,25 @@ export const billingRouter = router({
         }
       }
 
+      // ── Idempotency guard: prevent double-credit for the same Paystack reference ──
+      const db = await getDb();
+      if (db) {
+        const existing = await db.select().from(billingTopups)
+          .where(eq(billingTopups.reference, input.reference)).limit(1);
+        if (existing.length > 0) {
+          // Already processed — return the recorded values without re-crediting
+          return {
+            success: true,
+            amountKobo: existing[0].amountKobo,
+            amountNGN: existing[0].amountKobo / 100,
+            reference: input.reference,
+            channel: existing[0].channel,
+            transferId: existing[0].tbTransferId ?? `idempotent-${input.reference}`,
+            idempotent: true,
+          };
+        }
+      }
+
       // Credit the TigerBeetle account
       try {
         await ensureAccount(input.tenantId);
@@ -594,6 +619,16 @@ export const billingRouter = router({
             user_data_128: input.reference,
           },
         ]);
+        // Record in billing_topups for idempotency on future retries
+        if (db) {
+          await db.insert(billingTopups).values({
+            tenantId: input.tenantId,
+            reference: input.reference,
+            amountKobo,
+            channel,
+            tbTransferId: transferId,
+          }).onConflictDoNothing();
+        }
         return {
           success: true,
           amountKobo,
@@ -601,6 +636,7 @@ export const billingRouter = router({
           reference: input.reference,
           channel,
           transferId,
+          idempotent: false,
         };
       } catch (err) {
         console.error("[Billing] verifyTopUp TigerBeetle credit error:", err);
