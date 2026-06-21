@@ -1,0 +1,247 @@
+name: Deploy to Production
+
+# Triggered automatically after Docker images are built on main,
+# or manually via workflow_dispatch with optional image tag override.
+on:
+  workflow_run:
+    workflows: ["Docker Build"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Image tag to deploy (default: latest)"
+        required: false
+        default: "latest"
+      environment:
+        description: "Target environment"
+        required: true
+        default: "production"
+        type: choice
+        options:
+          - production
+          - staging
+
+concurrency:
+  group: deploy-${{ github.event.inputs.environment || 'production' }}
+  cancel-in-progress: false  # Never cancel in-flight deployments
+
+env:
+  IMAGE_TAG: ${{ github.event.inputs.image_tag || github.sha }}
+  DEPLOY_ENV: ${{ github.event.inputs.environment || 'production' }}
+
+jobs:
+  # ── Pre-flight checks ─────────────────────────────────────────────────────
+  preflight:
+    name: Pre-flight Checks
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    outputs:
+      image_tag: ${{ steps.resolve.outputs.tag }}
+    steps:
+      - name: Resolve image tag
+        id: resolve
+        run: |
+          TAG="${{ env.IMAGE_TAG }}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "Deploying tag: ${TAG} to ${{ env.DEPLOY_ENV }}"
+
+      - name: Verify images exist in GHCR
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          SERVICES="gateway bff risk-engine event-processor aml-engine"
+          for svc in $SERVICES; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              -H "Authorization: Bearer $GHCR_TOKEN" \
+              "https://ghcr.io/v2/${{ github.repository_owner }}/bis-${svc}/manifests/${{ env.IMAGE_TAG }}")
+            if [ "$STATUS" != "200" ]; then
+              echo "❌ Image bis-${svc}:${{ env.IMAGE_TAG }} not found in GHCR (HTTP $STATUS)"
+              exit 1
+            fi
+            echo "✅ bis-${svc}:${{ env.IMAGE_TAG }} verified"
+          done
+
+  # ── Smoke test against staging ────────────────────────────────────────────
+  smoke-test-staging:
+    name: Smoke Tests (Staging)
+    runs-on: ubuntu-latest
+    needs: preflight
+    if: env.DEPLOY_ENV == 'production'  # Always smoke-test staging before prod
+    environment: staging
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy to staging
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.STAGING_HOST }}
+          username: ${{ secrets.STAGING_USER }}
+          key: ${{ secrets.STAGING_SSH_KEY }}
+          script: |
+            cd /opt/bis
+            export IMAGE_TAG=${{ needs.preflight.outputs.image_tag }}
+            export GITHUB_REPOSITORY=${{ github.repository }}
+            docker compose -f docker-compose.yml -f docker-compose.prod.yml pull gateway bff risk-engine
+            docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --no-deps gateway bff risk-engine
+            sleep 15
+
+      - name: Run smoke tests against staging
+        env:
+          STAGING_URL: ${{ secrets.STAGING_URL }}
+          SMOKE_API_TOKEN: ${{ secrets.SMOKE_API_TOKEN }}
+        run: |
+          # Health check
+          curl -sf "${STAGING_URL}/api/trpc/lookup.gatewayHealth?batch=1&input={}" \
+            -H "Cookie: bis_session=${SMOKE_API_TOKEN}" || \
+            (echo "❌ Health check failed" && exit 1)
+          echo "✅ Gateway health OK"
+
+          # BFF liveness
+          curl -sf "${STAGING_URL}/api/trpc/auth.me?batch=1&input={}" \
+            -H "Cookie: bis_session=${SMOKE_API_TOKEN}" || \
+            (echo "❌ BFF liveness failed" && exit 1)
+          echo "✅ BFF liveness OK"
+
+          # Sandbox NIN lookup
+          RESULT=$(curl -sf "${STAGING_URL}/api/trpc/lookup.nin?batch=1&input=%7B%220%22%3A%7B%22nin%22%3A%2212345678901%22%7D%7D" \
+            -H "Cookie: bis_session=${SMOKE_API_TOKEN}")
+          echo "NIN response: $RESULT"
+          echo "✅ Sandbox NIN lookup OK"
+
+  # ── Production deployment ─────────────────────────────────────────────────
+  deploy-production:
+    name: Deploy Production
+    runs-on: ubuntu-latest
+    needs: [preflight, smoke-test-staging]
+    if: always() && needs.preflight.result == 'success' && (needs.smoke-test-staging.result == 'success' || needs.smoke-test-staging.result == 'skipped')
+    environment:
+      name: production
+      url: ${{ secrets.PRODUCTION_URL }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy to production (rolling update)
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.PRODUCTION_HOST }}
+          username: ${{ secrets.PRODUCTION_USER }}
+          key: ${{ secrets.PRODUCTION_SSH_KEY }}
+          script: |
+            set -e
+            cd /opt/bis
+            export IMAGE_TAG=${{ needs.preflight.outputs.image_tag }}
+            export GITHUB_REPOSITORY=${{ github.repository }}
+
+            echo "=== Pulling new images ==="
+            docker compose -f docker-compose.yml -f docker-compose.prod.yml pull \
+              gateway bff risk-engine event-processor aml-engine \
+              case-manager lex-intake lex-validator ml-enrichment \
+              biometric-engine lakehouse-writer ollama-adapter payment-rails
+
+            echo "=== Rolling update: gateway (2 replicas) ==="
+            docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d \
+              --no-deps --scale gateway=2 gateway
+            sleep 10
+
+            echo "=== Rolling update: bff ==="
+            docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d \
+              --no-deps bff
+            sleep 10
+
+            echo "=== Rolling update: remaining services ==="
+            docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d \
+              --no-deps risk-engine event-processor aml-engine \
+              case-manager lex-intake lex-validator ml-enrichment \
+              biometric-engine lakehouse-writer ollama-adapter payment-rails
+
+            echo "=== Cleanup old images ==="
+            docker image prune -f --filter "until=24h"
+
+      - name: Post-deployment health check
+        env:
+          PRODUCTION_URL: ${{ secrets.PRODUCTION_URL }}
+          SMOKE_API_TOKEN: ${{ secrets.SMOKE_API_TOKEN }}
+        run: |
+          sleep 20
+          for i in 1 2 3; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              "${PRODUCTION_URL}/api/trpc/lookup.gatewayHealth?batch=1&input={}" \
+              -H "Cookie: bis_session=${SMOKE_API_TOKEN}")
+            if [ "$STATUS" = "200" ]; then
+              echo "✅ Production health check passed (attempt $i)"
+              exit 0
+            fi
+            echo "⏳ Attempt $i: HTTP $STATUS — retrying in 15s..."
+            sleep 15
+          done
+          echo "❌ Production health check failed after 3 attempts"
+          exit 1
+
+      - name: Notify deployment success
+        if: success()
+        uses: slackapi/slack-github-action@v1.26.0
+        with:
+          payload: |
+            {
+              "text": "✅ BIS Platform deployed to production",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*✅ BIS Platform — Production Deployment Successful*\n• Tag: `${{ needs.preflight.outputs.image_tag }}`\n• Deployed by: ${{ github.actor }}\n• URL: ${{ secrets.PRODUCTION_URL }}"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+
+      - name: Notify deployment failure
+        if: failure()
+        uses: slackapi/slack-github-action@v1.26.0
+        with:
+          payload: |
+            {
+              "text": "❌ BIS Platform production deployment FAILED",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*❌ BIS Platform — Production Deployment FAILED*\n• Tag: `${{ needs.preflight.outputs.image_tag }}`\n• Triggered by: ${{ github.actor }}\n• <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View run>"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+
+  # ── Rollback (manual trigger only) ───────────────────────────────────────
+  rollback:
+    name: Rollback Production
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'production'
+    environment: production
+    steps:
+      - name: Rollback to previous image
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.PRODUCTION_HOST }}
+          username: ${{ secrets.PRODUCTION_USER }}
+          key: ${{ secrets.PRODUCTION_SSH_KEY }}
+          script: |
+            cd /opt/bis
+            # Roll back by re-deploying the previous SHA tag
+            PREV_TAG=$(docker image ls ghcr.io/${{ github.repository_owner }}/bis-gateway \
+              --format "{{.Tag}}" | grep -v latest | sort -r | sed -n '2p')
+            echo "Rolling back to: $PREV_TAG"
+            export IMAGE_TAG=$PREV_TAG
+            docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d \
+              --no-deps gateway bff risk-engine
+            echo "Rollback complete"

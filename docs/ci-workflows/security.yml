@@ -1,0 +1,147 @@
+name: Security Scan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Run every Monday at 08:00 UTC
+    - cron: '0 8 * * 1'
+
+jobs:
+  # ─── Node.js dependency audit ─────────────────────────────────────────────
+  node-audit:
+    name: Node.js Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: '9'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Audit dependencies
+        run: pnpm audit --audit-level=high
+        continue-on-error: true
+
+  # ─── Go vulnerability check ───────────────────────────────────────────────
+  go-vuln:
+    name: Go Vulnerability Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: Run govulncheck — gateway
+        run: govulncheck ./...
+        working-directory: services/gateway
+        continue-on-error: true
+
+      - name: Run govulncheck — case-manager
+        run: govulncheck ./...
+        working-directory: services/case-manager
+        continue-on-error: true
+
+  # ─── Rust cargo audit ─────────────────────────────────────────────────────
+  rust-audit:
+    name: Rust Cargo Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+
+      - name: Audit aml-engine
+        run: cargo audit
+        working-directory: services/aml-engine
+        continue-on-error: true
+
+      - name: Audit event-emitter
+        run: cargo audit
+        working-directory: services/event-emitter
+        continue-on-error: true
+
+      - name: Audit event-processor
+        run: cargo audit
+        working-directory: services/event-processor
+        continue-on-error: true
+
+  # ─── Python safety check ──────────────────────────────────────────────────
+  python-safety:
+    name: Python Safety Check
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [biometric-engine, lakehouse-writer, ml-enrichment, risk-engine, risk-scoring]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install safety
+        run: pip install safety
+
+      - name: Run safety check
+        run: safety check -r requirements.txt
+        working-directory: services/${{ matrix.service }}
+        continue-on-error: true
+
+  # ─── CodeQL SAST ──────────────────────────────────────────────────────────
+  codeql:
+    name: CodeQL SAST
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [javascript-typescript, go, python]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-and-quality
+
+      - name: Set up Go (for Go analysis)
+        if: matrix.language == 'go'
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: /language:${{ matrix.language }}
