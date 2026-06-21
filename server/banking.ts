@@ -19,13 +19,13 @@ import { TRPCError } from "@trpc/server";
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function lcRef(): string {
-  return `LC-${new Date().getFullYear()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+  return `LC-${new Date().getFullYear()}-${crypto.randomUUID().replace(/-/g,'').slice(0,8).toUpperCase()}`;
 }
 function evidenceRef(): string {
-  return `EVD-${new Date().getFullYear()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+  return `EVD-${new Date().getFullYear()}-${crypto.randomUUID().replace(/-/g,'').slice(0,8).toUpperCase()}`;
 }
 function reportRef(): string {
-  return `RPT-${new Date().getFullYear()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+  return `RPT-${new Date().getFullYear()}-${crypto.randomUUID().replace(/-/g,'').slice(0,8).toUpperCase()}`;
 }
 
 // ─── Trade Finance Router ─────────────────────────────────────────────────────

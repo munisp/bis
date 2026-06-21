@@ -100,7 +100,7 @@ export const paymentRailsRouter = router({
     .mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-      const txRef = input.reference ?? `TXN-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+      const txRef = input.reference ?? `TXN-${Date.now()}-${crypto.randomUUID().replace(/-/g, "").slice(0, 8).toUpperCase()}`;
       const amountKobo = Math.round(input.amount * 100);
 
       // Initiate via Mojaloop → NIBSS NIP → Sandbox
@@ -718,7 +718,7 @@ export const paymentRailsRouter = router({
 
       // Upload to S3
       const ts = new Date().toISOString().replace(/[:.]/g, "-");
-      const suffix = Math.random().toString(36).slice(2, 8);
+      const suffix = crypto.randomUUID().replace(/-/g, '').slice(0, 8);
       const fileKey = `exports/transfers-${ts}-${suffix}.csv`;
       const { url } = await storagePut(fileKey, csvContent, "text/csv");
 
@@ -1170,24 +1170,10 @@ export const paymentRailsRouter = router({
         }
       }
 
-      // 4. Deterministic mock simulating NIBSS NIP name-enquiry response (sandbox fallback)
-      const MOCK_NAMES = [
-        'ADEBAYO OLUWASEUN MICHAEL', 'IBRAHIM FATIMA AISHA', 'OKONKWO CHUKWUEMEKA DAVID',
-        'ABUBAKAR MUSA IBRAHIM', 'NWOSU CHIDINMA GRACE', 'ADELEKE TAIWO BLESSING',
-        'HASSAN AMINAT FOLAKE', 'EZE IFEANYI KINGSLEY', 'BELLO ABDULLAHI SANI', 'OKAFOR NGOZI PEACE',
-      ];
-      const MOCK_BANKS = [
-        'Access Bank', 'GTBank', 'First Bank', 'Zenith Bank', 'UBA',
-        'Fidelity Bank', 'Sterling Bank', 'Polaris Bank', 'Wema Bank', 'FCMB',
-      ];
-      const idx = parseInt(input.accountNumber.slice(-2), 10) % MOCK_NAMES.length;
-      const bankIdx = parseInt(input.accountNumber.slice(0, 2), 10) % MOCK_BANKS.length;
-      return {
-        accountNumber: input.accountNumber,
-        accountName: MOCK_NAMES[idx],
-        bankName: MOCK_BANKS[bankIdx],
-        verified: true,
-        source: 'sandbox',
-      };
+      // 4. Gateway unavailable and account not found in local DB — return unverified rather than fabricating a name
+      throw new TRPCError({
+        code: 'NOT_FOUND',
+        message: 'Account not found. The NIP gateway is unavailable or this account number is not registered. Please verify the account number and try again.',
+      });
     }),
 });

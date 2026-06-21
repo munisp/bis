@@ -2,7 +2,8 @@
  * Lakehouse tRPC Router
  * ─────────────────────
  * Proxies requests to the Python lakehouse-writer service (Delta Lake + DuckDB).
- * Falls back to mock data when the service is unavailable (dev / sandbox mode).
+ * When the service is unavailable, returns empty results with a service_unavailable
+ * flag rather than fabricating mock data.
  */
 
 import { z } from "zod";
@@ -36,73 +37,26 @@ async function lhFetch(path: string, options?: RequestInit): Promise<unknown> {
   }
 }
 
-// ── Mock data for sandbox / offline mode ─────────────────────────────────────
-function mockTableStats() {
-  return {
-    tables: [
-      { table: "investigations", path: "/data/lakehouse/investigations", version: 12, row_count: 63, last_commit_ms: Date.now() - 3600_000 },
-      { table: "alerts", path: "/data/lakehouse/alerts", version: 8, row_count: 147, last_commit_ms: Date.now() - 7200_000 },
-      { table: "kyc", path: "/data/lakehouse/kyc", version: 5, row_count: 41, last_commit_ms: Date.now() - 10800_000 },
-    ],
-  };
-}
-
-function mockQueryResult(sql: string) {
-  const upper = sql.toUpperCase();
-  if (upper.includes("INVESTIGATIONS")) {
-    return {
-      ok: true,
-      row_count: 5,
-      rows: [
-        { month: "2026-01", count: 12, avg_risk: 42.3 },
-        { month: "2026-02", count: 18, avg_risk: 51.7 },
-        { month: "2026-03", count: 33, avg_risk: 48.1 },
-      ],
-    };
-  }
-  if (upper.includes("ALERTS")) {
-    return {
-      ok: true,
-      row_count: 4,
-      rows: [
-        { severity: "critical", count: 8 },
-        { severity: "high", count: 23 },
-        { severity: "medium", count: 61 },
-        { severity: "low", count: 55 },
-      ],
-    };
-  }
-  if (upper.includes("KYC")) {
-    return {
-      ok: true,
-      row_count: 3,
-      rows: [
-        { status: "verified", count: 28 },
-        { status: "pending", count: 9 },
-        { status: "failed", count: 4 },
-      ],
-    };
-  }
-  return { ok: true, row_count: 0, rows: [] };
-}
-
 // ── Router ────────────────────────────────────────────────────────────────────
 export const lakehouseRouter = router({
   /**
    * List all registered Delta tables with version and row counts.
+   * Returns empty array with service_unavailable flag when service is down.
    */
   listTables: protectedProcedure.query(async () => {
     try {
       const data = await lhFetch("/tables") as { tables: unknown[] };
-      return data.tables;
-    } catch {
-      // Sandbox fallback
-      return mockTableStats().tables;
+      return { tables: data.tables, service_available: true };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn("[Lakehouse] listTables unavailable:", msg);
+      return { tables: [], service_available: false, reason: msg.slice(0, 200) };
     }
   }),
 
   /**
    * Execute a read-only DuckDB SQL query over the lakehouse parquet files.
+   * Returns empty result with service_unavailable flag when service is down.
    */
   query: protectedProcedure
     .input(
@@ -121,15 +75,18 @@ export const lakehouseRouter = router({
           method: "POST",
           body: JSON.stringify({ sql, limit: input.limit }),
         }) as { ok: boolean; row_count: number; rows: unknown[] };
-        return data;
-      } catch {
-        return mockQueryResult(sql);
+        return { ...data, service_available: true };
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn("[Lakehouse] query unavailable:", msg);
+        return { ok: false, row_count: 0, rows: [], service_available: false, reason: msg.slice(0, 200) };
       }
     }),
 
   /**
    * Ingest a single investigation row into the Delta Lake.
    * Called by the BFF after a new investigation is created.
+   * Non-fatal — lakehouse ingestion is async best-effort.
    */
   ingestInvestigation: protectedProcedure
     .input(
@@ -155,15 +112,17 @@ export const lakehouseRouter = router({
           method: "POST",
           body: JSON.stringify(input),
         });
-        return { ok: true };
-      } catch {
-        // Non-fatal — lakehouse ingestion is async best-effort
-        return { ok: false, reason: "lakehouse_unavailable" };
+        return { ok: true, service_available: true };
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn("[Lakehouse] ingestInvestigation unavailable:", msg);
+        return { ok: false, service_available: false, reason: "lakehouse_unavailable" };
       }
     }),
 
   /**
    * Pre-built analytics queries for the Lakehouse Analytics dashboard.
+   * Returns empty rows with service_unavailable flag when service is down.
    */
   analytics: protectedProcedure
     .input(
@@ -230,9 +189,11 @@ export const lakehouseRouter = router({
           method: "POST",
           body: JSON.stringify({ sql: sql.trim(), limit: 1000 }),
         }) as { ok: boolean; row_count: number; rows: unknown[] };
-        return { metric: input.metric, rows: data.rows };
-      } catch {
-        return { metric: input.metric, rows: mockQueryResult(sql).rows };
+        return { metric: input.metric, rows: data.rows, service_available: true };
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn("[Lakehouse] analytics unavailable:", msg);
+        return { metric: input.metric, rows: [], service_available: false, reason: msg.slice(0, 200) };
       }
     }),
 });

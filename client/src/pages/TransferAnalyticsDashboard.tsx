@@ -16,7 +16,7 @@ import {
   Shield, Activity, RefreshCw, Download, Calendar,
 } from "lucide-react";
 
-const COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#06b6d4"];
+const COLORS = ["var(--risk-none)", "var(--risk-low)", "var(--risk-medium)", "var(--risk-critical)", "var(--chart-violet)", "var(--chart-cyan)"];
 
 function formatNGN(amount: number): string {
   if (amount >= 1_000_000_000) return `₦${(amount / 1_000_000_000).toFixed(2)}B`;
@@ -209,19 +209,19 @@ export default function TransferAnalyticsDashboard() {
                     <AreaChart data={chartData}>
                       <defs>
                         <linearGradient id="volGrad" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
-                          <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                          <stop offset="5%" stopColor="var(--risk-none)" stopOpacity={0.3} />
+                          <stop offset="95%" stopColor="var(--risk-none)" stopOpacity={0} />
                         </linearGradient>
                       </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                      <XAxis dataKey="date" stroke="#94a3b8" tick={{ fontSize: 11 }} />
-                      <YAxis stroke="#94a3b8" tick={{ fontSize: 11 }} tickFormatter={v => `₦${v}M`} />
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--color-slate-700)" />
+                      <XAxis dataKey="date" stroke="var(--color-slate-400)" tick={{ fontSize: 11 }} />
+                      <YAxis stroke="var(--color-slate-400)" tick={{ fontSize: 11 }} tickFormatter={v => `₦${v}M`} />
                       <Tooltip
-                        contentStyle={{ background: "#1e293b", border: "1px solid #334155", borderRadius: 8 }}
-                        labelStyle={{ color: "#e2e8f0" }}
+                        contentStyle={{ background: "var(--color-slate-700)", border: "1px solid var(--color-slate-700)", borderRadius: 8 }}
+                        labelStyle={{ color: "var(--color-slate-200)" }}
                         formatter={(v: number) => [`₦${v.toFixed(3)}M`, "Volume"]}
                       />
-                      <Area type="monotone" dataKey="volumeM" stroke="#3b82f6" fill="url(#volGrad)" strokeWidth={2} />
+                      <Area type="monotone" dataKey="volumeM" stroke="var(--risk-none)" fill="url(#volGrad)" strokeWidth={2} />
                     </AreaChart>
                   </ResponsiveContainer>
                 )}
@@ -240,17 +240,17 @@ export default function TransferAnalyticsDashboard() {
                 ) : (
                   <ResponsiveContainer width="100%" height={300}>
                     <BarChart data={chartData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                      <XAxis dataKey="date" stroke="#94a3b8" tick={{ fontSize: 11 }} />
-                      <YAxis stroke="#94a3b8" tick={{ fontSize: 11 }} />
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--color-slate-700)" />
+                      <XAxis dataKey="date" stroke="var(--color-slate-400)" tick={{ fontSize: 11 }} />
+                      <YAxis stroke="var(--color-slate-400)" tick={{ fontSize: 11 }} />
                       <Tooltip
-                        contentStyle={{ background: "#1e293b", border: "1px solid #334155", borderRadius: 8 }}
-                        labelStyle={{ color: "#e2e8f0" }}
+                        contentStyle={{ background: "var(--color-slate-700)", border: "1px solid var(--color-slate-700)", borderRadius: 8 }}
+                        labelStyle={{ color: "var(--color-slate-200)" }}
                       />
                       <Legend />
-                      <Bar dataKey="count" name="Total" fill="#10b981" radius={[3, 3, 0, 0]} />
-                      <Bar dataKey="flagged" name="Flagged" fill="#f59e0b" radius={[3, 3, 0, 0]} />
-                      <Bar dataKey="blocked" name="Blocked" fill="#ef4444" radius={[3, 3, 0, 0]} />
+                      <Bar dataKey="count" name="Total" fill="var(--risk-low)" radius={[3, 3, 0, 0]} />
+                      <Bar dataKey="flagged" name="Flagged" fill="var(--risk-medium)" radius={[3, 3, 0, 0]} />
+                      <Bar dataKey="blocked" name="Blocked" fill="var(--risk-critical)" radius={[3, 3, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 )}
@@ -269,15 +269,15 @@ export default function TransferAnalyticsDashboard() {
                 ) : (
                   <ResponsiveContainer width="100%" height={300}>
                     <LineChart data={chartData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                      <XAxis dataKey="date" stroke="#94a3b8" tick={{ fontSize: 11 }} />
-                      <YAxis stroke="#94a3b8" tick={{ fontSize: 11 }} domain={[0, 100]} />
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--color-slate-700)" />
+                      <XAxis dataKey="date" stroke="var(--color-slate-400)" tick={{ fontSize: 11 }} />
+                      <YAxis stroke="var(--color-slate-400)" tick={{ fontSize: 11 }} domain={[0, 100]} />
                       <Tooltip
-                        contentStyle={{ background: "#1e293b", border: "1px solid #334155", borderRadius: 8 }}
-                        labelStyle={{ color: "#e2e8f0" }}
+                        contentStyle={{ background: "var(--color-slate-700)", border: "1px solid var(--color-slate-700)", borderRadius: 8 }}
+                        labelStyle={{ color: "var(--color-slate-200)" }}
                         formatter={(v: number) => [`${v}/100`, "Avg Risk"]}
                       />
-                      <Line type="monotone" dataKey="avgRisk" stroke="#8b5cf6" strokeWidth={2} dot={{ r: 3 }} />
+                      <Line type="monotone" dataKey="avgRisk" stroke="var(--chart-violet)" strokeWidth={2} dot={{ r: 3 }} />
                     </LineChart>
                   </ResponsiveContainer>
                 )}
@@ -311,7 +311,7 @@ export default function TransferAnalyticsDashboard() {
                           ))}
                         </Pie>
                         <Tooltip
-                          contentStyle={{ background: "#1e293b", border: "1px solid #334155", borderRadius: 8 }}
+                          contentStyle={{ background: "var(--color-slate-700)", border: "1px solid var(--color-slate-700)", borderRadius: 8 }}
                           formatter={(v: number) => [formatNGN(v), "Volume"]}
                         />
                       </PieChart>
@@ -342,17 +342,17 @@ export default function TransferAnalyticsDashboard() {
                 ) : (
                   <ResponsiveContainer width="100%" height={300}>
                     <BarChart data={chartData} stackOffset="expand">
-                      <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                      <XAxis dataKey="date" stroke="#94a3b8" tick={{ fontSize: 11 }} />
-                      <YAxis stroke="#94a3b8" tick={{ fontSize: 11 }} />
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--color-slate-700)" />
+                      <XAxis dataKey="date" stroke="var(--color-slate-400)" tick={{ fontSize: 11 }} />
+                      <YAxis stroke="var(--color-slate-400)" tick={{ fontSize: 11 }} />
                       <Tooltip
-                        contentStyle={{ background: "#1e293b", border: "1px solid #334155", borderRadius: 8 }}
-                        labelStyle={{ color: "#e2e8f0" }}
+                        contentStyle={{ background: "var(--color-slate-700)", border: "1px solid var(--color-slate-700)", borderRadius: 8 }}
+                        labelStyle={{ color: "var(--color-slate-200)" }}
                       />
                       <Legend />
-                      <Bar dataKey="count" name="Total" fill="#3b82f6" radius={[3, 3, 0, 0]} />
-                      <Bar dataKey="flagged" name="Flagged" fill="#f59e0b" radius={[3, 3, 0, 0]} />
-                      <Bar dataKey="blocked" name="Blocked" fill="#ef4444" radius={[3, 3, 0, 0]} />
+                      <Bar dataKey="count" name="Total" fill="var(--risk-none)" radius={[3, 3, 0, 0]} />
+                      <Bar dataKey="flagged" name="Flagged" fill="var(--risk-medium)" radius={[3, 3, 0, 0]} />
+                      <Bar dataKey="blocked" name="Blocked" fill="var(--risk-critical)" radius={[3, 3, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 )}

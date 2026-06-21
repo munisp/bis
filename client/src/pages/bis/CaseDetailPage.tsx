@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import BISLayout from "@/components/BISLayout";
 import { useRoute, useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
@@ -257,6 +258,7 @@ export default function CaseDetailPage() {
   const c = caseData;
 
   return (
+    <BISLayout title={`Case: ${c.ref}`} subtitle={c.title}>
     <div className="p-6 space-y-6">
       {/* Header */}
       <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -821,5 +823,6 @@ export default function CaseDetailPage() {
         </DialogContent>
       </Dialog>
     </div>
+    </BISLayout>
   );
 }

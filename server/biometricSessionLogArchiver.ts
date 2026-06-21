@@ -75,7 +75,7 @@ export async function runBiometricSessionLogArchival(): Promise<{
       try {
         const ndjson = monthRows.map(r => JSON.stringify(r)).join("\n");
         const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-        const s3Key = `biometric-archive/${monthKey}/session-logs-${timestamp}-${Math.random().toString(36).slice(2, 8)}.ndjson`;
+        const s3Key = `biometric-archive/${monthKey}/session-logs-${timestamp}-${crypto.randomUUID().replace(/-/g,'').slice(0,8)}.ndjson`;
         await storagePut(s3Key, Buffer.from(ndjson, "utf-8"), "application/x-ndjson");
         archived += monthRows.length;
       } catch (err) {

@@ -33,7 +33,7 @@ export default function TenantBrandingPage() {
   // Initialise local state from fetched tenant once
   const [initialised, setInitialised] = useState(false);
   if (tenant && !initialised) {
-    setPrimaryColor(tenant.primaryColor ?? "#1a56db");
+    setPrimaryColor(tenant.primaryColor ?? "var(--chart-blue2)");
     setReportFooter(tenant.reportFooter ?? "");
     setLogoPreview(tenant.logoUrl ?? null);
     setInitialised(true);
@@ -170,7 +170,7 @@ export default function TenantBrandingPage() {
                 {/* Classification banner */}
                 <div
                   className="text-center font-bold text-white py-1 rounded text-[11px] tracking-widest uppercase"
-                  style={{ backgroundColor: primaryColor || "#1a56db" }}
+                  style={{ backgroundColor: primaryColor || "var(--chart-blue2)" }}
                 >
                   CONFIDENTIAL — RESTRICTED
                 </div>
@@ -276,20 +276,20 @@ export default function TenantBrandingPage() {
                 <div className="flex items-center gap-3">
                   <input
                     type="color"
-                    value={primaryColor || "#1a56db"}
+                    value={primaryColor || "var(--chart-blue2)"}
                     onChange={(e) => setPrimaryColor(e.target.value)}
                     className="w-10 h-10 rounded border border-border cursor-pointer bg-transparent p-0.5"
                   />
                   <Input
                     value={primaryColor}
                     onChange={(e) => setPrimaryColor(e.target.value)}
-                    placeholder="#1a56db"
+                    placeholder="var(--chart-blue2)"
                     className="font-mono text-sm w-36"
                     maxLength={7}
                   />
                   <div
                     className="flex-1 h-8 rounded border border-border text-center text-[10px] font-bold text-white flex items-center justify-center tracking-widest uppercase"
-                    style={{ backgroundColor: primaryColor || "#1a56db" }}
+                    style={{ backgroundColor: primaryColor || "var(--chart-blue2)" }}
                   >
                     CONFIDENTIAL
                   </div>
@@ -327,7 +327,7 @@ export default function TenantBrandingPage() {
                 size="sm"
                 className="text-xs"
                 onClick={() => {
-                  setPrimaryColor(tenant.primaryColor ?? "#1a56db");
+                  setPrimaryColor(tenant.primaryColor ?? "var(--chart-blue2)");
                   setReportFooter(tenant.reportFooter ?? "");
                   setLogoPreview(tenant.logoUrl ?? null);
                   setLogoDataUri(null);

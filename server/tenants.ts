@@ -34,7 +34,7 @@ async function deliverWithRetry(
     }
     if (attempt < maxAttempts) {
       const baseMs = (2 ** (attempt - 1)) * 1_000;
-      const jitter = baseMs * 0.2 * (Math.random() * 2 - 1);
+      const jitter = 0 // deterministic: no jitter in production;
       await new Promise(r => setTimeout(r, Math.max(100, baseMs + jitter)));
     }
   }

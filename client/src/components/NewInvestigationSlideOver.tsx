@@ -172,9 +172,9 @@ export default function NewInvestigationSlideOver({ open, onClose, onCreated }: 
       />
 
       {/* Slide-over panel */}
-      <div className="fixed right-0 top-0 h-full w-full max-w-xl z-50 flex flex-col bg-[#0d1117] border-l border-border shadow-2xl overflow-hidden">
+      <div className="fixed right-0 top-0 h-full w-full max-w-xl z-50 flex flex-col bg-[var(--color-surface)] border-l border-border shadow-2xl overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-[#0d1117]">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-[var(--color-surface)]">
           <div>
             <h2 className="text-sm font-semibold text-foreground font-mono tracking-wide">NEW INVESTIGATION</h2>
             <p className="text-xs text-muted-foreground mt-0.5">
@@ -469,7 +469,7 @@ export default function NewInvestigationSlideOver({ open, onClose, onCreated }: 
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-4 border-t border-border bg-[#0d1117] flex items-center justify-between gap-3">
+        <div className="px-6 py-4 border-t border-border bg-[var(--color-surface)] flex items-center justify-between gap-3">
           <Button
             variant="outline"
             size="sm"

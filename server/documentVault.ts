@@ -172,7 +172,7 @@ export const documentVaultRouter = router({
         }
       }
 
-      const suffix = Math.random().toString(36).slice(2, 10);
+      const suffix = crypto.randomUUID().replace(/-/g,'').slice(0,10);
       const ext = input.filename.split(".").pop() ?? "bin";
       const fileKey = `vault/${input.category}/${Date.now()}-${suffix}.${ext}`;
 

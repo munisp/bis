@@ -7,7 +7,7 @@ import { eq, desc, and, like, or, count, sql, lte } from "drizzle-orm";
 
 function sarRef(): string {
   const year = new Date().getFullYear();
-  return `SAR-${year}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+  return `SAR-${year}-${crypto.randomUUID().replace(/-/g,'').slice(0,8).toUpperCase()}`;
 }
 
 export const sarRouter = router({

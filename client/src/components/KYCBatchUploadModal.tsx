@@ -270,7 +270,7 @@ export default function KYCBatchUploadModal({ open, onClose }: KYCBatchUploadMod
                         </td>
                         <td className="px-3 py-2 font-mono text-[10px]">
                           {row.riskScore !== undefined ? (
-                            <span style={{ color: row.riskScore >= 70 ? '#f87171' : row.riskScore >= 45 ? '#fbbf24' : '#34d399' }}>
+                            <span style={{ color: row.riskScore >= 70 ? 'var(--risk-critical)' : row.riskScore >= 45 ? 'var(--risk-medium)' : 'var(--risk-low)' }}>
                               {row.riskScore}
                             </span>
                           ) : '—'}

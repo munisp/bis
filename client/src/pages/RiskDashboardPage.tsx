@@ -18,17 +18,17 @@ import {
 import { Link } from "wouter";
 
 const RISK_COLORS: Record<string, string> = {
-  "Critical (80-100)": "#ef4444",
-  "High (60-79)": "#f97316",
-  "Medium (40-59)": "#eab308",
-  "Low (0-39)": "#22c55e",
+  "Critical (80-100)": "var(--risk-critical)",
+  "High (60-79)": "var(--risk-high)",
+  "Medium (40-59)": "var(--risk-medium)",
+  "Low (0-39)": "var(--risk-low)",
 };
 
 function getRiskColor(score: number): string {
-  if (score >= 80) return "#ef4444";
-  if (score >= 60) return "#f97316";
-  if (score >= 40) return "#eab308";
-  return "#22c55e";
+  if (score >= 80) return "var(--risk-critical)";
+  if (score >= 60) return "var(--risk-high)";
+  if (score >= 40) return "var(--risk-medium)";
+  return "var(--risk-low)";
 }
 
 function getRiskBadge(score: number) {
@@ -75,7 +75,7 @@ export default function RiskDashboardPage() {
       sector: b.sector,
       riskBucket: b.riskBucket,
       entities: b.entities,
-      fill: RISK_COLORS[b.riskBucket] ?? "#64748b",
+      fill: RISK_COLORS[b.riskBucket] ?? "var(--muted-foreground)",
     }));
   }, [heatmap]);
 
@@ -251,15 +251,15 @@ export default function RiskDashboardPage() {
             ) : (
               <ResponsiveContainer width="100%" height={380}>
                 <ScatterChart margin={{ top: 20, right: 30, bottom: 20, left: 20 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--color-slate-700)" />
                   <XAxis
                     type="number"
                     dataKey="x"
                     domain={[0.5, 5.5]}
                     ticks={[1, 2, 3, 4, 5]}
                     tickFormatter={xTickFormatter}
-                    tick={{ fill: "#94a3b8", fontSize: 11 }}
-                    label={{ value: "Entity Sector", position: "insideBottom", offset: -5, fill: "#64748b", fontSize: 12 }}
+                    tick={{ fill: "var(--color-slate-400)", fontSize: 11 }}
+                    label={{ value: "Entity Sector", position: "insideBottom", offset: -5, fill: "var(--muted-foreground)", fontSize: 12 }}
                   />
                   <YAxis
                     type="number"
@@ -267,8 +267,8 @@ export default function RiskDashboardPage() {
                     domain={[0, 100]}
                     ticks={[20, 50, 70, 90]}
                     tickFormatter={v => v >= 80 ? "Critical" : v >= 60 ? "High" : v >= 40 ? "Medium" : "Low"}
-                    tick={{ fill: "#94a3b8", fontSize: 11 }}
-                    label={{ value: "Risk Level", angle: -90, position: "insideLeft", fill: "#64748b", fontSize: 12 }}
+                    tick={{ fill: "var(--color-slate-400)", fontSize: 11 }}
+                    label={{ value: "Risk Level", angle: -90, position: "insideLeft", fill: "var(--muted-foreground)", fontSize: 12 }}
                   />
                   <Tooltip content={<CustomBubbleTooltip />} />
                   <Scatter data={scatterData} shape="circle">
@@ -302,13 +302,13 @@ export default function RiskDashboardPage() {
               {heatmap?.histogram && (
                 <ResponsiveContainer width="100%" height={220}>
                   <BarChart data={heatmap.histogram} margin={{ top: 5, right: 10, bottom: 5, left: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                    <XAxis dataKey="bucket" tick={{ fill: "#94a3b8", fontSize: 10 }} />
-                    <YAxis tick={{ fill: "#94a3b8", fontSize: 10 }} />
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--color-slate-700)" />
+                    <XAxis dataKey="bucket" tick={{ fill: "var(--color-slate-400)", fontSize: 10 }} />
+                    <YAxis tick={{ fill: "var(--color-slate-400)", fontSize: 10 }} />
                     <Tooltip
-                      contentStyle={{ backgroundColor: "#1e293b", border: "1px solid #475569", borderRadius: "8px" }}
-                      labelStyle={{ color: "#f1f5f9" }}
-                      itemStyle={{ color: "#94a3b8" }}
+                      contentStyle={{ backgroundColor: "var(--color-slate-700)", border: "1px solid var(--color-slate-700)", borderRadius: "8px" }}
+                      labelStyle={{ color: "var(--color-slate-200)" }}
+                      itemStyle={{ color: "var(--color-slate-400)" }}
                     />
                     <Bar dataKey="count" name="Entities" radius={[4, 4, 0, 0]}>
                       {heatmap.histogram.map((entry, index) => {
@@ -344,17 +344,17 @@ export default function RiskDashboardPage() {
               {trend && trend.length > 0 ? (
                 <ResponsiveContainer width="100%" height={220}>
                   <LineChart data={trend} margin={{ top: 5, right: 10, bottom: 5, left: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                    <XAxis dataKey="date" tick={{ fill: "#94a3b8", fontSize: 10 }} />
-                    <YAxis domain={[0, 100]} tick={{ fill: "#94a3b8", fontSize: 10 }} />
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--color-slate-700)" />
+                    <XAxis dataKey="date" tick={{ fill: "var(--color-slate-400)", fontSize: 10 }} />
+                    <YAxis domain={[0, 100]} tick={{ fill: "var(--color-slate-400)", fontSize: 10 }} />
                     <Tooltip
-                      contentStyle={{ backgroundColor: "#1e293b", border: "1px solid #475569", borderRadius: "8px" }}
-                      labelStyle={{ color: "#f1f5f9" }}
-                      itemStyle={{ color: "#94a3b8" }}
+                      contentStyle={{ backgroundColor: "var(--color-slate-700)", border: "1px solid var(--color-slate-700)", borderRadius: "8px" }}
+                      labelStyle={{ color: "var(--color-slate-200)" }}
+                      itemStyle={{ color: "var(--color-slate-400)" }}
                     />
-                    <Legend wrapperStyle={{ color: "#94a3b8", fontSize: "12px" }} />
-                    <Line type="monotone" dataKey="avgScore" stroke="#f97316" strokeWidth={2} dot={false} name="Avg Risk Score" />
-                    <Line type="monotone" dataKey="criticalCount" stroke="#ef4444" strokeWidth={1.5} dot={false} name="Critical Count" />
+                    <Legend wrapperStyle={{ color: "var(--color-slate-400)", fontSize: "12px" }} />
+                    <Line type="monotone" dataKey="avgScore" stroke="var(--risk-high)" strokeWidth={2} dot={false} name="Avg Risk Score" />
+                    <Line type="monotone" dataKey="criticalCount" stroke="var(--risk-critical)" strokeWidth={1.5} dot={false} name="Critical Count" />
                   </LineChart>
                 </ResponsiveContainer>
               ) : (

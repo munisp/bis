@@ -1,10 +1,17 @@
 /**
- * BIS Platform Service Worker v1.0
+ * BIS Platform Service Worker v2.0
  * Provides offline capability for LEX field agents with low bandwidth
  * Features: Cache-first for static assets, network-first for API, IndexedDB queue for mutations
+ *
+ * Cache-busting: On each deployment the server injects a new BUILD_VERSION meta tag.
+ * The SW reads this on activate and clears all old caches when the version changes.
  */
 
-const CACHE_VERSION = 'bis-v1';
+// ─── Version tracking ─────────────────────────────────────────────────────────
+// This constant is updated on each deployment by the CI pipeline or manually.
+// Changing it forces all old caches to be cleared on the next SW activation.
+const SW_VERSION = '2.0.0';
+const CACHE_VERSION = `bis-v${SW_VERSION}`;
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const API_CACHE = `${CACHE_VERSION}-api`;
 const OFFLINE_QUEUE_DB = 'bis-offline-queue';
@@ -26,25 +33,44 @@ const API_CACHE_ROUTES = [
 
 // ─── Install ────────────────────────────────────────────────────────────────
 self.addEventListener('install', (event) => {
+  console.log(`[SW] Installing version ${SW_VERSION}`);
   event.waitUntil(
     caches.open(STATIC_CACHE).then((cache) => {
       return cache.addAll(PRECACHE_URLS).catch((err) => {
         console.warn('[SW] Pre-cache failed for some URLs:', err);
       });
-    }).then(() => self.skipWaiting())
+    }).then(() => {
+      // Force immediate activation — don't wait for old SW to be unloaded
+      return self.skipWaiting();
+    })
   );
 });
 
 // ─── Activate ────────────────────────────────────────────────────────────────
 self.addEventListener('activate', (event) => {
+  console.log(`[SW] Activating version ${SW_VERSION} — clearing old caches`);
   event.waitUntil(
     caches.keys().then((cacheNames) => {
       return Promise.all(
         cacheNames
+          // Delete any BIS cache that doesn't match the current version
           .filter((name) => name.startsWith('bis-') && name !== STATIC_CACHE && name !== API_CACHE)
-          .map((name) => caches.delete(name))
+          .map((name) => {
+            console.log(`[SW] Deleting stale cache: ${name}`);
+            return caches.delete(name);
+          })
       );
-    }).then(() => self.clients.claim())
+    }).then(() => {
+      // Take control of all open pages immediately
+      return self.clients.claim();
+    }).then(() => {
+      // Notify all controlled clients that a new version is active
+      return self.clients.matchAll({ type: 'window' }).then((windowClients) => {
+        windowClients.forEach((client) => {
+          client.postMessage({ type: 'SW_UPDATED', version: SW_VERSION });
+        });
+      });
+    })
   );
 });
 
@@ -65,20 +91,17 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Static assets: cache-first
-  if (
-    url.pathname.match(/\.(js|css|woff2?|png|jpg|svg|ico)$/) ||
-    url.pathname === '/'
-  ) {
-    event.respondWith(cacheFirstWithNetwork(request, STATIC_CACHE));
+  // HTML navigation: ALWAYS network-first, no caching — must get fresh index.html
+  if (request.mode === 'navigate' || url.pathname === '/') {
+    event.respondWith(
+      fetch(request, { cache: 'no-store' }).catch(() => caches.match('/'))
+    );
     return;
   }
 
-  // HTML navigation: network-first, fallback to cached shell
-  if (request.mode === 'navigate') {
-    event.respondWith(
-      fetch(request).catch(() => caches.match('/'))
-    );
+  // Static assets with content-hash filenames: cache-first (safe — filename changes on deploy)
+  if (url.pathname.match(/\.(js|css|woff2?|png|jpg|svg|ico)(\?.*)?$/)) {
+    event.respondWith(cacheFirstWithNetwork(request, STATIC_CACHE));
     return;
   }
 
@@ -178,6 +201,9 @@ self.addEventListener('message', (event) => {
     getOfflineQueueCount().then((count) => {
       event.ports[0].postMessage({ count });
     });
+  }
+  if (event.data && event.data.type === 'GET_VERSION') {
+    event.ports[0].postMessage({ version: SW_VERSION });
   }
 });
 

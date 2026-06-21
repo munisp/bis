@@ -30,7 +30,7 @@ import {
 import {
   CheckCircle2, XCircle, RefreshCw, FileText, Loader2,
   Clock, Eye, ChevronRight, User, Calendar, HardDrive,
-  AlertTriangle, Filter, RotateCcw
+  AlertTriangle, Filter, RotateCcw, ChevronDown, History
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -347,6 +347,71 @@ function OcrDataPanel({
   );
 }
 
+// ─── OCR History Timeline ────────────────────────────────────────────────────
+/**
+ * Shows a collapsible per-field history timeline fetched from kyc_ocr_history.
+ * Displayed below the OcrDataPanel inside the ReviewDialog.
+ */
+function OcrHistoryTimeline({ documentId }: { documentId: number }) {
+  const [open, setOpen] = useState(false);
+  const { data: history, isLoading } = trpc.kyc.getOcrHistory.useQuery(
+    { documentId },
+    { enabled: open },
+  );
+
+  return (
+    <div className="mt-2">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1.5 text-[10px] font-mono text-muted-foreground hover:text-foreground transition-colors"
+      >
+        <History size={11} />
+        <span>OCR Re-extraction History</span>
+        <ChevronDown size={10} className={cn('transition-transform', open && 'rotate-180')} />
+      </button>
+      {open && (
+        <div className="mt-2 space-y-2 max-h-48 overflow-y-auto pr-1">
+          {isLoading ? (
+            <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+              <Loader2 size={10} className="animate-spin" /> Loading history…
+            </div>
+          ) : !history?.length ? (
+            <p className="text-[10px] text-muted-foreground">No re-extraction history for this document.</p>
+          ) : (
+            history.map((row) => (
+              <div key={row.id} className="border border-border/40 rounded p-2 text-[10px] font-mono">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-primary/80 font-semibold">{row.fieldName}</span>
+                  <span className="text-muted-foreground">{new Date(row.createdAt).toLocaleString()}</span>
+                </div>
+                <div className="grid grid-cols-2 gap-x-3">
+                  <div>
+                    <span className="text-[9px] text-muted-foreground uppercase">Before</span>
+                    <p className="text-foreground/70 truncate">{row.oldValue ?? '—'}</p>
+                  </div>
+                  <div>
+                    <span className="text-[9px] text-muted-foreground uppercase">After</span>
+                    <p className="text-foreground truncate">{row.newValue ?? '—'}</p>
+                  </div>
+                </div>
+                {row.newConfidence !== null && (
+                  <span className={cn(
+                    'text-[9px] px-1 py-0.5 rounded border mt-1 inline-block',
+                    confidenceClass(Number(row.newConfidence)),
+                  )}>
+                    {Math.round(Number(row.newConfidence) * 100)}% confidence
+                  </span>
+                )}
+              </div>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── OCR Diff Panel ───────────────────────────────────────────────────────────
 
 const OCR_LABELS: Record<string, string> = {
@@ -522,6 +587,8 @@ function ReviewDialog({
                 reextractingField={reextractingField}
               />
           }
+          {/* OCR history timeline — collapsible, lazy-loaded */}
+          {doc?.id && <OcrHistoryTimeline documentId={doc.id} />}
           {onRerunOcr && (
             <div className="flex justify-end">
               <Button

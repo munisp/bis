@@ -798,15 +798,13 @@ export default function OnboardingAdminPage() {
               <iframe
                 src={docPreview.url}
                 title={docPreview.name}
-                className="w-full h-full rounded border border-white/10"
-                style={{ minHeight: "70vh" }}
+                className="w-full h-full rounded border border-white/10 min-h-[70vh]"
               />
             ) : (
               <img
                 src={docPreview.url}
                 alt={docPreview.name}
-                className="max-w-full max-h-full object-contain rounded shadow-2xl"
-                style={{ maxHeight: "80vh" }}
+                className="max-w-full max-h-full object-contain rounded shadow-2xl max-h-[80vh]"
               />
             )}
           </div>

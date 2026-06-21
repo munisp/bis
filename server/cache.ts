@@ -152,4 +152,10 @@ export const TTL = {
   TENANTS:           600,  // 10 min
   SANCTIONS_LIST:    3600, // 1 hour
   KEYCLOAK_ROLES:    300,  // 5 min
+  // Hot query caches — short TTL, invalidated on mutations
+  INVESTIGATIONS_LIST: 15,  // 15s — high-frequency list queries
+  ALERTS_LIST:         10,  // 10s — alerts refresh very frequently
+  KYC_LIST:            20,  // 20s — KYC list
+  SANCTIONS_STATUS:    300, // 5 min — sanctions gateway health check
+  BROADCAST_HISTORY:   30,  // 30s — broadcast history list
 } as const;
