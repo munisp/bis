@@ -6,7 +6,7 @@ import { getDb } from "./db";
 import { publishAmlAlert } from "./dapr";
 import { fluvioPublishAmlEvent } from "./fluvio";
 import {
-  transactions, amlRules, amlAlerts, swiftMessages, sepaPayments, travelRuleRecords, cases, alertRules, webhooks,
+  transactions, amlRules, amlAlerts, swiftMessages, sepaPayments, travelRuleRecords, cases, alertRules, webhooks, velocityBlocks,
 } from "../drizzle/schema";
 import { eq, desc, and, gte, lte, like, or, sql, count, sum } from "drizzle-orm";
 
@@ -713,4 +713,33 @@ export const amlRouter = router({
         return record;
       }),
   }),
+
+  // ── Velocity Blocks ──────────────────────────────────────────────────────────
+  /**
+   * List velocity blocks recorded by the Fluvio sliding-window engine.
+   * Used by the AML dashboard to surface blocked transfers for compliance review.
+   */
+  listVelocityBlocks: protectedProcedure
+    .input(z.object({
+      accountId: z.string().optional(),
+      limit: z.number().int().min(1).max(200).default(50),
+      offset: z.number().int().min(0).default(0),
+    }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      const conditions = input.accountId ? [eq(velocityBlocks.accountId, input.accountId)] : [];
+      const rows = await db
+        .select()
+        .from(velocityBlocks)
+        .where(conditions.length ? and(...conditions) : undefined)
+        .orderBy(desc(velocityBlocks.createdAt))
+        .limit(input.limit)
+        .offset(input.offset);
+      const [{ total }] = await db
+        .select({ total: count() })
+        .from(velocityBlocks)
+        .where(conditions.length ? and(...conditions) : undefined);
+      return { rows, total };
+    }),
 });

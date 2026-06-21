@@ -42,6 +42,113 @@ function formatAmount(amount: number, currency: string): string {
   }
 }
 
+// ─── Velocity Blocks Panel ───────────────────────────────────────────────────
+function VelocityBlocksPanel() {
+  const [accountFilter, setAccountFilter] = useState("");
+  const [page, setPage] = useState(0);
+  const PAGE_SIZE = 25;
+
+  const { data, isLoading, refetch } = trpc.aml.listVelocityBlocks.useQuery({
+    accountId: accountFilter.trim() || undefined,
+    limit: PAGE_SIZE,
+    offset: page * PAGE_SIZE,
+  });
+
+  const rows = data?.rows ?? [];
+  const total = data?.total ?? 0;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-white">Velocity Blocks</h3>
+          <p className="text-xs text-slate-400 mt-0.5">
+            Transfers blocked by the Fluvio sliding-window engine ({total} total)
+          </p>
+        </div>
+        <Button variant="ghost" size="sm" onClick={() => refetch()}>
+          <RefreshCw size={14} className="mr-1" /> Refresh
+        </Button>
+      </div>
+
+      <div className="flex gap-2">
+        <div className="relative flex-1 max-w-xs">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <Input
+            placeholder="Filter by account ID..."
+            value={accountFilter}
+            onChange={e => { setAccountFilter(e.target.value); setPage(0); }}
+            className="pl-9 h-8 text-xs bg-slate-800 border-slate-700"
+          />
+        </div>
+      </div>
+
+      <Card className="bg-slate-800/50 border-slate-700">
+        <CardContent className="p-0">
+          {isLoading ? (
+            <div className="flex items-center justify-center py-12 text-slate-400 text-sm">
+              <RefreshCw size={16} className="animate-spin mr-2" /> Loading velocity blocks...
+            </div>
+          ) : rows.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-12 text-slate-400">
+              <ShieldAlert size={32} className="mb-3 text-green-500/50" />
+              <p className="text-sm font-medium text-green-400">No velocity blocks recorded</p>
+              <p className="text-xs mt-1">All transfers are within the sliding-window threshold</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-700 text-xs text-slate-400">
+                    <th className="text-left px-4 py-3">Account ID</th>
+                    <th className="text-right px-4 py-3">Amount</th>
+                    <th className="text-right px-4 py-3">Window Count</th>
+                    <th className="text-right px-4 py-3">Window (s)</th>
+                    <th className="text-left px-4 py-3">Blocked At</th>
+                    <th className="text-left px-4 py-3">Tx Ref</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((row: any) => (
+                    <tr key={row.id} className="border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors">
+                      <td className="px-4 py-3 font-mono text-xs text-slate-300">{row.accountId}</td>
+                      <td className="px-4 py-3 text-right font-mono text-red-400">
+                        {formatAmount(row.amount / 100, row.currency ?? "NGN")}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <Badge className="bg-red-500/20 text-red-400 border-red-500/30">{row.windowCount}</Badge>
+                      </td>
+                      <td className="px-4 py-3 text-right text-slate-400">{row.windowSeconds}s</td>
+                      <td className="px-4 py-3 text-xs text-slate-400">
+                        {new Date(row.createdAt).toLocaleString()}
+                      </td>
+                      <td className="px-4 py-3 font-mono text-xs text-slate-500">{row.txRef ?? "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {total > PAGE_SIZE && (
+        <div className="flex items-center justify-between text-xs text-slate-400">
+          <span>Showing {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, total)} of {total}</span>
+          <div className="flex gap-2">
+            <Button variant="ghost" size="sm" disabled={page === 0} onClick={() => setPage(p => p - 1)}>
+              <ChevronLeft size={14} />
+            </Button>
+            <Button variant="ghost" size="sm" disabled={(page + 1) * PAGE_SIZE >= total} onClick={() => setPage(p => p + 1)}>
+              <ChevronRight size={14} />
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function AMLTransactionsPage() {
   const [tab, setTab] = useState("transactions");
   const [search, setSearch] = useState("");
@@ -235,6 +342,10 @@ export default function AMLTransactionsPage() {
         <Tabs value={tab} onValueChange={setTab}>
           <TabsList>
             <TabsTrigger value="transactions">Transactions</TabsTrigger>
+            <TabsTrigger value="velocity" className="relative">
+              <ShieldAlert size={12} className="mr-1" />
+              Velocity Blocks
+            </TabsTrigger>
             <TabsTrigger value="alerts" className="relative">
               Alerts
               {(stats?.alerts.open ?? 0) > 0 && (
@@ -431,6 +542,11 @@ export default function AMLTransactionsPage() {
                 </table>
               </div>
             </Card>
+          </TabsContent>
+
+          {/* ── Velocity Blocks Tab ────────────────────────────────────────── */}
+          <TabsContent value="velocity" className="space-y-4">
+            <VelocityBlocksPanel />
           </TabsContent>
         </Tabs>
       </div>

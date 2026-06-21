@@ -2738,3 +2738,10 @@
 - [x] Temporal saga for initiateTransfer — PaymentTransferWorkflow with retry, timeout escalation, and compensation
 - [x] billing_topups idempotency vitest — assert second verifyTopUp returns idempotent:true without double-credit (9/9 passing)
 - [x] Fluvio velocity pre-flight gate in initiateTransfer — block transfers exceeding sliding-window threshold
+
+## Next Steps Sprint v2
+
+- [x] velocity_blocks audit table + migration + server-side recording in fluvioCheckVelocity
+- [x] Temporal saga integration test (compensation path on submitToRail failure)
+- [x] Cancel button in TransferStatusPoller wired to cancelPaymentTransferWorkflow
+- [ ] velocity_blocks panel in AML dashboard

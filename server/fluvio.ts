@@ -29,7 +29,8 @@
  */
 
 import { ENV } from "./_core/env";
-
+import { getDb } from "./db";
+import { velocityBlocks } from "../drizzle/schema";
 const FLUVIO_VELOCITY_URL =
   process.env.FLUVIO_VELOCITY_URL ?? "http://localhost:9090";
 
@@ -266,9 +267,37 @@ export async function fluvioCheckVelocity(
     });
 
     if (res.ok) {
-      const body = (await res.json()) as { decision: "allow" | "block"; reason?: string };
+      const body = (await res.json()) as {
+        decision: "allow" | "block";
+        reason?: string;
+        window_count?: number;
+        window_seconds?: number;
+        threshold?: number;
+      };
+      const decision = body.decision ?? "allow";
+      // Record blocks to the velocity_blocks audit table for compliance review
+      if (decision === "block") {
+        try {
+          const db = await getDb();
+          if (!db) throw new Error("DB unavailable");
+          await db.insert(velocityBlocks).values({
+            accountId: input.account_id,
+            tenantId: input.tenant_id,
+            txRef: (input as any).tx_ref ?? null,
+            amountKobo: input.amount_kobo,
+            windowCount: body.window_count ?? 0,
+            windowSeconds: body.window_seconds ?? 60,
+            threshold: body.threshold ?? 10,
+            decision: "block",
+            reason: body.reason ?? "velocity threshold exceeded",
+          });
+        } catch (dbErr) {
+          // Non-fatal: audit write failure must not block the payment rejection
+          console.warn("[Fluvio] failed to record velocity block to DB:", dbErr);
+        }
+      }
       return {
-        decision: body.decision ?? "allow",
+        decision,
         reason: body.reason,
         service_available: true,
       };

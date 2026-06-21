@@ -330,6 +330,13 @@
       "when": 1782061359059,
       "tag": "0046_charming_sphinx",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1782063925101,
+      "tag": "0047_graceful_tarot",
+      "breakpoints": true
     }
   ]
 }

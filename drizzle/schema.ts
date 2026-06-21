@@ -1928,3 +1928,30 @@ export const billingTopups = pgTable("billing_topups", {
   }));
 export type BillingTopup = typeof billingTopups.$inferSelect;
 export type InsertBillingTopup = typeof billingTopups.$inferInsert;
+
+// ─── Velocity Blocks (Fluvio sliding-window audit) ────────────────────────────
+// One row per blocked transfer attempt. Compliance officers review these in the
+// AML dashboard alongside SAR filings.
+export const velocityBlocks = pgTable("velocity_blocks", {
+  id: serial("id").primaryKey(),
+  accountId: varchar("accountId", { length: 128 }).notNull(),
+  tenantId: varchar("tenantId", { length: 64 }),
+  txRef: varchar("txRef", { length: 128 }),
+  amountKobo: bigint("amountKobo", { mode: "number" }).notNull(),
+  windowCount: integer("windowCount").notNull(),
+  windowSeconds: integer("windowSeconds").notNull(),
+  threshold: integer("threshold").notNull(),
+  decision: varchar("decision", { length: 32 }).notNull().default("block"),
+  reason: text("reason"),
+  reviewedAt: timestamp("reviewedAt"),
+  reviewedBy: integer("reviewedBy").references(() => users.id, { onDelete: "set null" }),
+  reviewNote: text("reviewNote"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+},
+  (table) => ({
+    velocity_blocks_account_idx: index("velocity_blocks_account_idx").on(table.accountId),
+    velocity_blocks_tenant_idx:  index("velocity_blocks_tenant_idx").on(table.tenantId),
+    velocity_blocks_created_idx: index("velocity_blocks_created_idx").on(table.createdAt),
+  }));
+export type VelocityBlock = typeof velocityBlocks.$inferSelect;
+export type InsertVelocityBlock = typeof velocityBlocks.$inferInsert;

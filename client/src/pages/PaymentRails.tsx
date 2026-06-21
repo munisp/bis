@@ -326,6 +326,13 @@ function TransferDetailDrawer({ txRef, open, onClose }: TransferDetailDrawerProp
  * Stops polling when the transfer reaches a terminal state.
  */
 function TransferStatusPoller({ txRef, onClose }: { txRef: string; onClose: () => void }) {
+  const utils = trpc.useUtils();
+  const cancelWorkflow = trpc.paymentRails.cancelWorkflow.useMutation({
+    onSuccess: () => {
+      utils.paymentRails.getWorkflowStatus.invalidate({ txRef });
+      utils.paymentRails.listTransfers.invalidate();
+    },
+  });
   const TERMINAL = new Set<string>(["posted", "voided", "failed", "reversed"]);
 
   const { data, isLoading, error } = trpc.paymentRails.getWorkflowStatus.useQuery(
@@ -462,6 +469,24 @@ function TransferStatusPoller({ txRef, onClose }: { txRef: string; onClose: () =
 
             {/* Footer */}
             <div className="flex gap-2 pt-1">
+              {!isTerminal && ["pending", "under_review"].includes(data.dbStatus) && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="flex-1 text-xs border-red-700 text-red-400 hover:bg-red-900/30"
+                  disabled={cancelWorkflow.isPending}
+                  onClick={() => cancelWorkflow.mutate({ txRef })}
+                >
+                  {cancelWorkflow.isPending ? (
+                    <><RefreshCw size={10} className="animate-spin mr-1" /> Cancelling…</>
+                  ) : (
+                    <><XCircle size={10} className="mr-1" /> Cancel Transfer</>
+                  )}
+                </Button>
+              )}
+              {cancelWorkflow.error && (
+                <p className="text-[10px] text-red-400 mt-1">{cancelWorkflow.error.message}</p>
+              )}
               <Button
                 size="sm"
                 variant="outline"
