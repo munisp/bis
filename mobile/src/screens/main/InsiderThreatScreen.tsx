@@ -1,14 +1,8 @@
 /**
- * InsiderThreatScreen — Real-time insider threat event feed for the BIS mobile app.
- *
- * Features:
- *   - KPI summary bar (total, open, high/critical, resolved)
- *   - Severity-filtered event list with pull-to-refresh and infinite scroll
- *   - Inline status triage (open → investigating → resolved / false_positive)
- *   - Event detail modal with HMAC integrity hash display
- *   - Auto-refresh every 60 seconds
+ * InsiderThreatScreen — live insider threat event feed with KPI summary cards,
+ * severity/status badges, and a detail modal with status-update actions.
  */
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -19,658 +13,358 @@ import {
   ActivityIndicator,
   Modal,
   ScrollView,
+  TextInput,
   Alert,
 } from 'react-native';
-import { useInsiderEvents } from '../../hooks/useInsiderThreat';
-import { InsiderEvent } from '../../services/api';
-import { colors, typography, spacing } from '../../utils/theme';
+import { useInsiderEvents, useDashboardSummary, type InsiderEvent } from '../../hooks/useInsiderThreat';
+import { colors, typography, spacing, radius } from '../../utils/theme';
 
-const SEVERITY_COLORS: Record<string, string> = {
-  critical: colors.critical,
-  high: colors.high,
-  medium: colors.medium,
-  low: colors.low,
+const SEVERITY_COLOR: Record<string, string> = {
+  critical: '#ef4444',
+  high: '#f97316',
+  medium: '#eab308',
+  low: '#22c55e',
+  info: '#06b6d4',
 };
 
-const STATUS_COLORS: Record<string, string> = {
-  open: colors.open,
-  investigating: colors.info,
-  resolved: colors.success,
-  false_positive: colors.textMuted,
+const STATUS_COLOR: Record<string, string> = {
+  open: '#3b82f6',
+  investigating: '#8b5cf6',
+  resolved: '#22c55e',
+  false_positive: '#64748b',
 };
 
-const CATEGORY_ICONS: Record<string, string> = {
-  data_exfiltration: '📤',
-  privilege_abuse: '🔑',
-  off_hours_access: '🌙',
-  policy_violation: '⚠️',
-  anomalous_behavior: '🔍',
-  account_takeover: '👤',
-  lateral_movement: '↔️',
+const STATUS_LABELS: Record<string, string> = {
+  open: 'Open',
+  investigating: 'Investigating',
+  resolved: 'Resolved',
+  false_positive: 'False Positive',
 };
-
-const SEVERITY_FILTERS = ['all', 'critical', 'high', 'medium', 'low'];
-const STATUS_FILTERS = ['all', 'open', 'investigating', 'resolved', 'false_positive'];
 
 export function InsiderThreatScreen() {
-  const [severityFilter, setSeverityFilter] = useState('all');
-  const [statusFilter, setStatusFilter] = useState('all');
+  const { events, total, loading, error, refresh, updateStatus } = useInsiderEvents();
+  const { summary } = useDashboardSummary();
   const [selected, setSelected] = useState<InsiderEvent | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
+  const [notes, setNotes] = useState('');
 
-  const {
-    events,
-    total,
-    loading,
-    refreshing,
-    error,
-    refresh,
-    loadMore,
-    hasMore,
-    updateStatus,
-  } = useInsiderEvents({
-    severity: severityFilter === 'all' ? undefined : severityFilter,
-    status: statusFilter === 'all' ? undefined : statusFilter,
-    autoRefreshMs: 60_000,
-  });
+  // Mobile session anomaly alert — show native dialog when concurrent sessions detected
+  useEffect(() => {
+    const sessionAnomalyEvents = events.filter(
+      (e) => e.category === 'session_anomaly' && e.status === 'open' && e.severity !== 'info'
+    );
+    if (sessionAnomalyEvents.length > 0) {
+      const evt = sessionAnomalyEvents[0];
+      Alert.alert(
+        '⚠️ Session Anomaly Detected',
+        `Concurrent sessions from different IPs detected for user ${evt.subjectId}. ` +
+          'This may indicate account compromise. Please review immediately.',
+        [
+          { text: 'Dismiss', style: 'cancel' },
+          {
+            text: 'Review Now',
+            style: 'destructive',
+            onPress: () => setSelected(evt),
+          },
+        ],
+        { cancelable: false }
+      );
+    }
+  // Only trigger once when events load (not on every re-render)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [events.length]);
 
-  // KPI counts derived from the loaded events
-  const openCount = events.filter(e => e.status === 'open').length;
-  const criticalHighCount = events.filter(
-    e => e.severity === 'critical' || e.severity === 'high',
-  ).length;
-  const resolvedCount = events.filter(e => e.status === 'resolved').length;
-
-  const handleStatusChange = async (
-    ev: InsiderEvent,
-    newStatus: InsiderEvent['status'],
-  ) => {
+  const handleUpdateStatus = async (id: number, status: string) => {
     setActionLoading(true);
     try {
-      await updateStatus(ev.id, newStatus);
+      await updateStatus(id, status, notes || undefined);
       setSelected(null);
-    } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Failed to update status');
+      setNotes('');
     } finally {
       setActionLoading(false);
     }
   };
 
+  const renderKpiCard = (label: string, value: number | string, accent: string) => (
+    <View style={[styles.kpiCard, { borderLeftColor: accent }]}>
+      <Text style={[styles.kpiValue, { color: accent }]}>{value}</Text>
+      <Text style={styles.kpiLabel}>{label}</Text>
+    </View>
+  );
+
   const renderEvent = ({ item }: { item: InsiderEvent }) => (
-    <TouchableOpacity
-      style={styles.card}
-      onPress={() => setSelected(item)}
-      activeOpacity={0.75}
-    >
+    <TouchableOpacity style={styles.card} onPress={() => setSelected(item)} activeOpacity={0.7}>
       <View style={styles.cardHeader}>
-        <View
-          style={[
-            styles.severityBadge,
-            { backgroundColor: SEVERITY_COLORS[item.severity] + '22' },
-          ]}
-        >
-          <Text
-            style={[styles.severityText, { color: SEVERITY_COLORS[item.severity] }]}
-          >
+        <View style={[styles.badge, { backgroundColor: SEVERITY_COLOR[item.severity] + '22' }]}>
+          <Text style={[styles.badgeText, { color: SEVERITY_COLOR[item.severity] }]}>
             {item.severity.toUpperCase()}
           </Text>
         </View>
-        <View
-          style={[
-            styles.statusBadge,
-            { backgroundColor: STATUS_COLORS[item.status] + '22' },
-          ]}
-        >
-          <Text style={[styles.statusText, { color: STATUS_COLORS[item.status] }]}>
-            {item.status.replace('_', ' ').toUpperCase()}
+        <View style={[styles.badge, { backgroundColor: STATUS_COLOR[item.status] + '22' }]}>
+          <Text style={[styles.badgeText, { color: STATUS_COLOR[item.status] }]}>
+            {STATUS_LABELS[item.status]}
           </Text>
         </View>
+        <Text style={styles.anomalyScore}>Score: {item.anomalyScore.toFixed(1)}</Text>
       </View>
-
-      <View style={styles.cardBody}>
-        <Text style={styles.categoryIcon}>
-          {CATEGORY_ICONS[item.category] ?? '🛡️'}
-        </Text>
-        <View style={styles.cardContent}>
-          <Text style={styles.subjectText} numberOfLines={1}>
-            {item.subjectId}
-          </Text>
-          <Text style={styles.categoryText}>
-            {item.category.replace(/_/g, ' ')}
-          </Text>
-          {item.anomalyScore !== undefined && (
-            <Text style={styles.scoreText}>
-              Anomaly: {(item.anomalyScore * 100).toFixed(0)}%
-            </Text>
-          )}
-        </View>
-        <Text style={styles.timeText}>
-          {new Date(item.createdAt).toLocaleTimeString()}
-        </Text>
-      </View>
+      <Text style={styles.eventType}>{item.eventType.replace(/_/g, ' ')}</Text>
+      <Text style={styles.userName}>{item.userName}</Text>
+      <Text style={styles.description} numberOfLines={2}>{item.description}</Text>
+      {item.resourceAccessed && (
+        <Text style={styles.resource} numberOfLines={1}>Resource: {item.resourceAccessed}</Text>
+      )}
+      <Text style={styles.timestamp}>{new Date(item.detectedAt).toLocaleString()}</Text>
     </TouchableOpacity>
   );
 
-  const renderFooter = () => {
-    if (!hasMore) return null;
+  if (error) {
     return (
-      <ActivityIndicator
-        color={colors.primary}
-        style={{ marginVertical: spacing.md }}
-      />
+      <View style={styles.centered}>
+        <Text style={styles.errorText}>Failed to load insider events</Text>
+        <TouchableOpacity style={styles.retryButton} onPress={refresh}>
+          <Text style={styles.retryText}>Retry</Text>
+        </TouchableOpacity>
+      </View>
     );
-  };
+  }
 
   return (
     <View style={styles.container}>
-      {/* KPI Bar */}
-      <View style={styles.kpiBar}>
-        <View style={styles.kpiItem}>
-          <Text style={styles.kpiValue}>{total}</Text>
-          <Text style={styles.kpiLabel}>Total</Text>
+      {/* KPI Summary */}
+      {summary && (
+        <View style={styles.kpiRow}>
+          {renderKpiCard('Open', summary.openEvents, '#3b82f6')}
+          {renderKpiCard('Critical', summary.criticalEvents, '#ef4444')}
+          {renderKpiCard('High-Risk Users', summary.highRiskUsers, '#f97316')}
+          {renderKpiCard('Pending Reviews', summary.pendingReviews, '#8b5cf6')}
         </View>
-        <View style={[styles.kpiItem, styles.kpiDivider]}>
-          <Text style={[styles.kpiValue, { color: colors.error }]}>{openCount}</Text>
-          <Text style={styles.kpiLabel}>Open</Text>
-        </View>
-        <View style={[styles.kpiItem, styles.kpiDivider]}>
-          <Text style={[styles.kpiValue, { color: colors.high }]}>
-            {criticalHighCount}
-          </Text>
-          <Text style={styles.kpiLabel}>High+</Text>
-        </View>
-        <View style={[styles.kpiItem, styles.kpiDivider]}>
-          <Text style={[styles.kpiValue, { color: colors.success }]}>
-            {resolvedCount}
-          </Text>
-          <Text style={styles.kpiLabel}>Resolved</Text>
-        </View>
+      )}
+
+      <View style={styles.listHeader}>
+        <Text style={styles.title}>Insider Events</Text>
+        <Text style={styles.totalCount}>{total} total</Text>
       </View>
 
-      {/* Severity Filter */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.filterRow}
-        contentContainerStyle={styles.filterContent}
-      >
-        {SEVERITY_FILTERS.map(f => (
-          <TouchableOpacity
-            key={f}
-            style={[
-              styles.filterChip,
-              severityFilter === f && styles.filterChipActive,
-            ]}
-            onPress={() => setSeverityFilter(f)}
-          >
-            <Text
-              style={[
-                styles.filterChipText,
-                severityFilter === f && styles.filterChipTextActive,
-              ]}
-            >
-              {f === 'all' ? 'All Severity' : f.charAt(0).toUpperCase() + f.slice(1)}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
-
-      {/* Status Filter */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.filterRow}
-        contentContainerStyle={styles.filterContent}
-      >
-        {STATUS_FILTERS.map(f => (
-          <TouchableOpacity
-            key={f}
-            style={[
-              styles.filterChip,
-              statusFilter === f && styles.filterChipActive,
-            ]}
-            onPress={() => setStatusFilter(f)}
-          >
-            <Text
-              style={[
-                styles.filterChipText,
-                statusFilter === f && styles.filterChipTextActive,
-              ]}
-            >
-              {f === 'all' ? 'All Status' : f.replace('_', ' ')}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
-
-      {/* Error */}
-      {error && (
-        <View style={styles.errorBanner}>
-          <Text style={styles.errorText}>{error}</Text>
-        </View>
-      )}
-
-      {/* Event List */}
-      {loading && events.length === 0 ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator color={colors.primary} size="large" />
-          <Text style={styles.loadingText}>Loading events...</Text>
-        </View>
-      ) : (
-        <FlatList
-          data={events}
-          keyExtractor={item => String(item.id)}
-          renderItem={renderEvent}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={refresh}
-              tintColor={colors.primary}
-            />
-          }
-          onEndReached={loadMore}
-          onEndReachedThreshold={0.3}
-          ListFooterComponent={renderFooter}
-          ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <Text style={styles.emptyIcon}>🛡️</Text>
-              <Text style={styles.emptyText}>No events found</Text>
-              <Text style={styles.emptySubtext}>
-                Adjust filters or pull to refresh
-              </Text>
+      <FlatList
+        data={events}
+        keyExtractor={(item) => String(item.id)}
+        renderItem={renderEvent}
+        contentContainerStyle={styles.list}
+        refreshControl={
+          <RefreshControl refreshing={loading} onRefresh={refresh} tintColor={colors.primary} />
+        }
+        ListEmptyComponent={
+          loading ? (
+            <ActivityIndicator style={styles.loader} color={colors.primary} />
+          ) : (
+            <View style={styles.centered}>
+              <Text style={styles.emptyText}>No insider events detected</Text>
             </View>
-          }
-          contentContainerStyle={styles.listContent}
-        />
-      )}
+          )
+        }
+      />
 
       {/* Event Detail Modal */}
       <Modal
         visible={!!selected}
         animationType="slide"
-        transparent
-        onRequestClose={() => setSelected(null)}
+        presentationStyle="pageSheet"
+        onRequestClose={() => { setSelected(null); setNotes(''); }}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContainer}>
-            <ScrollView>
-              {selected && (
-                <>
-                  <View style={styles.modalHeader}>
-                    <Text style={styles.modalTitle}>
-                      {CATEGORY_ICONS[selected.category] ?? '🛡️'}{' '}
-                      {selected.category.replace(/_/g, ' ').toUpperCase()}
-                    </Text>
-                    <TouchableOpacity onPress={() => setSelected(null)}>
-                      <Text style={styles.closeButton}>✕</Text>
-                    </TouchableOpacity>
-                  </View>
-
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>Subject</Text>
-                    <Text style={styles.detailValue}>{selected.subjectId}</Text>
-                  </View>
-                  {selected.tenantId && (
-                    <View style={styles.detailRow}>
-                      <Text style={styles.detailLabel}>Tenant</Text>
-                      <Text style={styles.detailValue}>{selected.tenantId}</Text>
-                    </View>
-                  )}
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>Severity</Text>
-                    <Text
-                      style={[
-                        styles.detailValue,
-                        { color: SEVERITY_COLORS[selected.severity] },
-                      ]}
-                    >
-                      {selected.severity.toUpperCase()}
-                    </Text>
-                  </View>
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>Status</Text>
-                    <Text
-                      style={[
-                        styles.detailValue,
-                        { color: STATUS_COLORS[selected.status] },
-                      ]}
-                    >
-                      {selected.status.replace('_', ' ').toUpperCase()}
-                    </Text>
-                  </View>
-                  {selected.anomalyScore !== undefined && (
-                    <View style={styles.detailRow}>
-                      <Text style={styles.detailLabel}>Anomaly Score</Text>
-                      <Text style={styles.detailValue}>
-                        {(selected.anomalyScore * 100).toFixed(1)}%
-                      </Text>
-                    </View>
-                  )}
-                  {selected.driftScore !== undefined && (
-                    <View style={styles.detailRow}>
-                      <Text style={styles.detailLabel}>Drift Score</Text>
-                      <Text style={styles.detailValue}>
-                        {(selected.driftScore * 100).toFixed(1)}%
-                      </Text>
-                    </View>
-                  )}
-                  {selected.sourceIp && (
-                    <View style={styles.detailRow}>
-                      <Text style={styles.detailLabel}>Source IP</Text>
-                      <Text style={styles.detailValue}>{selected.sourceIp}</Text>
-                    </View>
-                  )}
-                  {selected.resourcePath && (
-                    <View style={styles.detailRow}>
-                      <Text style={styles.detailLabel}>Resource</Text>
-                      <Text style={styles.detailValue} numberOfLines={2}>
-                        {selected.resourcePath}
-                      </Text>
-                    </View>
-                  )}
-                  {selected.payloadBytes !== undefined && (
-                    <View style={styles.detailRow}>
-                      <Text style={styles.detailLabel}>Payload</Text>
-                      <Text style={styles.detailValue}>
-                        {(selected.payloadBytes / 1024).toFixed(1)} KB
-                      </Text>
-                    </View>
-                  )}
-                  {selected.ruleId && (
-                    <View style={styles.detailRow}>
-                      <Text style={styles.detailLabel}>Rule</Text>
-                      <Text style={styles.detailValue}>{selected.ruleId}</Text>
-                    </View>
-                  )}
-                  {selected.integrityHash && (
-                    <View style={styles.detailRow}>
-                      <Text style={styles.detailLabel}>Integrity</Text>
-                      <Text style={[styles.detailValue, styles.hashText]} numberOfLines={1}>
-                        {selected.integrityHash.substring(0, 16)}…
-                      </Text>
-                    </View>
-                  )}
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>Created</Text>
-                    <Text style={styles.detailValue}>
-                      {new Date(selected.createdAt).toLocaleString()}
-                    </Text>
-                  </View>
-
-                  {/* Action Buttons */}
-                  {selected.status === 'open' && (
-                    <TouchableOpacity
-                      style={[styles.actionButton, { backgroundColor: colors.info }]}
-                      onPress={() => handleStatusChange(selected, 'investigating')}
-                      disabled={actionLoading}
-                    >
-                      {actionLoading ? (
-                        <ActivityIndicator color="#fff" />
-                      ) : (
-                        <Text style={styles.actionButtonText}>Start Investigating</Text>
-                      )}
-                    </TouchableOpacity>
-                  )}
-                  {selected.status === 'investigating' && (
-                    <>
-                      <TouchableOpacity
-                        style={[styles.actionButton, { backgroundColor: colors.success }]}
-                        onPress={() => handleStatusChange(selected, 'resolved')}
-                        disabled={actionLoading}
-                      >
-                        {actionLoading ? (
-                          <ActivityIndicator color="#fff" />
-                        ) : (
-                          <Text style={styles.actionButtonText}>Mark Resolved</Text>
-                        )}
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={[
-                          styles.actionButton,
-                          { backgroundColor: colors.textMuted, marginTop: spacing.sm },
-                        ]}
-                        onPress={() => handleStatusChange(selected, 'false_positive')}
-                        disabled={actionLoading}
-                      >
-                        <Text style={styles.actionButtonText}>False Positive</Text>
-                      </TouchableOpacity>
-                    </>
-                  )}
-                </>
+        {selected && (
+          <View style={styles.modal}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Event Detail</Text>
+              <TouchableOpacity onPress={() => { setSelected(null); setNotes(''); }}>
+                <Text style={styles.closeButton}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.modalBody}>
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>Event Type</Text>
+                <Text style={styles.detailValue}>{selected.eventType.replace(/_/g, ' ')}</Text>
+              </View>
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>User</Text>
+                <Text style={styles.detailValue}>{selected.userName} ({selected.userId})</Text>
+              </View>
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>Severity</Text>
+                <Text style={[styles.detailValue, { color: SEVERITY_COLOR[selected.severity] }]}>
+                  {selected.severity.toUpperCase()}
+                </Text>
+              </View>
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>Anomaly Score</Text>
+                <Text style={styles.detailValue}>{selected.anomalyScore.toFixed(2)}</Text>
+              </View>
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>Status</Text>
+                <Text style={[styles.detailValue, { color: STATUS_COLOR[selected.status] }]}>
+                  {STATUS_LABELS[selected.status]}
+                </Text>
+              </View>
+              {selected.sourceIp && (
+                <View style={styles.detailRow}>
+                  <Text style={styles.detailLabel}>Source IP</Text>
+                  <Text style={styles.detailValue}>{selected.sourceIp}</Text>
+                </View>
               )}
+              {selected.resourceAccessed && (
+                <View style={styles.detailRow}>
+                  <Text style={styles.detailLabel}>Resource</Text>
+                  <Text style={styles.detailValue}>{selected.resourceAccessed}</Text>
+                </View>
+              )}
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>Description</Text>
+                <Text style={styles.detailValue}>{selected.description}</Text>
+              </View>
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>Detected At</Text>
+                <Text style={styles.detailValue}>{new Date(selected.detectedAt).toLocaleString()}</Text>
+              </View>
+
+              {/* Notes input for status update */}
+              {selected.status === 'open' || selected.status === 'investigating' ? (
+                <View style={styles.notesSection}>
+                  <Text style={styles.detailLabel}>Investigation Notes</Text>
+                  <TextInput
+                    style={styles.notesInput}
+                    value={notes}
+                    onChangeText={setNotes}
+                    placeholder="Add notes..."
+                    placeholderTextColor={colors.textMuted}
+                    multiline
+                    numberOfLines={3}
+                  />
+                </View>
+              ) : null}
             </ScrollView>
+
+            {/* Action buttons */}
+            {(selected.status === 'open' || selected.status === 'investigating') && (
+              <View style={styles.modalActions}>
+                {selected.status === 'open' && (
+                  <TouchableOpacity
+                    style={[styles.actionButton, { backgroundColor: '#8b5cf6' }]}
+                    onPress={() => handleUpdateStatus(selected.id, 'investigating')}
+                    disabled={actionLoading}
+                  >
+                    {actionLoading
+                      ? <ActivityIndicator color="#fff" size="small" />
+                      : <Text style={styles.actionButtonText}>Investigate</Text>}
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity
+                  style={[styles.actionButton, { backgroundColor: '#22c55e' }]}
+                  onPress={() => handleUpdateStatus(selected.id, 'resolved')}
+                  disabled={actionLoading}
+                >
+                  <Text style={styles.actionButtonText}>Resolve</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.actionButton, { backgroundColor: '#64748b' }]}
+                  onPress={() => handleUpdateStatus(selected.id, 'false_positive')}
+                  disabled={actionLoading}
+                >
+                  <Text style={styles.actionButtonText}>False Positive</Text>
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
-        </View>
+        )}
       </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  kpiBar: {
+  container: { flex: 1, backgroundColor: colors.background },
+  kpiRow: {
     flexDirection: 'row',
-    backgroundColor: colors.card,
-    paddingVertical: spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  kpiItem: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  kpiDivider: {
-    borderLeftWidth: 1,
-    borderLeftColor: colors.border,
-  },
-  kpiValue: {
-    ...typography.h2,
-    color: colors.text,
-  },
-  kpiLabel: {
-    ...typography.caption,
-    color: colors.textMuted,
-    marginTop: 2,
-  },
-  filterRow: {
-    maxHeight: 44,
-    backgroundColor: colors.backgroundSecondary,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  filterContent: {
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    gap: spacing.sm,
+    paddingTop: spacing.md,
+    gap: 8,
+  },
+  kpiCard: {
+    flex: 1,
+    backgroundColor: colors.card,
+    borderRadius: radius.md,
+    padding: spacing.sm,
+    borderLeftWidth: 3,
+  },
+  kpiValue: { fontSize: 20, fontWeight: '700' },
+  kpiLabel: { fontSize: 10, color: colors.textMuted, marginTop: 2 },
+  listHeader: {
     flexDirection: 'row',
-  },
-  filterChip: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: 4,
-    borderRadius: 12,
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  filterChipActive: {
-    backgroundColor: colors.primary + '33',
-    borderColor: colors.primary,
-  },
-  filterChipText: {
-    ...typography.caption,
-    color: colors.textSecondary,
-  },
-  filterChipTextActive: {
-    color: colors.primary,
-    fontWeight: '600',
-  },
-  errorBanner: {
-    backgroundColor: colors.error + '22',
-    padding: spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.error + '44',
-  },
-  errorText: {
-    ...typography.body,
-    color: colors.error,
-    textAlign: 'center',
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
     alignItems: 'center',
-    gap: spacing.md,
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.sm,
   },
-  loadingText: {
-    ...typography.body,
-    color: colors.textMuted,
-  },
-  listContent: {
-    padding: spacing.md,
-    gap: spacing.sm,
-  },
+  title: { ...typography.h2, color: colors.text },
+  totalCount: { fontSize: 12, color: colors.textMuted },
+  list: { paddingHorizontal: spacing.md, paddingBottom: spacing.xl },
   card: {
     backgroundColor: colors.card,
-    borderRadius: 12,
+    borderRadius: radius.md,
     padding: spacing.md,
     marginBottom: spacing.sm,
     borderWidth: 1,
     borderColor: colors.border,
   },
-  cardHeader: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    marginBottom: spacing.sm,
-  },
-  severityBadge: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
-    borderRadius: 6,
-  },
-  severityText: {
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-  },
-  statusBadge: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
-    borderRadius: 6,
-  },
-  statusText: {
-    fontSize: 10,
-    fontWeight: '600',
-    letterSpacing: 0.5,
-  },
-  cardBody: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  categoryIcon: {
-    fontSize: 24,
-  },
-  cardContent: {
-    flex: 1,
-  },
-  subjectText: {
-    ...typography.body,
-    color: colors.text,
-    fontWeight: '600',
-  },
-  categoryText: {
-    ...typography.caption,
-    color: colors.textSecondary,
-    textTransform: 'capitalize',
-  },
-  scoreText: {
-    ...typography.caption,
-    color: colors.warning,
-    marginTop: 2,
-  },
-  timeText: {
-    ...typography.caption,
-    color: colors.textMuted,
-  },
-  emptyContainer: {
-    alignItems: 'center',
-    paddingVertical: spacing.xl * 2,
-    gap: spacing.sm,
-  },
-  emptyIcon: {
-    fontSize: 48,
-  },
-  emptyText: {
-    ...typography.h3,
-    color: colors.textSecondary,
-  },
-  emptySubtext: {
-    ...typography.body,
-    color: colors.textMuted,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    justifyContent: 'flex-end',
-  },
-  modalContainer: {
-    backgroundColor: colors.card,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: spacing.lg,
-    maxHeight: '85%',
-  },
+  cardHeader: { flexDirection: 'row', gap: 6, marginBottom: 8, alignItems: 'center' },
+  badge: { borderRadius: radius.sm, paddingHorizontal: 7, paddingVertical: 3 },
+  badgeText: { fontSize: 10, fontWeight: '700', letterSpacing: 0.4 },
+  anomalyScore: { marginLeft: 'auto', fontSize: 11, color: colors.textMuted },
+  eventType: { fontSize: 14, fontWeight: '600', color: colors.text, marginBottom: 2, textTransform: 'capitalize' },
+  userName: { fontSize: 12, color: colors.primary, marginBottom: 4 },
+  description: { fontSize: 12, color: colors.textSecondary, lineHeight: 17, marginBottom: 4 },
+  resource: { fontSize: 11, color: colors.textMuted, marginBottom: 4, fontFamily: 'Courier' },
+  timestamp: { fontSize: 11, color: colors.textMuted },
+  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 60 },
+  errorText: { color: colors.error, fontSize: 14, marginBottom: 12 },
+  retryButton: { backgroundColor: colors.primary, borderRadius: radius.md, paddingHorizontal: 20, paddingVertical: 10 },
+  retryText: { color: '#fff', fontWeight: '600' },
+  emptyText: { color: colors.textMuted, fontSize: 14 },
+  loader: { marginTop: 40 },
+  modal: { flex: 1, backgroundColor: colors.background },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: spacing.lg,
-  },
-  modalTitle: {
-    ...typography.h3,
-    color: colors.text,
-    flex: 1,
-  },
-  closeButton: {
-    ...typography.h3,
-    color: colors.textMuted,
-    paddingLeft: spacing.md,
-  },
-  detailRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: spacing.sm,
+    padding: spacing.md,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
-  detailLabel: {
-    ...typography.body,
-    color: colors.textMuted,
-    flex: 1,
-  },
-  detailValue: {
-    ...typography.body,
+  modalTitle: { ...typography.h3, color: colors.text },
+  closeButton: { fontSize: 18, color: colors.textMuted, padding: 4 },
+  modalBody: { flex: 1, padding: spacing.md },
+  detailRow: { marginBottom: spacing.md },
+  detailLabel: { fontSize: 11, color: colors.textMuted, marginBottom: 3, textTransform: 'uppercase', letterSpacing: 0.5 },
+  detailValue: { fontSize: 14, color: colors.text, lineHeight: 20 },
+  notesSection: { marginTop: spacing.sm },
+  notesInput: {
+    backgroundColor: colors.backgroundSecondary,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
     color: colors.text,
-    flex: 2,
-    textAlign: 'right',
+    padding: spacing.sm,
+    marginTop: 6,
+    fontSize: 13,
+    minHeight: 72,
+    textAlignVertical: 'top',
   },
-  hashText: {
-    fontFamily: 'monospace',
-    fontSize: 12,
-    color: colors.textMuted,
-  },
-  actionButton: {
-    marginTop: spacing.lg,
+  modalActions: {
+    flexDirection: 'row',
+    gap: 8,
     padding: spacing.md,
-    borderRadius: 10,
-    alignItems: 'center',
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
   },
-  actionButtonText: {
-    ...typography.body,
-    color: '#fff',
-    fontWeight: '700',
-  },
+  actionButton: { flex: 1, borderRadius: radius.md, paddingVertical: 13, alignItems: 'center' },
+  actionButtonText: { color: '#fff', fontWeight: '600', fontSize: 13 },
 });

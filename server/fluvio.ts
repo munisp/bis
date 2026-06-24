@@ -345,3 +345,105 @@ export async function fluvioHealthCheck(): Promise<{
     return { ok: false, latencyMs: Date.now() - start };
   }
 }
+
+// ─── Insider Alert Stream ─────────────────────────────────────────────────────
+
+export interface FluvioInsiderAlertEvent {
+  /** Unique alert identifier (UUID or DB row id) */
+  alertId: string;
+  /** Subject user ID */
+  subjectId: string;
+  /** Tenant identifier */
+  tenantId?: string;
+  /** Alert category: peer_comparison, exfiltration, off_hours, privilege_escalation, etc. */
+  category: string;
+  /** Severity: info | low | medium | high | critical */
+  severity: string;
+  /** Anomaly score 0.0–1.0 */
+  anomalyScore?: number;
+  /** Risk tier: LOW | MEDIUM | HIGH | CRITICAL */
+  riskTier?: string;
+  /** Human-readable detail */
+  detail: string;
+  /** ISO-8601 UTC timestamp */
+  triggeredAt: string;
+}
+
+/**
+ * Publish an insider-threat alert event to the Fluvio bis.alerts stream.
+ * Consumed by:
+ *   - PWA dashboard (real-time alert feed via SSE)
+ *   - Go gateway (push notification to mobile via FCM)
+ *   - Temporal workflow engine (escalation trigger)
+ */
+export async function fluvioPublishInsiderAlert(
+  opts: FluvioInsiderAlertEvent,
+): Promise<FluvioPublishResult> {
+  const start = Date.now();
+  try {
+    const res = await fetch(`${FLUVIO_VELOCITY_URL}/publish/bis.alerts`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        topic: "bis.alerts",
+        partition: 0,
+        payload: opts,
+      }),
+      signal: AbortSignal.timeout(5_000),
+    });
+    const latencyMs = Date.now() - start;
+    if (!res.ok) {
+      return { accepted: false, service_available: true, reason: `HTTP ${res.status}` };
+    }
+    return { accepted: true, service_available: true };
+  } catch (err) {
+    return {
+      accepted: false,
+      service_available: false,
+      reason: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+// ── Fluvio UEBA score stream ──────────────────────────────────────────────────
+// Publishes UEBA anomaly score updates to the bis.ueba topic so the PWA
+// dashboard can show real-time risk-tier changes without polling.
+
+export interface FluvioUebaScoreEvent {
+  userId: string;
+  tenantId?: string;
+  deviationScore: number;       // 0–100
+  riskTier: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+  baselineVersion: string;      // ISO timestamp of last retrain
+  triggeredBy?: string;         // action that caused the score update
+  publishedAt: string;          // ISO timestamp
+}
+
+export async function fluvioPublishUebaScore(
+  opts: FluvioUebaScoreEvent,
+): Promise<FluvioPublishResult> {
+  const start = Date.now();
+  try {
+    const res = await fetch(`${FLUVIO_VELOCITY_URL}/publish/bis.ueba`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        topic: "bis.ueba",
+        partition: 0,
+        payload: opts,
+      }),
+      signal: AbortSignal.timeout(5_000),
+    });
+    const latencyMs = Date.now() - start;
+    if (!res.ok) {
+      return { accepted: false, service_available: true, reason: `HTTP ${res.status}` };
+    }
+    return { accepted: true, service_available: true };
+  } catch (err) {
+    return {
+      accepted: false,
+      service_available: false,
+      reason: err instanceof Error ? err.message : String(err),
+    };
+  }
+}

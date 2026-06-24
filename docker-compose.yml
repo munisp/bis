@@ -40,6 +40,7 @@ volumes:
   influxdb_data:
   lakehouse_data:
   ollama_data:
+  opensearch_data:
 
 # ── Infrastructure ───────────────────────────────────────────────────────────
 
@@ -961,3 +962,146 @@ services:
       interval: 15s
       timeout: 5s
       retries: 3
+
+  # ─── OpenSearch (full-text search for investigations, alerts, KYC) ───────────
+  opensearch:
+    image: opensearchproject/opensearch:2.13.0
+    container_name: bis-opensearch
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=${OPENSEARCH_PASSWORD:-BisOpenSearch@2025!}
+      - DISABLE_SECURITY_PLUGIN=false
+      - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
+      - bootstrap.memory_lock=true
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - opensearch_data:/usr/share/opensearch/data
+    ports:
+      - "9200:9200"
+      - "9600:9600"
+    networks: [bis-net]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf -u admin:${OPENSEARCH_PASSWORD:-BisOpenSearch@2025!} http://localhost:9200/_cluster/health | grep -q '\"status\":\"green\"\\|\"status\":\"yellow\"'"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  opensearch-dashboards:
+    image: opensearchproject/opensearch-dashboards:2.13.0
+    container_name: bis-opensearch-dashboards
+    restart: unless-stopped
+    depends_on:
+      opensearch:
+        condition: service_healthy
+    environment:
+      OPENSEARCH_HOSTS: '["https://opensearch:9200"]'
+      OPENSEARCH_USERNAME: admin
+      OPENSEARCH_PASSWORD: ${OPENSEARCH_PASSWORD:-BisOpenSearch@2025!}
+    ports:
+      - "5601:5601"
+    networks: [bis-net]
+
+  # ─── OpenSearch Indexer (Python — syncs PostgreSQL → OpenSearch) ─────────────
+  opensearch-indexer:
+    build:
+      context: ./services/opensearch-indexer
+      dockerfile: Dockerfile
+    container_name: bis-opensearch-indexer
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      opensearch:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://bis:bis_dev_password@postgres:5432/bis}
+      OPENSEARCH_URL: http://opensearch:9200
+      OPENSEARCH_USER: admin
+      OPENSEARCH_PASSWORD: ${OPENSEARCH_PASSWORD:-BisOpenSearch@2025!}
+      BATCH_SIZE: "500"
+      MODE: watch
+      WATCH_INTERVAL: "60"
+    networks: [bis-net]
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import sys; sys.exit(0)"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+
+  # ─── Fluvio Velocity (Rust — real-time payment velocity checks) ──────────────
+  fluvio-velocity:
+    build:
+      context: ./services/fluvio-velocity
+      dockerfile: Dockerfile
+    container_name: bis-fluvio-velocity
+    restart: unless-stopped
+    depends_on:
+      - gateway
+    environment:
+      GATEWAY_URL: http://gateway:8081
+      BIS_GATEWAY_KEY: ${BIS_GATEWAY_KEY:-dev-gateway-key-change-in-prod}
+      WEBHOOK_PORT: "9090"
+      GC_INTERVAL_SECS: "300"
+      RUST_LOG: info
+    ports:
+      - "9090:9090"
+    networks: [bis-net]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9090/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ─── Kafka Schema Registry (Rust — Avro schema versioning) ───────────────────
+  kafka-schema-registry:
+    build:
+      context: ./services/kafka-schema-registry
+      dockerfile: Dockerfile
+    container_name: bis-kafka-schema-registry
+    restart: unless-stopped
+    depends_on:
+      - kafka
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      REGISTRY_PORT: "8097"
+      RUST_LOG: info
+    ports:
+      - "8097:8097"
+    networks: [bis-net]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8097/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ─── AML Engine (Rust — SDN screening + rule-based AML scoring) ──────────────
+  aml-engine:
+    build:
+      context: ./services/aml-engine
+      dockerfile: Dockerfile
+    container_name: bis-aml-engine
+    restart: unless-stopped
+    depends_on:
+      - kafka
+    environment:
+      AML_PORT: "8098"
+      KAFKA_BROKERS: kafka:9092
+      OFAC_REFRESH_INTERVAL_SECS: "3600"
+      RUST_LOG: info
+    ports:
+      - "8098:8098"
+    networks: [bis-net]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8098/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+

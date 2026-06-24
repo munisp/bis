@@ -1,13 +1,6 @@
 /**
- * AccessReviewScreen — SLA-tracked access review task manager for the BIS mobile app.
- *
- * Features:
- *   - Paginated review list with SLA countdown badges
- *   - Status filter (pending / approved / revoked / escalated / expired)
- *   - Approve / Revoke modal with mandatory reason field and dual-control notice
- *   - Escalate modal with reason field
- *   - Auto-refresh every 30 seconds
- *   - Pull-to-refresh and infinite scroll
+ * AccessReviewScreen — access review task manager with dual-control approve/revoke.
+ * Shows pending reviews, due dates, and allows reviewers to complete tasks with notes.
  */
 import React, { useState } from 'react';
 import {
@@ -23,405 +16,290 @@ import {
   TextInput,
   Alert,
 } from 'react-native';
-import { useAccessReviews } from '../../hooks/useInsiderThreat';
-import { AccessReview } from '../../services/api';
-import { colors, typography, spacing } from '../../utils/theme';
+import { useAccessReviews, type AccessReview } from '../../hooks/useInsiderThreat';
+import { colors, typography, spacing, radius } from '../../utils/theme';
 
-const STATUS_COLORS: Record<string, string> = {
-  pending: colors.warning,
-  approved: colors.success,
-  revoked: colors.error,
-  escalated: colors.high,
-  expired: colors.textMuted,
+const STATUS_COLOR: Record<string, string> = {
+  pending: '#eab308',
+  in_progress: '#3b82f6',
+  approved: '#22c55e',
+  revoked: '#ef4444',
+  escalated: '#f97316',
 };
 
-const STATUS_FILTERS = ['all', 'pending', 'approved', 'revoked', 'escalated', 'expired'];
+const STATUS_LABEL: Record<string, string> = {
+  pending: 'Pending',
+  in_progress: 'In Progress',
+  approved: 'Approved',
+  revoked: 'Revoked',
+  escalated: 'Escalated',
+};
 
-function slaLabel(dueAt: string): { text: string; color: string } {
-  const msLeft = new Date(dueAt).getTime() - Date.now();
-  if (msLeft <= 0) return { text: 'OVERDUE', color: colors.critical };
-  const hLeft = msLeft / 3_600_000;
-  if (hLeft < 1) return { text: `${Math.ceil(hLeft * 60)}m left`, color: colors.error };
-  if (hLeft < 4) return { text: `${hLeft.toFixed(1)}h left`, color: colors.high };
-  if (hLeft < 24) return { text: `${hLeft.toFixed(0)}h left`, color: colors.warning };
-  return { text: `${(hLeft / 24).toFixed(0)}d left`, color: colors.success };
+const REVIEW_TYPE_LABEL: Record<string, string> = {
+  access_certification: 'Access Certification',
+  privilege_review: 'Privilege Review',
+  separation_of_duties: 'Separation of Duties',
+  termination_review: 'Termination Review',
+  periodic_recertification: 'Periodic Recertification',
+};
+
+function isOverdue(dueAt?: string): boolean {
+  if (!dueAt) return false;
+  return new Date(dueAt) < new Date();
 }
 
 export function AccessReviewScreen() {
-  const [statusFilter, setStatusFilter] = useState('pending');
+  const { reviews, total, loading, error, refresh, completeReview } = useAccessReviews();
   const [selected, setSelected] = useState<AccessReview | null>(null);
-  const [modalMode, setModalMode] = useState<'decide' | 'escalate' | null>(null);
-  const [decision, setDecision] = useState<'approved' | 'revoked'>('approved');
-  const [reason, setReason] = useState('');
+  const [actionLoading, setActionLoading] = useState(false);
+  const [notes, setNotes] = useState('');
+  const [filter, setFilter] = useState<'all' | 'pending' | 'completed'>('pending');
 
-  const {
-    reviews,
-    total,
-    loading,
-    refreshing,
-    error,
-    refresh,
-    loadMore,
-    hasMore,
-    completeReview,
-    escalateReview,
-    submitting,
-  } = useAccessReviews({
-    status: statusFilter === 'all' ? undefined : statusFilter,
-    autoRefreshMs: 30_000,
+  const filtered = reviews.filter(r => {
+    if (filter === 'pending') return r.status === 'pending' || r.status === 'in_progress';
+    if (filter === 'completed') return r.status === 'approved' || r.status === 'revoked';
+    return true;
   });
 
-  const pendingCount = reviews.filter(r => r.status === 'pending').length;
-  const overdueCount = reviews.filter(
-    r => r.status === 'pending' && new Date(r.dueAt).getTime() < Date.now(),
-  ).length;
+  const pendingCount = reviews.filter(r => r.status === 'pending' || r.status === 'in_progress').length;
 
-  const openDecideModal = (review: AccessReview, dec: 'approved' | 'revoked') => {
-    setSelected(review);
-    setDecision(dec);
-    setReason('');
-    setModalMode('decide');
-  };
-
-  const openEscalateModal = (review: AccessReview) => {
-    setSelected(review);
-    setReason('');
-    setModalMode('escalate');
-  };
-
-  const handleDecide = async () => {
-    if (!selected || !reason.trim()) {
-      Alert.alert('Reason required', 'Please provide a reason for this decision.');
+  const handleDecision = async (decision: 'approve' | 'revoke') => {
+    if (!selected) return;
+    if (!notes.trim()) {
+      Alert.alert('Notes Required', 'Please add notes before completing this review.');
       return;
     }
+    setActionLoading(true);
     try {
-      await completeReview({ id: selected.id, decision, reason: reason.trim() });
-      setModalMode(null);
+      await completeReview(selected.id, decision, notes);
       setSelected(null);
-    } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Failed to complete review');
-    }
-  };
-
-  const handleEscalate = async () => {
-    if (!selected || !reason.trim()) {
-      Alert.alert('Reason required', 'Please provide an escalation reason.');
-      return;
-    }
-    try {
-      await escalateReview(selected.id, reason.trim());
-      setModalMode(null);
-      setSelected(null);
-    } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Failed to escalate review');
+      setNotes('');
+    } finally {
+      setActionLoading(false);
     }
   };
 
   const renderReview = ({ item }: { item: AccessReview }) => {
-    const sla = slaLabel(item.dueAt);
-    const isPending = item.status === 'pending';
+    const overdue = isOverdue(item.dueAt) && (item.status === 'pending' || item.status === 'in_progress');
     return (
-      <View style={styles.card}>
+      <TouchableOpacity
+        style={[styles.card, overdue && styles.cardOverdue]}
+        onPress={() => setSelected(item)}
+        activeOpacity={0.7}
+      >
         <View style={styles.cardHeader}>
-          <View
-            style={[
-              styles.statusBadge,
-              { backgroundColor: STATUS_COLORS[item.status] + '22' },
-            ]}
-          >
-            <Text
-              style={[styles.statusText, { color: STATUS_COLORS[item.status] }]}
-            >
-              {item.status.toUpperCase()}
+          <View style={[styles.statusBadge, { backgroundColor: STATUS_COLOR[item.status] + '22' }]}>
+            <Text style={[styles.statusText, { color: STATUS_COLOR[item.status] }]}>
+              {STATUS_LABEL[item.status]}
             </Text>
           </View>
-          {isPending && (
-            <View style={[styles.slaBadge, { backgroundColor: sla.color + '22' }]}>
-              <Text style={[styles.slaText, { color: sla.color }]}>{sla.text}</Text>
+          {overdue && (
+            <View style={styles.overdueBadge}>
+              <Text style={styles.overdueText}>OVERDUE</Text>
             </View>
           )}
-          <Text style={styles.reviewTypeText}>
-            {item.reviewType.replace(/_/g, ' ')}
-          </Text>
         </View>
-
-        <Text style={styles.subjectText} numberOfLines={1}>
-          {item.subjectId}
+        <Text style={styles.reviewType}>
+          {REVIEW_TYPE_LABEL[item.reviewType] ?? item.reviewType.replace(/_/g, ' ')}
         </Text>
-        {item.tenantId && (
-          <Text style={styles.tenantText}>{item.tenantId}</Text>
-        )}
-
+        <Text style={styles.targetUser}>{item.targetUserName}</Text>
         <View style={styles.metaRow}>
-          <Text style={styles.metaText}>
-            SLA: {item.slaHours}h · Due:{' '}
-            {new Date(item.dueAt).toLocaleDateString()}
-          </Text>
-          {item.decision && (
-            <Text style={styles.decisionText}>
-              Decision: {item.decision}
+          <Text style={styles.meta}>Requested by: {item.requestedBy}</Text>
+          {item.dueAt && (
+            <Text style={[styles.meta, overdue && { color: colors.error }]}>
+              Due: {new Date(item.dueAt).toLocaleDateString()}
             </Text>
           )}
         </View>
-
-        {isPending && (
-          <View style={styles.actionRow}>
-            <TouchableOpacity
-              style={[styles.actionBtn, { backgroundColor: colors.success + '22', borderColor: colors.success }]}
-              onPress={() => openDecideModal(item, 'approved')}
-            >
-              <Text style={[styles.actionBtnText, { color: colors.success }]}>
-                ✓ Approve
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.actionBtn, { backgroundColor: colors.error + '22', borderColor: colors.error }]}
-              onPress={() => openDecideModal(item, 'revoked')}
-            >
-              <Text style={[styles.actionBtnText, { color: colors.error }]}>
-                ✕ Revoke
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.actionBtn, { backgroundColor: colors.high + '22', borderColor: colors.high }]}
-              onPress={() => openEscalateModal(item)}
-            >
-              <Text style={[styles.actionBtnText, { color: colors.high }]}>
-                ↑ Escalate
-              </Text>
-            </TouchableOpacity>
-          </View>
+        {item.reviewedBy && (
+          <Text style={styles.meta}>Reviewed by: {item.reviewedBy}</Text>
         )}
+        <Text style={styles.createdAt}>{new Date(item.createdAt).toLocaleDateString()}</Text>
+      </TouchableOpacity>
+    );
+  };
+
+  if (error) {
+    return (
+      <View style={styles.centered}>
+        <Text style={styles.errorText}>Failed to load access reviews</Text>
+        <TouchableOpacity style={styles.retryButton} onPress={refresh}>
+          <Text style={styles.retryText}>Retry</Text>
+        </TouchableOpacity>
       </View>
     );
-  };
-
-  const renderFooter = () => {
-    if (!hasMore) return null;
-    return (
-      <ActivityIndicator
-        color={colors.primary}
-        style={{ marginVertical: spacing.md }}
-      />
-    );
-  };
+  }
 
   return (
     <View style={styles.container}>
-      {/* KPI Bar */}
-      <View style={styles.kpiBar}>
-        <View style={styles.kpiItem}>
-          <Text style={styles.kpiValue}>{total}</Text>
-          <Text style={styles.kpiLabel}>Total</Text>
-        </View>
-        <View style={[styles.kpiItem, styles.kpiDivider]}>
-          <Text style={[styles.kpiValue, { color: colors.warning }]}>
-            {pendingCount}
-          </Text>
-          <Text style={styles.kpiLabel}>Pending</Text>
-        </View>
-        <View style={[styles.kpiItem, styles.kpiDivider]}>
-          <Text style={[styles.kpiValue, { color: colors.critical }]}>
-            {overdueCount}
-          </Text>
-          <Text style={styles.kpiLabel}>Overdue</Text>
-        </View>
+      <View style={styles.header}>
+        <Text style={styles.title}>Access Reviews</Text>
+        {pendingCount > 0 && (
+          <View style={styles.pendingBadge}>
+            <Text style={styles.pendingCount}>{pendingCount} pending</Text>
+          </View>
+        )}
       </View>
 
-      {/* Status Filter */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.filterRow}
-        contentContainerStyle={styles.filterContent}
-      >
-        {STATUS_FILTERS.map(f => (
+      {/* Filter tabs */}
+      <View style={styles.filterRow}>
+        {(['all', 'pending', 'completed'] as const).map(f => (
           <TouchableOpacity
             key={f}
-            style={[
-              styles.filterChip,
-              statusFilter === f && styles.filterChipActive,
-            ]}
-            onPress={() => setStatusFilter(f)}
+            style={[styles.filterTab, filter === f && styles.filterTabActive]}
+            onPress={() => setFilter(f)}
           >
-            <Text
-              style={[
-                styles.filterChipText,
-                statusFilter === f && styles.filterChipTextActive,
-              ]}
-            >
-              {f === 'all' ? 'All' : f.charAt(0).toUpperCase() + f.slice(1)}
+            <Text style={[styles.filterTabText, filter === f && styles.filterTabTextActive]}>
+              {f.charAt(0).toUpperCase() + f.slice(1)}
             </Text>
           </TouchableOpacity>
         ))}
-      </ScrollView>
+        <Text style={styles.totalCount}>{total} total</Text>
+      </View>
 
-      {error && (
-        <View style={styles.errorBanner}>
-          <Text style={styles.errorText}>{error}</Text>
-        </View>
-      )}
-
-      {loading && reviews.length === 0 ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator color={colors.primary} size="large" />
-          <Text style={styles.loadingText}>Loading access reviews...</Text>
-        </View>
-      ) : (
-        <FlatList
-          data={reviews}
-          keyExtractor={item => String(item.id)}
-          renderItem={renderReview}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={refresh}
-              tintColor={colors.primary}
-            />
-          }
-          onEndReached={loadMore}
-          onEndReachedThreshold={0.3}
-          ListFooterComponent={renderFooter}
-          ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <Text style={styles.emptyIcon}>✅</Text>
-              <Text style={styles.emptyText}>No reviews found</Text>
-              <Text style={styles.emptySubtext}>
-                {statusFilter === 'pending'
-                  ? 'No pending reviews — all clear!'
-                  : 'Adjust the filter to see other reviews'}
-              </Text>
+      <FlatList
+        data={filtered}
+        keyExtractor={(item) => String(item.id)}
+        renderItem={renderReview}
+        contentContainerStyle={styles.list}
+        refreshControl={
+          <RefreshControl refreshing={loading} onRefresh={refresh} tintColor={colors.primary} />
+        }
+        ListEmptyComponent={
+          loading ? (
+            <ActivityIndicator style={styles.loader} color={colors.primary} />
+          ) : (
+            <View style={styles.centered}>
+              <Text style={styles.emptyText}>No access reviews found</Text>
             </View>
-          }
-          contentContainerStyle={styles.listContent}
-        />
-      )}
+          )
+        }
+      />
 
-      {/* Decide Modal (Approve / Revoke) */}
+      {/* Review Detail / Action Modal */}
       <Modal
-        visible={modalMode === 'decide'}
+        visible={!!selected}
         animationType="slide"
-        transparent
-        onRequestClose={() => setModalMode(null)}
+        presentationStyle="pageSheet"
+        onRequestClose={() => { setSelected(null); setNotes(''); }}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContainer}>
+        {selected && (
+          <View style={styles.modal}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>
-                {decision === 'approved' ? '✓ Approve Access' : '✕ Revoke Access'}
-              </Text>
-              <TouchableOpacity onPress={() => setModalMode(null)}>
+              <Text style={styles.modalTitle}>Access Review</Text>
+              <TouchableOpacity onPress={() => { setSelected(null); setNotes(''); }}>
                 <Text style={styles.closeButton}>✕</Text>
               </TouchableOpacity>
             </View>
-
-            {selected && (
-              <>
+            <ScrollView style={styles.modalBody}>
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>Review Type</Text>
+                <Text style={styles.detailValue}>
+                  {REVIEW_TYPE_LABEL[selected.reviewType] ?? selected.reviewType.replace(/_/g, ' ')}
+                </Text>
+              </View>
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>Target User</Text>
+                <Text style={styles.detailValue}>{selected.targetUserName} ({selected.targetUserId})</Text>
+              </View>
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>Status</Text>
+                <Text style={[styles.detailValue, { color: STATUS_COLOR[selected.status] }]}>
+                  {STATUS_LABEL[selected.status]}
+                </Text>
+              </View>
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>Requested By</Text>
+                <Text style={styles.detailValue}>{selected.requestedBy}</Text>
+              </View>
+              {selected.dueAt && (
                 <View style={styles.detailRow}>
-                  <Text style={styles.detailLabel}>Subject</Text>
-                  <Text style={styles.detailValue}>{selected.subjectId}</Text>
-                </View>
-                <View style={styles.detailRow}>
-                  <Text style={styles.detailLabel}>Review Type</Text>
-                  <Text style={styles.detailValue}>
-                    {selected.reviewType.replace(/_/g, ' ')}
+                  <Text style={styles.detailLabel}>Due Date</Text>
+                  <Text style={[
+                    styles.detailValue,
+                    isOverdue(selected.dueAt) && (selected.status === 'pending' || selected.status === 'in_progress')
+                      ? { color: colors.error } : {}
+                  ]}>
+                    {new Date(selected.dueAt).toLocaleString()}
+                    {isOverdue(selected.dueAt) && (selected.status === 'pending' || selected.status === 'in_progress')
+                      ? ' — OVERDUE' : ''}
                   </Text>
                 </View>
-              </>
-            )}
-
-            <View style={styles.dualControlNotice}>
-              <Text style={styles.dualControlText}>
-                ⚠️ Dual-control: A second approver must confirm this decision.
-              </Text>
-            </View>
-
-            <Text style={styles.inputLabel}>Reason *</Text>
-            <TextInput
-              style={styles.textInput}
-              placeholder="Enter reason for this decision..."
-              placeholderTextColor={colors.textMuted}
-              value={reason}
-              onChangeText={setReason}
-              multiline
-              numberOfLines={3}
-            />
-
-            <TouchableOpacity
-              style={[
-                styles.submitButton,
-                {
-                  backgroundColor:
-                    decision === 'approved' ? colors.success : colors.error,
-                },
-                submitting && styles.submitButtonDisabled,
-              ]}
-              onPress={handleDecide}
-              disabled={submitting}
-            >
-              {submitting ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.submitButtonText}>
-                  {decision === 'approved' ? 'Confirm Approval' : 'Confirm Revocation'}
-                </Text>
               )}
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      {/* Escalate Modal */}
-      <Modal
-        visible={modalMode === 'escalate'}
-        animationType="slide"
-        transparent
-        onRequestClose={() => setModalMode(null)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContainer}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>↑ Escalate Review</Text>
-              <TouchableOpacity onPress={() => setModalMode(null)}>
-                <Text style={styles.closeButton}>✕</Text>
-              </TouchableOpacity>
-            </View>
-
-            {selected && (
+              {selected.reviewedBy && (
+                <View style={styles.detailRow}>
+                  <Text style={styles.detailLabel}>Reviewed By</Text>
+                  <Text style={styles.detailValue}>{selected.reviewedBy}</Text>
+                </View>
+              )}
+              {selected.decision && (
+                <View style={styles.detailRow}>
+                  <Text style={styles.detailLabel}>Decision</Text>
+                  <Text style={[
+                    styles.detailValue,
+                    { color: selected.decision === 'approve' ? colors.success : colors.error }
+                  ]}>
+                    {selected.decision.toUpperCase()}
+                  </Text>
+                </View>
+              )}
+              {selected.notes && (
+                <View style={styles.detailRow}>
+                  <Text style={styles.detailLabel}>Notes</Text>
+                  <Text style={styles.detailValue}>{selected.notes}</Text>
+                </View>
+              )}
+              {selected.completedAt && (
+                <View style={styles.detailRow}>
+                  <Text style={styles.detailLabel}>Completed At</Text>
+                  <Text style={styles.detailValue}>{new Date(selected.completedAt).toLocaleString()}</Text>
+                </View>
+              )}
               <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Subject</Text>
-                <Text style={styles.detailValue}>{selected.subjectId}</Text>
+                <Text style={styles.detailLabel}>Created</Text>
+                <Text style={styles.detailValue}>{new Date(selected.createdAt).toLocaleString()}</Text>
+              </View>
+
+              {/* Notes input for pending/in-progress reviews */}
+              {(selected.status === 'pending' || selected.status === 'in_progress') && (
+                <View style={styles.notesSection}>
+                  <Text style={styles.detailLabel}>Review Notes <Text style={{ color: colors.error }}>*</Text></Text>
+                  <TextInput
+                    style={styles.notesInput}
+                    value={notes}
+                    onChangeText={setNotes}
+                    placeholder="Document your review decision..."
+                    placeholderTextColor={colors.textMuted}
+                    multiline
+                    numberOfLines={4}
+                  />
+                </View>
+              )}
+            </ScrollView>
+
+            {/* Dual-control action buttons */}
+            {(selected.status === 'pending' || selected.status === 'in_progress') && (
+              <View style={styles.modalActions}>
+                <TouchableOpacity
+                  style={[styles.actionButton, { backgroundColor: '#22c55e' }]}
+                  onPress={() => handleDecision('approve')}
+                  disabled={actionLoading}
+                >
+                  {actionLoading
+                    ? <ActivityIndicator color="#fff" size="small" />
+                    : <Text style={styles.actionButtonText}>✓ Approve Access</Text>}
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.actionButton, { backgroundColor: '#ef4444' }]}
+                  onPress={() => handleDecision('revoke')}
+                  disabled={actionLoading}
+                >
+                  <Text style={styles.actionButtonText}>✕ Revoke Access</Text>
+                </TouchableOpacity>
               </View>
             )}
-
-            <Text style={styles.inputLabel}>Escalation Reason *</Text>
-            <TextInput
-              style={styles.textInput}
-              placeholder="Explain why this review needs escalation..."
-              placeholderTextColor={colors.textMuted}
-              value={reason}
-              onChangeText={setReason}
-              multiline
-              numberOfLines={3}
-            />
-
-            <TouchableOpacity
-              style={[
-                styles.submitButton,
-                { backgroundColor: colors.high },
-                submitting && styles.submitButtonDisabled,
-              ]}
-              onPress={handleEscalate}
-              disabled={submitting}
-            >
-              {submitting ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.submitButtonText}>Escalate to Senior Analyst</Text>
-              )}
-            </TouchableOpacity>
           </View>
-        </View>
+        )}
       </Modal>
     </View>
   );
@@ -429,186 +307,97 @@ export function AccessReviewScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
-  kpiBar: {
+  header: {
     flexDirection: 'row',
-    backgroundColor: colors.card,
-    paddingVertical: spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.sm,
   },
-  kpiItem: { flex: 1, alignItems: 'center' },
-  kpiDivider: { borderLeftWidth: 1, borderLeftColor: colors.border },
-  kpiValue: { ...typography.h2, color: colors.text },
-  kpiLabel: { ...typography.caption, color: colors.textMuted, marginTop: 2 },
+  title: { ...typography.h2, color: colors.text },
+  pendingBadge: { backgroundColor: '#eab30822', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 4 },
+  pendingCount: { color: '#eab308', fontSize: 12, fontWeight: '600' },
   filterRow: {
-    maxHeight: 44,
-    backgroundColor: colors.backgroundSecondary,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  filterContent: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    gap: spacing.sm,
     flexDirection: 'row',
-  },
-  filterChip: {
     paddingHorizontal: spacing.md,
-    paddingVertical: 4,
-    borderRadius: 12,
+    paddingBottom: spacing.sm,
+    gap: 8,
+    alignItems: 'center',
+  },
+  filterTab: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: radius.full,
     backgroundColor: colors.card,
     borderWidth: 1,
     borderColor: colors.border,
   },
-  filterChipActive: {
-    backgroundColor: colors.primary + '33',
-    borderColor: colors.primary,
-  },
-  filterChipText: { ...typography.caption, color: colors.textSecondary },
-  filterChipTextActive: { color: colors.primary, fontWeight: '600' },
-  errorBanner: {
-    backgroundColor: colors.error + '22',
-    padding: spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.error + '44',
-  },
-  errorText: { ...typography.body, color: colors.error, textAlign: 'center' },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: spacing.md,
-  },
-  loadingText: { ...typography.body, color: colors.textMuted },
-  listContent: { padding: spacing.md },
+  filterTabActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  filterTabText: { fontSize: 12, color: colors.textMuted, fontWeight: '500' },
+  filterTabTextActive: { color: '#fff' },
+  totalCount: { marginLeft: 'auto', fontSize: 11, color: colors.textMuted },
+  list: { paddingHorizontal: spacing.md, paddingBottom: spacing.xl },
   card: {
     backgroundColor: colors.card,
-    borderRadius: 12,
+    borderRadius: radius.md,
     padding: spacing.md,
     marginBottom: spacing.sm,
     borderWidth: 1,
     borderColor: colors.border,
   },
-  cardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    marginBottom: spacing.sm,
-  },
-  statusBadge: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
-    borderRadius: 6,
-  },
-  statusText: { fontSize: 10, fontWeight: '700', letterSpacing: 0.5 },
-  slaBadge: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
-    borderRadius: 6,
-  },
-  slaText: { fontSize: 10, fontWeight: '700' },
-  reviewTypeText: {
-    ...typography.caption,
-    color: colors.textMuted,
-    flex: 1,
-    textAlign: 'right',
-    textTransform: 'capitalize',
-  },
-  subjectText: {
-    ...typography.body,
-    color: colors.text,
-    fontWeight: '600',
-  },
-  tenantText: { ...typography.caption, color: colors.textMuted, marginTop: 2 },
-  metaRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: spacing.sm,
-  },
-  metaText: { ...typography.caption, color: colors.textMuted },
-  decisionText: { ...typography.caption, color: colors.textSecondary },
-  actionRow: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    marginTop: spacing.md,
-  },
-  actionBtn: {
-    flex: 1,
-    paddingVertical: 6,
-    borderRadius: 8,
-    borderWidth: 1,
-    alignItems: 'center',
-  },
-  actionBtnText: { fontSize: 12, fontWeight: '700' },
-  emptyContainer: {
-    alignItems: 'center',
-    paddingVertical: spacing.xl * 2,
-    gap: spacing.sm,
-  },
-  emptyIcon: { fontSize: 48 },
-  emptyText: { ...typography.h3, color: colors.textSecondary },
-  emptySubtext: { ...typography.body, color: colors.textMuted, textAlign: 'center' },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    justifyContent: 'flex-end',
-  },
-  modalContainer: {
-    backgroundColor: colors.card,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: spacing.lg,
-    maxHeight: '85%',
-  },
+  cardOverdue: { borderColor: '#ef444466' },
+  cardHeader: { flexDirection: 'row', gap: 8, marginBottom: 8 },
+  statusBadge: { borderRadius: radius.sm, paddingHorizontal: 8, paddingVertical: 3 },
+  statusText: { fontSize: 10, fontWeight: '700', letterSpacing: 0.4 },
+  overdueBadge: { backgroundColor: '#ef444422', borderRadius: radius.sm, paddingHorizontal: 7, paddingVertical: 3 },
+  overdueText: { fontSize: 10, fontWeight: '700', color: '#ef4444', letterSpacing: 0.4 },
+  reviewType: { fontSize: 14, fontWeight: '600', color: colors.text, marginBottom: 2 },
+  targetUser: { fontSize: 12, color: colors.primary, marginBottom: 6 },
+  metaRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 2 },
+  meta: { fontSize: 11, color: colors.textMuted },
+  createdAt: { fontSize: 11, color: colors.textMuted, marginTop: 4 },
+  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 60 },
+  errorText: { color: colors.error, fontSize: 14, marginBottom: 12 },
+  retryButton: { backgroundColor: colors.primary, borderRadius: radius.md, paddingHorizontal: 20, paddingVertical: 10 },
+  retryText: { color: '#fff', fontWeight: '600' },
+  emptyText: { color: colors.textMuted, fontSize: 14 },
+  loader: { marginTop: 40 },
+  modal: { flex: 1, backgroundColor: colors.background },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: spacing.lg,
-  },
-  modalTitle: { ...typography.h3, color: colors.text, flex: 1 },
-  closeButton: { ...typography.h3, color: colors.textMuted, paddingLeft: spacing.md },
-  detailRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: spacing.sm,
+    padding: spacing.md,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
-  detailLabel: { ...typography.body, color: colors.textMuted, flex: 1 },
-  detailValue: { ...typography.body, color: colors.text, flex: 2, textAlign: 'right' },
-  dualControlNotice: {
-    backgroundColor: colors.warning + '22',
-    borderRadius: 8,
-    padding: spacing.md,
-    marginVertical: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.warning + '44',
-  },
-  dualControlText: { ...typography.caption, color: colors.warning },
-  inputLabel: {
-    ...typography.caption,
-    color: colors.textSecondary,
-    marginBottom: spacing.sm,
-    marginTop: spacing.md,
-  },
-  textInput: {
+  modalTitle: { ...typography.h3, color: colors.text },
+  closeButton: { fontSize: 18, color: colors.textMuted, padding: 4 },
+  modalBody: { flex: 1, padding: spacing.md },
+  detailRow: { marginBottom: spacing.md },
+  detailLabel: { fontSize: 11, color: colors.textMuted, marginBottom: 3, textTransform: 'uppercase', letterSpacing: 0.5 },
+  detailValue: { fontSize: 14, color: colors.text, lineHeight: 20 },
+  notesSection: { marginTop: spacing.sm },
+  notesInput: {
     backgroundColor: colors.backgroundSecondary,
-    borderRadius: 8,
-    padding: spacing.md,
-    color: colors.text,
+    borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.border,
+    color: colors.text,
+    padding: spacing.sm,
+    marginTop: 6,
+    fontSize: 13,
+    minHeight: 88,
     textAlignVertical: 'top',
-    minHeight: 80,
-    ...typography.body,
   },
-  submitButton: {
-    marginTop: spacing.lg,
+  modalActions: {
+    flexDirection: 'row',
+    gap: 10,
     padding: spacing.md,
-    borderRadius: 10,
-    alignItems: 'center',
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
   },
-  submitButtonDisabled: { opacity: 0.5 },
-  submitButtonText: { ...typography.body, color: '#fff', fontWeight: '700' },
+  actionButton: { flex: 1, borderRadius: radius.md, paddingVertical: 14, alignItems: 'center' },
+  actionButtonText: { color: '#fff', fontWeight: '700', fontSize: 14 },
 });

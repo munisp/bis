@@ -33,6 +33,7 @@ import (
 	"time"
 
 	daprpkg "bis/gateway/dapr"
+	insiderpkg "bis/gateway/insider"
 	kafkapkg "bis/gateway/kafka"
 	ospkg "bis/gateway/opensearch"
 	keycloakpkg "bis/gateway/keycloak"
@@ -1541,6 +1542,20 @@ func newRouter() http.Handler {
 	mux.HandleFunc("/v1/index/investigation", protected(ospkg.HandleIndexInvestigation))
 	mux.HandleFunc("/v1/index/alert", protected(ospkg.HandleIndexAlert))
 
+	// ── Mojaloop / NIP payment rail endpoints ────────────────────────────────
+	mux.HandleFunc("/v1/mojaloop/transfer", protected(handleMojaloopTransfer))
+	mux.HandleFunc("/v1/mojaloop/status/", protected(handleMojaloopStatus))
+	mux.HandleFunc("/v1/nip/transfer", protected(handleNIPTransfer))
+
+	// ── Stablecoin (USDC / cUSD) endpoints ────────────────────────────────────
+	mux.HandleFunc("/v1/stablecoin/transfer", protected(handleStablecoinTransfer))
+	mux.HandleFunc("/v1/stablecoin/balance/", protected(handleStablecoinBalance))
+	mux.HandleFunc("/v1/stablecoin/quote", protected(handleStablecoinQuote))
+	mux.HandleFunc("/v1/stablecoin/history/", protected(handleStablecoinHistory))
+
+	// ── Velocity alert ingest (from Rust fluvio-velocity sidecar) ─────────────
+	mux.HandleFunc("/v1/velocity/alert", protected(handleVelocityAlert))
+
 	// ── Dapr pub/sub subscriber endpoints ────────────────────────────────────
 	// Dapr calls GET /dapr/subscribe to discover subscriptions
 	mux.HandleFunc("/dapr/subscribe", func(w http.ResponseWriter, r *http.Request) {
@@ -1551,8 +1566,9 @@ func newRouter() http.Handler {
 	mux.HandleFunc("/dapr/subscribe/investigation-events", daprpkg.HandleInvestigationEvent)
 	mux.HandleFunc("/dapr/subscribe/biometric-events", daprpkg.HandleBiometricEvent)
 	mux.HandleFunc("/dapr/subscribe/kyc-events", daprpkg.HandleKYCEvent)
-	mux.HandleFunc("/dapr/subscribe/payment-events", daprpkg.HandlePaymentEvent)
-
+		mux.HandleFunc("/dapr/subscribe/payment-events", daprpkg.HandlePaymentEvent)
+	// Insider Threat — Dapr subscription handler
+	mux.HandleFunc("/dapr/subscribe/insider-events", insiderpkg.HandleInsiderEvent)
 	return mux
 }
 

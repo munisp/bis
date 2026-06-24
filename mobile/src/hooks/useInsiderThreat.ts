@@ -1,355 +1,219 @@
-// useInsiderThreat.ts — React hooks for insider threat data in the BIS mobile app
-//
-// Provides:
-//   useInsiderEvents()       — paginated event feed with severity/status filters
-//   useUebaProfiles()        — UEBA profile browser with ML refresh action
-//   useAccessReviews()       — access review task manager with approve/revoke/escalate
+/**
+ * useInsiderThreat — data hooks for insider threat, UEBA, and access review screens.
+ * All hooks auto-refresh every 30 seconds to surface new events in near-real-time.
+ */
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { insiderThreatApi } from '../services/api';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  insiderThreatApi,
-  AccessReview,
-  InsiderEvent,
-  UebaProfile,
-} from '../services/api';
+const REFRESH_INTERVAL_MS = 30_000;
 
-// ─── useInsiderEvents ─────────────────────────────────────────────────────────
+// ── Types ─────────────────────────────────────────────────────────────────────
 
-export interface UseInsiderEventsOptions {
-  severity?: string;
-  status?: string;
-  tenantId?: string;
-  pageSize?: number;
-  autoRefreshMs?: number;
+export interface InsiderEvent {
+  id: number;
+  userId: string;
+  userName: string;
+  eventType: string;
+  severity: 'critical' | 'high' | 'medium' | 'low' | 'info';
+  status: 'open' | 'investigating' | 'resolved' | 'false_positive';
+  description: string;
+  sourceIp?: string;
+  resourceAccessed?: string;
+  anomalyScore: number;
+  detectedAt: string;
+  resolvedAt?: string;
+  tenantId?: number;
 }
 
-export interface UseInsiderEventsResult {
-  events: InsiderEvent[];
-  total: number;
-  page: number;
-  loading: boolean;
-  refreshing: boolean;
-  error: string | null;
-  refresh: () => void;
-  loadMore: () => void;
-  hasMore: boolean;
-  updateStatus: (
-    id: number,
-    status: InsiderEvent['status'],
-    notes?: string,
-  ) => Promise<void>;
+export interface UebaProfile {
+  id: number;
+  userId: string;
+  userName: string;
+  department?: string;
+  riskScore: number;
+  riskTier: 'low' | 'medium' | 'high' | 'critical';
+  anomalyCount: number;
+  lastActivity?: string;
+  baselineComputed: boolean;
+  flaggedBehaviors: string[];
+  updatedAt: string;
 }
 
-export function useInsiderEvents(
-  opts: UseInsiderEventsOptions = {},
-): UseInsiderEventsResult {
-  const { severity, status, tenantId, pageSize = 20, autoRefreshMs } = opts;
+export interface AccessReview {
+  id: number;
+  targetUserId: string;
+  targetUserName: string;
+  reviewType: string;
+  status: 'pending' | 'in_progress' | 'approved' | 'revoked' | 'escalated';
+  requestedBy: string;
+  reviewedBy?: string;
+  decision?: string;
+  notes?: string;
+  dueAt?: string;
+  completedAt?: string;
+  createdAt: string;
+}
+
+export interface DashboardSummary {
+  openEvents: number;
+  criticalEvents: number;
+  highRiskUsers: number;
+  pendingReviews: number;
+  recentEvents: InsiderEvent[];
+}
+
+// ── useInsiderEvents ──────────────────────────────────────────────────────────
+
+export function useInsiderEvents(params?: Record<string, string | number>) {
   const [events, setEvents] = useState<InsiderEvent[]>([]);
   const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<Error | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const fetchPage = useCallback(
-    async (p: number, isRefresh = false) => {
-      if (isRefresh) setRefreshing(true);
-      else setLoading(true);
-      setError(null);
-      try {
-        const res = await insiderThreatApi.listEvents({
-          page: p,
-          pageSize,
-          severity,
-          status,
-          tenantId,
-        });
-        if (p === 1) {
-          setEvents(res.events);
-        } else {
-          setEvents(prev => [...prev, ...res.events]);
-        }
-        setTotal(res.total);
-        setPage(p);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : 'Failed to load events');
-      } finally {
-        setLoading(false);
-        setRefreshing(false);
-      }
-    },
-    [severity, status, tenantId, pageSize],
-  );
-
-  // Initial load and filter changes
-  useEffect(() => {
-    fetchPage(1);
-  }, [fetchPage]);
-
-  // Auto-refresh
-  useEffect(() => {
-    if (!autoRefreshMs) return;
-    timerRef.current = setInterval(() => fetchPage(1, true), autoRefreshMs);
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, [fetchPage, autoRefreshMs]);
-
-  const refresh = useCallback(() => fetchPage(1, true), [fetchPage]);
-  const loadMore = useCallback(() => {
-    if (!loading && events.length < total) {
-      fetchPage(page + 1);
-    }
-  }, [loading, events.length, total, page, fetchPage]);
-
-  const updateStatus = useCallback(
-    async (id: number, newStatus: InsiderEvent['status'], notes?: string) => {
-      await insiderThreatApi.updateEventStatus(id, newStatus, notes);
-      // Optimistic update
-      setEvents(prev =>
-        prev.map(ev =>
-          ev.id === id ? { ...ev, status: newStatus } : ev,
-        ),
-      );
-    },
-    [],
-  );
-
-  return {
-    events,
-    total,
-    page,
-    loading,
-    refreshing,
-    error,
-    refresh,
-    loadMore,
-    hasMore: events.length < total,
-    updateStatus,
-  };
-}
-
-// ─── useUebaProfiles ──────────────────────────────────────────────────────────
-
-export interface UseUebaProfilesOptions {
-  tenantId?: string;
-  pageSize?: number;
-}
-
-export interface UseUebaProfilesResult {
-  profiles: UebaProfile[];
-  total: number;
-  loading: boolean;
-  refreshing: boolean;
-  error: string | null;
-  refresh: () => void;
-  loadMore: () => void;
-  hasMore: boolean;
-  refreshProfile: (subjectId: string, tenantId?: string) => Promise<void>;
-  refreshingSubject: string | null;
-}
-
-export function useUebaProfiles(
-  opts: UseUebaProfilesOptions = {},
-): UseUebaProfilesResult {
-  const { tenantId, pageSize = 20 } = opts;
-  const [profiles, setProfiles] = useState<UebaProfile[]>([]);
-  const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
-  const [loading, setLoading] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [refreshingSubject, setRefreshingSubject] = useState<string | null>(null);
-
-  const fetchPage = useCallback(
-    async (p: number, isRefresh = false) => {
-      if (isRefresh) setRefreshing(true);
-      else setLoading(true);
-      setError(null);
-      try {
-        const res = await insiderThreatApi.listUebaProfiles({ page: p, pageSize, tenantId });
-        if (p === 1) {
-          setProfiles(res.profiles);
-        } else {
-          setProfiles(prev => [...prev, ...res.profiles]);
-        }
-        setTotal(res.total);
-        setPage(p);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : 'Failed to load UEBA profiles');
-      } finally {
-        setLoading(false);
-        setRefreshing(false);
-      }
-    },
-    [tenantId, pageSize],
-  );
-
-  useEffect(() => {
-    fetchPage(1);
-  }, [fetchPage]);
-
-  const refresh = useCallback(() => fetchPage(1, true), [fetchPage]);
-  const loadMore = useCallback(() => {
-    if (!loading && profiles.length < total) fetchPage(page + 1);
-  }, [loading, profiles.length, total, page, fetchPage]);
-
-  const refreshProfile = useCallback(
-    async (subjectId: string, tid?: string) => {
-      setRefreshingSubject(subjectId);
-      try {
-        const updated = await insiderThreatApi.refreshUebaProfile(subjectId, tid);
-        setProfiles(prev =>
-          prev.map(p => (p.subjectId === subjectId ? updated : p)),
-        );
-      } finally {
-        setRefreshingSubject(null);
-      }
-    },
-    [],
-  );
-
-  return {
-    profiles,
-    total,
-    loading,
-    refreshing,
-    error,
-    refresh,
-    loadMore,
-    hasMore: profiles.length < total,
-    refreshProfile,
-    refreshingSubject,
-  };
-}
-
-// ─── useAccessReviews ─────────────────────────────────────────────────────────
-
-export interface UseAccessReviewsOptions {
-  status?: string;
-  tenantId?: string;
-  pageSize?: number;
-  autoRefreshMs?: number;
-}
-
-export interface UseAccessReviewsResult {
-  reviews: AccessReview[];
-  total: number;
-  loading: boolean;
-  refreshing: boolean;
-  error: string | null;
-  refresh: () => void;
-  loadMore: () => void;
-  hasMore: boolean;
-  completeReview: (params: {
-    id: number;
-    decision: 'approved' | 'revoked';
-    reason: string;
-    approverToken?: string;
-  }) => Promise<void>;
-  escalateReview: (id: number, reason: string) => Promise<void>;
-  submitting: boolean;
-}
-
-export function useAccessReviews(
-  opts: UseAccessReviewsOptions = {},
-): UseAccessReviewsResult {
-  const { status, tenantId, pageSize = 20, autoRefreshMs } = opts;
-  const [reviews, setReviews] = useState<AccessReview[]>([]);
-  const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
-  const [loading, setLoading] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const fetchPage = useCallback(
-    async (p: number, isRefresh = false) => {
-      if (isRefresh) setRefreshing(true);
-      else setLoading(true);
-      setError(null);
-      try {
-        const res = await insiderThreatApi.listAccessReviews({
-          page: p,
-          pageSize,
-          status,
-          tenantId,
-        });
-        if (p === 1) {
-          setReviews(res.reviews);
-        } else {
-          setReviews(prev => [...prev, ...res.reviews]);
-        }
-        setTotal(res.total);
-        setPage(p);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : 'Failed to load access reviews');
-      } finally {
-        setLoading(false);
-        setRefreshing(false);
-      }
-    },
-    [status, tenantId, pageSize],
-  );
-
-  useEffect(() => {
-    fetchPage(1);
-  }, [fetchPage]);
-
-  useEffect(() => {
-    if (!autoRefreshMs) return;
-    timerRef.current = setInterval(() => fetchPage(1, true), autoRefreshMs);
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, [fetchPage, autoRefreshMs]);
-
-  const refresh = useCallback(() => fetchPage(1, true), [fetchPage]);
-  const loadMore = useCallback(() => {
-    if (!loading && reviews.length < total) fetchPage(page + 1);
-  }, [loading, reviews.length, total, page, fetchPage]);
-
-  const completeReview = useCallback(
-    async (params: {
-      id: number;
-      decision: 'approved' | 'revoked';
-      reason: string;
-      approverToken?: string;
-    }) => {
-      setSubmitting(true);
-      try {
-        const updated = await insiderThreatApi.completeAccessReview(params);
-        setReviews(prev => prev.map(r => (r.id === params.id ? updated : r)));
-      } finally {
-        setSubmitting(false);
-      }
-    },
-    [],
-  );
-
-  const escalateReview = useCallback(async (id: number, reason: string) => {
-    setSubmitting(true);
+  const fetch = useCallback(async () => {
+    setLoading(true);
+    setError(null);
     try {
-      const updated = await insiderThreatApi.escalateAccessReview(id, reason);
-      setReviews(prev => prev.map(r => (r.id === id ? updated : r)));
+      const result = await insiderThreatApi.listEvents({ limit: 50, ...params });
+      setEvents((result.data ?? []) as InsiderEvent[]);
+      setTotal(result.total ?? 0);
+    } catch (err) {
+      setError(err instanceof Error ? err : new Error('Failed to load insider events'));
     } finally {
-      setSubmitting(false);
+      setLoading(false);
+    }
+  }, [JSON.stringify(params)]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    fetch();
+    timerRef.current = setInterval(fetch, REFRESH_INTERVAL_MS);
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [fetch]);
+
+  const updateStatus = useCallback(async (id: number, status: string, notes?: string) => {
+    await insiderThreatApi.updateEventStatus(id, status, notes);
+    setEvents(prev =>
+      prev.map(e => e.id === id ? { ...e, status: status as InsiderEvent['status'] } : e)
+    );
+  }, []);
+
+  return { events, total, loading, error, refresh: fetch, updateStatus };
+}
+
+// ── useDashboardSummary ───────────────────────────────────────────────────────
+
+export function useDashboardSummary() {
+  const [summary, setSummary] = useState<DashboardSummary | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const fetch = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await insiderThreatApi.getDashboardSummary();
+      setSummary(result.data as DashboardSummary);
+    } catch (err) {
+      setError(err instanceof Error ? err : new Error('Failed to load dashboard'));
+    } finally {
+      setLoading(false);
     }
   }, []);
 
-  return {
-    reviews,
-    total,
-    loading,
-    refreshing,
-    error,
-    refresh,
-    loadMore,
-    hasMore: reviews.length < total,
-    completeReview,
-    escalateReview,
-    submitting,
-  };
+  useEffect(() => {
+    fetch();
+    timerRef.current = setInterval(fetch, REFRESH_INTERVAL_MS);
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [fetch]);
+
+  return { summary, loading, error, refresh: fetch };
+}
+
+// ── useUebaProfiles ───────────────────────────────────────────────────────────
+
+export function useUebaProfiles(params?: Record<string, string | number>) {
+  const [profiles, setProfiles] = useState<UebaProfile[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const fetch = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await insiderThreatApi.listUebaProfiles({ limit: 50, ...params });
+      setProfiles((result.data ?? []) as UebaProfile[]);
+      setTotal(result.total ?? 0);
+    } catch (err) {
+      setError(err instanceof Error ? err : new Error('Failed to load UEBA profiles'));
+    } finally {
+      setLoading(false);
+    }
+  }, [JSON.stringify(params)]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    fetch();
+    timerRef.current = setInterval(fetch, REFRESH_INTERVAL_MS);
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [fetch]);
+
+  const refreshProfile = useCallback(async (userId: string) => {
+    await insiderThreatApi.refreshUebaProfile(userId);
+    await fetch();
+  }, [fetch]);
+
+  return { profiles, total, loading, error, refresh: fetch, refreshProfile };
+}
+
+// ── useAccessReviews ──────────────────────────────────────────────────────────
+
+export function useAccessReviews(params?: Record<string, string | number>) {
+  const [reviews, setReviews] = useState<AccessReview[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const fetch = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await insiderThreatApi.listAccessReviews({ limit: 50, ...params });
+      setReviews((result.data ?? []) as AccessReview[]);
+      setTotal(result.total ?? 0);
+    } catch (err) {
+      setError(err instanceof Error ? err : new Error('Failed to load access reviews'));
+    } finally {
+      setLoading(false);
+    }
+  }, [JSON.stringify(params)]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    fetch();
+    timerRef.current = setInterval(fetch, REFRESH_INTERVAL_MS);
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [fetch]);
+
+  const completeReview = useCallback(async (id: number, decision: string, notes?: string) => {
+    await insiderThreatApi.completeAccessReview(id, decision, notes);
+    setReviews(prev =>
+      prev.map(r => r.id === id
+        ? { ...r, status: decision === 'approve' ? 'approved' : 'revoked' as AccessReview['status'], decision, completedAt: new Date().toISOString() }
+        : r
+      )
+    );
+  }, []);
+
+  return { reviews, total, loading, error, refresh: fetch, completeReview };
 }

@@ -33,6 +33,7 @@ import { paymentRailsRouter } from "./paymentRails";
 import { documentVaultRouter } from "./documentVault";
 import { riskDashboardRouter } from "./riskDashboard";
 import { insiderThreatRouter } from "./insiderThreat";
+import { stablecoinRouter } from "./stablecoin";
 import { searchRouter, indexDocument } from "./search";
 import { sendPushToUser, broadcastPush } from "./pushNotify";
 import { publishInvestigationEvent, publishKycEvent } from "./dapr";
@@ -5475,6 +5476,7 @@ export const appRouter = router({
   search: searchRouter,
   push: pushRouter,
   insiderThreat: insiderThreatRouter,
+  stablecoin: stablecoinRouter,
 });
 export type AppRouter = typeof appRouter;
 

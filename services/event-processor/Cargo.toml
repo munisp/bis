@@ -19,3 +19,21 @@ uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 tokio-stream = "0.1"
 dashmap = "5"
+# HTTP client — used for webhook fan-out and BFF forwarding
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+# Native Kafka consumer/producer — requires librdkafka-dev in the Docker build image.
+# Enable with: cargo build --features kafka-native
+# Docker: RUN apt-get install -y librdkafka-dev cmake
+rdkafka = { version = "0.36", features = ["cmake-build", "ssl"], optional = true }
+# Redis async client — for pub/sub fan-out and alert caching
+# Enable with: cargo build --features redis-pubsub
+redis = { version = "0.25", features = ["tokio-comp", "connection-manager"], optional = true }
+
+[features]
+default = []
+# Enable native Kafka consumer (requires librdkafka-dev in build environment)
+kafka-native = ["dep:rdkafka"]
+# Enable Redis pub/sub for real-time alert fan-out
+redis-pubsub = ["dep:redis"]
+# Enable both Kafka and Redis
+full = ["kafka-native", "redis-pubsub"]

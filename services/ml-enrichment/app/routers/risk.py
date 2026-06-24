@@ -12,13 +12,13 @@ The model uses a weighted linear combination with Ollama-generated
 natural-language explanation for each contributing factor.
 """
 from __future__ import annotations
-
+import asyncio
 import math
 from typing import Dict, List, Optional
-
 import structlog
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
+from app.services import opensearch_sink, kafka_producer
 
 log = structlog.get_logger(__name__)
 router = APIRouter()
@@ -238,10 +238,28 @@ async def score_risk(inp: RiskInput, request: Request) -> RiskScoreResponse:
         level=level,
     )
 
-    return RiskScoreResponse(
+    result = RiskScoreResponse(
         subject_name=inp.subject_name,
         composite_score=score,
         risk_level=level,
         factors=factors,
         recommendation=rec,
     )
+
+    # Async fire-and-forget: sink to OpenSearch + Kafka without blocking response
+    subject_id = getattr(request.state, "subject_id", inp.subject_name.replace(" ", "_").lower())
+    tenant_id = getattr(request.state, "tenant_id", "default")
+    score_data = result.model_dump()
+
+    async def _sink():
+        try:
+            opensearch_sink.sink_risk_score(subject_id, tenant_id, score_data)
+        except Exception as exc:
+            log.warning("risk.opensearch_sink_error", error=str(exc))
+        try:
+            kafka_producer.publish_risk_score(subject_id, tenant_id, score_data)
+        except Exception as exc:
+            log.warning("risk.kafka_publish_error", error=str(exc))
+
+    asyncio.ensure_future(_sink())
+    return result

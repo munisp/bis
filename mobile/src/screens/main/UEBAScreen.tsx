@@ -1,12 +1,7 @@
 /**
- * UEBAScreen — User and Entity Behaviour Analytics profile browser for the BIS mobile app.
- *
- * Features:
- *   - Paginated UEBA profile list with anomaly/drift score progress bars
- *   - Baseline readiness indicator
- *   - Per-subject ML refresh action (calls Python risk engine via BFF)
- *   - Pull-to-refresh and infinite scroll
- *   - Profile detail modal with full metric breakdown
+ * UEBAScreen — User and Entity Behaviour Analytics profile browser.
+ * Displays risk scores, anomaly counts, risk tier badges, and flagged behaviours.
+ * Supports manual profile refresh and drill-down detail modal.
  */
 import React, { useState } from 'react';
 import {
@@ -19,339 +14,237 @@ import {
   ActivityIndicator,
   Modal,
   ScrollView,
-  Alert,
+  TextInput,
 } from 'react-native';
-import { useUebaProfiles } from '../../hooks/useInsiderThreat';
-import { UebaProfile } from '../../services/api';
-import { colors, typography, spacing } from '../../utils/theme';
+import { useUebaProfiles, type UebaProfile } from '../../hooks/useInsiderThreat';
+import { colors, typography, spacing, radius } from '../../utils/theme';
 
-function ScoreBar({
-  label,
-  value,
-  color,
-}: {
-  label: string;
-  value: number;
-  color: string;
-}) {
-  const pct = Math.min(Math.max(value, 0), 1);
+const RISK_TIER_COLOR: Record<string, string> = {
+  critical: '#ef4444',
+  high: '#f97316',
+  medium: '#eab308',
+  low: '#22c55e',
+};
+
+function RiskBar({ score }: { score: number }) {
+  const pct = Math.min(100, Math.max(0, score));
+  const barColor =
+    pct >= 80 ? '#ef4444' :
+    pct >= 60 ? '#f97316' :
+    pct >= 40 ? '#eab308' : '#22c55e';
   return (
-    <View style={scoreBarStyles.container}>
-      <View style={scoreBarStyles.labelRow}>
-        <Text style={scoreBarStyles.label}>{label}</Text>
-        <Text style={[scoreBarStyles.value, { color }]}>
-          {(pct * 100).toFixed(0)}%
-        </Text>
-      </View>
-      <View style={scoreBarStyles.track}>
-        <View
-          style={[
-            scoreBarStyles.fill,
-            { width: `${pct * 100}%`, backgroundColor: color },
-          ]}
-        />
-      </View>
+    <View style={riskBarStyles.track}>
+      <View style={[riskBarStyles.fill, { width: `${pct}%` as any, backgroundColor: barColor }]} />
     </View>
   );
 }
 
-const scoreBarStyles = StyleSheet.create({
-  container: { marginBottom: spacing.sm },
-  labelRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 4,
-  },
-  label: { ...typography.caption, color: colors.textSecondary },
-  value: { ...typography.caption, fontWeight: '700' },
-  track: {
-    height: 6,
-    backgroundColor: colors.border,
-    borderRadius: 3,
-    overflow: 'hidden',
-  },
-  fill: { height: '100%', borderRadius: 3 },
+const riskBarStyles = StyleSheet.create({
+  track: { height: 6, backgroundColor: '#1e293b', borderRadius: 3, overflow: 'hidden', flex: 1 },
+  fill: { height: 6, borderRadius: 3 },
 });
 
-function anomalyColor(score: number): string {
-  if (score >= 0.8) return colors.critical;
-  if (score >= 0.6) return colors.high;
-  if (score >= 0.4) return colors.warning;
-  return colors.success;
-}
-
 export function UEBAScreen() {
+  const { profiles, total, loading, error, refresh, refreshProfile } = useUebaProfiles();
   const [selected, setSelected] = useState<UebaProfile | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [search, setSearch] = useState('');
 
-  const {
-    profiles,
-    total,
-    loading,
-    refreshing,
-    error,
-    refresh,
-    loadMore,
-    hasMore,
-    refreshProfile,
-    refreshingSubject,
-  } = useUebaProfiles({ pageSize: 20 });
+  const filtered = profiles.filter(p =>
+    !search || p.userName.toLowerCase().includes(search.toLowerCase()) ||
+    (p.department ?? '').toLowerCase().includes(search.toLowerCase())
+  );
 
-  const handleRefreshProfile = async (profile: UebaProfile) => {
+  const handleRefreshProfile = async (userId: string) => {
+    setRefreshing(true);
     try {
-      await refreshProfile(profile.subjectId, profile.tenantId ?? undefined);
-      // Update selected if it's the same profile
-      if (selected?.subjectId === profile.subjectId) {
-        setSelected(prev =>
-          prev
-            ? {
-                ...prev,
-                anomalyScore: profile.anomalyScore,
-                driftScore: profile.driftScore,
-              }
-            : null,
-        );
+      await refreshProfile(userId);
+      // Update selected if it's the same user
+      if (selected?.userId === userId) {
+        const updated = profiles.find(p => p.userId === userId);
+        if (updated) setSelected(updated);
       }
-    } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Refresh failed');
+    } finally {
+      setRefreshing(false);
     }
   };
 
-  const renderProfile = ({ item }: { item: UebaProfile }) => {
-    const isRefreshing = refreshingSubject === item.subjectId;
-    const aColor = anomalyColor(item.anomalyScore);
-    return (
-      <TouchableOpacity
-        style={styles.card}
-        onPress={() => setSelected(item)}
-        activeOpacity={0.75}
-      >
-        <View style={styles.cardHeader}>
-          <View style={styles.cardTitleRow}>
-            <Text style={styles.subjectText} numberOfLines={1}>
-              {item.subjectId}
-            </Text>
-            {item.baselineReady ? (
-              <View style={styles.baselineBadge}>
-                <Text style={styles.baselineBadgeText}>BASELINE</Text>
-              </View>
-            ) : (
-              <View style={[styles.baselineBadge, styles.baselineBadgePending]}>
-                <Text style={[styles.baselineBadgeText, { color: colors.warning }]}>
-                  LEARNING
-                </Text>
-              </View>
-            )}
-          </View>
-          {item.tenantId && (
-            <Text style={styles.tenantText}>{item.tenantId}</Text>
-          )}
+  const renderProfile = ({ item }: { item: UebaProfile }) => (
+    <TouchableOpacity style={styles.card} onPress={() => setSelected(item)} activeOpacity={0.7}>
+      <View style={styles.cardHeader}>
+        <View style={styles.userInfo}>
+          <Text style={styles.userName}>{item.userName}</Text>
+          {item.department && <Text style={styles.department}>{item.department}</Text>}
         </View>
-
-        <ScoreBar label="Anomaly Score" value={item.anomalyScore} color={aColor} />
-        <ScoreBar label="Drift Score" value={item.driftScore} color={colors.info} />
-
-        <View style={styles.cardFooter}>
-          <Text style={styles.metaText}>
-            Auth failures: {item.failedAuthCount} · Priv changes:{' '}
-            {item.privilegeChangeCount}
+        <View style={[styles.tierBadge, { backgroundColor: RISK_TIER_COLOR[item.riskTier] + '22' }]}>
+          <Text style={[styles.tierText, { color: RISK_TIER_COLOR[item.riskTier] }]}>
+            {item.riskTier.toUpperCase()}
           </Text>
-          <TouchableOpacity
-            style={[styles.refreshBtn, isRefreshing && styles.refreshBtnDisabled]}
-            onPress={() => handleRefreshProfile(item)}
-            disabled={isRefreshing}
-          >
-            {isRefreshing ? (
-              <ActivityIndicator color={colors.primary} size="small" />
-            ) : (
-              <Text style={styles.refreshBtnText}>↻ Refresh</Text>
-            )}
-          </TouchableOpacity>
         </View>
-      </TouchableOpacity>
-    );
-  };
+      </View>
+      <View style={styles.scoreRow}>
+        <Text style={styles.scoreLabel}>Risk Score</Text>
+        <Text style={[styles.scoreValue, { color: RISK_TIER_COLOR[item.riskTier] }]}>
+          {item.riskScore.toFixed(1)}
+        </Text>
+      </View>
+      <RiskBar score={item.riskScore} />
+      <View style={styles.statsRow}>
+        <Text style={styles.stat}>
+          <Text style={styles.statValue}>{item.anomalyCount}</Text> anomalies
+        </Text>
+        {item.flaggedBehaviors.length > 0 && (
+          <Text style={styles.stat}>
+            <Text style={styles.statValue}>{item.flaggedBehaviors.length}</Text> flags
+          </Text>
+        )}
+        {!item.baselineComputed && (
+          <View style={styles.baselineBadge}>
+            <Text style={styles.baselineText}>No Baseline</Text>
+          </View>
+        )}
+      </View>
+      {item.lastActivity && (
+        <Text style={styles.lastActivity}>
+          Last active: {new Date(item.lastActivity).toLocaleDateString()}
+        </Text>
+      )}
+    </TouchableOpacity>
+  );
 
-  const renderFooter = () => {
-    if (!hasMore) return null;
+  if (error) {
     return (
-      <ActivityIndicator
-        color={colors.primary}
-        style={{ marginVertical: spacing.md }}
-      />
+      <View style={styles.centered}>
+        <Text style={styles.errorText}>Failed to load UEBA profiles</Text>
+        <TouchableOpacity style={styles.retryButton} onPress={refresh}>
+          <Text style={styles.retryText}>Retry</Text>
+        </TouchableOpacity>
+      </View>
     );
-  };
+  }
 
   return (
     <View style={styles.container}>
-      {/* Header Stats */}
-      <View style={styles.statsBar}>
-        <View style={styles.statItem}>
-          <Text style={styles.statValue}>{total}</Text>
-          <Text style={styles.statLabel}>Profiles</Text>
-        </View>
-        <View style={[styles.statItem, styles.statDivider]}>
-          <Text style={[styles.statValue, { color: colors.success }]}>
-            {profiles.filter(p => p.baselineReady).length}
-          </Text>
-          <Text style={styles.statLabel}>Baseline Ready</Text>
-        </View>
-        <View style={[styles.statItem, styles.statDivider]}>
-          <Text style={[styles.statValue, { color: colors.error }]}>
-            {profiles.filter(p => p.anomalyScore >= 0.7).length}
-          </Text>
-          <Text style={styles.statLabel}>High Anomaly</Text>
-        </View>
+      <View style={styles.header}>
+        <Text style={styles.title}>UEBA Profiles</Text>
+        <Text style={styles.totalCount}>{total} users</Text>
       </View>
 
-      {error && (
-        <View style={styles.errorBanner}>
-          <Text style={styles.errorText}>{error}</Text>
-        </View>
-      )}
-
-      {loading && profiles.length === 0 ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator color={colors.primary} size="large" />
-          <Text style={styles.loadingText}>Loading UEBA profiles...</Text>
-        </View>
-      ) : (
-        <FlatList
-          data={profiles}
-          keyExtractor={item => String(item.id)}
-          renderItem={renderProfile}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={refresh}
-              tintColor={colors.primary}
-            />
-          }
-          onEndReached={loadMore}
-          onEndReachedThreshold={0.3}
-          ListFooterComponent={renderFooter}
-          ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <Text style={styles.emptyIcon}>📊</Text>
-              <Text style={styles.emptyText}>No UEBA profiles yet</Text>
-              <Text style={styles.emptySubtext}>
-                Profiles are created as events are ingested
-              </Text>
-            </View>
-          }
-          contentContainerStyle={styles.listContent}
+      <View style={styles.searchContainer}>
+        <TextInput
+          style={styles.searchInput}
+          value={search}
+          onChangeText={setSearch}
+          placeholder="Search by name or department..."
+          placeholderTextColor={colors.textMuted}
         />
-      )}
+      </View>
+
+      <FlatList
+        data={filtered}
+        keyExtractor={(item) => item.userId}
+        renderItem={renderProfile}
+        contentContainerStyle={styles.list}
+        refreshControl={
+          <RefreshControl refreshing={loading} onRefresh={refresh} tintColor={colors.primary} />
+        }
+        ListEmptyComponent={
+          loading ? (
+            <ActivityIndicator style={styles.loader} color={colors.primary} />
+          ) : (
+            <View style={styles.centered}>
+              <Text style={styles.emptyText}>No UEBA profiles found</Text>
+            </View>
+          )
+        }
+      />
 
       {/* Profile Detail Modal */}
       <Modal
         visible={!!selected}
         animationType="slide"
-        transparent
+        presentationStyle="pageSheet"
         onRequestClose={() => setSelected(null)}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContainer}>
-            <ScrollView>
-              {selected && (
-                <>
-                  <View style={styles.modalHeader}>
-                    <Text style={styles.modalTitle}>📊 UEBA Profile</Text>
-                    <TouchableOpacity onPress={() => setSelected(null)}>
-                      <Text style={styles.closeButton}>✕</Text>
-                    </TouchableOpacity>
-                  </View>
-
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>Subject</Text>
-                    <Text style={styles.detailValue}>{selected.subjectId}</Text>
-                  </View>
-                  {selected.tenantId && (
-                    <View style={styles.detailRow}>
-                      <Text style={styles.detailLabel}>Tenant</Text>
-                      <Text style={styles.detailValue}>{selected.tenantId}</Text>
+        {selected && (
+          <View style={styles.modal}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>UEBA Profile</Text>
+              <TouchableOpacity onPress={() => setSelected(null)}>
+                <Text style={styles.closeButton}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.modalBody}>
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>User</Text>
+                <Text style={styles.detailValue}>{selected.userName}</Text>
+              </View>
+              {selected.department && (
+                <View style={styles.detailRow}>
+                  <Text style={styles.detailLabel}>Department</Text>
+                  <Text style={styles.detailValue}>{selected.department}</Text>
+                </View>
+              )}
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>Risk Tier</Text>
+                <Text style={[styles.detailValue, { color: RISK_TIER_COLOR[selected.riskTier] }]}>
+                  {selected.riskTier.toUpperCase()}
+                </Text>
+              </View>
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>Risk Score</Text>
+                <View style={styles.scoreWithBar}>
+                  <Text style={[styles.detailValue, { color: RISK_TIER_COLOR[selected.riskTier], marginRight: 12 }]}>
+                    {selected.riskScore.toFixed(2)}
+                  </Text>
+                  <RiskBar score={selected.riskScore} />
+                </View>
+              </View>
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>Anomaly Count</Text>
+                <Text style={styles.detailValue}>{selected.anomalyCount}</Text>
+              </View>
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>Baseline Computed</Text>
+                <Text style={[styles.detailValue, { color: selected.baselineComputed ? colors.success : colors.warning }]}>
+                  {selected.baselineComputed ? 'Yes' : 'No — insufficient data'}
+                </Text>
+              </View>
+              {selected.lastActivity && (
+                <View style={styles.detailRow}>
+                  <Text style={styles.detailLabel}>Last Activity</Text>
+                  <Text style={styles.detailValue}>{new Date(selected.lastActivity).toLocaleString()}</Text>
+                </View>
+              )}
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>Profile Updated</Text>
+                <Text style={styles.detailValue}>{new Date(selected.updatedAt).toLocaleString()}</Text>
+              </View>
+              {selected.flaggedBehaviors.length > 0 && (
+                <View style={styles.detailRow}>
+                  <Text style={styles.detailLabel}>Flagged Behaviours</Text>
+                  {selected.flaggedBehaviors.map((b, i) => (
+                    <View key={i} style={styles.flagItem}>
+                      <Text style={styles.flagDot}>•</Text>
+                      <Text style={styles.flagText}>{b.replace(/_/g, ' ')}</Text>
                     </View>
-                  )}
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>Baseline</Text>
-                    <Text
-                      style={[
-                        styles.detailValue,
-                        {
-                          color: selected.baselineReady
-                            ? colors.success
-                            : colors.warning,
-                        },
-                      ]}
-                    >
-                      {selected.baselineReady ? 'Ready' : 'Learning'}
-                    </Text>
-                  </View>
-
-                  <View style={{ marginVertical: spacing.md }}>
-                    <ScoreBar
-                      label="Anomaly Score"
-                      value={selected.anomalyScore}
-                      color={anomalyColor(selected.anomalyScore)}
-                    />
-                    <ScoreBar
-                      label="Drift Score"
-                      value={selected.driftScore}
-                      color={colors.info}
-                    />
-                    <ScoreBar
-                      label="Off-Hours Ratio"
-                      value={selected.offHoursRatio}
-                      color={colors.warning}
-                    />
-                  </View>
-
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>Failed Auth</Text>
-                    <Text style={styles.detailValue}>{selected.failedAuthCount}</Text>
-                  </View>
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>Priv Changes</Text>
-                    <Text style={styles.detailValue}>
-                      {selected.privilegeChangeCount}
-                    </Text>
-                  </View>
-                  {selected.lastRefreshedAt && (
-                    <View style={styles.detailRow}>
-                      <Text style={styles.detailLabel}>Last Refresh</Text>
-                      <Text style={styles.detailValue}>
-                        {new Date(selected.lastRefreshedAt).toLocaleString()}
-                      </Text>
-                    </View>
-                  )}
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>Created</Text>
-                    <Text style={styles.detailValue}>
-                      {new Date(selected.createdAt).toLocaleString()}
-                    </Text>
-                  </View>
-
-                  <TouchableOpacity
-                    style={[
-                      styles.actionButton,
-                      refreshingSubject === selected.subjectId &&
-                        styles.actionButtonDisabled,
-                    ]}
-                    onPress={() => handleRefreshProfile(selected)}
-                    disabled={refreshingSubject === selected.subjectId}
-                  >
-                    {refreshingSubject === selected.subjectId ? (
-                      <ActivityIndicator color="#fff" />
-                    ) : (
-                      <Text style={styles.actionButtonText}>
-                        ↻ Refresh ML Score
-                      </Text>
-                    )}
-                  </TouchableOpacity>
-                </>
+                  ))}
+                </View>
               )}
             </ScrollView>
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={[styles.actionButton, { backgroundColor: colors.primary }]}
+                onPress={() => handleRefreshProfile(selected.userId)}
+                disabled={refreshing}
+              >
+                {refreshing
+                  ? <ActivityIndicator color="#fff" size="small" />
+                  : <Text style={styles.actionButtonText}>Refresh Profile</Text>}
+              </TouchableOpacity>
+            </View>
           </View>
-        </View>
+        )}
       </Modal>
     </View>
   );
@@ -359,133 +252,81 @@ export function UEBAScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
-  statsBar: {
+  header: {
     flexDirection: 'row',
-    backgroundColor: colors.card,
-    paddingVertical: spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  statItem: { flex: 1, alignItems: 'center' },
-  statDivider: { borderLeftWidth: 1, borderLeftColor: colors.border },
-  statValue: { ...typography.h2, color: colors.text },
-  statLabel: { ...typography.caption, color: colors.textMuted, marginTop: 2 },
-  errorBanner: {
-    backgroundColor: colors.error + '22',
-    padding: spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.error + '44',
-  },
-  errorText: { ...typography.body, color: colors.error, textAlign: 'center' },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
     alignItems: 'center',
-    gap: spacing.md,
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.sm,
   },
-  loadingText: { ...typography.body, color: colors.textMuted },
-  listContent: { padding: spacing.md },
+  title: { ...typography.h2, color: colors.text },
+  totalCount: { fontSize: 12, color: colors.textMuted },
+  searchContainer: { paddingHorizontal: spacing.md, paddingBottom: spacing.sm },
+  searchInput: {
+    backgroundColor: colors.card,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    color: colors.text,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    fontSize: 13,
+  },
+  list: { paddingHorizontal: spacing.md, paddingBottom: spacing.xl },
   card: {
     backgroundColor: colors.card,
-    borderRadius: 12,
+    borderRadius: radius.md,
     padding: spacing.md,
     marginBottom: spacing.sm,
     borderWidth: 1,
     borderColor: colors.border,
   },
-  cardHeader: { marginBottom: spacing.sm },
-  cardTitleRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  subjectText: {
-    ...typography.body,
-    color: colors.text,
-    fontWeight: '600',
-    flex: 1,
-  },
-  tenantText: { ...typography.caption, color: colors.textMuted, marginTop: 2 },
-  baselineBadge: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
-    borderRadius: 6,
-    backgroundColor: colors.success + '22',
-  },
-  baselineBadgePending: { backgroundColor: colors.warning + '22' },
-  baselineBadgeText: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: colors.success,
-    letterSpacing: 0.5,
-  },
-  cardFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: spacing.sm,
-  },
-  metaText: { ...typography.caption, color: colors.textMuted, flex: 1 },
-  refreshBtn: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: 4,
-    borderRadius: 8,
-    backgroundColor: colors.primary + '22',
-    borderWidth: 1,
-    borderColor: colors.primary,
-    minWidth: 80,
-    alignItems: 'center',
-  },
-  refreshBtnDisabled: { opacity: 0.5 },
-  refreshBtnText: {
-    ...typography.caption,
-    color: colors.primary,
-    fontWeight: '600',
-  },
-  emptyContainer: {
-    alignItems: 'center',
-    paddingVertical: spacing.xl * 2,
-    gap: spacing.sm,
-  },
-  emptyIcon: { fontSize: 48 },
-  emptyText: { ...typography.h3, color: colors.textSecondary },
-  emptySubtext: { ...typography.body, color: colors.textMuted },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    justifyContent: 'flex-end',
-  },
-  modalContainer: {
-    backgroundColor: colors.card,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: spacing.lg,
-    maxHeight: '85%',
-  },
+  cardHeader: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 10 },
+  userInfo: { flex: 1 },
+  userName: { fontSize: 14, fontWeight: '600', color: colors.text },
+  department: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
+  tierBadge: { borderRadius: radius.sm, paddingHorizontal: 8, paddingVertical: 3 },
+  tierText: { fontSize: 10, fontWeight: '700', letterSpacing: 0.4 },
+  scoreRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
+  scoreLabel: { fontSize: 11, color: colors.textMuted },
+  scoreValue: { fontSize: 13, fontWeight: '700' },
+  statsRow: { flexDirection: 'row', gap: 12, marginTop: 8, alignItems: 'center' },
+  stat: { fontSize: 12, color: colors.textMuted },
+  statValue: { color: colors.text, fontWeight: '600' },
+  baselineBadge: { backgroundColor: '#eab30822', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 },
+  baselineText: { fontSize: 10, color: '#eab308', fontWeight: '600' },
+  lastActivity: { fontSize: 11, color: colors.textMuted, marginTop: 6 },
+  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 60 },
+  errorText: { color: colors.error, fontSize: 14, marginBottom: 12 },
+  retryButton: { backgroundColor: colors.primary, borderRadius: radius.md, paddingHorizontal: 20, paddingVertical: 10 },
+  retryText: { color: '#fff', fontWeight: '600' },
+  emptyText: { color: colors.textMuted, fontSize: 14 },
+  loader: { marginTop: 40 },
+  modal: { flex: 1, backgroundColor: colors.background },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: spacing.lg,
-  },
-  modalTitle: { ...typography.h3, color: colors.text, flex: 1 },
-  closeButton: { ...typography.h3, color: colors.textMuted, paddingLeft: spacing.md },
-  detailRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: spacing.sm,
+    padding: spacing.md,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
-  detailLabel: { ...typography.body, color: colors.textMuted, flex: 1 },
-  detailValue: { ...typography.body, color: colors.text, flex: 2, textAlign: 'right' },
-  actionButton: {
-    marginTop: spacing.lg,
+  modalTitle: { ...typography.h3, color: colors.text },
+  closeButton: { fontSize: 18, color: colors.textMuted, padding: 4 },
+  modalBody: { flex: 1, padding: spacing.md },
+  detailRow: { marginBottom: spacing.md },
+  detailLabel: { fontSize: 11, color: colors.textMuted, marginBottom: 3, textTransform: 'uppercase', letterSpacing: 0.5 },
+  detailValue: { fontSize: 14, color: colors.text, lineHeight: 20 },
+  scoreWithBar: { flexDirection: 'row', alignItems: 'center', marginTop: 4 },
+  flagItem: { flexDirection: 'row', alignItems: 'flex-start', marginTop: 4 },
+  flagDot: { color: colors.warning, marginRight: 6, fontSize: 14 },
+  flagText: { fontSize: 13, color: colors.textSecondary, flex: 1, textTransform: 'capitalize' },
+  modalActions: {
     padding: spacing.md,
-    borderRadius: 10,
-    alignItems: 'center',
-    backgroundColor: colors.primary,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
   },
-  actionButtonDisabled: { opacity: 0.5 },
-  actionButtonText: { ...typography.body, color: '#fff', fontWeight: '700' },
+  actionButton: { borderRadius: radius.md, paddingVertical: 14, alignItems: 'center' },
+  actionButtonText: { color: '#fff', fontWeight: '600', fontSize: 14 },
 });

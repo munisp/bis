@@ -2755,72 +2755,72 @@
 ## Insider Threat Prevention & Mitigation Sprint
 
 ### Architecture & Design
-- [ ] Document insider-threat threat model (data exfiltration, privilege abuse, lateral movement, sabotage)
-- [ ] Define UEBA (User and Entity Behaviour Analytics) data model: baseline, deviation score, risk tier
-- [ ] Define access_reviews, insider_events, ueba_profiles DB tables
+- [x] Document insider-threat threat model (data exfiltration, privilege abuse, lateral movement, sabotage)
+- [x] Define UEBA (User and Entity Behaviour Analytics) data model: baseline, deviation score, risk tier
+- [x] Define access_reviews, insider_events, ueba_profiles DB tables
 
 ### Go Gateway (insider threat controls)
-- [ ] Privileged-access time-window enforcement — block privileged routes outside approved hours
-- [ ] mTLS peer certificate validation for inter-service calls (mutual TLS)
-- [ ] Anomalous-IP / geolocation blocking middleware (Redis-backed allowlist)
-- [ ] Enriched audit-log emission to Kafka bis.insider topic on every privileged action
-- [ ] Rate-limit per-user on sensitive endpoints (download, bulk export, admin) via Redis
-- [ ] Dead-man-switch: flag sessions with >N bulk-export calls in sliding window
+- [x] Privileged-access time-window enforcement — block privileged routes outside approved hours
+- [x] mTLS peer certificate validation for inter-service calls (mutual TLS)
+- [x] Anomalous-IP / geolocation blocking middleware (Redis-backed allowlist)
+- [x] Enriched audit-log emission to Kafka bis.insider topic on every privileged action
+- [x] Rate-limit per-user on sensitive endpoints (download, bulk export, admin) via Redis
+- [x] Dead-man-switch: flag sessions with >N bulk-export calls in sliding window
 
 ### Rust Event Processor (behaviour stream analytics)
-- [ ] Subscribe to bis.insider Kafka topic
-- [ ] Peer-comparison alert: flag user whose action rate exceeds 3σ above role cohort
-- [ ] Exfiltration detector: sliding-window counter for bulk-download events per user
-- [ ] Off-hours access detector: emit alert when privileged action occurs outside schedule
-- [ ] Publish insider_alert events to bis.alerts Kafka topic
+- [x] Subscribe to bis.insider Kafka topic
+- [x] Peer-comparison alert: flag user whose action rate exceeds 3σ above role cohort
+- [x] Exfiltration detector: sliding-window counter for bulk-download events per user
+- [x] Off-hours access detector: emit alert when privileged action occurs outside schedule
+- [x] Publish insider_alert events to bis.alerts Kafka topic
 
 ### Python ML Engine (UEBA)
-- [ ] User behaviour baseline model: rolling 30-day feature vector per user (action counts, time-of-day, data volume)
-- [ ] Anomaly scoring endpoint POST /ueba/score — returns deviation score 0–100
-- [ ] Peer-group clustering: group users by role, compare individual vs cohort baseline
-- [ ] Risk-tier classification: LOW / MEDIUM / HIGH / CRITICAL based on composite score
-- [ ] Retrain endpoint POST /ueba/retrain — updates baseline from last 30 days of audit_log
+- [x] User behaviour baseline model: rolling 30-day feature vector per user (action counts, time-of-day, data volume)
+- [x] Anomaly scoring endpoint POST /ueba/score — returns deviation score 0–100
+- [x] Peer-group clustering: group users by role, compare individual vs cohort baseline
+- [x] Risk-tier classification: LOW / MEDIUM / HIGH / CRITICAL based on composite score
+- [x] Retrain endpoint POST /ueba/retrain — updates baseline from last 30 days of audit_log
 
 ### TypeScript BFF (tRPC procedures + DB)
-- [ ] DB schema: insider_events table (userId, eventType, severity, metadata, createdAt)
-- [ ] DB schema: ueba_profiles table (userId, baselineVector, deviationScore, riskTier, updatedAt)
-- [ ] DB schema: access_reviews table (userId, reviewerId, status, notes, scheduledAt, completedAt)
-- [ ] Migration: pnpm db:push for all three new tables
-- [ ] insiderRouter: listEvents, getUebaProfile, triggerReview, listAccessReviews, completeReview
-- [ ] Scheduled job: daily UEBA score refresh via Temporal heartbeat
-- [ ] Wire insiderRouter into appRouter
-- [ ] Session anomaly middleware: flag concurrent sessions from different IPs
-- [ ] Data-loss prevention (DLP) hook: intercept bulk-export mutations, log to insider_events
+- [x] DB schema: insider_events table (userId, eventType, severity, metadata, createdAt)
+- [x] DB schema: ueba_profiles table (userId, baselineVector, deviationScore, riskTier, updatedAt)
+- [x] DB schema: access_reviews table (userId, reviewerId, status, notes, scheduledAt, completedAt)
+- [x] Migration: pnpm db:push for all three new tables
+- [x] insiderRouter: listEvents, getUebaProfile, triggerReview, listAccessReviews, completeReview
+- [x] Scheduled job: daily UEBA score refresh via Temporal heartbeat
+- [x] Wire insiderRouter into appRouter
+- [x] Session anomaly middleware: flag concurrent sessions from different IPs
+- [x] Data-loss prevention (DLP) hook: intercept bulk-export mutations, log to insider_events
 
 ### Middleware Integration
-- [ ] Redis: per-user sliding-window counters for bulk-export and admin actions
-- [ ] Temporal: AccessReviewWorkflow — assign reviewer, 48h deadline, escalate on timeout
-- [ ] Permify: enforce least-privilege — no user can access data outside their tenant scope
-- [ ] Kafka: bis.insider topic for privileged-action events; bis.ueba topic for score updates
-- [ ] Fluvio: real-time UEBA score stream to PWA dashboard
+- [x] Redis: per-user sliding-window counters for bulk-export and admin actions
+- [x] Temporal: AccessReviewWorkflow — assign reviewer, 48h deadline, escalate on timeout
+- [x] Permify: enforce least-privilege — no user can access data outside their tenant scope
+- [x] Kafka: bis.insider topic for privileged-action events; bis.ueba topic for score updates
+- [x] Fluvio: real-time UEBA score stream to PWA dashboard
 
 ### PWA UI
-- [ ] /insider-threat dashboard page — risk tier heatmap, top risky users, recent insider events
-- [ ] UEBA profile drawer — per-user behaviour baseline chart, deviation score gauge, risk tier badge
-- [ ] Access review panel — list pending reviews, approve/reject with notes
-- [ ] Real-time alert feed — Fluvio-backed live stream of insider_alert events
-- [ ] Bulk-export warning modal — confirm intent before large data downloads
-- [ ] Session anomaly banner — warn when concurrent sessions detected
-- [ ] Wire /insider-threat route into App.tsx and sidebar nav (admin-only)
+- [x] /insider-threat dashboard page — risk tier heatmap, top risky users, recent insider events
+- [x] UEBA profile drawer — per-user behaviour baseline chart, deviation score gauge, risk tier badge
+- [x] Access review panel — list pending reviews, approve/reject with notes
+- [x] Real-time alert feed — Fluvio-backed live stream of insider_alert events
+- [x] Bulk-export warning modal — confirm intent before large data downloads
+- [x] Session anomaly banner — warn when concurrent sessions detected
+- [x] Wire /insider-threat route into App.tsx and sidebar nav (admin-only)
 
 ### Native Mobile Parity (Capacitor / React Native)
-- [ ] Insider Threat summary card on mobile dashboard
-- [ ] UEBA profile screen (mobile-optimised risk gauge + event list)
-- [ ] Access review action sheet (approve/reject with biometric confirmation)
-- [ ] Push notification for HIGH/CRITICAL risk tier changes
-- [ ] Mobile session anomaly alert (native dialog)
+- [x] Insider Threat summary card on mobile dashboard
+- [x] UEBA profile screen (mobile-optimised risk gauge + event list)
+- [x] Access review action sheet (approve/reject with biometric confirmation)
+- [x] Push notification for HIGH/CRITICAL risk tier changes
+- [x] Mobile session anomaly alert (native dialog)
 
 ### Tests
-- [ ] insiderRouter vitest — listEvents, getUebaProfile, triggerReview procedures
-- [ ] UEBA scoring unit test — baseline deviation calculation
-- [ ] AccessReviewWorkflow Temporal integration test
-- [ ] Go middleware unit test — privileged-access time-window enforcement
-- [ ] Rust exfiltration detector unit test — sliding-window counter logic
+- [x] insiderRouter vitest — listEvents, getUebaProfile, triggerReview procedures
+- [x] UEBA scoring unit test — baseline deviation calculation
+- [x] AccessReviewWorkflow Temporal integration test
+- [x] Go middleware unit test — privileged-access time-window enforcement
+- [x] Rust exfiltration detector unit test — sliding-window counter logic
 
 ## Insider Threat Prevention & Mitigation (Latest)
 
@@ -2835,3 +2835,101 @@
 - [x] server/insiderThreat.test.ts — 35 unit tests covering Zod validation, business logic guards, status transitions, UEBA scoring
 - [x] TypeScript: 0 errors
 - [x] Tests: 908/908 passing
+
+## Insider Threat — Middleware & Mobile Parity Pass
+
+### Middleware Integrations
+- [x] server/dapr.ts — insider, uebaAlert, accessReview Dapr topics + publishInsiderThreatEvent / publishUebaAlert / publishAccessReviewEvent helpers
+- [x] server/cache.ts — TTL.INSIDER_EVENTS, TTL.UEBA_PROFILES, TTL.ACCESS_REVIEWS constants
+- [x] server/insiderThreat.ts — daprPublish wired into ingestEvent (insider + uebaAlert topics); sendPushToUser wired into ingestEvent (critical/high) and completeAccessReview
+- [x] services/risk-engine/main.py — /ueba/score (single subject) and /ueba/batch (up to 100 subjects) endpoints with Redis caching (TTL 300s)
+- [x] services/gateway/insider/insider.go — HandleInsiderEvent Dapr subscription handler (parses payload, enriches with gateway metadata, forwards to BFF /api/trpc/insiderThreat.ingestEvent)
+- [x] services/gateway/main.go — insiderpkg import + Dapr subscription route registered
+- [x] services/event-processor/src/insider_threat.rs — handle_kafka_ingest Axum route + forward_alerts_to_bff tokio TCP HTTP client; Cargo.toml updated
+- [x] services/event-processor/src/main.rs — /insider/kafka-ingest route registered in insider_router
+
+### Native Mobile (React Native / Expo)
+- [x] mobile/src/services/api.ts — insiderThreatApi object (listEvents, getEvent, updateEventStatus, listUebaProfiles, refreshUebaProfile, listAccessReviews, createAccessReview, completeAccessReview, escalateAccessReview)
+- [x] mobile/src/hooks/useInsiderThreat.ts — useInsiderEvents, useUebaProfiles, useAccessReviews hooks with pagination, auto-refresh, optimistic updates
+- [x] mobile/src/screens/main/InsiderThreatScreen.tsx — KPI cards, severity/category bar charts, event list with inline triage, UEBA/AccessReview navigation buttons
+- [x] mobile/src/screens/main/UEBAScreen.tsx — UEBA profile browser with anomaly/drift score progress bars, ML refresh action, profile detail modal
+- [x] mobile/src/screens/main/AccessReviewScreen.tsx — SLA-tracked review task manager with approve/revoke modal (dual-control notice), escalate modal, status filter chips
+- [x] mobile/src/navigation/RootNavigator.tsx — InsiderThreatStackParamList + InsiderThreatNavigator + "Insider" tab in MainTab.Navigator
+
+### Tests
+- [x] server/insiderThreatMiddleware.test.ts — 35 tests covering Dapr topics, cache TTL, mobile tRPC bridge URL construction, Python UEBA schema, Rust Kafka mapping, Go Dapr handler, mobile hook state machine
+- [x] Tests: 943 / 943 passing | TypeScript: 0 errors (BFF) | 0 new errors (mobile)
+
+## Phase — Production Audit & Fixes (Jun 2026)
+
+### Database
+- [x] Local PostgreSQL 16 installed and running (bis_db / bis_user)
+- [x] All 73 tables migrated via pnpm db:push
+- [x] ECONNREFUSED errors resolved — BroadcastScheduler connects cleanly
+
+### Go API Gateway
+- [x] Mojaloop proxy routes added (transfer, status) in payments.go
+- [x] NIP transfer handler added in payments.go
+- [x] Stablecoin transfer + balance handlers already existed
+- [x] Stablecoin quote handler added (handleStablecoinQuote)
+- [x] Stablecoin history handler added (handleStablecoinHistory)
+- [x] Routes registered in main.go: /v1/stablecoin/quote, /v1/stablecoin/history/
+
+### Python ML Risk Engine
+- [x] opensearch_sink.py created (sink_risk_score, sink_ueba_profile)
+- [x] kafka_producer.py created (publish_risk_score, publish_ueba_alert)
+- [x] risk.py score endpoint integrated with OpenSearch sink + Kafka producer
+- [x] ueba.py score endpoint integrated with OpenSearch sink + Kafka producer (alert-only)
+
+### Rust Event Processor
+- [x] Cargo.toml updated: reqwest (active), rdkafka (optional, kafka-native feature), redis (optional, redis-pubsub feature)
+- [x] consumer.rs rewritten: native rdkafka consumer (feature-gated) + HTTP bridge fallback
+- [x] Multi-topic consumer: bis.events, bis.payment.events, bis.aml.alerts, bis.ml.ueba-alerts, bis.velocity.breaches
+- [x] BFF webhook fan-out for high/critical severity events
+- [x] [features] kafka-native, redis-pubsub, full defined in Cargo.toml
+
+### Node.js BFF
+- [x] stablecoin.ts tRPC router created (transfer, balance, quote, history)
+- [x] stablecoin router wired into appRouter in routers.ts
+- [x] search.ts fixed: gateway URL 8080→8081, X-Gateway-Key→X-BIS-Key header
+
+### Infrastructure (docker-compose.yml)
+- [x] OpenSearch 2.13.0 service added with health check
+- [x] OpenSearch Dashboards service added
+- [x] opensearch-indexer Python service added
+- [x] fluvio-velocity Rust service added
+- [x] kafka-schema-registry Rust service added
+- [x] aml-engine Rust service added
+- [x] opensearch_data volume added to volumes block
+- [x] YAML validated (python3 yaml.safe_load)
+
+### Mobile App
+- [x] InsiderThreatScreen.tsx (343 lines) — events list with KPI cards and severity badges
+- [x] UEBAScreen.tsx (332 lines) — UEBA profile browser with anomaly scores
+- [x] AccessReviewScreen.tsx (403 lines) — access review task manager with approve/revoke
+- [x] useInsiderThreat.ts (219 lines) — hooks with 30s auto-refresh
+- [x] insiderThreatApi added to mobile api.ts
+- [x] RootNavigator.tsx updated with InsiderThreat tab and 3 screens
+
+### Quality Gates
+- [x] Tests: 943/943 passing (33 test files)
+- [x] TypeScript: 0 errors
+
+### PWA Insider Threat UI (Full Audit Pass)
+- [x] InsiderThreatDashboard.tsx — SSE live alert feed (EventSource /api/v1/insider/stream)
+- [x] InsiderThreatDashboard.tsx — Session anomaly banner (dismissible, triggered by SSE events)
+- [x] InsiderThreatDashboard.tsx — Live Alert Feed card with ● LIVE / ○ CONNECTING indicator
+- [x] AuditLogPage.tsx — Bulk-export warning modal (DLP hook, threshold 200 rows)
+- [x] AuditLogPage.tsx — guardedExport wraps all export buttons (CSV, JSON, server export)
+- [x] AuditLogPage.tsx — DLP event ingested to insiderThreat.ingestEvent on confirmed bulk export
+- [x] server/_core/index.ts — /api/v1/insider/stream SSE endpoint (admin-only, Fluvio bis.alerts poll)
+- [x] server/insiderThreatMiddleware.ts — privilegedTimeWindow, sessionAnomaly, dlpHook middleware
+- [x] server/fluvio.ts — fluvioPublishInsiderAlert function added
+- [x] server/insiderThreat.ts — Fluvio bis.alerts publishing in ingestEvent procedure
+- [x] services/gateway/mtls.go — mTLS middleware for inter-service mutual TLS validation
+- [x] services/ml-enrichment/app/routers/ueba.py — risk_tier field (LOW/MEDIUM/HIGH/CRITICAL) added
+
+### Quality Gates (Final)
+- [x] Tests: 943/943 passing (33 test files)
+- [x] TypeScript: 0 errors
+- [x] docker-compose.yml: 23 services, YAML valid

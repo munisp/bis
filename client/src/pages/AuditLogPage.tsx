@@ -1,8 +1,9 @@
 // AuditLogPage — live tRPC-backed audit trail
 // Design: Forensic Intelligence theme, semantic CSS variables
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import BISLayout from "@/components/BISLayout";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -114,6 +115,40 @@ export default function AuditLogPage() {
     );
   }, [items, search]);
 
+  // ── Bulk-export warning modal (DLP hook) ──────────────────────────────────
+  const [showBulkExportWarning, setShowBulkExportWarning] = useState(false);
+  const [pendingExportFn, setPendingExportFn] = useState<(() => void) | null>(null);
+  const BULK_EXPORT_THRESHOLD = 200; // warn when exporting more than 200 rows
+
+  const ingestDlpEvent = trpc.insiderThreat.ingestEvent.useMutation();
+
+  const guardedExport = useCallback((exportFn: () => void, rowCount: number) => {
+    if (rowCount >= BULK_EXPORT_THRESHOLD) {
+      setPendingExportFn(() => exportFn);
+      setShowBulkExportWarning(true);
+    } else {
+      exportFn();
+    }
+  }, []);
+
+  const confirmBulkExport = () => {
+    setShowBulkExportWarning(false);
+    if (pendingExportFn) {
+      pendingExportFn();
+      // DLP: log bulk-download event to insider threat engine
+      ingestDlpEvent.mutate({
+        subjectId: "current-user",
+        category: "bulk_download",
+        severity: "medium",
+        anomalyScore: 0.5,
+        payloadBytes: filtered.length * 512, // rough estimate
+        resourcePath: "/audit-log/export",
+        ruleId: "dlp:bulk-export-confirmed",
+      });
+      setPendingExportFn(null);
+    }
+  };
+
   const handleExportCSV = () => {
     if (filtered.length === 0) { toast.error("No entries to export."); return; }
     const headers = ["ID", "Timestamp", "Category", "Action", "Target Ref", "Result", "Detail"];
@@ -136,6 +171,9 @@ export default function AuditLogPage() {
     URL.revokeObjectURL(url);
     toast.success(`Exported ${filtered.length} entries.`);
   };
+
+  const handleGuardedExportCSV = () => guardedExport(handleExportCSV, filtered.length);
+  const handleGuardedServerExport = (format: "csv" | "json") => guardedExport(() => handleServerExport(format), total);
 
   // Stats from current page
   const stats = useMemo(() => ({
@@ -166,10 +204,10 @@ export default function AuditLogPage() {
               Verify {selectedIds.length} Selected
             </Button>
           )}
-          <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => handleServerExport("csv")} disabled={exportMutation.isPending}>
+          <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => handleGuardedServerExport("csv")} disabled={exportMutation.isPending}>
             <Download size={11} /> {exportMutation.isPending ? "Exporting..." : "Export CSV"}
           </Button>
-          <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => handleServerExport("json")} disabled={exportMutation.isPending}>
+          <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => handleGuardedServerExport("json")} disabled={exportMutation.isPending}>
             <Download size={11} /> JSON
           </Button>
         </div>
@@ -356,6 +394,28 @@ export default function AuditLogPage() {
           </div>
         </div>
       )}
+      {/* Bulk-Export Warning Modal (DLP) */}
+      <Dialog open={showBulkExportWarning} onOpenChange={setShowBulkExportWarning}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-amber-400">
+              <AlertTriangle size={16} /> Bulk Export Warning
+            </DialogTitle>
+            <DialogDescription className="text-sm text-muted-foreground">
+              You are about to export <strong className="text-foreground">{total >= BULK_EXPORT_THRESHOLD ? total.toLocaleString() : filtered.length.toLocaleString()}</strong> audit log entries.
+              This action will be logged as a potential data-loss prevention (DLP) event and reviewed by the security team.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-3 text-xs font-mono text-amber-300 space-y-1">
+            <p>⚠️ Bulk exports are monitored for insider threat compliance.</p>
+            <p>Confirm only if you have a legitimate business reason for this export.</p>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" size="sm" onClick={() => { setShowBulkExportWarning(false); setPendingExportFn(null); }}>Cancel</Button>
+            <Button size="sm" className="bg-amber-600 hover:bg-amber-700 text-white" onClick={confirmBulkExport}>Confirm Export</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </BISLayout>
   );
 }

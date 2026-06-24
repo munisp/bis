@@ -580,152 +580,34 @@ export const lakehouseApi = {
 };
 
 // ── Insider Threat ────────────────────────────────────────────────────────────
-// All calls go through the BFF tRPC batch endpoint at /api/trpc/insiderThreat.*
-// The mobile app uses the same REST-style wrapper (request()) but targets the
-// tRPC batch URL so the BFF can handle auth and dual-control enforcement.
-
-export interface InsiderEvent {
-  id: number;
-  subjectId: string;
-  tenantId?: string;
-  category: string;
-  severity: 'low' | 'medium' | 'high' | 'critical';
-  status: 'open' | 'investigating' | 'resolved' | 'false_positive';
-  anomalyScore?: number;
-  driftScore?: number;
-  sourceIp?: string;
-  resourcePath?: string;
-  payloadBytes?: number;
-  ruleId?: string;
-  integrityHash?: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface UebaProfile {
-  id: number;
-  subjectId: string;
-  tenantId?: string;
-  anomalyScore: number;
-  driftScore: number;
-  offHoursRatio: number;
-  failedAuthCount: number;
-  privilegeChangeCount: number;
-  baselineReady: boolean;
-  lastRefreshedAt?: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface AccessReview {
-  id: number;
-  subjectId: string;
-  tenantId?: string;
-  reviewType: string;
-  status: 'pending' | 'approved' | 'revoked' | 'escalated' | 'expired';
-  reviewerId?: string;
-  secondApproverId?: string;
-  decision?: string;
-  reason?: string;
-  slaHours: number;
-  dueAt: string;
-  completedAt?: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-/** Call a tRPC query procedure via the batch GET endpoint */
-async function trpcQuery<T>(
-  procedure: string,
-  input: Record<string, unknown> = {},
-): Promise<T> {
-  const token = getStoredToken();
-  const encoded = encodeURIComponent(JSON.stringify({ json: input }));
-  const url = `${BIS_API_URL}/trpc/${procedure}?input=${encoded}&batch=1`;
-  const res = await fetch(url, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    credentials: 'include',
-  });
-  if (!res.ok) throw new Error(`tRPC ${procedure} failed: ${res.status}`);
-  const json = await res.json();
-  // tRPC batch response: [{ result: { data: { json: T } } }]
-  return json[0]?.result?.data?.json as T;
-}
-
-/** Call a tRPC mutation procedure via the batch POST endpoint */
-async function trpcMutate<T>(
-  procedure: string,
-  input: Record<string, unknown> = {},
-): Promise<T> {
-  const token = getStoredToken();
-  const url = `${BIS_API_URL}/trpc/${procedure}?batch=1`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    credentials: 'include',
-    body: JSON.stringify([{ json: input }]),
-  });
-  if (!res.ok) throw new Error(`tRPC ${procedure} mutation failed: ${res.status}`);
-  const json = await res.json();
-  return json[0]?.result?.data?.json as T;
-}
-
 export const insiderThreatApi = {
   // Events
-  listEvents: (params: {
-    page?: number;
-    pageSize?: number;
-    severity?: string;
-    status?: string;
-    tenantId?: string;
-  } = {}) =>
-    trpcQuery<{ events: InsiderEvent[]; total: number; page: number; pageSize: number }>(
-      'insiderThreat.listEvents',
-      params,
-    ),
-
+  listEvents: (params?: Record<string, string | number>) =>
+    request<{ data: unknown[]; total: number }>('GET', '/insider-threat/events', undefined, params),
   getEvent: (id: number) =>
-    trpcQuery<InsiderEvent>('insiderThreat.getEvent', { id }),
+    request<{ data: unknown }>('GET', `/insider-threat/events/${id}`),
+  ingestEvent: (data: Record<string, unknown>) =>
+    request<{ data: unknown }>('POST', '/insider-threat/events', data),
+  updateEventStatus: (id: number, status: string, notes?: string) =>
+    request<{ data: unknown }>('PATCH', `/insider-threat/events/${id}/status`, { status, notes }),
+  getDashboardSummary: () =>
+    request<{ data: unknown }>('GET', '/insider-threat/dashboard'),
 
-  updateEventStatus: (id: number, status: InsiderEvent['status'], notes?: string) =>
-    trpcMutate<InsiderEvent>('insiderThreat.updateEventStatus', { id, status, notes }),
-
-  // UEBA Profiles
-  listUebaProfiles: (params: { page?: number; pageSize?: number; tenantId?: string } = {}) =>
-    trpcQuery<{ profiles: UebaProfile[]; total: number; page: number; pageSize: number }>(
-      'insiderThreat.listUebaProfiles',
-      params,
-    ),
-
-  refreshUebaProfile: (subjectId: string, tenantId?: string) =>
-    trpcMutate<UebaProfile>('insiderThreat.refreshUebaProfile', { subjectId, tenantId }),
+  // UEBA
+  listUebaProfiles: (params?: Record<string, string | number>) =>
+    request<{ data: unknown[]; total: number }>('GET', '/insider-threat/ueba', undefined, params),
+  getUebaProfile: (userId: string) =>
+    request<{ data: unknown }>('GET', `/insider-threat/ueba/${userId}`),
+  refreshUebaProfile: (userId: string) =>
+    request<{ data: unknown }>('POST', `/insider-threat/ueba/${userId}/refresh`),
 
   // Access Reviews
-  listAccessReviews: (params: {
-    page?: number;
-    pageSize?: number;
-    status?: string;
-    tenantId?: string;
-  } = {}) =>
-    trpcQuery<{ reviews: AccessReview[]; total: number; page: number; pageSize: number }>(
-      'insiderThreat.listAccessReviews',
-      params,
-    ),
-
-  completeAccessReview: (params: {
-    id: number;
-    decision: 'approved' | 'revoked';
-    reason: string;
-    approverToken?: string;
-  }) =>
-    trpcMutate<AccessReview>('insiderThreat.completeAccessReview', params),
-
-  escalateAccessReview: (id: number, reason: string) =>
-    trpcMutate<AccessReview>('insiderThreat.escalateAccessReview', { id, reason }),
+  listAccessReviews: (params?: Record<string, string | number>) =>
+    request<{ data: unknown[]; total: number }>('GET', '/insider-threat/access-reviews', undefined, params),
+  getAccessReview: (id: number) =>
+    request<{ data: unknown }>('GET', `/insider-threat/access-reviews/${id}`),
+  createAccessReview: (data: Record<string, unknown>) =>
+    request<{ data: unknown }>('POST', '/insider-threat/access-reviews', data),
+  completeAccessReview: (id: number, decision: string, notes?: string) =>
+    request<{ data: unknown }>('POST', `/insider-threat/access-reviews/${id}/complete`, { decision, notes }),
 };

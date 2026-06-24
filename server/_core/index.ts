@@ -634,6 +634,58 @@ async function startServer() {
     }
   });
 
+  // ── Insider Threat real-time alert stream (SSE) ─────────────────────────────
+  // Proxies the Fluvio bis.alerts topic as an SSE stream to the PWA dashboard.
+  // Auth: session cookie (admin only).
+  // Client usage: new EventSource('/api/v1/insider/stream')
+  app.get("/api/v1/insider/stream", async (req: Request, res: Response) => {
+    const { sdk } = await import("./sdk");
+    const user = await sdk.authenticateRequest(req).catch(() => null);
+    if (!user || (user as { role?: string }).role !== "admin") {
+      res.status(401).json({ error: "Admin authentication required" });
+      return;
+    }
+    const fluvioUrl = (ENV as Record<string, unknown>).fluvioVelocityUrl as string
+      ?? process.env.FLUVIO_VELOCITY_URL
+      ?? "http://localhost:9000";
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.setHeader("Connection", "keep-alive");
+    res.flushHeaders();
+    // Send initial heartbeat
+    res.write(`event: connected\ndata: ${JSON.stringify({ ts: new Date().toISOString() })}\n\n`);
+    // Poll Fluvio REST API for new bis.alerts messages every 2 seconds
+    let offset = 0;
+    let closed = false;
+    req.on("close", () => { closed = true; });
+    const heartbeat = setInterval(() => {
+      if (!res.writableEnded) res.write(`:heartbeat\n\n`);
+    }, 25_000);
+    const poll = async () => {
+      while (!closed && !res.writableEnded) {
+        try {
+          const r = await fetch(
+            `${fluvioUrl}/consume/bis.alerts?offset=${offset}&max_records=20`,
+            { signal: AbortSignal.timeout(5_000) },
+          );
+          if (r.ok) {
+            const records = await r.json() as Array<{ value: unknown; offset: number }>;
+            for (const rec of records) {
+              if (closed || res.writableEnded) break;
+              res.write(`event: insider_alert\ndata: ${JSON.stringify(rec.value)}\n\n`);
+              offset = rec.offset + 1;
+            }
+          }
+        } catch { /* Fluvio unavailable — keep polling */ }
+        await new Promise(r2 => setTimeout(r2, 2_000));
+      }
+      clearInterval(heartbeat);
+      if (!res.writableEnded) res.end();
+    };
+    poll();
+  });
+
   // ── Stakeholder Portal SSE stream ────────────────────────────────────────────
   // Provides real-time push notifications to stakeholder portal sessions.
   // Auth: token query param (portal access token, no session cookie required).

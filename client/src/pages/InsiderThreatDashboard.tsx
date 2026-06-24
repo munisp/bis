@@ -8,7 +8,7 @@
  *   • Quick-triage actions (assign, update status)
  */
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { trpc } from "@/lib/trpc";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -91,6 +91,35 @@ export default function InsiderThreatDashboard() {
   const [, navigate] = useLocation();
   const [tenantId, setTenantId] = useState<string | undefined>(undefined);
 
+  // ── Real-time SSE alert feed ──────────────────────────────────────────────
+  const [liveAlerts, setLiveAlerts] = useState<Array<{ alertId: string; subjectId: string; severity: string; category: string; detail: string; triggeredAt: string }>>([]);
+  const [sseConnected, setSseConnected] = useState(false);
+  const [sessionAnomalyWarning, setSessionAnomalyWarning] = useState(false);
+  const esRef = useRef<EventSource | null>(null);
+
+  useEffect(() => {
+    const es = new EventSource("/api/v1/insider/stream");
+    esRef.current = es;
+    es.addEventListener("connected", () => setSseConnected(true));
+    es.addEventListener("insider_alert", (e: MessageEvent) => {
+      try {
+        const alert = JSON.parse(e.data);
+        setLiveAlerts(prev => [alert, ...prev].slice(0, 50));
+        // Detect session anomaly category
+        if (alert.category === "session_anomaly" || alert.category === "unusual_ip") {
+          setSessionAnomalyWarning(true);
+        }
+        // Trigger refetch on new critical/high alerts
+        if (alert.severity === "critical" || alert.severity === "high") {
+          refetchSummary();
+          refetchEvents();
+        }
+      } catch { /* ignore malformed */ }
+    });
+    es.onerror = () => setSseConnected(false);
+    return () => { es.close(); setSseConnected(false); };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const { data: summary, isLoading: summaryLoading, refetch: refetchSummary } = trpc.insiderThreat.dashboardSummary.useQuery(
     { tenantId },
     { refetchInterval: 30_000 }
@@ -126,6 +155,17 @@ export default function InsiderThreatDashboard() {
 
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
+      {/* Session Anomaly Banner */}
+      {sessionAnomalyWarning && (
+        <div className="flex items-center justify-between gap-3 px-4 py-3 rounded-lg bg-orange-500/10 border border-orange-500/30 text-orange-300 text-sm font-mono">
+          <div className="flex items-center gap-2">
+            <AlertTriangle size={14} className="shrink-0" />
+            <span><strong>Session Anomaly Detected</strong> — concurrent sessions from different IPs observed for one or more users.</span>
+          </div>
+          <Button variant="ghost" size="sm" className="text-orange-300 hover:text-orange-100 text-xs h-7" onClick={() => setSessionAnomalyWarning(false)}>Dismiss</Button>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -302,6 +342,40 @@ export default function InsiderThreatDashboard() {
                       <ChevronRight size={12} />
                     </Button>
                   </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Live Alert Feed (SSE) */}
+      <Card className="bg-card/50 border-border/50">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-mono flex items-center gap-2">
+            <Activity size={14} className={sseConnected ? "text-emerald-400" : "text-muted-foreground"} />
+            Live Alert Feed
+            <span className={cn("ml-auto text-[10px] px-2 py-0.5 rounded-full font-mono border",
+              sseConnected ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30" : "bg-muted/30 text-muted-foreground border-border/30"
+            )}>
+              {sseConnected ? "● LIVE" : "○ CONNECTING"}
+            </span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {liveAlerts.length === 0 ? (
+            <p className="text-xs text-muted-foreground font-mono py-4 text-center">No live alerts yet — stream active</p>
+          ) : (
+            <div className="space-y-1.5 max-h-64 overflow-y-auto">
+              {liveAlerts.map((a, i) => (
+                <div key={`${a.alertId}-${i}`} className="flex items-start gap-2 p-2 rounded bg-muted/10 border border-border/30 text-xs font-mono">
+                  <SeverityBadge severity={a.severity} />
+                  <div className="flex-1 min-w-0">
+                    <span className="text-foreground font-semibold">{CATEGORY_LABELS[a.category] ?? a.category}</span>
+                    <span className="text-muted-foreground ml-2">{a.subjectId}</span>
+                    {a.detail && <p className="text-[10px] text-muted-foreground/70 mt-0.5 truncate">{a.detail}</p>}
+                  </div>
+                  <span className="text-[10px] text-muted-foreground shrink-0">{new Date(a.triggeredAt).toLocaleTimeString()}</span>
                 </div>
               ))}
             </div>

@@ -15,8 +15,9 @@ import {
 } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
 import { useSelector } from 'react-redux';
+import { useNavigation } from '@react-navigation/native';
 import type { RootState } from '../../store';
-import { alertsApi, investigationsApi } from '../../services/api';
+import { alertsApi, investigationsApi, insiderThreatApi } from '../../services/api';
 
 interface StatCardProps {
   label: string;
@@ -35,6 +36,7 @@ function StatCard({ label, value, color }: StatCardProps) {
 
 export function DashboardScreen() {
   const user = useSelector((state: RootState) => state.auth.user);
+  const navigation = useNavigation<any>();
 
   const {
     data: investigations,
@@ -54,12 +56,23 @@ export function DashboardScreen() {
     queryFn: () => alertsApi.list({ isRead: 0, limit: 5 }),
   });
 
-  const isLoading = invLoading || alertsLoading;
+  const {
+    data: insiderData,
+    isLoading: insiderLoading,
+    refetch: refetchInsider,
+  } = useQuery({
+    queryKey: ['insider', 'dashboard'],
+    queryFn: () => insiderThreatApi.listEvents({ limit: 5, status: 'open' }),
+    refetchInterval: 30_000,
+  });
+
+  const isLoading = invLoading || alertsLoading || insiderLoading;
 
   const onRefresh = useCallback(() => {
     refetchInv();
     refetchAlerts();
-  }, [refetchInv, refetchAlerts]);
+    refetchInsider();
+  }, [refetchInv, refetchAlerts, refetchInsider]);
 
   return (
     <ScrollView
@@ -77,6 +90,36 @@ export function DashboardScreen() {
         <StatCard label="Open Cases" value={investigations?.total ?? '—'} color="#3b82f6" />
         <StatCard label="Unread Alerts" value={alerts?.total ?? '—'} color="#ef4444" />
       </View>
+
+      {/* ── Insider Threat Summary Card ─────────────────────────────────── */}
+      <TouchableOpacity
+        style={styles.insiderCard}
+        onPress={() => navigation.navigate('InsiderThreat')}
+        activeOpacity={0.85}
+      >
+        <View style={styles.insiderCardHeader}>
+          <Text style={styles.insiderCardTitle}>🛡 Insider Threat</Text>
+          <Text style={styles.insiderCardBadge}>
+            {insiderLoading ? '…' : `${insiderData?.total ?? 0} open`}
+          </Text>
+        </View>
+        {insiderLoading ? (
+          <ActivityIndicator color="#f59e0b" size="small" style={{ marginTop: 8 }} />
+        ) : (
+          (insiderData?.rows ?? []).slice(0, 3).map((evt: any) => (
+            <View key={evt.id} style={styles.insiderRow}>
+              <View style={[styles.insiderDot, { backgroundColor: getSeverityColor(evt.severity) }]} />
+              <Text style={styles.insiderRowText} numberOfLines={1}>
+                {evt.category?.replace(/_/g, ' ')} — {evt.subjectId}
+              </Text>
+              <Text style={styles.insiderRowTime}>
+                {new Date(evt.createdAt).toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit' })}
+              </Text>
+            </View>
+          ))
+        )}
+        <Text style={styles.insiderViewAll}>View all →</Text>
+      </TouchableOpacity>
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Recent Alerts</Text>
@@ -154,4 +197,22 @@ const styles = StyleSheet.create({
   actionsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   actionBtn: { borderRadius: 10, paddingVertical: 14, paddingHorizontal: 16, minWidth: '45%' },
   actionBtnText: { color: '#fff', fontWeight: '600', fontSize: 14, textAlign: 'center' },
+  // Insider Threat card
+  insiderCard: {
+    marginHorizontal: 16,
+    marginBottom: 8,
+    backgroundColor: '#1e293b',
+    borderRadius: 14,
+    padding: 16,
+    borderLeftWidth: 4,
+    borderLeftColor: '#f59e0b',
+  },
+  insiderCardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  insiderCardTitle: { fontSize: 15, fontWeight: '700', color: '#f8fafc' },
+  insiderCardBadge: { fontSize: 12, color: '#f59e0b', fontWeight: '700', backgroundColor: 'rgba(245,158,11,0.15)', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8 },
+  insiderRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
+  insiderDot: { width: 8, height: 8, borderRadius: 4, marginRight: 10 },
+  insiderRowText: { flex: 1, fontSize: 13, color: '#cbd5e1', textTransform: 'capitalize' },
+  insiderRowTime: { fontSize: 11, color: '#64748b', marginLeft: 8 },
+  insiderViewAll: { fontSize: 12, color: '#3b82f6', marginTop: 8, textAlign: 'right' },
 });

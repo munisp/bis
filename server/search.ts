@@ -32,8 +32,8 @@ export interface CrossEntitySearchResponse {
 
 // ─── Gateway helper ───────────────────────────────────────────────────────────
 
-const GATEWAY_URL = ENV.gatewayUrl ?? "http://localhost:8080";
-const GATEWAY_KEY = ENV.bisGatewayKey ?? "";
+const GATEWAY_URL = ENV.bisGatewayUrl ?? ENV.gatewayUrl ?? "http://localhost:8081";
+const GATEWAY_KEY = ENV.bisGatewayKey ?? "dev-gateway-key-change-in-prod";
 
 async function gatewaySearch(payload: {
   query: string;
@@ -46,7 +46,7 @@ async function gatewaySearch(payload: {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "X-Gateway-Key": GATEWAY_KEY,
+      "X-BIS-Key": GATEWAY_KEY,
     },
     body: JSON.stringify(payload),
     signal: AbortSignal.timeout(10_000),
@@ -88,7 +88,7 @@ export async function indexDocument(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Gateway-Key": GATEWAY_KEY,
+        "X-BIS-Key": GATEWAY_KEY,
       },
       body: JSON.stringify({ index, id, doc: { ...doc, tenantId }, tenantId }),
       signal: AbortSignal.timeout(5_000),

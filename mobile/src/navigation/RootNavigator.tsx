@@ -165,7 +165,7 @@ function MainNavigator() {
       <MainTab.Screen
         name="InsiderThreat"
         component={InsiderThreatNavigator}
-        options={{ title: 'Insider Threat', tabBarLabel: 'Insider' }}
+        options={{ title: 'Insider' }}
       />
       <MainTab.Screen name="Profile" component={ProfileScreen} />
     </MainTab.Navigator>

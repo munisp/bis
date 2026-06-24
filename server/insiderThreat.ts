@@ -32,6 +32,14 @@ import { withCache, invalidateCache, TTL } from "./cache";
 import { notifyOwner } from "./_core/notification";
 import { startAccessReviewWorkflow } from "./temporal";
 import { ENV } from "./_core/env";
+import {
+  publishInsiderThreatEvent,
+  publishUebaAlert,
+  publishAccessReviewEvent,
+} from "./dapr";
+import { sendPushToUser } from "./pushNotify";
+import { fluvioPublishInsiderAlert, fluvioPublishUebaScore } from "./fluvio";
+import { permifyCheck } from "./permify";
 
 // ─── Zod schemas ──────────────────────────────────────────────────────────────
 
@@ -174,6 +182,49 @@ export const insiderThreatRouter = router({
       // Auto-escalate high/critical
       await maybeEscalate(event.id, input.severity, input.subjectId);
 
+      // Publish to Dapr pub/sub (fire-and-forget) — consumed by Rust EP and Go gateway
+      publishInsiderThreatEvent({
+        eventId: event.id,
+        subjectId: input.subjectId,
+        tenantId: input.tenantId,
+        category: input.category,
+        severity: input.severity,
+        anomalyScore: input.anomalyScore,
+        driftScore: input.driftScore,
+        sourceIp: input.sourceIp,
+        resourcePath: input.resourcePath,
+        payloadBytes: input.payloadBytes,
+        ruleId: input.ruleId,
+        triggeredAt: new Date().toISOString(),
+      }).catch((e) => console.error("[InsiderThreat] Dapr publish failed:", e));
+
+      // Publish to Fluvio bis.alerts stream — consumed by PWA real-time feed and Go gateway FCM push
+      fluvioPublishInsiderAlert({
+        alertId: String(event.id),
+        subjectId: input.subjectId,
+        tenantId: input.tenantId,
+        category: input.category,
+        severity: input.severity,
+        anomalyScore: input.anomalyScore,
+        riskTier: input.anomalyScore != null
+          ? input.anomalyScore >= 0.9 ? "CRITICAL"
+          : input.anomalyScore >= 0.7 ? "HIGH"
+          : input.anomalyScore >= 0.4 ? "MEDIUM"
+          : "LOW"
+          : "LOW",
+        detail: `${input.category} event for subject ${input.subjectId}`,
+        triggeredAt: new Date().toISOString(),
+      }).catch((e) => console.warn("[InsiderThreat] Fluvio publish failed:", e));
+
+      // Push notification to the authenticated user (if high/critical)
+      if ((input.severity === "high" || input.severity === "critical") && event.id) {
+        // ctx is not available in writeProcedure — use owner notification path instead
+        notifyOwner({
+          title: `Insider Threat [${input.severity.toUpperCase()}]: ${input.category}`,
+          content: `Subject ${input.subjectId} — event #${event.id} ingested. Review required.`,
+        }).catch(() => {});
+      }
+
       return { id: event.id, status: event.status };
     }),
 
@@ -195,7 +246,19 @@ export const insiderThreatRouter = router({
         offset: z.number().int().min(0).default(0),
       })
     )
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      // Permify: enforce least-privilege — user can only read insider events within their tenant scope
+      if (input.tenantId) {
+        const allowed = await permifyCheck(
+          "tenant",
+          input.tenantId,
+          "read_insider_events",
+          String(ctx.user.id),
+        ).catch(() => true); // fail-open if Permify unavailable
+        if (!allowed) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "Access denied to this tenant's insider events" });
+        }
+      }
       const db = await getDb();
       if (!db) return { rows: [], total: 0 };
       const cacheKey = `insider:events:${JSON.stringify(input)}`;
@@ -442,6 +505,26 @@ export const insiderThreatRouter = router({
           },
         })
         .returning();
+      // Publish UEBA score update to Fluvio bis.ueba topic for real-time PWA streaming
+      fluvioPublishUebaScore({
+        userId: input.subjectId,
+        tenantId: input.tenantId,
+        deviationScore: Math.round(score.anomaly_score * 100),
+        riskTier: (score.risk_level?.toUpperCase() as "LOW" | "MEDIUM" | "HIGH" | "CRITICAL") ?? "LOW",
+        baselineVersion: new Date().toISOString(),
+        triggeredBy: "refreshUebaProfile",
+        publishedAt: new Date().toISOString(),
+      }).catch(() => { /* non-fatal */ });
+      // Push notification for HIGH/CRITICAL risk tier changes (mobile alert)
+      const tier = score.risk_level?.toUpperCase();
+      if (tier === "HIGH" || tier === "CRITICAL") {
+        sendPushToUser(parseInt(input.subjectId, 10) || 0, {
+          title: `🚨 ${tier} Risk Tier Detected`,
+          body: `User ${input.subjectId} anomaly score: ${Math.round(score.anomaly_score * 100)}/100. Immediate review required.`,
+          url: `/insider-threat/ueba?userId=${encodeURIComponent(input.subjectId)}`,
+          tag: `ueba-alert-${input.subjectId}`,
+        }).catch(() => { /* non-fatal */ });
+      }
       return upserted;
     }),
 
@@ -599,6 +682,23 @@ export const insiderThreatRouter = router({
         .where(eq(accessReviews.id, input.id))
         .returning();
 
+      // Publish access-review completion to Dapr (fire-and-forget)
+      publishAccessReviewEvent({
+        reviewId: input.id,
+        subjectId: existing.subjectId,
+        tenantId: existing.tenantId ?? undefined,
+        reviewType: existing.reviewType,
+        action: input.decision,
+        reviewerId: ctx.user.id,
+        triggeredAt: new Date().toISOString(),
+      }).catch((e) => console.error("[InsiderThreat] Dapr access-review publish failed:", e));
+
+      // Push notification to the reviewer
+      sendPushToUser(ctx.user.id, {
+        title: `Access Review ${input.decision === "approved" ? "Approved" : "Revoked"}: #${input.id}`,
+        body: `Subject ${existing.subjectId} — review completed.`,
+      }).catch(() => {});
+
       return updated;
     }),
 
@@ -621,6 +721,17 @@ export const insiderThreatRouter = router({
         .where(eq(accessReviews.id, input.id))
         .returning();
       if (!updated) throw new TRPCError({ code: "NOT_FOUND" });
+
+      // Publish escalation event to Dapr (fire-and-forget)
+      publishAccessReviewEvent({
+        reviewId: input.id,
+        subjectId: updated.subjectId,
+        tenantId: updated.tenantId ?? undefined,
+        reviewType: updated.reviewType,
+        action: "escalated",
+        triggeredAt: new Date().toISOString(),
+      }).catch((e) => console.error("[InsiderThreat] Dapr escalation publish failed:", e));
+
       return updated;
     }),
 });
