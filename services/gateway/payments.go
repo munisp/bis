@@ -385,16 +385,21 @@ func handleStablecoinTransfer(w http.ResponseWriter, r *http.Request) {
 	})
 
 	if stablecoinBridge == "" {
-		// Sandbox: return a deterministic mock tx hash
-		mockHash := fmt.Sprintf("0x%x%x", time.Now().UnixNano(), len(req.TxRef))
-		log.Printf("[Stablecoin] Sandbox mode — STABLECOIN_BRIDGE_URL not set, returning mock hash for %s", req.TxRef)
+		// No external bridge configured — use direct on-chain settlement via blockchain.go
+		txHash, isSandbox, err := ExecuteOnChainTransfer(r.Context(), req.Network, req.Currency, req.ToAddress, req.AmountUnits)
+		if err != nil {
+			log.Printf("[Stablecoin] On-chain transfer failed: %v — falling back to sandbox hash", err)
+			txHash = fmt.Sprintf("0x%x%x", time.Now().UnixNano(), len(req.TxRef))
+			isSandbox = true
+		}
+		log.Printf("[Stablecoin] On-chain transfer: network=%s currency=%s txHash=%s sandbox=%v", req.Network, req.Currency, txHash, isSandbox)
 		writeJSON(w, http.StatusAccepted, StablecoinTransferResponse{
 			TxRef:    req.TxRef,
-			TxHash:   mockHash,
+			TxHash:   txHash,
 			Status:   "pending",
 			Network:  req.Network,
 			Currency: req.Currency,
-			Sandbox:  true,
+			Sandbox:  isSandbox,
 		})
 		return
 	}

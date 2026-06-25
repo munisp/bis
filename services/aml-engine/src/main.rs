@@ -20,6 +20,8 @@ use aml_engine::sdn_sync::{
     SharedSdnCache, REFRESH_INTERVAL,
 };
 
+mod metrics;
+
 // ─── App State ────────────────────────────────────────────────────────────────
 
 #[derive(Clone)]
@@ -122,6 +124,16 @@ async fn verify_chain(
         StatusCode::CONFLICT
     };
     (status, Json(result))
+}
+
+// ─── Prometheus metrics endpoint ─────────────────────────────────────────────
+
+async fn prometheus_metrics() -> impl IntoResponse {
+    (
+        StatusCode::OK,
+        [(axum::http::header::CONTENT_TYPE, "text/plain; version=0.0.4")],
+        metrics::render(),
+    )
 }
 
 async fn sanctions_status(State(state): State<AppState>) -> impl IntoResponse {
@@ -240,7 +252,29 @@ async fn main() {
     }
 
     // Spawn background refresh task.
-    spawn_sdn_refresh(Arc::clone(&sdn_cache));
+        spawn_sdn_refresh(Arc::clone(&sdn_cache));
+
+    // ── SIGHUP handler: hot-reload sanctions list without restart ──────────────
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+        let cache_for_signal = Arc::clone(&sdn_cache);
+        tokio::spawn(async move {
+            let mut stream = signal(SignalKind::hangup())
+                .expect("Failed to register SIGHUP handler");
+            loop {
+                stream.recv().await;
+                info!("[AML] SIGHUP received — hot-reloading sanctions lists");
+                metrics::RELOAD_TOTAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                match fetch_and_update_sdn(Arc::clone(&cache_for_signal)).await {
+                    Ok(count) => info!("[AML] Hot-reload complete: {} entries", count),
+                    Err(e) => {
+                        warn!("[AML] Hot-reload failed: {}", e);
+                        metrics::RELOAD_ERRORS_TOTAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    }
+                }
+            }
+        });
+    }
 
     let state = AppState { sdn_cache };
 
@@ -249,12 +283,12 @@ async fn main() {
         .route("/screen", post(screen_transaction))
         .route("/evidence/verify-chain", post(verify_chain))
         .route("/sanctions/status", get(sanctions_status))
+        .route("/metrics", get(prometheus_metrics))
         .with_state(state)
         .layer(CorsLayer::permissive());
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     info!("BIS AML Engine v2.0 listening on {}", addr);
-
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }

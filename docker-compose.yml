@@ -1105,3 +1105,57 @@ services:
       timeout: 10s
       retries: 3
 
+
+  # ─── Kafka Topic Init (creates all 32 BIS topics on first boot) ──────────────
+  kafka-init:
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: bis-kafka-init
+    restart: "no"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_BOOTSTRAP: kafka:9092
+      KAFKA_REPLICATION: "1"
+      KAFKA_WAIT_SECS: "60"
+    volumes:
+      - ./infra/kafka/init-topics.sh:/init-topics.sh:ro
+    entrypoint: ["/bin/bash", "/init-topics.sh"]
+    networks: [bis-net]
+
+  # ─── Temporal Namespace Init (registers 'bis' namespace + search attributes) ─
+  temporal-init:
+    image: temporalio/admin-tools:1.24.2
+    container_name: bis-temporal-init
+    restart: "no"
+    depends_on:
+      temporal:
+        condition: service_healthy
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: bis
+      TEMPORAL_RETENTION_DAYS: "30"
+      TEMPORAL_WAIT_SECS: "60"
+    volumes:
+      - ./infra/temporal/init-namespace.sh:/init-namespace.sh:ro
+    entrypoint: ["/bin/bash", "/init-namespace.sh"]
+    networks: [bis-net]
+
+  # ─── OpenSearch ISM Init (creates ILM policies, index templates, write aliases) 
+  opensearch-init:
+    image: curlimages/curl:8.7.1
+    container_name: bis-opensearch-init
+    restart: "no"
+    depends_on:
+      opensearch:
+        condition: service_healthy
+    environment:
+      OPENSEARCH_URL: http://opensearch:9200
+      OPENSEARCH_USER: admin
+      OPENSEARCH_PASSWORD: ${OPENSEARCH_PASSWORD:-BisOpenSearch@2025!}
+      OPENSEARCH_WAIT_SECS: "120"
+    volumes:
+      - ./infra/opensearch/init-ilm.sh:/init-ilm.sh:ro
+    entrypoint: ["/bin/sh", "/init-ilm.sh"]
+    networks: [bis-net]
+

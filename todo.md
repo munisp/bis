@@ -2933,3 +2933,61 @@
 - [x] Tests: 943/943 passing (33 test files)
 - [x] TypeScript: 0 errors
 - [x] docker-compose.yml: 23 services, YAML valid
+
+## Remaining Gaps Sprint (Production Audit Follow-Up)
+
+### Python ML Engine
+- [x] Model persistence: joblib.dump to S3 on every /ueba/retrain call
+- [x] Model load from S3 on startup (fallback to fresh fit if not found)
+- [x] Input size validation: reject feature vectors > 512 fields
+- [x] Kafka producer retry with exponential backoff (3 attempts, 100ms/500ms/2s)
+- [x] Shared model store: Redis-backed model version key for multi-replica deployments
+
+### Rust AML Engine
+- [x] Prometheus /metrics endpoint (aml_screenings_total, aml_hits_total, aml_latency_seconds)
+- [x] SIGHUP handler to hot-reload OFAC/UN/EU sanctions CSV from S3 without restart
+- [x] Configurable structuring thresholds via environment variables
+- [x] HTTP rate-limit on inbound /screen endpoint (100 req/s per tenant)
+- [x] Dead-letter queue for failed AML screenings
+
+### Rust Fluvio Velocity
+- [x] mTLS on /publish endpoint (require client cert from gateway)
+- [x] /health endpoint returning JSON status + Redis ping
+- [x] Prometheus /metrics endpoint (velocity_checks_total, velocity_breaches_total)
+- [x] Redis circuit breaker: return 503 if Redis unavailable instead of panic
+
+### Go Gateway
+- [x] Kafka dead-letter queue topic (bis.events.dlq) for failed publishes
+- [x] SSRF allowlist for Mojaloop proxy URLs (env-configurable)
+- [x] Go unit tests for mTLS middleware (cert validation + rejection)
+- [x] Go unit tests for privileged-time-window enforcement
+
+### Node.js BFF — Stablecoin
+- [x] Celo ContractKit integration for cUSD on-chain balance query
+- [x] Stellar SDK integration for USDC on-chain balance query
+- [x] Real on-chain transfer via Celo/Stellar SDK (with simulation fallback)
+- [x] Stablecoin transaction history from on-chain explorer API
+
+### React Native
+- [x] Real expo-local-authentication biometric confirmation in AccessReviewScreen
+- [x] Offline action queue: persist triage actions to AsyncStorage when network unavailable
+- [x] Flush offline queue on reconnect
+- [x] Sentry crash reporting integration (@sentry/react-native)
+
+### React PWA
+- [x] Content Security Policy headers in Express server
+- [x] Sentry error boundary integration (@sentry/react)
+- [x] Service worker for offline PWA capability (Workbox)
+- [x] Stablecoin on-chain balance display in PWA
+
+### Infrastructure
+- [x] Keycloak realm import automation script (docker entrypoint)
+- [x] OpenSearch ILM policy for risk-scores index (30-day retention)
+- [x] OpenSearch ILM policy for ueba-profiles index (90-day retention)
+- [x] Temporal namespace creation automation (temporal-admin-tools)
+- [x] Kafka topic auto-creation config (KAFKA_AUTO_CREATE_TOPICS_ENABLE)
+
+### Rust Event Processor
+- [x] OpenTelemetry SDK integration (opentelemetry-otlp crate)
+- [x] Span export to Jaeger/Tempo via OTLP gRPC
+- [x] Trace context propagation from Kafka message headers

@@ -148,3 +148,23 @@ func (c *Client) Del(ctx context.Context, key string) error {
 	CacheDel(ctx, key)
 	return nil
 }
+
+// LPush prepends a value to a Redis list (used by DLQ).
+func (c *Client) LPush(key, value string) error {
+	if rdb == nil {
+		return fmt.Errorf("redis not connected")
+	}
+	return rdb.LPush(context.Background(), key, value).Err()
+}
+
+// RPop removes and returns the last element of a Redis list (used by DLQ replay).
+func (c *Client) RPop(key string) (string, error) {
+	if rdb == nil {
+		return "", fmt.Errorf("redis not connected")
+	}
+	val, err := rdb.RPop(context.Background(), key).Result()
+	if err == redis.Nil {
+		return "", nil
+	}
+	return val, err
+}

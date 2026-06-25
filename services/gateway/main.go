@@ -116,6 +116,7 @@ func initMiddleware() {
 		} else {
 			kafkaProducer = p
 			log.Printf("[INFO] Kafka producer connected: %s", kafkaBrokers)
+			startDLQReplay()
 		}
 	}
 
@@ -350,19 +351,9 @@ func cacheSet(ctx context.Context, key string, val []byte, ttl time.Duration) {
 	}
 }
 
-// publishEvent sends an event to Kafka. No-op if Kafka is not configured.
+// publishEvent sends an event to Kafka with DLQ fallback on failure.
 func publishEvent(topic string, payload any) {
-	if kafkaProducer == nil {
-		return
-	}
-	data, err := json.Marshal(payload)
-	if err != nil {
-		log.Printf("[WARN] Failed to marshal Kafka event: %v", err)
-		return
-	}
-	if err := kafkaProducer.Publish(topic, data); err != nil {
-		log.Printf("[WARN] Kafka publish failed (topic=%s): %v", topic, err)
-	}
+	publishEventWithDLQ(topic, payload)
 }
 
 // checkPermify verifies fine-grained authorization. Returns true if Permify is not configured (permissive default).

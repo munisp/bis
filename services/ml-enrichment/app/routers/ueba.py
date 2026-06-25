@@ -35,7 +35,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import StandardScaler
-from app.services import opensearch_sink, kafka_producer
+from app.services import opensearch_sink, kafka_producer, model_store
 
 log = structlog.get_logger(__name__)
 
@@ -197,6 +197,9 @@ class UEBAModelStore:
     serialised to S3 with versioning.
     """
 
+    # Maximum number of fields in a feature vector (input size guard)
+    MAX_FEATURE_FIELDS: int = 512
+
     def __init__(self) -> None:
         self._lock = threading.RLock()
         self._profiles: Dict[str, UserBehaviourProfile] = {}
@@ -205,6 +208,25 @@ class UEBAModelStore:
         self._events_since_retrain: int = 0
         self._model_trained_at: Optional[float] = None
         self._total_events: int = 0
+        self._model_version: Optional[str] = None
+        # Bootstrap: attempt to load persisted model from S3 on startup
+        self._bootstrap_from_s3()
+
+    def _bootstrap_from_s3(self) -> None:
+        """Load the latest model from S3 on startup (non-fatal on failure)."""
+        try:
+            m, s, version = model_store.load_model()
+            if m is not None and s is not None:
+                with self._lock:
+                    self._model = m
+                    self._scaler = s
+                    self._model_version = version
+                    self._model_trained_at = time.time()
+                log.info("ueba.model_bootstrapped_from_s3", version=version)
+            else:
+                log.info("ueba.no_persisted_model", msg="Starting with fresh model")
+        except Exception as exc:
+            log.warning("ueba.bootstrap_failed", error=str(exc))
 
     # ── Profile management ─────────────────────────────────────────────────────
 
@@ -270,11 +292,22 @@ class UEBAModelStore:
             cohort_size=len(established),
             total_events=self._total_events,
         )
+        # Persist model to S3 and update Redis version key (non-blocking)
+        try:
+            version = model_store.save_model(model, scaler)
+            if version:
+                self._model_version = version
+                log.info("ueba.model_persisted", version=version)
+        except Exception as exc:
+            log.warning("ueba.model_persist_failed", error=str(exc))
 
     def force_retrain(self) -> bool:
         with self._lock:
             self._retrain_model()
             return self._model is not None
+
+    def model_version(self) -> Optional[str]:
+        return self._model_version
 
     # ── Scoring ────────────────────────────────────────────────────────────────
 
@@ -580,7 +613,11 @@ async def force_retrain(
 ) -> Dict[str, Any]:
     trained = store.force_retrain()
     stats = store.cohort_stats()
-    return {"trained": trained, **stats}
+    return {
+        "trained": trained,
+        "model_version": store.model_version(),
+        **stats,
+    }
 
 
 @router.get(
