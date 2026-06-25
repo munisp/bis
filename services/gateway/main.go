@@ -1539,10 +1539,16 @@ func newRouter() http.Handler {
 	mux.HandleFunc("/v1/nip/transfer", protected(handleNIPTransfer))
 
 	// ── Stablecoin (USDC / cUSD) endpoints ────────────────────────────────────
-	mux.HandleFunc("/v1/stablecoin/transfer", protected(handleStablecoinTransfer))
-	mux.HandleFunc("/v1/stablecoin/balance/", protected(handleStablecoinBalance))
-	mux.HandleFunc("/v1/stablecoin/quote", protected(handleStablecoinQuote))
-	mux.HandleFunc("/v1/stablecoin/history/", protected(handleStablecoinHistory))
+	// Transfer uses per-account sliding-window rate limiting (irreversible on-chain ops).
+	// Read-only endpoints use a higher read-RPM limit.
+	mux.Handle("/v1/stablecoin/transfer",
+		StablecoinTransferRateLimitMiddleware(http.HandlerFunc(protected(handleStablecoinTransfer))))
+	mux.Handle("/v1/stablecoin/balance/",
+		StablecoinReadRateLimitMiddleware(http.HandlerFunc(protected(handleStablecoinBalance))))
+	mux.Handle("/v1/stablecoin/quote",
+		StablecoinReadRateLimitMiddleware(http.HandlerFunc(protected(handleStablecoinQuote))))
+	mux.Handle("/v1/stablecoin/history/",
+		StablecoinReadRateLimitMiddleware(http.HandlerFunc(protected(handleStablecoinHistory))))
 
 	// ── Velocity alert ingest (from Rust fluvio-velocity sidecar) ─────────────
 	mux.HandleFunc("/v1/velocity/alert", protected(handleVelocityAlert))

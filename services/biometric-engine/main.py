@@ -31,6 +31,7 @@ Endpoints:
 
 import asyncio
 import base64
+import datetime
 import hashlib
 import io
 import json
@@ -150,6 +151,11 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         log.warning(f"Redis not available: {e} — caching disabled")
         _redis = None
+    # Inject shared Redis handle into PIN fallback module
+    try:
+        _pin_set_redis(_redis)
+    except NameError:
+        pass  # pin_fallback not yet imported (import happens after lifespan definition)
     yield
     log.info("BIS Biometric Engine shutting down")
     if _redis:
@@ -172,6 +178,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── PIN Fallback router ───────────────────────────────────────────────────────────────────────────
+from pin_fallback import pin_router, set_redis as _pin_set_redis
+app.include_router(pin_router)
 
 
 # ── Request/Response models ───────────────────────────────────────────────────

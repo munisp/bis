@@ -5,6 +5,7 @@
 pub mod insider_threat;
 pub mod kafka;
 pub mod otel;
+pub mod traceparent;
 #[cfg(test)]
 mod tests;
 
@@ -223,6 +224,7 @@ async fn health() -> Json<serde_json::Value> {
 
 async fn publish_event(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(req): Json<PublishRequest>,
 ) -> Json<PublishResponse> {
     let start = Instant::now();
@@ -238,13 +240,26 @@ async fn publish_event(
     };
     info!(event_id = %event.id, "Publishing event {:?}", event.event_type);
 
-    // ── OTel span for this publish ──────────────────────────────────────────
-    let span_builder = SpanBuilder::new("event.publish")
+    // ── W3C Trace Context extraction ────────────────────────────────────────
+    // Extract traceparent / tracestate from the incoming HTTP headers so that
+    // this span is linked to the upstream trace (Go gateway or Kafka producer).
+    let http_headers: Vec<(String, String)> = headers
+        .iter()
+        .filter_map(|(k, v)| {
+            v.to_str().ok().map(|val| (k.as_str().to_string(), val.to_string()))
+        })
+        .collect();
+    let trace_ctx = traceparent::TraceContext::from_http_headers(&http_headers);
+
+    // ── OTel span for this publish (linked to upstream trace) ───────────────
+    let span_builder = trace_ctx
+        .child_span("event.publish")
         .server()
         .attr_str("event.type",    format!("{:?}", req.event_type))
         .attr_str("event.subject", req.subject_ref.clone())
         .attr_str("event.source",  req.source_service.clone())
-        .attr_str("event.severity",format!("{:?}", req.severity));
+        .attr_str("event.severity",format!("{:?}", req.severity))
+        .attr_str("trace.upstream", if trace_ctx.is_remote { "true" } else { "false" });
 
     let _ = state.event_tx.send(event.clone());
     let sub_count = state

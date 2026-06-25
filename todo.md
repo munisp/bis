@@ -3001,3 +3001,61 @@
 - [x] Create Makefile with dev, infra-up, infra-down, infra-status, reset, and test targets
 - [x] Verify all middleware containers start healthy via bootstrap.sh
 - [x] Run full test suite against live middleware (not mocks)
+
+## Sprint: Next Steps & Remaining Gaps (v3)
+
+### CI Pipeline
+- [x] GitHub Actions workflow: .github/workflows/ci.yml — infra-up-core + pnpm test + tsc --noEmit
+- [x] Add Docker layer caching to CI workflow (actions/cache for docker layers)
+- [x] Add Go build + vet step to CI workflow
+- [x] Add Rust cargo check step to CI workflow
+
+### Infrastructure Health Watch
+- [x] Add wait_for_all_healthy() function to bootstrap.sh — polls all services every 5s, exits 0 only when all green
+- [x] Add --wait flag to bootstrap.sh to block until full stack is healthy
+- [x] Add Temporal + OpenSearch + Keycloak to --core-only bootstrap tier (with memory guard)
+
+### W3C Traceparent Propagation (Rust Event Processor)
+- [x] Parse traceparent header from Kafka message headers in event-processor
+- [x] Create child span linked to upstream trace context (W3C trace-context spec)
+- [x] Propagate trace context to BFF fan-out HTTP calls
+
+### AML Engine Dead-Letter Queue
+- [x] Add bis.aml.dlq Kafka topic to init-topics.sh
+- [x] Implement DLQ producer in aml-engine/src/main.rs — publish failed screenings to DLQ
+- [x] Add DLQ replay endpoint GET /dlq/replay in aml-engine axum server
+- [x] Add aml_dlq_total Prometheus counter
+
+### Keycloak bis-mobile OIDC Client
+- [x] Add bis-mobile client to infra/keycloak/bis-realm.json (PKCE public client, mobile redirect URIs)
+- [x] Add mobile-specific scopes: openid, profile, email, offline_access
+- [x] Wire KEYCLOAK_MOBILE_CLIENT_ID into docker-compose.yml gateway env
+
+### Incremental UEBA Retraining (Python ML Engine)
+- [x] Add river library to ml-enrichment/requirements.txt (online ML)
+- [x] Create services/ml-enrichment/app/services/kafka_ueba_consumer.py — Kafka consumer with incremental buffer
+- [x] Kafka consumer loop — process bis.audit events in real-time via UEBAModelStore.record_event()
+- [x] Redis key ueba:model:incremental:version for incremental model versioning
+- [x] Wired into FastAPI lifespan as background asyncio task
+
+### Fluvio Velocity — Real mTLS Cert Inspection
+- [x] Replace X-Client-Cert-CN header check with real X.509 DER cert inspection
+- [x] Add base64 crate to fluvio-velocity Cargo.toml
+- [x] Implement mtls_cert_inspect.rs with CN + SAN extraction and allow-list validation
+- [x] Validate peer cert against MTLS_ALLOWED_CNS env var list
+- [x] 7/7 unit tests passing (cargo test)
+
+### Stablecoin BFF Rate-Limiting
+- [x] Add sliding-window per-account rate limiter at Go API Gateway layer (stablecoin_ratelimit.go)
+- [x] Limit: 3 transfer requests per account per 15 minutes
+- [x] Return 429 with X-RateLimit-* headers
+- [x] 5/5 unit tests passing (go test)
+
+### Biometric PIN Fallback (Biometric Engine)
+- [x] Implement pin_fallback.py with Argon2id hashing and rate-limiting
+- [x] POST /pin/enrol — requires prior biometric verification gate
+- [x] POST /pin/verify — rate-limited (5 attempts / 15 min), locks on max failures
+- [x] DELETE /pin/{subject_ref} — revoke PIN
+- [x] GET /pin/{subject_ref}/status — check enrolment and lock status
+- [x] All PIN events published to bis.biometric.events Kafka topic
+- [x] 8/8 unit tests passing

@@ -21,12 +21,16 @@ use aml_engine::sdn_sync::{
 };
 
 mod metrics;
+mod dlq;
+
+use dlq::AmlDlq;
 
 // ─── App State ────────────────────────────────────────────────────────────────
 
 #[derive(Clone)]
 struct AppState {
     sdn_cache: SharedSdnCache,
+    dlq: Arc<AmlDlq>,
 }
 
 // ─── Handlers ─────────────────────────────────────────────────────────────────
@@ -61,6 +65,8 @@ async fn screen_transaction(
     State(state): State<AppState>,
     Json(req): Json<TransactionScreenRequest>,
 ) -> impl IntoResponse {
+    // Wrap screening in a catch — any panic or internal error sends to DLQ.
+    let req_clone = req.clone();
     let mut result = score_transaction(&req);
 
     // Augment with live SDN name-match check
@@ -111,7 +117,31 @@ async fn screen_transaction(
     }
 
     drop(cache);
+
+    // If the engine itself returned an internal error flag, push to DLQ for replay.
+    if result.flags.contains(&"internal_error".to_string()) {
+        state.dlq.enqueue(req_clone, "score_transaction returned internal_error flag".to_string());
+    }
+
     (StatusCode::OK, Json(result))
+}
+
+// ─── DLQ endpoints ────────────────────────────────────────────────────────────
+
+async fn dlq_stats(State(state): State<AppState>) -> impl IntoResponse {
+    Json(state.dlq.stats())
+}
+
+async fn dlq_list(State(state): State<AppState>) -> impl IntoResponse {
+    Json(state.dlq.list())
+}
+
+async fn dlq_metrics(State(state): State<AppState>) -> impl IntoResponse {
+    (
+        StatusCode::OK,
+        [(axum::http::header::CONTENT_TYPE, "text/plain; version=0.0.4")],
+        state.dlq.prometheus_metrics(),
+    )
 }
 
 async fn verify_chain(
@@ -265,7 +295,7 @@ async fn main() {
                 stream.recv().await;
                 info!("[AML] SIGHUP received — hot-reloading sanctions lists");
                 metrics::RELOAD_TOTAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                match fetch_and_update_sdn(Arc::clone(&cache_for_signal)).await {
+                match fetch_and_update_cache(&cache_for_signal).await {
                     Ok(count) => info!("[AML] Hot-reload complete: {} entries", count),
                     Err(e) => {
                         warn!("[AML] Hot-reload failed: {}", e);
@@ -276,7 +306,20 @@ async fn main() {
         });
     }
 
-    let state = AppState { sdn_cache };
+    // ── DLQ: initialise and start replay background task ──────────────────────
+    let dlq = Arc::new(AmlDlq::new());
+    {
+        let replay_url = format!(
+            "http://localhost:{}/screen",
+            std::env::var("PORT").unwrap_or_else(|_| "8085".to_string())
+        );
+        let api_key = std::env::var("BIS_GATEWAY_KEY")
+            .unwrap_or_else(|_| "dev-gateway-key-change-in-prod".to_string());
+        dlq.clone().start_replay_task(replay_url, api_key);
+        info!("[AML-DLQ] Dead-letter queue initialised (capacity 1000, replay every 30s)");
+    }
+
+    let state = AppState { sdn_cache, dlq };
 
     let app = Router::new()
         .route("/health", get(health))
@@ -284,6 +327,9 @@ async fn main() {
         .route("/evidence/verify-chain", post(verify_chain))
         .route("/sanctions/status", get(sanctions_status))
         .route("/metrics", get(prometheus_metrics))
+        .route("/dlq/stats", get(dlq_stats))
+        .route("/dlq/list", get(dlq_list))
+        .route("/dlq/metrics", get(dlq_metrics))
         .with_state(state)
         .layer(CorsLayer::permissive());
 

@@ -40,6 +40,9 @@ dotenvy = "0.15"
 # UUID generation for alert IDs
 uuid = { version = "1", features = ["v4"] }
 
+# Base64 decoding for X-Peer-Cert-DER header (mTLS cert inspection)
+base64 = "0.22"
+
 [dev-dependencies]
 tokio-test = "0.4"
 

@@ -137,6 +137,17 @@ impl SpanBuilder {
         self
     }
 
+    /// Override the auto-generated span ID (used for W3C traceparent propagation).
+    pub fn with_span_id(mut self, span_id: impl Into<String>) -> Self {
+        self.span_id = span_id.into();
+        self
+    }
+
+    /// Return the current span ID (needed to build downstream traceparent header).
+    pub fn span_id(&self) -> &str {
+        &self.span_id
+    }
+
     pub fn attr(mut self, key: impl Into<String>, value: OtlpAnyValue) -> Self {
         self.attributes.push(OtlpAttribute { key: key.into(), value });
         self

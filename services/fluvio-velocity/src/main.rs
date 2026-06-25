@@ -1,3 +1,6 @@
+mod mtls_cert_inspect;
+use mtls_cert_inspect::{inspect_peer_cert, peer_cn_from_header};
+
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -231,14 +234,42 @@ async fn handle_event(
     State(state): State<AppState>,
     Json(req): Json<PaymentEventReq>,
 ) -> impl IntoResponse {
-    // mTLS peer CN check
+    // mTLS peer certificate inspection.
+    // Production: reads X-Peer-Cert-DER (base64 DER) injected by TLS terminator,
+    // parses the real certificate CN/SANs, and validates against the allow-list.
+    // Dev/test fallback: trusts X-Peer-CN header when X-Peer-Cert-DER is absent.
     if state.config.mtls_enabled {
-        let cn = headers.get("X-Peer-CN")
-            .and_then(|v| v.to_str().ok()).unwrap_or("");
-        if !state.config.mtls_allowed_cns.iter().any(|a| a == cn) {
-            warn!(peer_cn = %cn, "mTLS peer CN not allowed");
+        let allowed = if let Some(der_b64) = headers.get("X-Peer-Cert-DER")
+            .and_then(|v| v.to_str().ok())
+        {
+            use base64::Engine as _;
+            match base64::engine::general_purpose::STANDARD.decode(der_b64) {
+                Ok(der) => {
+                    let (info, ok) = inspect_peer_cert(&der, &state.config.mtls_allowed_cns);
+                    if ok {
+                        info!(identity = %info.identity(), "mTLS peer cert accepted");
+                    } else {
+                        warn!(identity = %info.identity(), "mTLS peer cert rejected");
+                    }
+                    ok
+                }
+                Err(_) => {
+                    warn!("X-Peer-Cert-DER header present but not valid base64 — rejecting");
+                    false
+                }
+            }
+        } else {
+            // Header-based fallback (dev/test only — not for production)
+            let cn = peer_cn_from_header(&headers).unwrap_or_default();
+            let ok = state.config.mtls_allowed_cns.iter().any(|a| a.as_str() == cn.as_str());
+            if !ok {
+                warn!(peer_cn = %cn, "mTLS peer CN (header fallback) not allowed");
+            }
+            ok
+        };
+        if !allowed {
             return (StatusCode::FORBIDDEN,
-                Json(serde_json::json!({"error": "peer CN not allowed"})));
+                Json(serde_json::json!({"error": "peer certificate not allowed"})));
         }
     }
     EVENTS_TOTAL.fetch_add(1, Ordering::Relaxed);
