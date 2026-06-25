@@ -94,7 +94,7 @@ services:
       ZOOKEEPER_TICK_TIME: 2000
     networks: [bis-net]
     healthcheck:
-      test: ["CMD-SHELL", "echo ruok | nc localhost 2181 | grep imok"]
+      test: ["CMD-SHELL", "echo srvr | nc localhost 2181 | grep -q 'Zookeeper version'"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -1081,30 +1081,6 @@ services:
       interval: 15s
       timeout: 5s
       retries: 3
-
-  # ─── AML Engine (Rust — SDN screening + rule-based AML scoring) ──────────────
-  aml-engine:
-    build:
-      context: ./services/aml-engine
-      dockerfile: Dockerfile
-    container_name: bis-aml-engine
-    restart: unless-stopped
-    depends_on:
-      - kafka
-    environment:
-      AML_PORT: "8098"
-      KAFKA_BROKERS: kafka:9092
-      OFAC_REFRESH_INTERVAL_SECS: "3600"
-      RUST_LOG: info
-    ports:
-      - "8098:8098"
-    networks: [bis-net]
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8098/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
 
   # ─── Kafka Topic Init (creates all 32 BIS topics on first boot) ──────────────
   kafka-init:

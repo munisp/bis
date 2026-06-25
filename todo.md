@@ -2991,3 +2991,13 @@
 - [x] OpenTelemetry SDK integration (opentelemetry-otlp crate)
 - [x] Span export to Jaeger/Tempo via OTLP gRPC
 - [x] Trace context propagation from Kafka message headers
+
+## Docker Socket & Infrastructure Bootstrap (Devin/OpenHands Pattern)
+
+- [x] Install Docker Engine in sandbox and verify /var/run/docker.sock is accessible
+- [x] Create infra/bootstrap.sh — ordered docker-compose up with health-gate waits for all middleware
+- [x] Create .devcontainer/devcontainer.json with Docker socket mount for OpenHands/Devin
+- [x] Create .devcontainer/Dockerfile with all required toolchains (Go, Rust, Python, Node, pnpm)
+- [x] Create Makefile with dev, infra-up, infra-down, infra-status, reset, and test targets
+- [x] Verify all middleware containers start healthy via bootstrap.sh
+- [x] Run full test suite against live middleware (not mocks)

@@ -1,0 +1,139 @@
+{
+  "name": "BIS Platform Dev Container",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+
+  // ── Docker-in-Docker via socket mount ─────────────────────────────────────
+  // This is the Devin/OpenHands pattern: mount the host Docker socket so the
+  // agent can spin up infrastructure containers directly from inside the dev
+  // container without a nested Docker daemon.
+  "mounts": [
+    "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind"
+  ],
+
+  // ── Resource limits ───────────────────────────────────────────────────────
+  "hostRequirements": {
+    "cpus": 4,
+    "memory": "8gb",
+    "storage": "32gb"
+  },
+
+  // ── Port forwarding ───────────────────────────────────────────────────────
+  // All middleware and application ports forwarded for local access
+  "forwardPorts": [
+    3000,   // Node.js BFF / Grafana
+    5432,   // PostgreSQL
+    6379,   // Redis
+    7233,   // Temporal gRPC
+    8080,   // Keycloak
+    8081,   // Go API Gateway
+    8088,   // Temporal UI
+    9090,   // Prometheus
+    9092,   // Kafka
+    9200,   // OpenSearch
+    9476,   // Permify
+    11434,  // Ollama
+    5601    // OpenSearch Dashboards
+  ],
+
+  "portsAttributes": {
+    "3000":  { "label": "BFF / Grafana",           "onAutoForward": "notify" },
+    "8081":  { "label": "Go API Gateway",           "onAutoForward": "notify" },
+    "8080":  { "label": "Keycloak",                 "onAutoForward": "silent" },
+    "8088":  { "label": "Temporal UI",              "onAutoForward": "silent" },
+    "9090":  { "label": "Prometheus",               "onAutoForward": "silent" },
+    "9200":  { "label": "OpenSearch",               "onAutoForward": "silent" },
+    "5601":  { "label": "OpenSearch Dashboards",    "onAutoForward": "silent" }
+  },
+
+  // ── Lifecycle hooks ───────────────────────────────────────────────────────
+  "onCreateCommand": "pnpm install --frozen-lockfile",
+
+  // Bootstrap all infrastructure on first attach — mirrors Devin's pattern
+  // of creating infrastructure before running application code.
+  "postStartCommand": "bash -c 'cd /workspace && ./infra/bootstrap.sh --core-only 2>&1 | tee .infra-logs/devcontainer-bootstrap.log || true'",
+
+  "postAttachCommand": "bash -c 'cd /workspace && pnpm db:push 2>&1 | tail -5 && echo \"DB schema up to date\"'",
+
+  // ── VS Code extensions ────────────────────────────────────────────────────
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        // Go
+        "golang.go",
+        // Rust
+        "rust-lang.rust-analyzer",
+        "vadimcn.vscode-lldb",
+        // Python
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        // TypeScript / Node
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        // Docker
+        "ms-azuretools.vscode-docker",
+        // Database
+        "mtxr.sqltools",
+        "mtxr.sqltools-driver-pg",
+        // Kafka
+        "jeppeandersen.vscode-kafka",
+        // Temporal
+        "temporalio.vscode-temporal",
+        // General
+        "eamodio.gitlens",
+        "usernamehw.errorlens",
+        "streetsidesoftware.code-spell-checker"
+      ],
+      "settings": {
+        "editor.formatOnSave": true,
+        "editor.defaultFormatter": "esbenp.prettier-vscode",
+        "[go]": { "editor.defaultFormatter": "golang.go" },
+        "[rust]": { "editor.defaultFormatter": "rust-lang.rust-analyzer" },
+        "[python]": { "editor.defaultFormatter": "ms-python.python" },
+        "go.toolsManagement.autoUpdate": true,
+        "rust-analyzer.checkOnSave.command": "clippy",
+        "python.defaultInterpreterPath": "/usr/bin/python3",
+        "terminal.integrated.defaultProfile.linux": "bash",
+        // Docker socket path for Docker extension
+        "docker.host": "unix:///var/run/docker.sock",
+        // Temporal workspace
+        "temporal.address": "localhost:7233",
+        "temporal.namespace": "bis"
+      }
+    },
+
+    // ── OpenHands / Devin agent configuration ─────────────────────────────
+    // These settings are read by OpenHands when it attaches to this container.
+    "openhands": {
+      "agent": "CodeActAgent",
+      "llm_model": "claude-sonnet-4-5",
+      "sandbox_type": "local",
+      // The agent must run infra/bootstrap.sh before any code execution
+      "init_script": "./infra/bootstrap.sh --core-only",
+      "workspace_mount_path": "/workspace",
+      "docker_socket": "/var/run/docker.sock"
+    }
+  },
+
+  // ── Environment variables ─────────────────────────────────────────────────
+  "containerEnv": {
+    "DATABASE_URL":     "postgresql://bis_user:bis_secure_2026@localhost:5432/bis_db",
+    "REDIS_URL":        "redis://localhost:6379",
+    "KAFKA_BROKERS":    "localhost:9092",
+    "KEYCLOAK_URL":     "http://localhost:8080",
+    "TEMPORAL_HOST":    "localhost:7233",
+    "TEMPORAL_NAMESPACE": "bis",
+    "OPENSEARCH_URL":   "http://localhost:9200",
+    "GATEWAY_URL":      "http://localhost:8081",
+    "NODE_ENV":         "development",
+    "RUST_LOG":         "info",
+    "BLOCKCHAIN_SIMULATE": "true"
+  },
+
+  // ── Remote user ───────────────────────────────────────────────────────────
+  "remoteUser": "bis",
+  "workspaceFolder": "/workspace",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached"
+}

@@ -5,13 +5,47 @@
 .PHONY: help setup dev build test test-all test-go test-rust test-python \
         test-ts lint clean docker-up docker-down docker-logs docker-ps \
         db-push db-seed smoke-test services-build services-test \
-        waf-up waf-down waf-logs waf-status waf-test waf-policy-reload
+        waf-up waf-down waf-logs waf-status waf-test waf-policy-reload \
+        infra-up infra-up-core infra-down infra-reset infra-status health dev-all
 
 SHELL := /bin/bash
 SERVICES_DIR := services
 GO_SERVICES := gateway case-manager lex-intake ollama-adapter payment-rails
 RUST_SERVICES := event-processor event-emitter aml-engine
 PYTHON_SERVICES := risk-engine lex-validator ml-enrichment biometric-engine risk-scoring
+
+# ─── Infrastructure Bootstrap (Devin/OpenHands pattern) ─────────────────────
+# Docker socket must be accessible: /var/run/docker.sock
+# These targets mirror how Devin/OpenHands creates infrastructure first.
+infra-up: ## Spin up ALL middleware containers (Devin/OpenHands entry point)
+	@./infra/bootstrap.sh
+
+infra-up-core: ## Spin up core middleware only (postgres, redis, kafka, keycloak, temporal)
+	@./infra/bootstrap.sh --core-only
+
+infra-down: ## Stop all containers (data volumes preserved)
+	@docker compose down
+
+infra-reset: ## DESTRUCTIVE: stop containers + delete all volumes
+	@./infra/bootstrap.sh --reset
+
+infra-status: ## Show status of all running containers
+	@docker compose ps --format "table {{.Name}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null || docker compose ps
+
+health: ## Check health of all running middleware
+	@echo "Checking middleware health..."
+	@echo -n "  PostgreSQL:  " && PGPASSWORD=bis_secure_2026 psql -h localhost -U bis_user -d bis_db -c "SELECT 1" -q 2>/dev/null | grep -q "1 row" && echo "OK" || echo "DOWN"
+	@echo -n "  Redis:       " && redis-cli ping 2>/dev/null | grep -q PONG && echo "OK" || echo "DOWN"
+	@echo -n "  Keycloak:    " && curl -sf http://localhost:8080/health/ready 2>/dev/null | grep -q UP && echo "OK" || echo "UNKNOWN"
+	@echo -n "  Temporal:    " && curl -sf http://localhost:7233/api/v1/namespaces 2>/dev/null | grep -q namespaces && echo "OK" || echo "UNKNOWN"
+	@echo -n "  OpenSearch:  " && curl -sf http://localhost:9200/_cluster/health 2>/dev/null | grep -qE '"status":"(green|yellow)"' && echo "OK" || echo "UNKNOWN"
+
+dev-all: ## Start BFF + Go/Rust/Python services in tmux (requires tmux)
+	@command -v tmux >/dev/null 2>&1 || (echo "tmux required: sudo apt install tmux" && exit 1)
+	@tmux new-session -d -s bis -n bff 'make dev' \; \
+	  new-window -t bis -n gateway 'cd services/gateway && go run . 2>&1' \; \
+	  new-window -t bis -n ml 'cd services/ml-enrichment && uvicorn app.main:app --reload 2>&1' \; \
+	  attach-session -t bis
 
 # ─── Help ─────────────────────────────────────────────────────────────────────
 help: ## Show this help
