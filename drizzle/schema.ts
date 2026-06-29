@@ -2670,3 +2670,215 @@ export const fieldVisitReports = pgTable("field_visit_reports", {
 }));
 export type FieldVisitReport       = typeof fieldVisitReports.$inferSelect;
 export type InsertFieldVisitReport = typeof fieldVisitReports.$inferInsert;
+
+// ─── Nigerian Law Enforcement Criminal Records ────────────────────────────────
+
+export const lawEnforcementAgencyEnum = pgEnum("law_enforcement_agency", [
+  "npf",          // Nigeria Police Force (federal)
+  "efcc",         // Economic and Financial Crimes Commission
+  "icpc",         // Independent Corrupt Practices Commission
+  "dss",          // Department of State Services
+  "ndlea",        // National Drug Law Enforcement Agency
+  "nscdc",        // Nigeria Security and Civil Defence Corps
+  "frsc",         // Federal Road Safety Corps
+  "custom_state", // State-level police command (specify in stateCommand field)
+]);
+
+export const criminalRequestStatusEnum = pgEnum("criminal_request_status", [
+  "draft",
+  "submitted",
+  "acknowledged",
+  "processing",
+  "completed",
+  "rejected",
+  "expired",
+]);
+
+export const offenceCategoryEnum = pgEnum("offence_category", [
+  "violent",       // murder, assault, armed robbery
+  "financial",     // fraud, money laundering, advance fee
+  "drug",          // trafficking, possession, cultivation
+  "cybercrime",    // hacking, identity theft, online fraud
+  "terrorism",     // terrorism, insurgency, extremism
+  "corruption",    // bribery, embezzlement, abuse of office
+  "traffic",       // dangerous driving, DUI, vehicular manslaughter
+  "sexual",        // rape, sexual assault, trafficking
+  "property",      // theft, burglary, arson
+  "other",
+]);
+
+export const criminalVerdictEnum = pgEnum("criminal_verdict", [
+  "convicted",
+  "acquitted",
+  "discharged",
+  "pending",
+  "nolle_prosequi",
+  "unknown",
+]);
+
+// ── criminal_record_requests ──────────────────────────────────────────────────
+// One request per agency per subject — tracks the lifecycle of a data request
+// sent to a Nigerian law enforcement agency.
+
+export const criminalRecordRequests = pgTable("criminal_record_requests", {
+  id:               serial("id").primaryKey(),
+  requestRef:       varchar("requestRef", { length: 32 }).notNull().unique(),
+  tenantId:         integer("tenantId"),
+  investigationRef: varchar("investigationRef", { length: 32 }),
+  // Subject identifiers
+  subjectName:      text("subjectName").notNull(),
+  subjectType:      subjectTypeEnum("subjectType").default("individual").notNull(),
+  nin:              varchar("nin", { length: 20 }),
+  bvn:              varchar("bvn", { length: 20 }),
+  dob:              date("dob"),
+  gender:           varchar("gender", { length: 16 }),
+  nationality:      varchar("nationality", { length: 64 }).default("Nigerian"),
+  // Agency details
+  agency:           lawEnforcementAgencyEnum("agency").notNull(),
+  stateCommand:     varchar("stateCommand", { length: 64 }),   // e.g. "Lagos State Police Command"
+  agencyRefNumber:  varchar("agencyRefNumber", { length: 64 }), // agency's own reference
+  contactOfficer:   text("contactOfficer"),
+  contactEmail:     varchar("contactEmail", { length: 320 }),
+  contactPhone:     varchar("contactPhone", { length: 32 }),
+  // Request metadata
+  priority:         priorityEnum("priority").default("medium").notNull(),
+  status:           criminalRequestStatusEnum("status").default("draft").notNull(),
+  purpose:          text("purpose"),                           // reason for request
+  requestedChecks:  json("requestedChecks").$type<string[]>().default([]), // e.g. ["arrest", "conviction", "warrant"]
+  // Timestamps
+  submittedAt:      timestamp("submittedAt"),
+  acknowledgedAt:   timestamp("acknowledgedAt"),
+  processingAt:     timestamp("processingAt"),
+  completedAt:      timestamp("completedAt"),
+  rejectedAt:       timestamp("rejectedAt"),
+  rejectedReason:   text("rejectedReason"),
+  expiresAt:        timestamp("expiresAt"),
+  // Tracking
+  requestedBy:      integer("requestedBy").references(() => users.id, { onDelete: "set null" }),
+  assignedTo:       integer("assignedTo").references(() => users.id, { onDelete: "set null" }),
+  notes:            text("notes"),
+  createdAt:        timestamp("createdAt").defaultNow().notNull(),
+  updatedAt:        timestamp("updatedAt").defaultNow().notNull(),
+}, (t) => ({
+  crr_ref_idx:  index("crr_ref_idx").on(t.requestRef),
+  crr_inv_idx:  index("crr_inv_idx").on(t.investigationRef),
+  crr_nin_idx:  index("crr_nin_idx").on(t.nin),
+  crr_stat_idx: index("crr_stat_idx").on(t.status),
+  crr_agcy_idx: index("crr_agcy_idx").on(t.agency),
+}));
+export type CriminalRecordRequest       = typeof criminalRecordRequests.$inferSelect;
+export type InsertCriminalRecordRequest = typeof criminalRecordRequests.$inferInsert;
+
+// ── criminal_records ──────────────────────────────────────────────────────────
+// Individual criminal record entries returned by an agency in response to a
+// criminal_record_requests entry, or ingested manually by an analyst.
+
+export const criminalRecords = pgTable("criminal_records", {
+  id:                serial("id").primaryKey(),
+  recordRef:         varchar("recordRef", { length: 32 }).notNull().unique(),
+  requestRef:        varchar("requestRef", { length: 32 }),    // FK to criminalRecordRequests
+  investigationRef:  varchar("investigationRef", { length: 32 }),
+  tenantId:          integer("tenantId"),
+  // Agency
+  agency:            lawEnforcementAgencyEnum("agency").notNull(),
+  agencyRef:         varchar("agencyRef", { length: 64 }),      // agency's internal case/file ref
+  stateCommand:      varchar("stateCommand", { length: 64 }),
+  // Subject
+  subjectName:       text("subjectName").notNull(),
+  nin:               varchar("nin", { length: 20 }),
+  dob:               date("dob"),
+  gender:            varchar("gender", { length: 16 }),
+  nationality:       varchar("nationality", { length: 64 }),
+  aliases:           json("aliases").$type<string[]>().default([]),
+  // Offence
+  offenceCategory:   offenceCategoryEnum("offenceCategory").notNull(),
+  offenceCode:       varchar("offenceCode", { length: 32 }),    // e.g. "S.319 CC"
+  offenceDescription: text("offenceDescription").notNull(),
+  offenceDate:       date("offenceDate"),
+  offenceLocation:   text("offenceLocation"),
+  offenceState:      varchar("offenceState", { length: 64 }),
+  // Arrest & charge
+  dateArrested:      date("dateArrested"),
+  arrestingStation:  text("arrestingStation"),
+  dateCharged:       date("dateCharged"),
+  chargingAuthority: text("chargingAuthority"),
+  // Court
+  courtName:         text("courtName"),
+  caseNumber:        varchar("caseNumber", { length: 64 }),
+  verdict:           criminalVerdictEnum("verdict").default("unknown"),
+  dateConvicted:     date("dateConvicted"),
+  sentence:          text("sentence"),                          // e.g. "5 years IHL"
+  dateReleased:      date("dateReleased"),
+  // Warrant
+  outstandingWarrant: boolean("outstandingWarrant").default(false),
+  warrantDetails:    text("warrantDetails"),
+  warrantIssuedBy:   text("warrantIssuedBy"),
+  warrantIssuedAt:   date("warrantIssuedAt"),
+  // Data quality
+  dataSource:        varchar("dataSource", { length: 64 }).default("agency_response"), // agency_response | manual_entry | api_integration
+  confidence:        real("confidence"),                        // 0–1 confidence score
+  verifiedBy:        integer("verifiedBy").references(() => users.id, { onDelete: "set null" }),
+  verifiedAt:        timestamp("verifiedAt"),
+  rawPayload:        json("rawPayload"),                        // original API/form payload
+  // Tracking
+  recordedBy:        integer("recordedBy").references(() => users.id, { onDelete: "set null" }),
+  createdAt:         timestamp("createdAt").defaultNow().notNull(),
+  updatedAt:         timestamp("updatedAt").defaultNow().notNull(),
+}, (t) => ({
+  cr_ref_idx:   index("cr_ref_idx").on(t.recordRef),
+  cr_req_idx:   index("cr_req_idx").on(t.requestRef),
+  cr_inv_idx:   index("cr_inv_idx").on(t.investigationRef),
+  cr_nin_idx:   index("cr_nin_idx").on(t.nin),
+  cr_agcy_idx:  index("cr_agcy_idx").on(t.agency),
+  cr_cat_idx:   index("cr_cat_idx").on(t.offenceCategory),
+  cr_warr_idx:  index("cr_warr_idx").on(t.outstandingWarrant),
+}));
+export type CriminalRecord       = typeof criminalRecords.$inferSelect;
+export type InsertCriminalRecord = typeof criminalRecords.$inferInsert;
+
+// ── criminal_record_attachments ───────────────────────────────────────────────
+// Documents attached to a criminal record or request (police extracts, court
+// judgements, warrant copies, agency letters).
+
+export const criminalRecordAttachments = pgTable("criminal_record_attachments", {
+  id:           serial("id").primaryKey(),
+  attachmentRef: varchar("attachmentRef", { length: 32 }).notNull().unique(),
+  recordRef:    varchar("recordRef", { length: 32 }),
+  requestRef:   varchar("requestRef", { length: 32 }),
+  tenantId:     integer("tenantId"),
+  fileName:     text("fileName").notNull(),
+  fileUrl:      text("fileUrl").notNull(),
+  fileKey:      text("fileKey").notNull(),
+  mimeType:     varchar("mimeType", { length: 128 }),
+  fileSize:     integer("fileSize"),
+  documentType: varchar("documentType", { length: 64 }), // police_extract | court_judgement | warrant | agency_letter | other
+  description:  text("description"),
+  uploadedBy:   integer("uploadedBy").references(() => users.id, { onDelete: "set null" }),
+  createdAt:    timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  cra_rec_idx: index("cra_rec_idx").on(t.recordRef),
+  cra_req_idx: index("cra_req_idx").on(t.requestRef),
+}));
+export type CriminalRecordAttachment       = typeof criminalRecordAttachments.$inferSelect;
+export type InsertCriminalRecordAttachment = typeof criminalRecordAttachments.$inferInsert;
+
+// ── criminal_record_audit ─────────────────────────────────────────────────────
+// Immutable audit trail for every status change and action on requests/records.
+
+export const criminalRecordAudit = pgTable("criminal_record_audit", {
+  id:         serial("id").primaryKey(),
+  auditRef:   varchar("auditRef", { length: 32 }).notNull().unique(),
+  requestRef: varchar("requestRef", { length: 32 }),
+  recordRef:  varchar("recordRef", { length: 32 }),
+  tenantId:   integer("tenantId"),
+  action:     varchar("action", { length: 64 }).notNull(),  // submitted | acknowledged | record_ingested | status_changed | attachment_uploaded | verified
+  actorId:    integer("actorId").references(() => users.id, { onDelete: "set null" }),
+  actorName:  text("actorName"),
+  details:    json("details"),
+  createdAt:  timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  cra2_req_idx: index("cra2_req_idx").on(t.requestRef),
+  cra2_rec_idx: index("cra2_rec_idx").on(t.recordRef),
+}));
+export type CriminalRecordAuditEntry       = typeof criminalRecordAudit.$inferSelect;
+export type InsertCriminalRecordAuditEntry = typeof criminalRecordAudit.$inferInsert;

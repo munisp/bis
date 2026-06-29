@@ -94,6 +94,10 @@ import {
   screeningAiSummaries,
   corporateScreeningProfiles,
   fieldVisitReports,
+  criminalRecordRequests,
+  criminalRecords,
+  criminalRecordAttachments,
+  criminalRecordAudit,
 } from "../drizzle/schema";
 import {
   getDashboardStats,
@@ -6191,6 +6195,462 @@ const pushRouter = router({
       return { ...result, retried: userIds.length };
     }),
 });
+// ─── Criminal Records Router ──────────────────────────────────────────────────
+// Manages Nigerian law enforcement data collection requests and criminal records.
+
+const criminalRecordsRouter = router({
+
+  // ── Submit a new data collection request to a law enforcement agency ──────
+  submitRequest: writeProcedure
+    .input(z.object({
+      investigationRef:  z.string().optional(),
+      subjectName:       z.string().min(2),
+      subjectType:       z.enum(["individual", "corporate"]).default("individual"),
+      nin:               z.string().optional(),
+      bvn:               z.string().optional(),
+      dob:               z.string().optional(),
+      gender:            z.string().optional(),
+      nationality:       z.string().default("Nigerian"),
+      agency:            z.enum(["npf", "efcc", "icpc", "dss", "ndlea", "nscdc", "frsc", "custom_state"]),
+      stateCommand:      z.string().optional(),
+      contactOfficer:    z.string().optional(),
+      contactEmail:      z.string().email().optional(),
+      contactPhone:      z.string().optional(),
+      priority:          z.enum(["low", "medium", "high", "critical"]).default("medium"),
+      purpose:           z.string().optional(),
+      requestedChecks:   z.array(z.string()).default(["arrest", "conviction", "warrant"]),
+      notes:             z.string().optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      const requestRef = generateRef("CRR");
+      const expiresAt = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000); // 90 days
+      await db.insert(criminalRecordRequests).values({
+        requestRef,
+        tenantId:         ctx.tenantId ?? null,
+        investigationRef: input.investigationRef ?? null,
+        subjectName:      input.subjectName,
+        subjectType:      input.subjectType,
+        nin:              input.nin ?? null,
+        bvn:              input.bvn ?? null,
+        dob:              input.dob ?? null,
+        gender:           input.gender ?? null,
+        nationality:      input.nationality,
+        agency:           input.agency,
+        stateCommand:     input.stateCommand ?? null,
+        contactOfficer:   input.contactOfficer ?? null,
+        contactEmail:     input.contactEmail ?? null,
+        contactPhone:     input.contactPhone ?? null,
+        priority:         input.priority,
+        status:           "submitted",
+        purpose:          input.purpose ?? null,
+        requestedChecks:  input.requestedChecks as any,
+        notes:            input.notes ?? null,
+        submittedAt:      new Date(),
+        expiresAt,
+        requestedBy:      ctx.user!.id,
+      });
+      // Audit trail
+      await db.insert(criminalRecordAudit).values({
+        auditRef:   generateRef("CRA"),
+        requestRef,
+        tenantId:   ctx.tenantId ?? null,
+        action:     "submitted",
+        actorId:    ctx.user!.id,
+        actorName:  ctx.user!.name ?? ctx.user!.email ?? "unknown",
+        details:    { agency: input.agency, subjectName: input.subjectName, requestedChecks: input.requestedChecks } as any,
+      });
+      // Notify owner
+      await notifyOwner({
+        title: `New Criminal Record Request — ${input.agency.toUpperCase()}`,
+        content: `Request ${requestRef} submitted for ${input.subjectName} to ${input.agency.toUpperCase()}. Priority: ${input.priority}.`,
+      }).catch(() => {});
+      return { requestRef, status: "submitted" };
+    }),
+
+  // ── List requests with filters ────────────────────────────────────────────
+  listRequests: protectedProcedure
+    .input(z.object({
+      investigationRef: z.string().optional(),
+      agency:           z.string().optional(),
+      status:           z.string().optional(),
+      search:           z.string().optional(),
+      limit:            z.number().min(1).max(200).default(50),
+      offset:           z.number().default(0),
+    }))
+    .query(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) return { items: [], total: 0 };
+      const conditions: any[] = [];
+      if (ctx.tenantId !== null) conditions.push(eq(criminalRecordRequests.tenantId, ctx.tenantId));
+      if (input.investigationRef) conditions.push(eq(criminalRecordRequests.investigationRef, input.investigationRef));
+      if (input.agency) conditions.push(eq(criminalRecordRequests.agency, input.agency as any));
+      if (input.status) conditions.push(eq(criminalRecordRequests.status, input.status as any));
+      if (input.search) conditions.push(ilike(criminalRecordRequests.subjectName, `%${input.search}%`));
+      const where = conditions.length > 0 ? and(...conditions) : undefined;
+      const [items, countResult] = await Promise.all([
+        db.select().from(criminalRecordRequests).where(where).orderBy(desc(criminalRecordRequests.createdAt)).limit(input.limit).offset(input.offset),
+        db.select({ count: sql<number>`count(*)` }).from(criminalRecordRequests).where(where),
+      ]);
+      return { items, total: Number(countResult[0]?.count ?? 0) };
+    }),
+
+  // ── Get single request with its records and audit trail ──────────────────
+  getRequest: protectedProcedure
+    .input(z.object({ requestRef: z.string() }))
+    .query(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) return null;
+      const conditions: any[] = [eq(criminalRecordRequests.requestRef, input.requestRef)];
+      if (ctx.tenantId !== null) conditions.push(eq(criminalRecordRequests.tenantId, ctx.tenantId));
+      const [request, records, attachments, auditEntries] = await Promise.all([
+        db.select().from(criminalRecordRequests).where(and(...conditions)).limit(1),
+        db.select().from(criminalRecords).where(eq(criminalRecords.requestRef, input.requestRef)).orderBy(desc(criminalRecords.createdAt)),
+        db.select().from(criminalRecordAttachments).where(eq(criminalRecordAttachments.requestRef, input.requestRef)).orderBy(desc(criminalRecordAttachments.createdAt)),
+        db.select().from(criminalRecordAudit).where(eq(criminalRecordAudit.requestRef, input.requestRef)).orderBy(asc(criminalRecordAudit.createdAt)),
+      ]);
+      if (!request[0]) return null;
+      return { request: request[0], records, attachments, auditTrail: auditEntries };
+    }),
+
+  // ── Update request status (acknowledge / processing / reject / expire) ────
+  updateRequestStatus: writeProcedure
+    .input(z.object({
+      requestRef:      z.string(),
+      status:          z.enum(["acknowledged", "processing", "completed", "rejected", "expired"]),
+      agencyRefNumber: z.string().optional(),
+      contactOfficer:  z.string().optional(),
+      rejectedReason:  z.string().optional(),
+      notes:           z.string().optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      const now = new Date();
+      const updates: Record<string, any> = {
+        status:    input.status,
+        updatedAt: now,
+      };
+      if (input.agencyRefNumber) updates.agencyRefNumber = input.agencyRefNumber;
+      if (input.contactOfficer)  updates.contactOfficer  = input.contactOfficer;
+      if (input.rejectedReason)  updates.rejectedReason  = input.rejectedReason;
+      if (input.notes)           updates.notes           = input.notes;
+      if (input.status === "acknowledged") updates.acknowledgedAt = now;
+      if (input.status === "processing")   updates.processingAt   = now;
+      if (input.status === "completed")    updates.completedAt    = now;
+      if (input.status === "rejected")     updates.rejectedAt     = now;
+      await db.update(criminalRecordRequests).set(updates).where(eq(criminalRecordRequests.requestRef, input.requestRef));
+      await db.insert(criminalRecordAudit).values({
+        auditRef:   generateRef("CRA"),
+        requestRef: input.requestRef,
+        tenantId:   ctx.tenantId ?? null,
+        action:     "status_changed",
+        actorId:    ctx.user!.id,
+        actorName:  ctx.user!.name ?? ctx.user!.email ?? "unknown",
+        details:    { newStatus: input.status, reason: input.rejectedReason } as any,
+      });
+      return { success: true, status: input.status };
+    }),
+
+  // ── Ingest a criminal record (manual entry or agency response) ────────────
+  ingestRecord: writeProcedure
+    .input(z.object({
+      requestRef:          z.string().optional(),
+      investigationRef:    z.string().optional(),
+      agency:              z.enum(["npf", "efcc", "icpc", "dss", "ndlea", "nscdc", "frsc", "custom_state"]),
+      agencyRef:           z.string().optional(),
+      stateCommand:        z.string().optional(),
+      subjectName:         z.string().min(2),
+      nin:                 z.string().optional(),
+      dob:                 z.string().optional(),
+      gender:              z.string().optional(),
+      nationality:         z.string().optional(),
+      aliases:             z.array(z.string()).default([]),
+      offenceCategory:     z.enum(["violent", "financial", "drug", "cybercrime", "terrorism", "corruption", "traffic", "sexual", "property", "other"]),
+      offenceCode:         z.string().optional(),
+      offenceDescription:  z.string().min(5),
+      offenceDate:         z.string().optional(),
+      offenceLocation:     z.string().optional(),
+      offenceState:        z.string().optional(),
+      dateArrested:        z.string().optional(),
+      arrestingStation:    z.string().optional(),
+      dateCharged:         z.string().optional(),
+      chargingAuthority:   z.string().optional(),
+      courtName:           z.string().optional(),
+      caseNumber:          z.string().optional(),
+      verdict:             z.enum(["convicted", "acquitted", "discharged", "pending", "nolle_prosequi", "unknown"]).default("unknown"),
+      dateConvicted:       z.string().optional(),
+      sentence:            z.string().optional(),
+      dateReleased:        z.string().optional(),
+      outstandingWarrant:  z.boolean().default(false),
+      warrantDetails:      z.string().optional(),
+      warrantIssuedBy:     z.string().optional(),
+      warrantIssuedAt:     z.string().optional(),
+      dataSource:          z.enum(["agency_response", "manual_entry", "api_integration"]).default("manual_entry"),
+      confidence:          z.number().min(0).max(1).optional(),
+      rawPayload:          z.record(z.string(), z.any()).optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      const recordRef = generateRef("CR");
+      await db.insert(criminalRecords).values({
+        recordRef,
+        requestRef:         input.requestRef ?? null,
+        investigationRef:   input.investigationRef ?? null,
+        tenantId:           ctx.tenantId ?? null,
+        agency:             input.agency,
+        agencyRef:          input.agencyRef ?? null,
+        stateCommand:       input.stateCommand ?? null,
+        subjectName:        input.subjectName,
+        nin:                input.nin ?? null,
+        dob:                input.dob ?? null,
+        gender:             input.gender ?? null,
+        nationality:        input.nationality ?? null,
+        aliases:            input.aliases as any,
+        offenceCategory:    input.offenceCategory,
+        offenceCode:        input.offenceCode ?? null,
+        offenceDescription: input.offenceDescription,
+        offenceDate:        input.offenceDate ?? null,
+        offenceLocation:    input.offenceLocation ?? null,
+        offenceState:       input.offenceState ?? null,
+        dateArrested:       input.dateArrested ?? null,
+        arrestingStation:   input.arrestingStation ?? null,
+        dateCharged:        input.dateCharged ?? null,
+        chargingAuthority:  input.chargingAuthority ?? null,
+        courtName:          input.courtName ?? null,
+        caseNumber:         input.caseNumber ?? null,
+        verdict:            input.verdict,
+        dateConvicted:      input.dateConvicted ?? null,
+        sentence:           input.sentence ?? null,
+        dateReleased:       input.dateReleased ?? null,
+        outstandingWarrant: input.outstandingWarrant,
+        warrantDetails:     input.warrantDetails ?? null,
+        warrantIssuedBy:    input.warrantIssuedBy ?? null,
+        warrantIssuedAt:    input.warrantIssuedAt ?? null,
+        dataSource:         input.dataSource,
+        confidence:         input.confidence ?? null,
+        rawPayload:         input.rawPayload as any ?? null,
+        recordedBy:         ctx.user!.id,
+      });
+      // If linked to a request, update request status to completed
+      if (input.requestRef) {
+        await db.update(criminalRecordRequests)
+          .set({ status: "completed", completedAt: new Date(), updatedAt: new Date() })
+          .where(eq(criminalRecordRequests.requestRef, input.requestRef));
+      }
+      // Audit trail
+      await db.insert(criminalRecordAudit).values({
+        auditRef:   generateRef("CRA"),
+        requestRef: input.requestRef ?? null,
+        recordRef,
+        tenantId:   ctx.tenantId ?? null,
+        action:     "record_ingested",
+        actorId:    ctx.user!.id,
+        actorName:  ctx.user!.name ?? ctx.user!.email ?? "unknown",
+        details:    { agency: input.agency, offenceCategory: input.offenceCategory, verdict: input.verdict, outstandingWarrant: input.outstandingWarrant } as any,
+      });
+      // If there's an outstanding warrant, fire a critical alert
+      if (input.outstandingWarrant) {
+        await db.insert(alerts).values({
+          tenantId:    ctx.tenantId ?? null,
+          type:        "risk_threshold",
+          severity:    "critical",
+          title:       `Outstanding Warrant — ${input.subjectName}`,
+          body:        `Criminal record ${recordRef} from ${input.agency.toUpperCase()} indicates an outstanding warrant. Agency ref: ${input.agencyRef ?? "N/A"}. ${input.warrantDetails ?? ""}`,
+          subjectRef:  input.investigationRef ?? input.requestRef ?? recordRef,
+          read:        false,
+        });
+      }
+      return { recordRef, status: "ingested" };
+    }),
+
+  // ── List criminal records ─────────────────────────────────────────────────
+  listRecords: protectedProcedure
+    .input(z.object({
+      investigationRef: z.string().optional(),
+      requestRef:       z.string().optional(),
+      agency:           z.string().optional(),
+      offenceCategory:  z.string().optional(),
+      outstandingWarrant: z.boolean().optional(),
+      search:           z.string().optional(),
+      limit:            z.number().min(1).max(200).default(50),
+      offset:           z.number().default(0),
+    }))
+    .query(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) return { items: [], total: 0 };
+      const conditions: any[] = [];
+      if (ctx.tenantId !== null) conditions.push(eq(criminalRecords.tenantId, ctx.tenantId));
+      if (input.investigationRef) conditions.push(eq(criminalRecords.investigationRef, input.investigationRef));
+      if (input.requestRef)       conditions.push(eq(criminalRecords.requestRef, input.requestRef));
+      if (input.agency)           conditions.push(eq(criminalRecords.agency, input.agency as any));
+      if (input.offenceCategory)  conditions.push(eq(criminalRecords.offenceCategory, input.offenceCategory as any));
+      if (input.outstandingWarrant !== undefined) conditions.push(eq(criminalRecords.outstandingWarrant, input.outstandingWarrant));
+      if (input.search)           conditions.push(ilike(criminalRecords.subjectName, `%${input.search}%`));
+      const where = conditions.length > 0 ? and(...conditions) : undefined;
+      const [items, countResult] = await Promise.all([
+        db.select().from(criminalRecords).where(where).orderBy(desc(criminalRecords.createdAt)).limit(input.limit).offset(input.offset),
+        db.select({ count: sql<number>`count(*)` }).from(criminalRecords).where(where),
+      ]);
+      return { items, total: Number(countResult[0]?.count ?? 0) };
+    }),
+
+  // ── Get single criminal record with attachments ───────────────────────────
+  getRecord: protectedProcedure
+    .input(z.object({ recordRef: z.string() }))
+    .query(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) return null;
+      const conditions: any[] = [eq(criminalRecords.recordRef, input.recordRef)];
+      if (ctx.tenantId !== null) conditions.push(eq(criminalRecords.tenantId, ctx.tenantId));
+      const [record, attachments] = await Promise.all([
+        db.select().from(criminalRecords).where(and(...conditions)).limit(1),
+        db.select().from(criminalRecordAttachments).where(eq(criminalRecordAttachments.recordRef, input.recordRef)).orderBy(desc(criminalRecordAttachments.createdAt)),
+      ]);
+      if (!record[0]) return null;
+      return { record: record[0], attachments };
+    }),
+
+  // ── Verify a criminal record (analyst sign-off) ───────────────────────────
+  verifyRecord: writeProcedure
+    .input(z.object({ recordRef: z.string() }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      await db.update(criminalRecords)
+        .set({ verifiedBy: ctx.user!.id, verifiedAt: new Date(), updatedAt: new Date() })
+        .where(eq(criminalRecords.recordRef, input.recordRef));
+      await db.insert(criminalRecordAudit).values({
+        auditRef:  generateRef("CRA"),
+        recordRef: input.recordRef,
+        tenantId:  ctx.tenantId ?? null,
+        action:    "verified",
+        actorId:   ctx.user!.id,
+        actorName: ctx.user!.name ?? ctx.user!.email ?? "unknown",
+        details:   {} as any,
+      });
+      return { success: true };
+    }),
+
+  // ── Upload attachment (police extract, court judgement, warrant copy) ─────
+  uploadAttachment: writeProcedure
+    .input(z.object({
+      requestRef:   z.string().optional(),
+      recordRef:    z.string().optional(),
+      fileName:     z.string(),
+      fileBase64:   z.string(),
+      mimeType:     z.string().default("application/pdf"),
+      documentType: z.string().default("other"),
+      description:  z.string().optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      const { randomBytes } = await import("crypto");
+      const suffix = randomBytes(4).toString("hex");
+      const fileKey = `criminal-records/${input.requestRef ?? input.recordRef ?? "misc"}/${suffix}-${input.fileName}`;
+      const buffer = Buffer.from(input.fileBase64, "base64");
+      const { url } = await storagePut(fileKey, buffer, input.mimeType);
+      const attachmentRef = generateRef("CRA");
+      await db.insert(criminalRecordAttachments).values({
+        attachmentRef,
+        recordRef:    input.recordRef ?? null,
+        requestRef:   input.requestRef ?? null,
+        tenantId:     ctx.tenantId ?? null,
+        fileName:     input.fileName,
+        fileUrl:      url,
+        fileKey,
+        mimeType:     input.mimeType,
+        fileSize:     buffer.length,
+        documentType: input.documentType,
+        description:  input.description ?? null,
+        uploadedBy:   ctx.user!.id,
+      });
+      await db.insert(criminalRecordAudit).values({
+        auditRef:   generateRef("CRA"),
+        requestRef: input.requestRef ?? null,
+        recordRef:  input.recordRef ?? null,
+        tenantId:   ctx.tenantId ?? null,
+        action:     "attachment_uploaded",
+        actorId:    ctx.user!.id,
+        actorName:  ctx.user!.name ?? ctx.user!.email ?? "unknown",
+        details:    { fileName: input.fileName, documentType: input.documentType, fileUrl: url } as any,
+      });
+      return { attachmentRef, fileUrl: url };
+    }),
+
+  // ── Link a request/record to an investigation ─────────────────────────────
+  linkToInvestigation: writeProcedure
+    .input(z.object({
+      requestRef:      z.string().optional(),
+      recordRef:       z.string().optional(),
+      investigationRef: z.string(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      if (input.requestRef) {
+        await db.update(criminalRecordRequests)
+          .set({ investigationRef: input.investigationRef, updatedAt: new Date() })
+          .where(eq(criminalRecordRequests.requestRef, input.requestRef));
+      }
+      if (input.recordRef) {
+        await db.update(criminalRecords)
+          .set({ investigationRef: input.investigationRef, updatedAt: new Date() })
+          .where(eq(criminalRecords.recordRef, input.recordRef));
+      }
+      await db.insert(criminalRecordAudit).values({
+        auditRef:   generateRef("CRA"),
+        requestRef: input.requestRef ?? null,
+        recordRef:  input.recordRef ?? null,
+        tenantId:   ctx.tenantId ?? null,
+        action:     "linked_to_investigation",
+        actorId:    ctx.user!.id,
+        actorName:  ctx.user!.name ?? ctx.user!.email ?? "unknown",
+        details:    { investigationRef: input.investigationRef } as any,
+      });
+      return { success: true };
+    }),
+
+  // ── Get stats for the criminal records dashboard ──────────────────────────
+  getStats: protectedProcedure
+    .query(async ({ ctx }) => {
+      const db = await getDb();
+      if (!db) return { totalRequests: 0, pendingRequests: 0, completedRequests: 0, totalRecords: 0, warrantCount: 0, byAgency: [], byCategory: [] };
+      const tenantCond = ctx.tenantId !== null ? eq(criminalRecordRequests.tenantId, ctx.tenantId) : undefined;
+      const recTenantCond = ctx.tenantId !== null ? eq(criminalRecords.tenantId, ctx.tenantId) : undefined;
+      const [reqStats, recStats, warrantCount, byAgency, byCategory] = await Promise.all([
+        db.select({
+          total:     sql<number>`count(*)`,
+          pending:   sql<number>`count(*) filter (where status in ('submitted','acknowledged','processing'))`,
+          completed: sql<number>`count(*) filter (where status = 'completed')`,
+          rejected:  sql<number>`count(*) filter (where status = 'rejected')`,
+        }).from(criminalRecordRequests).where(tenantCond),
+        db.select({ total: sql<number>`count(*)` }).from(criminalRecords).where(recTenantCond),
+        db.select({ count: sql<number>`count(*)` }).from(criminalRecords).where(
+          recTenantCond ? and(recTenantCond, eq(criminalRecords.outstandingWarrant, true)) : eq(criminalRecords.outstandingWarrant, true)
+        ),
+        db.select({ agency: criminalRecordRequests.agency, count: sql<number>`count(*)` })
+          .from(criminalRecordRequests).where(tenantCond).groupBy(criminalRecordRequests.agency),
+        db.select({ category: criminalRecords.offenceCategory, count: sql<number>`count(*)` })
+          .from(criminalRecords).where(recTenantCond).groupBy(criminalRecords.offenceCategory),
+      ]);
+      return {
+        totalRequests:     Number(reqStats[0]?.total ?? 0),
+        pendingRequests:   Number(reqStats[0]?.pending ?? 0),
+        completedRequests: Number(reqStats[0]?.completed ?? 0),
+        rejectedRequests:  Number(reqStats[0]?.rejected ?? 0),
+        totalRecords:      Number(recStats[0]?.total ?? 0),
+        warrantCount:      Number(warrantCount[0]?.count ?? 0),
+        byAgency:          byAgency.map(r => ({ agency: r.agency, count: Number(r.count) })),
+        byCategory:        byCategory.map(r => ({ category: r.category, count: Number(r.count) })),
+      };
+    }),
+});
+
+
 export const appRouter = router({
   system: systemRouter,
   auth: router({
@@ -6257,6 +6717,7 @@ export const appRouter = router({
   stablecoin: stablecoinRouter,
   ngScreening: ngScreeningRouter,
   ngScreeningExt: ngScreeningExtRouter,
+  criminalRecords: criminalRecordsRouter,
 });
 export type AppRouter = typeof appRouter;
 

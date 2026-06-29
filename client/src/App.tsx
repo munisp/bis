@@ -26,6 +26,7 @@ const VerifyKYC              = lazy(() => import("@/pages/VerifyKYC"));
 const BiometricEnrollmentPage   = lazy(() => import("@/pages/bis/BiometricEnrollmentPage"));
 const BiometricSessionLogPage   = lazy(() => import("@/pages/bis/BiometricSessionLogPage"));
 const FieldAgentsPage           = lazy(() => import("@/pages/bis/FieldAgentsPage"));
+const CriminalRecordsPage       = lazy(() => import("@/pages/bis/CriminalRecordsPage"));
 const DataSourcesPage           = lazy(() => import("@/pages/bis/DataSourcesPage"));
 const ContinuousMonitoringPage  = lazy(() => import("@/pages/bis/ContinuousMonitoringPage"));
 const DrugScreeningPage         = lazy(() => import("@/pages/bis/DrugScreeningPage"));
@@ -151,6 +152,7 @@ function Router() {
         <Route path="/work-authorization" component={WorkAuthorizationPage} />
         <Route path="/zero-footprint" component={ZeroFootprintPage} />
         <Route path="/field-agents" component={FieldAgentsPage} />
+        <Route path="/criminal-records" component={CriminalRecordsPage} />
         <Route path="/data-sources" component={DataSourcesPage} />
         <Route path="/billing" component={BillingPage} />
         <Route path="/stablecoin" component={StablecoinPage} />

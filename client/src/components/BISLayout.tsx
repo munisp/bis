@@ -10,7 +10,7 @@ import {
   Briefcase, Globe, MapPin, MessageSquare, Building2, Eye,
   UserCheck, BarChart3, Key, Zap, CheckCheck, ArrowRight, Sun, Moon, ClipboardList, Wallet, UserSearch, Shield, BarChart2,
   BookOpen, Link2, Brain, Gavel, ClipboardCheck, SendToBack, Smartphone, Download, Link as LinkIcon, BellRing, ShieldAlert,
-  FileBarChart, TrendingUp, Landmark, Scale, Lock, Server, Workflow, Database as DbIcon, ArrowLeftRight
+  FileBarChart, TrendingUp, Landmark, Scale, Lock, Server, Workflow, Database as DbIcon, ArrowLeftRight, Coins
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -79,6 +79,19 @@ const BASE_NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
+    label: 'NG BACKGROUND CHECK',
+    defaultOpen: true,
+    items: [
+      { label: 'Screening Dashboard', href: '/ng-screening', icon: <ShieldCheck size={15} /> },
+      { label: 'Packages & Programs', href: '/ng-screening/packages', icon: <FileBarChart size={15} /> },
+      { label: 'Candidate Portal', href: '/ng-screening/candidates', icon: <UserSearch size={15} /> },
+      { label: 'Adverse Actions', href: '/ng-screening/adverse-actions', icon: <Gavel size={15} /> },
+      { label: 'Continuous Monitoring', href: '/ng-screening/continuous', icon: <Activity size={15} /> },
+      { label: 'Work Permits', href: '/ng-screening/work-permits', icon: <Landmark size={15} /> },
+      { label: 'Screening Analytics', href: '/ng-screening/analytics', icon: <BarChart2 size={15} /> },
+    ],
+  },
+  {
     label: 'MONITORING',
     defaultOpen: true,
     items: [
@@ -94,6 +107,7 @@ const BASE_NAV_GROUPS: NavGroup[] = [
       { label: 'Nigerian Data Bundle', href: '/nigeria-data-bundle', icon: <MapPin size={15} /> },
       { label: 'Field Agents', href: '/field-agents', icon: <Users size={15} /> },
       { label: 'Agent Playbooks', href: '/playbooks', icon: <BookOpen size={15} /> },
+      { label: 'Criminal Records', href: '/criminal-records', icon: <Gavel size={15} /> },
       { label: 'Data Sources', href: '/data-sources', icon: <Database size={15} /> },
     ],
   },
@@ -105,6 +119,7 @@ const BASE_NAV_GROUPS: NavGroup[] = [
       { label: 'User Management', href: '/admin/users', icon: <UserCheck size={15} />, adminOnly: true },
       { label: 'Tenants & API Keys', href: '/tenants', icon: <Key size={15} /> },
       { label: 'Billing & Ledger', href: '/billing', icon: <Wallet size={15} /> },
+      { label: 'Stablecoin', href: '/stablecoin', icon: <Coins size={15} /> },
       { label: 'Payment Rails', href: '/payment-rails', icon: <TrendingUp size={15} /> },
       { label: 'Frozen Accounts', href: '/payment-rails/frozen', icon: <Lock size={15} /> },
       { label: 'Batch Monitor', href: '/payment-rails/batch-monitor', icon: <Activity size={15} /> },
