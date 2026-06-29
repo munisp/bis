@@ -14,7 +14,8 @@ import {
   Shield, Activity, Globe, CreditCard, Fingerprint, Search,
   Link2, MessageSquare, Send, Camera, Paperclip, MapPin, X,
   ChevronDown, UserCheck, Truck, ChevronLeft, ChevronRight,
-  ClipboardCheck, ExternalLink, Plus
+  ClipboardCheck, ExternalLink, Plus, Sparkles, AlertOctagon,
+  CheckCircle, Info, Building
 } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetFooter } from "@/components/ui/sheet";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -183,6 +184,65 @@ export default function InvestigationDetail() {
     { value: 'frsc_mvr',                label: 'FRSC Driver Licence' },
     { value: 'nis_work_permit',         label: 'NIS Work Permit' },
   ];
+
+  // ── AI Summary & Corporate Check ─────────────────────────────────────────────
+  const { data: aiSummary, isLoading: summaryLoading, refetch: refetchSummary } =
+    trpc.investigations.getScreeningSummary.useQuery(
+      { investigationRef: invRef },
+      { enabled: !!invRef && activeTab === 'screening' }
+    );
+
+  const { data: corporateProfiles, isLoading: corpLoading, refetch: refetchCorpProfiles } =
+    trpc.investigations.getCorporateProfiles.useQuery(
+      { investigationRef: invRef },
+      { enabled: !!invRef && activeTab === 'screening' && (liveInv as any)?.subjectType === 'corporate' }
+    );
+
+  const [corpCheckOpen, setCorpCheckOpen] = useState(false);
+  const [corpChecks, setCorpChecks] = useState<string[]>(['cac_full_profile', 'beneficial_owner']);
+  const [corpRcNumber, setCorpRcNumber] = useState('');
+  const [corpTinNumber, setCorpTinNumber] = useState('');
+
+  const generateSummaryMutation = trpc.investigations.generateScreeningSummary.useMutation({
+    onSuccess: () => {
+      toast.success('AI screening summary generated successfully');
+      refetchSummary();
+    },
+    onError: (e) => toast.error(`Failed to generate summary: ${e.message}`),
+  });
+
+  const runCorporateCheckMutation = trpc.investigations.runCorporateCheck.useMutation({
+    onSuccess: (result: any) => {
+      const outcome = Array.isArray(result) ? result[0]?.overallOutcome : result?.overallOutcome;
+      toast.success(`Corporate check completed — outcome: ${outcome ?? 'pending'}`);
+      setCorpCheckOpen(false);
+      refetchCorpProfiles();
+    },
+    onError: (e) => toast.error(`Corporate check failed: ${e.message}`),
+  });
+
+  const handleRunCorporateCheck = () => {
+    const rc = corpRcNumber || (liveInv as any)?.rcNumber || '';
+    if (!rc) { toast.error('RC Number is required'); return; }
+    if (corpChecks.length === 0) { toast.error('Select at least one check type'); return; }
+    runCorporateCheckMutation.mutate({
+      investigationRef: invRef,
+      rcNumber: rc,
+      tinNumber: corpTinNumber || undefined,
+      checks: corpChecks as any,
+    });
+  };
+
+  const toggleCorpCheck = (value: string) => {
+    setCorpChecks(prev => prev.includes(value) ? prev.filter(v => v !== value) : [...prev, value]);
+  };
+
+  const RISK_COLORS: Record<string, string> = {
+    low:      'text-emerald-400 bg-emerald-500/10 border-emerald-500/20',
+    medium:   'text-amber-400 bg-amber-500/10 border-amber-500/20',
+    high:     'text-orange-400 bg-orange-500/10 border-orange-500/20',
+    critical: 'text-red-400 bg-red-500/10 border-red-500/20',
+  };
 
   const runBackgroundCheckMutation = trpc.investigations.runBackgroundCheck.useMutation({
     onSuccess: (result) => {
@@ -1101,14 +1161,211 @@ export default function InvestigationDetail() {
                 <span className="font-mono text-primary">{invRef}</span>
               </p>
             </div>
-            <Button
-              size="sm"
-              className="h-8 text-xs gap-1.5"
-              onClick={() => setBgCheckOpen(true)}
-            >
-              <Plus size={12} /> Run Background Check
-            </Button>
+            <div className="flex items-center gap-2">
+              {(liveInv as any)?.subjectType === 'corporate' && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-8 text-xs gap-1.5"
+                  onClick={() => {
+                    setCorpRcNumber((liveInv as any)?.rcNumber ?? '');
+                    setCorpCheckOpen(true);
+                  }}
+                >
+                  <Building size={12} /> Corporate Check
+                </Button>
+              )}
+              <Button
+                size="sm"
+                className="h-8 text-xs gap-1.5"
+                onClick={() => setBgCheckOpen(true)}
+              >
+                <Plus size={12} /> Run Background Check
+              </Button>
+            </div>
           </div>
+
+          {/* ── AI Screening Summary Panel ── */}
+          <div className="bis-card p-4 border-primary/20">
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="text-xs font-semibold text-foreground flex items-center gap-2">
+                <Sparkles size={13} className="text-primary" /> AI Screening Summary
+              </h4>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-[10px] gap-1.5"
+                onClick={() => generateSummaryMutation.mutate({ investigationRef: invRef })}
+                disabled={generateSummaryMutation.isPending || summaryLoading}
+              >
+                {generateSummaryMutation.isPending
+                  ? <><Loader2 size={10} className="animate-spin" /> Generating…</>
+                  : aiSummary
+                  ? <><RefreshCw size={10} /> Regenerate</>
+                  : <><Sparkles size={10} /> Generate Summary</>
+                }
+              </Button>
+            </div>
+
+            {summaryLoading && (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground py-4 justify-center">
+                <Loader2 size={12} className="animate-spin" /> Loading summary…
+              </div>
+            )}
+
+            {!summaryLoading && !aiSummary && !generateSummaryMutation.isPending && (
+              <p className="text-xs text-muted-foreground text-center py-4">
+                No AI summary yet. Run a background check first, then click "Generate Summary" to get an AI-powered risk analysis.
+              </p>
+            )}
+
+            {generateSummaryMutation.isPending && (
+              <div className="flex flex-col items-center gap-3 py-6 text-center">
+                <Loader2 size={24} className="animate-spin text-primary" />
+                <div>
+                  <p className="text-xs font-semibold text-foreground">Analysing screening results…</p>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">This may take 5–20 seconds</p>
+                </div>
+              </div>
+            )}
+
+            {!summaryLoading && aiSummary && !generateSummaryMutation.isPending && (
+              <div className="space-y-3">
+                {/* Risk badge + headline */}
+                <div className="flex items-start gap-3">
+                  <span className={`text-[11px] font-mono font-bold uppercase px-2 py-1 rounded border shrink-0 ${RISK_COLORS[aiSummary.overallRisk] ?? 'text-muted-foreground bg-muted/20 border-border'}`}>
+                    {aiSummary.overallRisk} risk
+                  </span>
+                  <p className="text-xs font-semibold text-foreground leading-relaxed">{aiSummary.headline}</p>
+                </div>
+
+                {/* Composite score */}
+                {aiSummary.compositeScore != null && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-muted-foreground">Composite Risk Score:</span>
+                    <div className="flex-1 bg-muted/30 rounded-full h-1.5 max-w-32">
+                      <div
+                        className={`h-1.5 rounded-full ${aiSummary.compositeScore >= 70 ? 'bg-red-500' : aiSummary.compositeScore >= 40 ? 'bg-amber-500' : 'bg-emerald-500'}`}
+                        style={{ width: `${Math.min(100, aiSummary.compositeScore)}%` }}
+                      />
+                    </div>
+                    <span className="text-[10px] font-mono text-foreground">{aiSummary.compositeScore}/100</span>
+                  </div>
+                )}
+
+                {/* Key findings */}
+                {(aiSummary.keyFindings as string[]).length > 0 && (
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1">
+                      <Info size={10} /> Key Findings
+                    </p>
+                    <ul className="space-y-1">
+                      {(aiSummary.keyFindings as string[]).map((f: string, i: number) => (
+                        <li key={i} className="text-xs text-foreground flex items-start gap-1.5">
+                          <CheckCircle size={10} className="text-primary mt-0.5 shrink-0" />
+                          {f}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Red flags */}
+                {(aiSummary.redFlags as string[]).length > 0 && (
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-red-400 mb-1.5 flex items-center gap-1">
+                      <AlertOctagon size={10} /> Red Flags
+                    </p>
+                    <ul className="space-y-1">
+                      {(aiSummary.redFlags as string[]).map((f: string, i: number) => (
+                        <li key={i} className="text-xs text-red-300 flex items-start gap-1.5">
+                          <AlertOctagon size={10} className="text-red-400 mt-0.5 shrink-0" />
+                          {f}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Recommendations */}
+                {(aiSummary.recommendations as string[]).length > 0 && (
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-400 mb-1.5">Recommendations</p>
+                    <ul className="space-y-1">
+                      {(aiSummary.recommendations as string[]).map((r: string, i: number) => (
+                        <li key={i} className="text-xs text-muted-foreground flex items-start gap-1.5">
+                          <span className="text-amber-400 mt-0.5 shrink-0">→</span>
+                          {r}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Full narrative (collapsible) */}
+                <details className="group">
+                  <summary className="text-[10px] text-muted-foreground cursor-pointer hover:text-foreground transition-colors select-none flex items-center gap-1">
+                    <ChevronDown size={10} className="group-open:rotate-180 transition-transform" /> Full Narrative
+                  </summary>
+                  <p className="text-xs text-muted-foreground mt-2 leading-relaxed border-l-2 border-primary/30 pl-3">
+                    {aiSummary.fullNarrative}
+                  </p>
+                </details>
+
+                <p className="text-[9px] text-muted-foreground/50 font-mono">
+                  Generated {new Date(aiSummary.createdAt).toLocaleString()} · Model: {aiSummary.modelVersion ?? 'gpt-4o'} · Ref: {aiSummary.summaryRef}
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* ── Corporate Screening Profiles ── */}
+          {(liveInv as any)?.subjectType === 'corporate' && !corpLoading && (corporateProfiles ?? []).length > 0 && (
+            <div className="space-y-3">
+              <h4 className="text-xs font-semibold text-foreground flex items-center gap-2">
+                <Building size={13} className="text-primary" /> Corporate Check Results
+              </h4>
+              {(corporateProfiles ?? []).map((cp: any) => {
+                const outcomeColor =
+                  cp.overallOutcome === 'clear'   ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' :
+                  cp.overallOutcome === 'consider' ? 'text-amber-400 bg-amber-500/10 border-amber-500/20' :
+                  cp.overallOutcome === 'adverse'  ? 'text-red-400 bg-red-500/10 border-red-500/20' :
+                                                     'text-muted-foreground bg-muted/20 border-border/50';
+                return (
+                  <div key={cp.profileRef} className="bis-card p-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="font-mono text-xs font-semibold text-primary">{cp.profileRef}</span>
+                      <div className="flex items-center gap-2">
+                        {cp.overallOutcome && (
+                          <span className={`text-[10px] font-mono uppercase px-1.5 py-0.5 rounded border ${outcomeColor}`}>
+                            {cp.overallOutcome}
+                          </span>
+                        )}
+                        {cp.riskScore != null && (
+                          <span className="text-[10px] font-mono text-muted-foreground">Risk: {cp.riskScore}/100</span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs mb-2">
+                      <div><span className="text-muted-foreground">Company: </span><span className="font-mono">{cp.companyName}</span></div>
+                      <div><span className="text-muted-foreground">RC: </span><span className="font-mono">{cp.rcNumber}</span></div>
+                      {cp.tinNumber && <div><span className="text-muted-foreground">TIN: </span><span className="font-mono">{cp.tinNumber}</span></div>}
+                      <div><span className="text-muted-foreground">Status: </span><span className="font-mono capitalize">{cp.status}</span></div>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5 mt-2">
+                      {cp.cacResult && <span className="text-[9px] font-mono bg-primary/10 text-primary px-1.5 py-0.5 rounded">CAC ✓</span>}
+                      {cp.firsResult && <span className="text-[9px] font-mono bg-primary/10 text-primary px-1.5 py-0.5 rounded">FIRS ✓</span>}
+                      {cp.directorsResult && <span className="text-[9px] font-mono bg-primary/10 text-primary px-1.5 py-0.5 rounded">Directors ✓</span>}
+                      {cp.sanctionsResult && <span className="text-[9px] font-mono bg-primary/10 text-primary px-1.5 py-0.5 rounded">Sanctions ✓</span>}
+                    </div>
+                    <p className="text-[9px] text-muted-foreground/50 font-mono mt-2">
+                      {new Date(cp.createdAt).toLocaleString()}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+          )}
 
           {/* Loading state */}
           {screeningLoading && (
@@ -1280,6 +1537,82 @@ export default function InvestigationDetail() {
             >
               {runBackgroundCheckMutation.isPending ? <Loader2 size={12} className="animate-spin" /> : <ClipboardCheck size={12} />}
               {runBackgroundCheckMutation.isPending ? 'Initiating…' : 'Run Check'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Corporate Check Dialog ── */}
+      <Dialog open={corpCheckOpen} onOpenChange={setCorpCheckOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-sm">
+              <Building size={14} className="text-primary" /> Run Corporate Background Check
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <p className="text-xs text-muted-foreground">
+              Run CAC registry, FIRS tax clearance, directors/UBO, and sanctions checks for{" "}
+              <span className="font-mono text-foreground">{(liveInv as any)?.subjectName ?? invRef}</span>.
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1 block">RC Number *</Label>
+                <Input
+                  value={corpRcNumber}
+                  onChange={e => setCorpRcNumber(e.target.value)}
+                  placeholder="e.g. RC123456"
+                  className="text-xs h-8 font-mono"
+                />
+              </div>
+              <div>
+                <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1 block">TIN (optional)</Label>
+                <Input
+                  value={corpTinNumber}
+                  onChange={e => setCorpTinNumber(e.target.value)}
+                  placeholder="e.g. 12345678-0001"
+                  className="text-xs h-8 font-mono"
+                />
+              </div>
+            </div>
+            <div>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2 block">Checks to Run *</Label>
+              <div className="grid grid-cols-2 gap-1.5">
+                {[
+                  { value: 'cac_full_profile',    label: 'CAC Full Profile' },
+                  { value: 'firs_tax_clearance',  label: 'FIRS Tax Clearance' },
+                  { value: 'beneficial_owner',    label: 'Directors / UBO' },
+                  { value: 'corporate_sanctions', label: 'Corporate Sanctions' },
+                ].map(ct => (
+                  <button
+                    key={ct.value}
+                    onClick={() => toggleCorpCheck(ct.value)}
+                    className={cn(
+                      "text-left text-[11px] font-mono px-2.5 py-2 rounded border transition-all",
+                      corpChecks.includes(ct.value)
+                        ? "bg-primary/10 border-primary text-primary"
+                        : "bg-muted/20 border-border text-muted-foreground hover:border-primary/50"
+                    )}
+                  >
+                    {ct.label}
+                  </button>
+                ))}
+              </div>
+              {corpChecks.length > 0 && (
+                <p className="text-[10px] text-primary mt-1.5">{corpChecks.length} check{corpChecks.length > 1 ? 's' : ''} selected</p>
+              )}
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => setCorpCheckOpen(false)}>Cancel</Button>
+            <Button
+              size="sm"
+              className="h-8 text-xs gap-1.5"
+              onClick={handleRunCorporateCheck}
+              disabled={runCorporateCheckMutation.isPending || corpChecks.length === 0}
+            >
+              {runCorporateCheckMutation.isPending ? <Loader2 size={12} className="animate-spin" /> : <Building size={12} />}
+              {runCorporateCheckMutation.isPending ? 'Running…' : 'Run Corporate Check'}
             </Button>
           </div>
         </DialogContent>

@@ -288,6 +288,10 @@ export const screeningTypeEnum = pgEnum("screening_type", [
   "professional_licence",
   // Corporate
   "cac_directorship",
+  "cac_full_profile",
+  "firs_tax_clearance",
+  "beneficial_owner",
+  "corporate_sanctions",
   // Healthcare
   "mdcn_licence",
   // Work Permits
@@ -2570,3 +2574,57 @@ export const continuousChecks = pgTable("continuous_checks", {
 }));
 export type ContinuousCheck       = typeof continuousChecks.$inferSelect;
 export type InsertContinuousCheck = typeof continuousChecks.$inferInsert;
+
+// ─── Screening AI Summaries ──────────────────────────────────────────────────
+export const screeningAiSummaries = pgTable("screening_ai_summaries", {
+  id:              serial("id").primaryKey(),
+  summaryRef:      varchar("summaryRef", { length: 32 }).notNull().unique(),
+  investigationRef: varchar("investigationRef", { length: 32 }).notNull(),
+  orderRefs:       json("orderRefs").$type<string[]>().notNull().default([]),
+  overallRisk:     varchar("overallRisk", { length: 16 }).notNull(),
+  headline:        text("headline").notNull(),
+  keyFindings:     json("keyFindings").$type<string[]>().notNull().default([]),
+  redFlags:        json("redFlags").$type<string[]>().notNull().default([]),
+  recommendations: json("recommendations").$type<string[]>().notNull().default([]),
+  fullNarrative:   text("fullNarrative").notNull(),
+  compositeScore:  real("compositeScore"),
+  modelVersion:    varchar("modelVersion", { length: 32 }).default("gpt-4o"),
+  generatedBy:     integer("generatedBy").references(() => users.id, { onDelete: "set null" }),
+  createdAt:       timestamp("createdAt").defaultNow().notNull(),
+  updatedAt:       timestamp("updatedAt").defaultNow().notNull(),
+}, (t) => ({
+  sas_inv_idx: index("sas_inv_idx").on(t.investigationRef),
+}));
+export type ScreeningAiSummary       = typeof screeningAiSummaries.$inferSelect;
+export type InsertScreeningAiSummary = typeof screeningAiSummaries.$inferInsert;
+
+// ─── Corporate Screening Profiles ────────────────────────────────────────────
+export const corporateScreeningProfiles = pgTable("corporate_screening_profiles", {
+  id:              serial("id").primaryKey(),
+  profileRef:      varchar("profileRef", { length: 32 }).notNull().unique(),
+  investigationRef: varchar("investigationRef", { length: 32 }),
+  tenantId:        integer("tenantId").references(() => tenants.id, { onDelete: "cascade" }).notNull(),
+  companyName:     varchar("companyName", { length: 255 }).notNull(),
+  rcNumber:        varchar("rcNumber", { length: 20 }).notNull(),
+  tinNumber:       varchar("tinNumber", { length: 20 }),
+  incorporationDate: timestamp("incorporationDate"),
+  companyType:     varchar("companyType", { length: 64 }),
+  registeredAddress: text("registeredAddress"),
+  status:          screeningStatusEnum("status").notNull().default("pending"),
+  overallOutcome:  assessmentOutcomeEnum("overallOutcome"),
+  cacResult:       json("cacResult"),
+  firsResult:      json("firsResult"),
+  directorsResult: json("directorsResult"),
+  sanctionsResult: json("sanctionsResult"),
+  riskScore:       real("riskScore"),
+  notes:           text("notes"),
+  createdBy:       integer("createdBy").references(() => users.id, { onDelete: "set null" }),
+  createdAt:       timestamp("createdAt").defaultNow().notNull(),
+  updatedAt:       timestamp("updatedAt").defaultNow().notNull(),
+}, (t) => ({
+  csp_inv_idx:    index("csp_inv_idx").on(t.investigationRef),
+  csp_tenant_idx: index("csp_tenant_idx").on(t.tenantId),
+  csp_rc_idx:     index("csp_rc_idx").on(t.rcNumber),
+}));
+export type CorporateScreeningProfile       = typeof corporateScreeningProfiles.$inferSelect;
+export type InsertCorporateScreeningProfile = typeof corporateScreeningProfiles.$inferInsert;

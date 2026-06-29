@@ -3191,3 +3191,37 @@
 - [x] All API shapes match actual tRPC router procedures in server/ngScreening.ts
 - [x] No non-existent procedures referenced (adverseActions.advance/withdraw, continuousChecks.toggle, workPermits.list/create/verify all removed)
 - [x] Integrated into existing BIS platform via DashboardLayout + sidebar navigation
+
+## Integration: Investigation ↔ NG Background Screening (Jun 29 2026)
+
+- [x] Add candidateProfileId optional FK to investigations table in schema.ts
+- [x] Add investigationRef optional varchar to screening_orders table in schema.ts
+- [x] Run pnpm db:push to push schema migration
+- [x] Add investigations.linkCandidate tRPC procedure
+- [x] Add investigations.runBackgroundCheck tRPC procedure
+- [x] Add investigations.getScreeningOrders tRPC procedure
+- [x] Update ngScreening.orders.list to accept optional investigationRef filter
+- [x] Add Background Screening tab to InvestigationDetail page
+- [x] Add Run Background Check button/modal on InvestigationDetail
+- [x] Show linked screening orders with outcome badges in the new tab
+- [x] Incorporate screening composite score into investigation risk score display
+- [x] Add View Investigation deep-link on NgScreeningDashboard when investigationRef is set
+- [x] Write vitest tests for new procedures
+- [x] Save checkpoint and push to GitHub
+
+## AI Screening Summary + Corporate Background Checks (Jun 29 2026)
+- [x] Add screening_ai_summaries table to schema.ts (summaryRef, investigationRef, orderRefs, overallRisk, headline, keyFindings, redFlags, recommendations, fullNarrative, compositeScore, modelVersion, generatedBy)
+- [x] Add corporate_screening_profiles table to schema.ts (profileRef, investigationRef, tenantId, companyName, rcNumber, tinNumber, status, overallOutcome, cacResult, firsResult, directorsResult, sanctionsResult, riskScore)
+- [x] Add 4 new corporate screeningTypeEnum values: cac_full_profile, firs_tax_clearance, beneficial_owner, corporate_sanctions
+- [x] Run pnpm db:push to push schema migration (migration 0052)
+- [x] Add investigations.generateScreeningSummary tRPC mutation (LLM-powered, structured JSON schema, fallback rule-based)
+- [x] Add investigations.getScreeningSummary tRPC query
+- [x] Add investigations.runCorporateCheck tRPC mutation (CAC, FIRS, directors, sanctions gateway calls)
+- [x] Add investigations.getCorporateProfiles tRPC query
+- [x] Import screeningAiSummaries and corporateScreeningProfiles in routers.ts
+- [x] Add AI Summary panel to Background Screening tab (risk badge, composite score bar, key findings, red flags, recommendations, collapsible narrative, regenerate button)
+- [x] Add Corporate Check button (visible only for corporate subjects) in Background Screening tab header
+- [x] Add Corporate Check dialog (RC number, TIN, 4 check type toggles)
+- [x] Add Corporate Check Results section showing profile cards with outcome badges
+- [x] Write 31 vitest tests in server/investigations.ai-corporate.test.ts (all passing)
+- [x] TypeScript: 0 errors

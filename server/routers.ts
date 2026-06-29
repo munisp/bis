@@ -86,6 +86,13 @@ import {
   pushBroadcasts,
   scheduledBroadcasts,
   kycOcrHistory,
+  candidateProfiles,
+  screeningOrders,
+  screeningPackages,
+  screeningResults,
+  candidateConsents,
+  screeningAiSummaries,
+  corporateScreeningProfiles,
 } from "../drizzle/schema";
 import {
   getDashboardStats,
@@ -763,6 +770,517 @@ const investigationsRouter = router({
         targetRef: input.refs.join(',').substring(0, 200),
       });
       return { updated: input.refs.length };
+    }),
+
+  // ─── Integration: NG Background Screening ─────────────────────────────────
+
+  /**
+   * Fetch all screening orders linked to an investigation (via investigationRef).
+   * Used to populate the "Background Screening" tab on InvestigationDetail.
+   */
+  getLinkedScreening: protectedProcedure
+    .input(z.object({ investigationRef: z.string() }))
+    .query(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) return { orders: [], candidateProfile: null };
+      // Find the investigation to get candidateProfileId
+      const [inv] = await db.select().from(investigations)
+        .where(eq(investigations.ref, input.investigationRef)).limit(1);
+      if (!inv) return { orders: [], candidateProfile: null };
+      // Get candidate profile if linked
+      let candidateProfile = null;
+      if (inv.candidateProfileId) {
+        const [cp] = await db.select().from(candidateProfiles)
+          .where(eq(candidateProfiles.id, inv.candidateProfileId)).limit(1);
+        if (cp) {
+          // Mask sensitive fields
+          candidateProfile = {
+            ...cp,
+            nin: cp.nin ? cp.nin.slice(0, 3) + '****' + cp.nin.slice(-2) : null,
+            bvn: cp.bvn ? cp.bvn.slice(0, 3) + '****' + cp.bvn.slice(-2) : null,
+          };
+        }
+      }
+      // Get all screening orders linked to this investigation
+      const orders = await db.select({
+        order: screeningOrders,
+        candidateFirstName: candidateProfiles.firstName,
+        candidateLastName: candidateProfiles.lastName,
+      })
+        .from(screeningOrders)
+        .leftJoin(candidateProfiles, eq(screeningOrders.candidateId, candidateProfiles.id))
+        .where(eq(screeningOrders.investigationRef, input.investigationRef))
+        .orderBy(desc(screeningOrders.createdAt));
+      return { orders, candidateProfile };
+    }),
+
+  /**
+   * Create a background screening order from an investigation context.
+   * This:
+   *   1. Creates or reuses a CandidateProfile from the investigation's subject data
+   *   2. Creates a ScreeningOrder linked back to the investigation via investigationRef
+   *   3. Updates the investigation's candidateProfileId
+   * The caller must supply screeningTypes (or packageId).
+   */
+  runBackgroundCheck: writeProcedure
+    .input(z.object({
+      investigationRef: z.string(),
+      screeningTypes: z.array(z.string()).min(1),
+      packageId: z.number().optional(),
+      notes: z.string().optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Database unavailable' });
+      if (!ctx.tenantId) throw new TRPCError({ code: 'FORBIDDEN', message: 'Tenant context required' });
+      // Load the investigation
+      const [inv] = await db.select().from(investigations)
+        .where(and(
+          eq(investigations.ref, input.investigationRef),
+          ctx.tenantId !== null ? eq(investigations.tenantId, ctx.tenantId) : sql`1=1`,
+        )).limit(1);
+      if (!inv) throw new TRPCError({ code: 'NOT_FOUND', message: 'Investigation not found' });
+      // Step 1: find or create a CandidateProfile for this subject
+      let candidateId: number;
+      let candidateRef: string;
+      if (inv.candidateProfileId) {
+        // Already linked — reuse
+        const [existing] = await db.select().from(candidateProfiles)
+          .where(eq(candidateProfiles.id, inv.candidateProfileId)).limit(1);
+        if (!existing) throw new TRPCError({ code: 'NOT_FOUND', message: 'Linked candidate profile not found' });
+        candidateId = existing.id;
+        candidateRef = existing.candidateRef;
+      } else {
+        // Create a new CandidateProfile from investigation subject data
+        const { randomBytes } = require('crypto');
+        candidateRef = `CAND-${new Date().getFullYear()}-${randomBytes(4).toString('hex').toUpperCase()}`;
+        const nameParts = inv.subjectName.trim().split(/\s+/);
+        const firstName = nameParts[0] ?? inv.subjectName;
+        const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '-';
+        const [inserted] = await db.insert(candidateProfiles).values({
+          candidateRef,
+          tenantId: ctx.tenantId,
+          firstName,
+          lastName,
+          email: inv.email ?? `${candidateRef.toLowerCase()}@bis-placeholder.local`,
+          phone: inv.phone ?? undefined,
+          nin: inv.nin ?? undefined,
+          bvn: inv.bvn ?? undefined,
+          consentStatus: 'submitted',  // analyst-initiated — consent assumed via investigation purpose
+          invitedBy: ctx.user!.id,
+        }).returning({ id: candidateProfiles.id });
+        candidateId = inserted.id;
+        // Link investigation → candidate profile
+        await db.update(investigations)
+          .set({ candidateProfileId: candidateId, updatedAt: new Date() })
+          .where(eq(investigations.ref, input.investigationRef));
+      }
+      // Step 2: create the ScreeningOrder with investigationRef
+      const orderRef = `ORD-${new Date().getFullYear()}-${require('crypto').randomBytes(4).toString('hex').toUpperCase()}`;
+      const etaAt = new Date(Date.now() + 48 * 60 * 60 * 1000);
+      await db.transaction(async (tx) => {
+        const [inserted] = await tx.insert(screeningOrders).values({
+          orderRef,
+          tenantId: ctx.tenantId!,
+          candidateId,
+          packageId: input.packageId,
+          status: 'pending',
+          screeningTypes: input.screeningTypes as any,
+          investigationRef: input.investigationRef,
+          etaAt,
+          notes: input.notes,
+          createdBy: ctx.user!.id,
+        }).returning({ id: screeningOrders.id });
+        // Seed one result row per screening type
+        const resultRows = input.screeningTypes.map(st => ({
+          orderId: inserted.id,
+          screeningType: st as any,
+          status: 'pending' as const,
+        }));
+        if (resultRows.length > 0) await tx.insert(screeningResults).values(resultRows);
+      });
+      // Audit log
+      await writeAuditLog(db, {
+        userId: ctx.user!.id,
+        category: 'investigation',
+        action: `Background check initiated: ${orderRef} (${input.screeningTypes.join(', ')})`,
+        targetRef: input.investigationRef,
+      });
+      // Invalidate investigations cache
+      invalidateCache('investigations:list:*').catch(() => {});
+      return { orderRef, candidateRef, etaAt };
+    }),
+
+  /**
+   * Link an existing CandidateProfile to an investigation.
+   * Used when the candidate already exists in the system.
+   */
+  linkCandidateProfile: writeProcedure
+    .input(z.object({
+      investigationRef: z.string(),
+      candidateRef: z.string(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR' });
+      const [candidate] = await db.select().from(candidateProfiles)
+        .where(and(
+          eq(candidateProfiles.candidateRef, input.candidateRef),
+          ctx.tenantId !== null ? eq(candidateProfiles.tenantId, ctx.tenantId!) : sql`1=1`,
+        )).limit(1);
+      if (!candidate) throw new TRPCError({ code: 'NOT_FOUND', message: 'Candidate not found' });
+      await db.update(investigations)
+        .set({ candidateProfileId: candidate.id, updatedAt: new Date() })
+        .where(eq(investigations.ref, input.investigationRef));
+      await writeAuditLog(db, {
+        userId: ctx.user!.id,
+        category: 'investigation',
+        action: `Linked to candidate profile ${input.candidateRef}`,
+        targetRef: input.investigationRef,
+      });
+      return { success: true, candidateRef: candidate.candidateRef };
+    }),
+
+  /**
+   * Generate an AI-powered screening summary for an investigation.
+   * Fetches all linked screening results, calls the LLM with structured JSON schema,
+   * stores the result in screening_ai_summaries, and returns it.
+   */
+  generateScreeningSummary: writeProcedure
+    .input(z.object({ investigationRef: z.string() }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Database unavailable' });
+      if (!ctx.tenantId) throw new TRPCError({ code: 'FORBIDDEN', message: 'Tenant context required' });
+
+      // Load the investigation
+      const [inv] = await db.select().from(investigations)
+        .where(and(
+          eq(investigations.ref, input.investigationRef),
+          ctx.tenantId !== null ? eq(investigations.tenantId, ctx.tenantId) : sql`1=1`,
+        )).limit(1);
+      if (!inv) throw new TRPCError({ code: 'NOT_FOUND', message: 'Investigation not found' });
+
+      // Fetch all linked screening orders and their results
+      const orders = await db.select().from(screeningOrders)
+        .where(eq(screeningOrders.investigationRef, input.investigationRef))
+        .orderBy(desc(screeningOrders.createdAt));
+
+      if (orders.length === 0) {
+        throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'No screening orders found for this investigation. Run a background check first.' });
+      }
+
+      const orderIds = orders.map(o => o.id);
+      const results = await db.select().from(screeningResults)
+        .where(inArray(screeningResults.orderId, orderIds));
+
+      // Build a compact summary of results for the LLM
+      const completedResults = results.filter(r => r.status === 'completed');
+      const pendingCount = results.filter(r => r.status === 'pending' || r.status === 'processing').length;
+      const adverseCount = results.filter(r => r.outcome === 'adverse').length;
+      const considerCount = results.filter(r => r.outcome === 'consider').length;
+      const clearCount = results.filter(r => r.outcome === 'clear').length;
+
+      const resultSummaries = completedResults.map(r => ({
+        type: r.screeningType,
+        outcome: r.outcome ?? 'unknown',
+        summary: r.summary ?? '',
+        riskScore: r.riskScore,
+      }));
+
+      const orderRefs = orders.map(o => o.orderRef);
+
+      // Build LLM prompt
+      const systemPrompt = `You are a senior compliance analyst at a Nigerian background screening firm. 
+You review background check results and produce concise, professional risk summaries for compliance officers and HR teams.
+Your summaries are factual, balanced, and actionable. You always cite specific check types when flagging risks.
+You MUST output valid JSON matching the provided schema.`;
+
+      const userPrompt = `Subject: ${inv.subjectName} (${inv.subjectType})
+Country: ${inv.country}
+Investigation Purpose: ${inv.purpose ?? 'Background screening'}
+Investigation Tier: ${inv.tier}
+
+Screening Results Summary:
+- Total checks: ${results.length}
+- Completed: ${completedResults.length}
+- Pending: ${pendingCount}
+- Adverse findings: ${adverseCount}
+- Consider findings: ${considerCount}  
+- Clear findings: ${clearCount}
+
+Detailed Results:
+${JSON.stringify(resultSummaries, null, 2)}
+
+${inv.subjectType === 'corporate' ? `Company RC Number: ${inv.rcNumber ?? 'N/A'}` : `NIN: ${inv.nin ? inv.nin.slice(0,3) + '****' : 'N/A'} | BVN: ${inv.bvn ? inv.bvn.slice(0,3) + '****' : 'N/A'}`}
+
+Please generate a comprehensive screening summary.`;
+
+      let summaryData: {
+        overallRisk: string;
+        headline: string;
+        keyFindings: string[];
+        redFlags: string[];
+        recommendations: string[];
+        fullNarrative: string;
+        compositeScore: number;
+      };
+
+      try {
+        const llmResult = await invokeLLM({
+          messages: [
+            { role: 'system' as const, content: systemPrompt },
+            { role: 'user' as const, content: userPrompt },
+          ],
+          response_format: {
+            type: 'json_schema',
+            json_schema: {
+              name: 'screening_summary',
+              strict: true,
+              schema: {
+                type: 'object',
+                properties: {
+                  overallRisk: { type: 'string', description: 'Overall risk level: low, medium, high, or critical' },
+                  headline: { type: 'string', description: 'Concise summary headline (max 120 chars)' },
+                  keyFindings: { type: 'array', items: { type: 'string' }, description: '3-7 key findings' },
+                  redFlags: { type: 'array', items: { type: 'string' }, description: 'Specific red flags (0-5 items)' },
+                  recommendations: { type: 'array', items: { type: 'string' }, description: 'Actionable recommendations' },
+                  fullNarrative: { type: 'string', description: 'Full narrative paragraph (200-400 words)' },
+                  compositeScore: { type: 'number', description: 'Composite risk score 0-100' },
+                },
+                required: ['overallRisk', 'headline', 'keyFindings', 'redFlags', 'recommendations', 'fullNarrative', 'compositeScore'],
+                additionalProperties: false,
+              },
+            },
+          },
+        });
+
+        const rawContent = llmResult?.choices?.[0]?.message?.content;
+        const parsed = JSON.parse(typeof rawContent === 'string' ? rawContent : '{}');
+        const validRisks = ['low', 'medium', 'high', 'critical'];
+        summaryData = {
+          overallRisk: validRisks.includes(parsed.overallRisk) ? parsed.overallRisk : (adverseCount > 0 ? 'high' : considerCount > 0 ? 'medium' : 'low'),
+          headline: parsed.headline ?? `Background screening summary for ${inv.subjectName}`,
+          keyFindings: Array.isArray(parsed.keyFindings) ? parsed.keyFindings : [],
+          redFlags: Array.isArray(parsed.redFlags) ? parsed.redFlags : [],
+          recommendations: Array.isArray(parsed.recommendations) ? parsed.recommendations : [],
+          fullNarrative: parsed.fullNarrative ?? 'AI summary generation completed.',
+          compositeScore: typeof parsed.compositeScore === 'number' ? Math.min(100, Math.max(0, parsed.compositeScore)) : (adverseCount * 20 + considerCount * 10),
+        };
+      } catch (_e) {
+        // Fallback: generate a rule-based summary if LLM fails
+        const risk = adverseCount > 0 ? 'high' : considerCount > 0 ? 'medium' : clearCount === results.length ? 'low' : 'medium';
+        summaryData = {
+          overallRisk: risk,
+          headline: `${adverseCount > 0 ? 'Adverse findings detected' : considerCount > 0 ? 'Items requiring review' : 'Screening completed'} for ${inv.subjectName}`,
+          keyFindings: [
+            `${completedResults.length} of ${results.length} checks completed`,
+            ...(adverseCount > 0 ? [`${adverseCount} adverse finding(s) detected`] : []),
+            ...(considerCount > 0 ? [`${considerCount} item(s) require further review`] : []),
+            ...(clearCount > 0 ? [`${clearCount} check(s) returned clear`] : []),
+          ],
+          redFlags: adverseCount > 0 ? completedResults.filter(r => r.outcome === 'adverse').map(r => `${r.screeningType}: ${r.summary ?? 'Adverse outcome'}`) : [],
+          recommendations: adverseCount > 0
+            ? ['Review adverse findings with legal counsel before proceeding', 'Consider escalating to senior compliance officer']
+            : considerCount > 0
+            ? ['Review flagged items before making a hiring/engagement decision']
+            : ['Screening results are satisfactory; proceed with standard onboarding'],
+          fullNarrative: `Background screening for ${inv.subjectName} has been completed. ${completedResults.length} of ${results.length} checks have been processed. ${adverseCount > 0 ? `${adverseCount} adverse finding(s) were detected requiring immediate attention. ` : ''}${considerCount > 0 ? `${considerCount} item(s) require further review before a final decision. ` : ''}${clearCount > 0 ? `${clearCount} check(s) returned clear results. ` : ''}This summary was generated automatically based on available screening data.`,
+          compositeScore: Math.min(100, adverseCount * 25 + considerCount * 10 + (pendingCount > 0 ? 5 : 0)),
+        };
+      }
+
+      // Delete any existing summary for this investigation
+      await db.delete(screeningAiSummaries)
+        .where(eq(screeningAiSummaries.investigationRef, input.investigationRef));
+
+      // Insert new summary
+      const summaryRef = generateRef('SUM');
+      const [inserted] = await db.insert(screeningAiSummaries).values({
+        summaryRef,
+        investigationRef: input.investigationRef,
+        orderRefs: orderRefs as any,
+        overallRisk: summaryData.overallRisk,
+        headline: summaryData.headline,
+        keyFindings: summaryData.keyFindings as any,
+        redFlags: summaryData.redFlags as any,
+        recommendations: summaryData.recommendations as any,
+        fullNarrative: summaryData.fullNarrative,
+        compositeScore: summaryData.compositeScore,
+        modelVersion: 'gpt-4o',
+        generatedBy: ctx.user!.id,
+      }).returning();
+
+      await writeAuditLog(db, {
+        userId: ctx.user!.id,
+        category: 'investigation',
+        action: `AI screening summary generated (risk: ${summaryData.overallRisk})`,
+        targetRef: input.investigationRef,
+      });
+
+      return inserted;
+    }),
+
+  /**
+   * Get the latest AI screening summary for an investigation.
+   */
+  getScreeningSummary: protectedProcedure
+    .input(z.object({ investigationRef: z.string() }))
+    .query(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) return null;
+      const [summary] = await db.select().from(screeningAiSummaries)
+        .where(eq(screeningAiSummaries.investigationRef, input.investigationRef))
+        .orderBy(desc(screeningAiSummaries.createdAt))
+        .limit(1);
+      return summary ?? null;
+    }),
+
+  /**
+   * Run a corporate background check (CAC full profile, FIRS tax clearance,
+   * directors/UBO, corporate sanctions) for a corporate investigation subject.
+   */
+  runCorporateCheck: writeProcedure
+    .input(z.object({
+      investigationRef: z.string(),
+      rcNumber: z.string().min(1),
+      tinNumber: z.string().optional(),
+      companyName: z.string().optional(),
+      checks: z.array(z.enum(['cac_full_profile', 'firs_tax_clearance', 'beneficial_owner', 'corporate_sanctions'])).min(1),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Database unavailable' });
+      if (!ctx.tenantId) throw new TRPCError({ code: 'FORBIDDEN', message: 'Tenant context required' });
+
+      // Load the investigation
+      const [inv] = await db.select().from(investigations)
+        .where(and(
+          eq(investigations.ref, input.investigationRef),
+          ctx.tenantId !== null ? eq(investigations.tenantId, ctx.tenantId) : sql`1=1`,
+        )).limit(1);
+      if (!inv) throw new TRPCError({ code: 'NOT_FOUND', message: 'Investigation not found' });
+      if (inv.subjectType !== 'corporate') {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Corporate checks can only be run on corporate investigation subjects' });
+      }
+
+      const profileRef = generateRef('CORP');
+      const companyName = input.companyName ?? inv.subjectName;
+
+      // Create the corporate screening profile record
+      const [profile] = await db.insert(corporateScreeningProfiles).values({
+        profileRef,
+        investigationRef: input.investigationRef,
+        tenantId: ctx.tenantId,
+        companyName,
+        rcNumber: input.rcNumber,
+        tinNumber: input.tinNumber,
+        status: 'processing',
+        createdBy: ctx.user!.id,
+      }).returning();
+
+      // Run each requested check against the gateway
+      let cacResult: unknown = null;
+      let firsResult: unknown = null;
+      let directorsResult: unknown = null;
+      let sanctionsResult: unknown = null;
+      let riskScore = 0;
+      let overallOutcome: 'clear' | 'consider' | 'adverse' = 'clear';
+
+      // CAC Full Profile
+      if (input.checks.includes('cac_full_profile')) {
+        try {
+          const res = await fetch(`${GATEWAY_URL}/v1/cac/${encodeURIComponent(input.rcNumber)}`, {
+            headers: { 'X-BIS-Key': GATEWAY_KEY },
+          });
+          cacResult = res.ok ? await res.json() : { error: `HTTP ${res.status}`, rc: input.rcNumber };
+        } catch (e: any) {
+          cacResult = { error: e.message, rc: input.rcNumber };
+        }
+      }
+
+      // FIRS Tax Clearance
+      if (input.checks.includes('firs_tax_clearance')) {
+        try {
+          const res = await fetch(`${GATEWAY_URL}/v1/firs/tax-clearance`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-BIS-Key': GATEWAY_KEY },
+            body: JSON.stringify({ rc_number: input.rcNumber, tin: input.tinNumber }),
+          });
+          firsResult = res.ok ? await res.json() : { error: `HTTP ${res.status}`, rc: input.rcNumber };
+          if ((firsResult as any)?.status === 'not_cleared') {
+            overallOutcome = 'consider';
+            riskScore += 20;
+          }
+        } catch (e: any) {
+          firsResult = { error: e.message };
+        }
+      }
+
+      // Directors / UBO
+      if (input.checks.includes('beneficial_owner')) {
+        try {
+          const res = await fetch(`${GATEWAY_URL}/v1/cac/${encodeURIComponent(input.rcNumber)}/directors`, {
+            headers: { 'X-BIS-Key': GATEWAY_KEY },
+          });
+          directorsResult = res.ok ? await res.json() : { error: `HTTP ${res.status}`, rc: input.rcNumber };
+        } catch (e: any) {
+          directorsResult = { error: e.message };
+        }
+      }
+
+      // Corporate Sanctions
+      if (input.checks.includes('corporate_sanctions')) {
+        try {
+          const res = await fetch(`${GATEWAY_URL}/v1/sanctions/${encodeURIComponent(companyName)}`, {
+            headers: { 'X-BIS-Key': GATEWAY_KEY },
+          });
+          sanctionsResult = res.ok ? await res.json() : { error: `HTTP ${res.status}`, name: companyName };
+          if ((sanctionsResult as any)?.hits?.length > 0) {
+            overallOutcome = 'adverse';
+            riskScore += 50;
+          }
+        } catch (e: any) {
+          sanctionsResult = { error: e.message };
+        }
+      }
+
+      // Update the profile with results
+      const [updated] = await db.update(corporateScreeningProfiles)
+        .set({
+          status: 'completed',
+          overallOutcome,
+          cacResult: cacResult as any,
+          firsResult: firsResult as any,
+          directorsResult: directorsResult as any,
+          sanctionsResult: sanctionsResult as any,
+          riskScore,
+          updatedAt: new Date(),
+        })
+        .where(eq(corporateScreeningProfiles.profileRef, profileRef))
+        .returning();
+
+      await writeAuditLog(db, {
+        userId: ctx.user!.id,
+        category: 'investigation',
+        action: `Corporate check run: ${input.checks.join(', ')} (outcome: ${overallOutcome})`,
+        targetRef: input.investigationRef,
+      });
+
+      return updated;
+    }),
+
+  /**
+   * Get corporate screening profiles for an investigation.
+   */
+  getCorporateProfiles: protectedProcedure
+    .input(z.object({ investigationRef: z.string() }))
+    .query(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) return [];
+      return db.select().from(corporateScreeningProfiles)
+        .where(eq(corporateScreeningProfiles.investigationRef, input.investigationRef))
+        .orderBy(desc(corporateScreeningProfiles.createdAt));
     }),
 });
 
