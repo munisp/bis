@@ -3225,3 +3225,47 @@
 - [x] Add Corporate Check Results section showing profile cards with outcome badges
 - [x] Write 31 vitest tests in server/investigations.ai-corporate.test.ts (all passing)
 - [x] TypeScript: 0 errors
+
+## Corporate Check Detail Modal (Jun 29 2026)
+- [x] Add corpDetailOpen, corpDetailProfile, corpDetailTab state variables
+- [x] Add openCorpDetail() handler to open modal with selected profile
+- [x] Make corporate profile cards clickable (onClick -> openCorpDetail) with hover effect and "View" eye icon
+- [x] Add Corporate Check Detail Modal (Dialog) with 5-tab layout: Overview, CAC, FIRS, Directors, Sanctions
+- [x] Overview tab: summary header cards (company, RC, risk score, outcome), checks-performed grid with ShieldCheck/ShieldX/ShieldAlert icons
+- [x] CAC tab: key fields grid (name, RC, status, type, date registered, address), error state, collapsible raw JSON with copy button
+- [x] FIRS tab: clearance status banner (cleared/not_cleared/unknown), outstanding amount, message, collapsible raw JSON with copy button
+- [x] Directors tab: director cards with name, role, nationality, DOB, shares, address, collapsible raw JSON with copy button
+- [x] Sanctions tab: hits list with entity name, list, type, score, program, date listed, reason; clear state if no hits; collapsible raw JSON with copy button
+- [x] Each tab has a collapsible raw JSON section with a one-click copy-to-clipboard button
+- [x] Modal footer shows profile ref + timestamp + Close button
+- [x] TypeScript: 0 errors
+
+## Field Visit Return-Leg + Thin-File Features (Jun 29 2026)
+### Schema & Backend
+- [x] Add thin_file to investigationStatusEnum in schema.ts
+- [x] Add field_visit_reports table (visitRef, taskRef, investigationId, agentId, checkInAt, checkOutAt, checkInLat, checkInLng, checkOutLat, checkOutLng, findings, photoUrls, dataCompleteness, recommendedNextSteps, submittedAt)
+- [x] Run pnpm db:push to apply migration
+- [x] Add fieldTasks.submitResult tRPC mutation (findings, photoUrls, gpsLat, gpsLng, status=completed/failed)
+- [x] Add fieldTasks.checkIn tRPC mutation (GPS stamp, status → in_progress)
+- [x] Add fieldTasks.checkOut tRPC mutation (GPS stamp, duration, status → completed)
+- [x] Add fieldTasks.get tRPC query (single task by taskRef)
+- [x] Add fieldTasks.uploadPhoto tRPC mutation (S3 storagePut, returns URL)
+- [x] Add investigations.setThinFile tRPC mutation (sets status=thin_file, creates audit entry)
+- [x] Add investigations.getDataCompleteness tRPC query (returns per-source coverage %, overall score, missing sources)
+### Field Visit UI
+- [x] Add task detail drawer to FieldAgentsPage (click task row → drawer with full task info)
+- [x] Add Check In button in task drawer (GPS stamp, status → in_progress)
+- [x] Add findings submission form in task drawer (narrative text, structured fields per taskType)
+- [x] Add photo upload in task drawer (multi-file, S3, thumbnail preview)
+- [x] Add Check Out / Submit button (GPS stamp + findings → submitResult mutation)
+- [x] Show completed task result in drawer (read-only findings, photos, GPS trail, duration)
+- [x] Show field visit results in InvestigationDetail (linked tasks with completion status + findings summary)
+### Thin-File & Data Completeness UI
+- [x] Add data-completeness indicator to Background Screening tab header (coverage bar, X of Y sources)
+- [x] Add thin_file status badge to InvestigationDetail subject card
+- [x] Add "Mark as Thin File" action button in InvestigationDetail when coverage < threshold
+- [x] Add alternative evidence prompts panel in Background Screening tab (per-source fallback suggestions)
+- [x] Show thin_file warning banner when investigation status is thin_file
+### Tests
+- [x] Write vitest tests for fieldTasks.submitResult, checkIn, checkOut, uploadPhoto
+- [x] Write vitest tests for investigations.getDataCompleteness and setThinFile

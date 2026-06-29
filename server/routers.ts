@@ -93,6 +93,7 @@ import {
   candidateConsents,
   screeningAiSummaries,
   corporateScreeningProfiles,
+  fieldVisitReports,
 } from "../drizzle/schema";
 import {
   getDashboardStats,
@@ -204,6 +205,22 @@ function generateRef(prefix: string): string {
 }
 
 // ─── Investigations Router ────────────────────────────────────────────────────
+
+function getFallbackSuggestion(source: string): string {
+  const map: Record<string, string> = {
+    nin_trace:           'Request NIN slip or NIMC self-service printout from subject',
+    bvn_fraud_check:     'Request recent bank statement (last 3 months) as alternative',
+    npf_criminal:        'Request sworn affidavit of good character from magistrate court',
+    efcc_watchlist:      'Cross-check against INTERPOL Red Notice list manually',
+    pep_check:           'Search public records: INEC portal, FIRS TCC, NASS website',
+    adverse_media_ng:    'Run manual Google News search with subject name + "fraud" / "court"',
+    cac_full_profile:    'Request certified true copy of Certificate of Incorporation',
+    firs_tax_clearance:  'Request TCC (Tax Clearance Certificate) from entity directly',
+    beneficial_owner:    'Request CAC Form CO2 (Return of Allotment) from entity',
+    corporate_sanctions: 'Cross-check OFAC SDN list and UN consolidated sanctions list',
+  };
+  return map[source] ?? 'Request supporting documentation from subject directly';
+}
 
 const investigationsRouter = router({
   list: protectedProcedure
@@ -1273,7 +1290,7 @@ Please generate a comprehensive screening summary.`;
   /**
    * Get corporate screening profiles for an investigation.
    */
-  getCorporateProfiles: protectedProcedure
+    getCorporateProfiles: protectedProcedure
     .input(z.object({ investigationRef: z.string() }))
     .query(async ({ input, ctx }) => {
       const db = await getDb();
@@ -1282,8 +1299,70 @@ Please generate a comprehensive screening summary.`;
         .where(eq(corporateScreeningProfiles.investigationRef, input.investigationRef))
         .orderBy(desc(corporateScreeningProfiles.createdAt));
     }),
-});
 
+  // ── Thin-file & data completeness ──────────────────────────────────────────
+
+  getDataCompleteness: protectedProcedure
+    .input(z.object({ investigationRef: z.string() }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return { score: 0, sourcesChecked: 0, sourcesTotal: 0, coverage: [], thinFile: true, missingCritical: [] };
+      const [inv] = await db.select().from(investigations).where(eq(investigations.ref, input.investigationRef)).limit(1);
+      if (!inv) throw new TRPCError({ code: 'NOT_FOUND' });
+      const isCorperate = inv.subjectType === 'corporate';
+      const expectedSources = isCorperate
+        ? ['cac_full_profile', 'firs_tax_clearance', 'beneficial_owner', 'corporate_sanctions']
+        : ['nin_trace', 'bvn_fraud_check', 'npf_criminal', 'efcc_watchlist', 'pep_check', 'adverse_media_ng'];
+      // screeningResults links via screeningOrders.investigationRef
+      const orderRows = await db.select({ id: screeningOrders.id, types: screeningOrders.screeningTypes })
+        .from(screeningOrders).where(eq(screeningOrders.investigationRef, input.investigationRef));
+      const orderIds = orderRows.map((o: any) => o.id);
+      const screeningRows = orderIds.length > 0
+        ? await db.select().from(screeningResults).where(and(inArray(screeningResults.orderId, orderIds), eq(screeningResults.status, 'completed')))
+        : [];
+      const completedTypes = new Set(screeningRows.map((r: any) => r.screeningType));
+      const kycRows = await db.select().from(kycRecords).where(eq(kycRecords.investigationId, inv.id)).limit(1);
+      const hasKyc = kycRows.length > 0 && kycRows[0].status !== 'pending';
+      const visitRows = await db.select().from(fieldVisitReports).where(eq(fieldVisitReports.investigationId, inv.id)).limit(1);
+      const hasFieldVisit = visitRows.length > 0 && visitRows[0].submittedAt != null;
+      const coverage = expectedSources.map(src => ({
+        source: src,
+        label: src.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()),
+        hasData: completedTypes.has(src),
+        fallback: getFallbackSuggestion(src),
+      }));
+      const bonusSources = [
+        { source: 'kyc_identity', label: 'KYC Identity Verification', hasData: hasKyc, fallback: 'Request government-issued ID document upload' },
+        { source: 'field_visit', label: 'Field Visit / Physical Verification', hasData: hasFieldVisit, fallback: 'Dispatch field agent for address verification' },
+      ];
+      const allCoverage = [...coverage, ...bonusSources];
+      const sourcesWithData = allCoverage.filter(c => c.hasData).length;
+      const score = Math.round((sourcesWithData / allCoverage.length) * 100);
+      const thinFile = score < 40;
+      return { score, sourcesChecked: sourcesWithData, sourcesTotal: allCoverage.length, thinFile, coverage: allCoverage, missingCritical: coverage.filter(c => !c.hasData).map(c => c.source) };
+    }),
+
+  setThinFile: writeProcedure
+    .input(z.object({ investigationRef: z.string(), reason: z.string().optional() }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR' });
+      await db.update(investigations).set({ status: 'thin_file' as any, updatedAt: new Date() }).where(eq(investigations.ref, input.investigationRef));
+      await writeAuditLog(db, { userId: ctx.user!.id, category: 'investigation', action: `Investigation marked as thin-file${input.reason ? ': ' + input.reason : ''}`, targetRef: input.investigationRef, result: 'warning' });
+      await publishEvent('INVESTIGATION_THIN_FILE', input.investigationRef, 'warning', { reason: input.reason });
+      return { success: true };
+    }),
+
+  revertThinFile: writeProcedure
+    .input(z.object({ investigationRef: z.string() }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR' });
+      await db.update(investigations).set({ status: 'processing' as any, updatedAt: new Date() }).where(eq(investigations.ref, input.investigationRef));
+      await writeAuditLog(db, { userId: ctx.user!.id, category: 'investigation', action: 'Thin-file flag removed — investigation returned to processing', targetRef: input.investigationRef });
+      return { success: true };
+    }),
+});
 // ─── Data Source Lookup Router ────────────────────────────────────────────────
 
 const lookupRouter = router({
@@ -2658,6 +2737,17 @@ const fieldTasksRouter = router({
       return db.select().from(fieldTasks).where(conditions.length ? and(...conditions) : undefined).orderBy(desc(fieldTasks.createdAt)).limit(input.limit);
     }),
 
+  get: protectedProcedure
+    .input(z.object({ taskRef: z.string() }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return null;
+      const [task] = await db.select().from(fieldTasks).where(eq(fieldTasks.taskRef, input.taskRef)).limit(1);
+      if (!task) return null;
+      const [report] = await db.select().from(fieldVisitReports).where(eq(fieldVisitReports.taskRef, input.taskRef)).limit(1);
+      return { ...task, visitReport: report ?? null };
+    }),
+
   dispatch: writeProcedure
     .input(z.object({
       agentId: z.string(),
@@ -2699,6 +2789,174 @@ const fieldTasksRouter = router({
       await writeAuditLog(db, { userId: ctx.user!.id, category: "investigation", action: `Field task dispatched to ${input.agentName}`, targetRef: taskRef });
       await publishEvent("FIELD_TASK_DISPATCHED", taskRef, "info", { agentName: input.agentName, taskType: input.taskType });
       return { taskRef };
+    }),
+
+  checkIn: writeProcedure
+    .input(z.object({
+      taskRef: z.string(),
+      gpsLat: z.number().optional(),
+      gpsLng: z.number().optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      const [task] = await db.select().from(fieldTasks).where(eq(fieldTasks.taskRef, input.taskRef)).limit(1);
+      if (!task) throw new TRPCError({ code: "NOT_FOUND", message: "Task not found" });
+      // Update task status to in_progress
+      await db.update(fieldTasks)
+        .set({ status: "in_progress", updatedAt: new Date() })
+        .where(eq(fieldTasks.taskRef, input.taskRef));
+      // Create or update visit report with check-in data
+      const visitRef = generateRef("VR");
+      const existing = await db.select().from(fieldVisitReports).where(eq(fieldVisitReports.taskRef, input.taskRef)).limit(1);
+      if (existing.length === 0) {
+        await db.insert(fieldVisitReports).values({
+          visitRef,
+          taskRef: input.taskRef,
+          investigationId: task.investigationId ?? undefined,
+          agentId: task.agentId,
+          agentName: task.agentName,
+          checkInAt: new Date(),
+          checkInLat: input.gpsLat,
+          checkInLng: input.gpsLng,
+          createdBy: ctx.user!.id,
+        });
+      } else {
+        await db.update(fieldVisitReports)
+          .set({ checkInAt: new Date(), checkInLat: input.gpsLat, checkInLng: input.gpsLng, updatedAt: new Date() })
+          .where(eq(fieldVisitReports.taskRef, input.taskRef));
+      }
+      await writeAuditLog(db, { userId: ctx.user!.id, category: "investigation", action: `Field task ${input.taskRef} — agent checked in`, targetRef: input.taskRef });
+      return { success: true, checkedInAt: new Date() };
+    }),
+
+  checkOut: writeProcedure
+    .input(z.object({
+      taskRef: z.string(),
+      gpsLat: z.number().optional(),
+      gpsLng: z.number().optional(),
+      findings: z.string().optional(),
+      subjectPresent: z.boolean().optional(),
+      addressConfirmed: z.boolean().optional(),
+      outcome: z.enum(["confirmed", "unconfirmed", "inconclusive"]).optional(),
+      photoUrls: z.array(z.string().url()).optional(),
+      structuredFindings: z.record(z.string(), z.any()).optional(),
+      recommendedNextSteps: z.array(z.string()).optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      const [task] = await db.select().from(fieldTasks).where(eq(fieldTasks.taskRef, input.taskRef)).limit(1);
+      if (!task) throw new TRPCError({ code: "NOT_FOUND", message: "Task not found" });
+      const [report] = await db.select().from(fieldVisitReports).where(eq(fieldVisitReports.taskRef, input.taskRef)).limit(1);
+      const checkOutAt = new Date();
+      const durationMinutes = report?.checkInAt
+        ? Math.round((checkOutAt.getTime() - new Date(report.checkInAt).getTime()) / 60000)
+        : null;
+      // Update visit report
+      if (report) {
+        await db.update(fieldVisitReports)
+          .set({
+            checkOutAt,
+            checkOutLat: input.gpsLat,
+            checkOutLng: input.gpsLng,
+            durationMinutes: durationMinutes ?? undefined,
+            findings: input.findings,
+            subjectPresent: input.subjectPresent,
+            addressConfirmed: input.addressConfirmed,
+            outcome: input.outcome,
+            photoUrls: input.photoUrls ?? [],
+            structuredFindings: input.structuredFindings,
+            recommendedNextSteps: input.recommendedNextSteps ?? [],
+            submittedAt: checkOutAt,
+            updatedAt: checkOutAt,
+          })
+          .where(eq(fieldVisitReports.taskRef, input.taskRef));
+      }
+      // Update task status and result
+      await db.update(fieldTasks)
+        .set({
+          status: "completed",
+          completedAt: checkOutAt,
+          result: { findings: input.findings, outcome: input.outcome, subjectPresent: input.subjectPresent, addressConfirmed: input.addressConfirmed },
+          updatedAt: checkOutAt,
+        })
+        .where(eq(fieldTasks.taskRef, input.taskRef));
+      await writeAuditLog(db, { userId: ctx.user!.id, category: "investigation", action: `Field task ${input.taskRef} — agent checked out (${input.outcome ?? 'no outcome'})`, targetRef: input.taskRef });
+      await publishEvent("FIELD_TASK_COMPLETED", input.taskRef, "info", { outcome: input.outcome, durationMinutes });
+      return { success: true, checkedOutAt: checkOutAt, durationMinutes };
+    }),
+
+  submitResult: writeProcedure
+    .input(z.object({
+      taskRef: z.string(),
+      findings: z.string().min(1),
+      subjectPresent: z.boolean().optional(),
+      addressConfirmed: z.boolean().optional(),
+      outcome: z.enum(["confirmed", "unconfirmed", "inconclusive"]),
+      photoUrls: z.array(z.string()).optional(),
+      structuredFindings: z.record(z.string(), z.any()).optional(),
+      recommendedNextSteps: z.array(z.string()).optional(),
+      status: z.enum(["completed", "failed"]).default("completed"),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      const [task] = await db.select().from(fieldTasks).where(eq(fieldTasks.taskRef, input.taskRef)).limit(1);
+      if (!task) throw new TRPCError({ code: "NOT_FOUND", message: "Task not found" });
+      const now = new Date();
+      // Upsert visit report
+      const [existing] = await db.select().from(fieldVisitReports).where(eq(fieldVisitReports.taskRef, input.taskRef)).limit(1);
+      if (existing) {
+        await db.update(fieldVisitReports)
+          .set({ findings: input.findings, subjectPresent: input.subjectPresent, addressConfirmed: input.addressConfirmed, outcome: input.outcome, photoUrls: input.photoUrls ?? [], structuredFindings: input.structuredFindings, recommendedNextSteps: input.recommendedNextSteps ?? [], submittedAt: now, updatedAt: now })
+          .where(eq(fieldVisitReports.taskRef, input.taskRef));
+      } else {
+        const visitRef = generateRef("VR");
+        await db.insert(fieldVisitReports).values({ visitRef, taskRef: input.taskRef, investigationId: task.investigationId ?? undefined, agentId: task.agentId, agentName: task.agentName, findings: input.findings, subjectPresent: input.subjectPresent, addressConfirmed: input.addressConfirmed, outcome: input.outcome, photoUrls: input.photoUrls ?? [], structuredFindings: input.structuredFindings, recommendedNextSteps: input.recommendedNextSteps ?? [], submittedAt: now, createdBy: ctx.user!.id });
+      }
+      // Update task
+      await db.update(fieldTasks)
+        .set({ status: input.status, completedAt: now, result: { findings: input.findings, outcome: input.outcome, subjectPresent: input.subjectPresent, addressConfirmed: input.addressConfirmed }, updatedAt: now })
+        .where(eq(fieldTasks.taskRef, input.taskRef));
+      await writeAuditLog(db, { userId: ctx.user!.id, category: "investigation", action: `Field task ${input.taskRef} result submitted — ${input.outcome}`, targetRef: input.taskRef });
+      await publishEvent("FIELD_TASK_COMPLETED", input.taskRef, "info", { outcome: input.outcome, status: input.status });
+      return { success: true };
+    }),
+
+  uploadPhoto: writeProcedure
+    .input(z.object({
+      taskRef: z.string(),
+      fileName: z.string(),
+      fileBase64: z.string(),
+      mimeType: z.string().default("image/jpeg"),
+    }))
+    .mutation(async ({ input }) => {
+      const { storagePut } = await import('./storage');
+      const buf = Buffer.from(input.fileBase64, 'base64');
+      const suffix = Date.now().toString(36);
+      const key = `field-visits/${input.taskRef}/${suffix}-${input.fileName}`;
+      const { url } = await storagePut(key, buf, input.mimeType);
+      return { url };
+    }),
+
+  getVisitReport: protectedProcedure
+    .input(z.object({ taskRef: z.string() }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return null;
+      const [report] = await db.select().from(fieldVisitReports).where(eq(fieldVisitReports.taskRef, input.taskRef)).limit(1);
+      return report ?? null;
+    }),
+
+  listVisitReports: protectedProcedure
+    .input(z.object({ investigationId: z.number().optional(), limit: z.number().min(1).max(100).default(20) }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return [];
+      const conditions = [];
+      if (input.investigationId) conditions.push(eq(fieldVisitReports.investigationId, input.investigationId));
+      return db.select().from(fieldVisitReports).where(conditions.length ? and(...conditions) : undefined).orderBy(desc(fieldVisitReports.createdAt)).limit(input.limit);
     }),
 });
 

@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { MapView } from '@/components/Map';
 import { trpc } from '@/lib/trpc';
+import { FieldTaskDetailDrawer } from '@/components/FieldTaskDetailDrawer';
 import { toast } from 'sonner';
 
 // ─── Config ───────────────────────────────────────────────────────────────────
@@ -255,6 +256,7 @@ export default function FieldAgentsPage() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [dispatchAgent, setDispatchAgent] = useState<any | null>(null);
+  const [taskDetailRef, setTaskDetailRef] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'table' | 'map'>('table');
   const [recruitOpen, setRecruitOpen] = useState(false);
   const [recruitForm, setRecruitForm] = useState({
@@ -532,7 +534,10 @@ export default function FieldAgentsPage() {
                 {(activeTasks as any[]).map((task: any) => {
                   const c = TASK_PIN_COLORS[task.priority] ?? 'var(--risk-medium)';
                   return (
-                    <div key={task.id} className="p-3 rounded-lg border border-border/50 bg-muted/10">
+                    <div key={task.id}
+                      className="p-3 rounded-lg border border-border/50 bg-muted/10 cursor-pointer hover:border-primary/40 hover:bg-muted/20 transition-all"
+                      onClick={() => setTaskDetailRef(task.taskRef)}
+                      title="Click to view task details & submit findings">
                       <div className="flex items-center justify-between mb-1">
                         <span className="text-[10px] font-mono font-bold" style={{ color: c }}>
                           {task.priority?.toUpperCase()}
@@ -542,6 +547,7 @@ export default function FieldAgentsPage() {
                       <p className="text-xs font-mono font-semibold text-foreground">{task.taskType?.replace(/_/g, ' ')}</p>
                       {task.subjectName && <p className="text-[10px] font-mono text-muted-foreground mt-0.5">Subject: {task.subjectName}</p>}
                       <p className="text-[10px] font-mono text-primary mt-0.5">{task.agentName}</p>
+                      <p className="text-[9px] font-mono text-muted-foreground/60 mt-1">Click to view &amp; submit →</p>
                     </div>
                   );
                 })}
@@ -677,6 +683,11 @@ export default function FieldAgentsPage() {
           ))}
         </div>
       </div>
+
+      {/* Field Task Detail Drawer */}
+      {taskDetailRef && (
+        <FieldTaskDetailDrawer taskRef={taskDetailRef} onClose={() => setTaskDetailRef(null)} />
+      )}
 
       {/* Dispatch Task Sheet */}
       {dispatchAgent && (

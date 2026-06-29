@@ -337,6 +337,48 @@
       "when": 1782063925101,
       "tag": "0047_graceful_tarot",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1782069128221,
+      "tag": "0048_old_lady_ursula",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1782706757086,
+      "tag": "0049_pretty_pet_avengers",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1782706886345,
+      "tag": "0050_flaky_red_hulk",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1782736414425,
+      "tag": "0051_empty_bruce_banner",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1782737999655,
+      "tag": "0052_flawless_mauler",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1782740226127,
+      "tag": "0053_nervous_otto_octavius",
+      "breakpoints": true
     }
   ]
 }

@@ -3,7 +3,7 @@
 
 // ─── Domain types ─────────────────────────────────────────────────────────────
 
-export type InvestigationStatus = 'pending' | 'processing' | 'completed' | 'flagged' | 'draft';
+export type InvestigationStatus = 'pending' | 'processing' | 'completed' | 'flagged' | 'draft' | 'thin_file';
 export type InvestigationTier = 'basic' | 'standard' | 'comprehensive';
 export type RiskLevel = 'low' | 'medium' | 'high' | 'critical';
 export type EntityType = 'individual' | 'corporate' | 'government' | 'ngo';
@@ -40,6 +40,8 @@ export function getStatusBadgeClass(status: string): string {
     case 'dismissed':
     case 'suspended':
       return 'bis-badge-draft';
+    case 'thin_file':
+      return 'bis-badge-pending';
     case 'degraded':
     case 'reviewed':
       return 'bis-badge-pending';

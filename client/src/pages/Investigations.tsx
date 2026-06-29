@@ -58,6 +58,7 @@ const statusIcon: Record<InvestigationStatus, React.ReactNode> = {
   completed:  <CheckCircle2 size={12} className="text-emerald-400" />,
   flagged:    <AlertTriangle size={12} className="text-red-400" />,
   draft:      <FileText size={12} className="text-muted-foreground" />,
+  thin_file:  <AlertTriangle size={12} className="text-amber-400" />,
 };
 
 // Countries list is static; live filter options come from the DB

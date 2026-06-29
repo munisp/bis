@@ -249,6 +249,34 @@ export default function InvestigationDetail() {
     setCorpChecks(prev => prev.includes(value) ? prev.filter(v => v !== value) : [...prev, value]);
   };
 
+  // ── Data Completeness & Thin-File ─────────────────────────────────────────────
+  const { data: dataCompleteness, isLoading: completenessLoading, refetch: refetchCompleteness } =
+    trpc.investigations.getDataCompleteness.useQuery(
+      { investigationRef: invRef },
+      { enabled: !!invRef && activeTab === 'screening' }
+    );
+
+  const [thinFileReason, setThinFileReason] = useState('');
+  const [showThinFileConfirm, setShowThinFileConfirm] = useState(false);
+
+  const setThinFileMutation = trpc.investigations.setThinFile.useMutation({
+    onSuccess: () => {
+      toast.success('Investigation flagged as thin-file');
+      setShowThinFileConfirm(false);
+      setThinFileReason('');
+      refetchCompleteness();
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const revertThinFileMutation = trpc.investigations.revertThinFile.useMutation({
+    onSuccess: () => {
+      toast.success('Thin-file flag removed');
+      refetchCompleteness();
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
   const RISK_COLORS: Record<string, string> = {
     low:      'text-emerald-400 bg-emerald-500/10 border-emerald-500/20',
     medium:   'text-amber-400 bg-amber-500/10 border-amber-500/20',
@@ -1196,6 +1224,176 @@ export default function InvestigationDetail() {
               </Button>
             </div>
           </div>
+
+          {/* ── Data Completeness & Thin-File Panel ── */}
+          {completenessLoading ? (
+            <div className="bis-card p-4 flex items-center gap-2 text-muted-foreground">
+              <Loader2 size={12} className="animate-spin" />
+              <span className="text-xs font-mono">Analysing data coverage…</span>
+            </div>
+          ) : dataCompleteness ? (
+            <div className={cn(
+              'bis-card p-4 border',
+              (dataCompleteness as any).isThinFile
+                ? 'border-amber-500/40 bg-amber-500/5'
+                : (dataCompleteness as any).overallScore >= 70
+                  ? 'border-emerald-500/20'
+                  : (dataCompleteness as any).overallScore >= 40
+                    ? 'border-amber-500/20'
+                    : 'border-red-500/20'
+            )}>
+              {/* Header row */}
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <Activity size={13} className={cn(
+                    (dataCompleteness as any).isThinFile ? 'text-amber-400'
+                    : (dataCompleteness as any).overallScore >= 70 ? 'text-emerald-400'
+                    : (dataCompleteness as any).overallScore >= 40 ? 'text-amber-400' : 'text-red-400'
+                  )} />
+                  <h4 className="text-xs font-semibold text-foreground">Data Completeness</h4>
+                  {(dataCompleteness as any).isThinFile && (
+                    <span className="text-[9px] font-mono font-bold px-2 py-0.5 rounded border border-amber-500/40 bg-amber-500/10 text-amber-400 uppercase tracking-wider">
+                      Thin File
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  {(dataCompleteness as any).isThinFile ? (
+                    <Button size="sm" variant="outline" className="h-6 text-[9px] gap-1 border-amber-500/30 text-amber-400 hover:bg-amber-500/10"
+                      onClick={() => revertThinFileMutation.mutate({ investigationRef: invRef })}
+                      disabled={revertThinFileMutation.isPending}>
+                      {revertThinFileMutation.isPending ? <Loader2 size={9} className="animate-spin" /> : <CheckCircle size={9} />}
+                      Clear Thin-File Flag
+                    </Button>
+                  ) : (
+                    <Button size="sm" variant="outline" className="h-6 text-[9px] gap-1"
+                      onClick={() => setShowThinFileConfirm(true)}>
+                      <AlertOctagon size={9} /> Flag as Thin File
+                    </Button>
+                  )}
+                  <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => refetchCompleteness()}>
+                    <RefreshCw size={10} />
+                  </Button>
+                </div>
+              </div>
+
+              {/* Score bar */}
+              <div className="mb-3">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[9px] font-mono text-muted-foreground uppercase tracking-wider">Overall Coverage</span>
+                  <span className={cn('text-sm font-mono font-bold',
+                    (dataCompleteness as any).overallScore >= 70 ? 'text-emerald-400'
+                    : (dataCompleteness as any).overallScore >= 40 ? 'text-amber-400' : 'text-red-400'
+                  )}>{(dataCompleteness as any).overallScore}%</span>
+                </div>
+                <div className="h-1.5 rounded-full bg-muted/30 overflow-hidden">
+                  <div
+                    className={cn('h-full rounded-full transition-all',
+                      (dataCompleteness as any).overallScore >= 70 ? 'bg-emerald-500'
+                      : (dataCompleteness as any).overallScore >= 40 ? 'bg-amber-500' : 'bg-red-500'
+                    )}
+                    style={{ width: `${(dataCompleteness as any).overallScore}%` }}
+                  />
+                </div>
+              </div>
+
+              {/* Source grid */}
+              <div className="grid grid-cols-2 gap-2 mb-3">
+                {((dataCompleteness as any).sources ?? []).map((src: any) => (
+                  <div key={src.name} className={cn(
+                    'flex items-center justify-between px-2.5 py-1.5 rounded-md border text-[10px] font-mono',
+                    src.status === 'returned'  ? 'border-emerald-500/20 bg-emerald-500/5'
+                    : src.status === 'empty'   ? 'border-amber-500/20 bg-amber-500/5'
+                    : src.status === 'error'   ? 'border-red-500/20 bg-red-500/5'
+                                               : 'border-border bg-muted/10'
+                  )}>
+                    <span className={cn(
+                      'truncate',
+                      src.status === 'returned' ? 'text-foreground' : 'text-muted-foreground'
+                    )}>{src.label}</span>
+                    <span className={cn('ml-2 flex-shrink-0',
+                      src.status === 'returned' ? 'text-emerald-400'
+                      : src.status === 'empty'  ? 'text-amber-400'
+                      : src.status === 'error'  ? 'text-red-400'
+                                                : 'text-muted-foreground'
+                    )}>
+                      {src.status === 'returned' ? '✓'
+                       : src.status === 'empty'  ? '—'
+                       : src.status === 'error'  ? '✗'
+                                                 : '·'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+
+              {/* Alternative evidence prompts for missing sources */}
+              {((dataCompleteness as any).alternativePrompts ?? []).length > 0 && (
+                <div className="border-t border-border/50 pt-3">
+                  <p className="text-[9px] font-mono text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1">
+                    <Info size={9} /> Suggested Alternative Evidence
+                  </p>
+                  <ul className="space-y-1.5">
+                    {((dataCompleteness as any).alternativePrompts as string[]).map((prompt, i) => (
+                      <li key={i} className="flex items-start gap-2 text-[10px] font-mono text-muted-foreground">
+                        <span className="text-amber-400 flex-shrink-0 mt-0.5">→</span>
+                        <span>{prompt}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* Thin-file reason */}
+              {(dataCompleteness as any).thinFileReason && (
+                <div className="border-t border-amber-500/20 pt-3 mt-1">
+                  <p className="text-[9px] font-mono text-amber-400 uppercase tracking-wider mb-1">Thin-File Reason</p>
+                  <p className="text-[10px] font-mono text-muted-foreground">{(dataCompleteness as any).thinFileReason}</p>
+                </div>
+              )}
+            </div>
+          ) : null}
+
+          {/* Thin-file confirmation dialog */}
+          {showThinFileConfirm && (
+            <>
+              <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40" onClick={() => setShowThinFileConfirm(false)} />
+              <div className="fixed inset-0 flex items-center justify-center z-50 p-4">
+                <div className="bg-popover border border-amber-500/30 rounded-xl shadow-2xl p-5 w-full max-w-sm">
+                  <div className="flex items-center gap-2 mb-3">
+                    <AlertOctagon size={16} className="text-amber-400" />
+                    <h3 className="text-sm font-semibold text-foreground">Flag as Thin File</h3>
+                  </div>
+                  <p className="text-xs text-muted-foreground mb-3">
+                    This marks the investigation as having insufficient data for a reliable risk assessment.
+                    The status will be updated to <span className="font-mono text-amber-400">thin_file</span> and
+                    an audit log entry will be created.
+                  </p>
+                  <div className="mb-4">
+                    <label className="text-[9px] font-mono text-muted-foreground uppercase tracking-wider block mb-1.5">
+                      Reason (optional)
+                    </label>
+                    <textarea
+                      className="w-full h-20 px-3 py-2 rounded-md border border-border bg-background text-xs font-mono text-foreground resize-none focus:outline-none focus:ring-1 focus:ring-amber-500 placeholder:text-muted-foreground"
+                      placeholder="e.g. Subject has no BVN, NIN not found in NIMC database, no formal employment history…"
+                      value={thinFileReason}
+                      onChange={e => setThinFileReason(e.target.value)}
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <Button variant="outline" size="sm" className="flex-1 text-xs" onClick={() => setShowThinFileConfirm(false)}>
+                      Cancel
+                    </Button>
+                    <Button size="sm" className="flex-1 text-xs bg-amber-500 hover:bg-amber-600 text-black gap-1.5"
+                      onClick={() => setThinFileMutation.mutate({ investigationRef: invRef, reason: thinFileReason || undefined })}
+                      disabled={setThinFileMutation.isPending}>
+                      {setThinFileMutation.isPending ? <Loader2 size={10} className="animate-spin" /> : <AlertOctagon size={10} />}
+                      Confirm Thin File
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
 
           {/* ── AI Screening Summary Panel ── */}
           <div className="bis-card p-4 border-primary/20">

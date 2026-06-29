@@ -20,7 +20,7 @@ export const userRoleEnum = pgEnum("user_role", ["user", "admin", "analyst", "su
 export const subjectTypeEnum = pgEnum("subject_type", ["individual", "corporate"]);
 export const tierEnum = pgEnum("tier", ["basic", "standard", "comprehensive"]);
 export const priorityEnum = pgEnum("priority", ["low", "medium", "high", "critical"]);
-export const investigationStatusEnum = pgEnum("investigation_status", ["draft", "pending", "processing", "completed", "flagged", "archived"]);
+export const investigationStatusEnum = pgEnum("investigation_status", ["draft", "pending", "processing", "completed", "flagged", "archived", "thin_file"]);
 export const riskTierEnum = pgEnum("risk_tier", ["low", "medium", "high", "critical"]);
 export const alertTypeEnum = pgEnum("alert_type", ["sanctions_hit", "pep_detected", "risk_threshold", "velocity", "adverse_media", "field_report", "system"]);
 export const severityEnum = pgEnum("severity", ["info", "low", "medium", "high", "critical"]);
@@ -2628,3 +2628,45 @@ export const corporateScreeningProfiles = pgTable("corporate_screening_profiles"
 }));
 export type CorporateScreeningProfile       = typeof corporateScreeningProfiles.$inferSelect;
 export type InsertCorporateScreeningProfile = typeof corporateScreeningProfiles.$inferInsert;
+
+// ─── Field Visit Reports ──────────────────────────────────────────────────────
+
+export const fieldVisitReports = pgTable("field_visit_reports", {
+  id:                serial("id").primaryKey(),
+  visitRef:          varchar("visitRef", { length: 32 }).notNull().unique(),
+  taskRef:           varchar("taskRef", { length: 32 }).notNull(),
+  investigationId:   integer("investigationId"),
+  agentId:           varchar("agentId", { length: 64 }).notNull(),
+  agentName:         varchar("agentName", { length: 255 }).notNull(),
+  // GPS trail
+  checkInAt:         timestamp("checkInAt"),
+  checkInLat:        real("checkInLat"),
+  checkInLng:        real("checkInLng"),
+  checkOutAt:        timestamp("checkOutAt"),
+  checkOutLat:       real("checkOutLat"),
+  checkOutLng:       real("checkOutLng"),
+  durationMinutes:   integer("durationMinutes"),
+  // Findings
+  subjectPresent:    boolean("subjectPresent"),
+  addressConfirmed:  boolean("addressConfirmed"),
+  findings:          text("findings"),
+  structuredFindings: json("structuredFindings"),
+  photoUrls:         json("photoUrls").$type<string[]>().default([]),
+  // Data completeness
+  dataCompleteness:  real("dataCompleteness"),           // 0–100 coverage score
+  sourcesChecked:    json("sourcesChecked").$type<string[]>().default([]),
+  sourcesReturned:   json("sourcesReturned").$type<string[]>().default([]),
+  recommendedNextSteps: json("recommendedNextSteps").$type<string[]>().default([]),
+  // Status
+  outcome:           varchar("outcome", { length: 32 }),  // confirmed / unconfirmed / inconclusive
+  submittedAt:       timestamp("submittedAt"),
+  createdBy:         integer("createdBy").references(() => users.id, { onDelete: "set null" }),
+  createdAt:         timestamp("createdAt").defaultNow().notNull(),
+  updatedAt:         timestamp("updatedAt").defaultNow().notNull(),
+}, (t) => ({
+  fvr_task_idx:  index("fvr_task_idx").on(t.taskRef),
+  fvr_inv_idx:   index("fvr_inv_idx").on(t.investigationId),
+  fvr_agent_idx: index("fvr_agent_idx").on(t.agentId),
+}));
+export type FieldVisitReport       = typeof fieldVisitReports.$inferSelect;
+export type InsertFieldVisitReport = typeof fieldVisitReports.$inferInsert;
