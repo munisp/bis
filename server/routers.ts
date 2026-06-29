@@ -34,6 +34,8 @@ import { documentVaultRouter } from "./documentVault";
 import { riskDashboardRouter } from "./riskDashboard";
 import { insiderThreatRouter } from "./insiderThreat";
 import { stablecoinRouter } from "./stablecoin";
+import { ngScreeningRouter } from "./ngScreening";
+import { ngScreeningExtRouter } from "./ngScreeningWebhooks";
 import { searchRouter, indexDocument } from "./search";
 import { sendPushToUser, broadcastPush } from "./pushNotify";
 import { publishInvestigationEvent, publishKycEvent } from "./dapr";
@@ -5477,6 +5479,8 @@ export const appRouter = router({
   push: pushRouter,
   insiderThreat: insiderThreatRouter,
   stablecoin: stablecoinRouter,
+  ngScreening: ngScreeningRouter,
+  ngScreeningExt: ngScreeningExtRouter,
 });
 export type AppRouter = typeof appRouter;
 

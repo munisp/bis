@@ -35,6 +35,7 @@ const WorkAuthorizationPage     = lazy(() => import("@/pages/bis/WorkAuthorizati
 const ZeroFootprintPage         = lazy(() => import("@/pages/bis/ZeroFootprintPage"));
 
 const BillingPage               = lazy(() => import("@/pages/bis/BillingPage"));
+const StablecoinPage            = lazy(() => import("@/pages/StablecoinPage"));
 const PaymentRailsPage          = lazy(() => import("@/pages/PaymentRails"));
 const AccountDetailPage          = lazy(() => import("@/pages/AccountDetail"));
 const FrozenAccountsDashboard    = lazy(() => import("@/pages/FrozenAccountsDashboard"));
@@ -100,6 +101,15 @@ const InsiderThreatDashboard     = lazy(() => import("@/pages/InsiderThreatDashb
 const UEBAProfilePage            = lazy(() => import("@/pages/UEBAProfilePage"));
 const AccessReviewPanel          = lazy(() => import("@/pages/AccessReviewPanel"));
 
+// ─── Nigerian Background Screening pages ────────────────────────────────────
+const NgScreeningDashboard = lazy(() => import('@/pages/ng-screening/NgScreeningDashboard'));
+const NgPackagesPage       = lazy(() => import('@/pages/ng-screening/NgPackagesPage'));
+const NgCandidatesPage     = lazy(() => import('@/pages/ng-screening/NgCandidatesPage'));
+const NgAdverseActionsPage = lazy(() => import('@/pages/ng-screening/NgAdverseActionsPage'));
+const NgContinuousPage     = lazy(() => import('@/pages/ng-screening/NgContinuousPage'));
+const NgWorkPermitsPage    = lazy(() => import('@/pages/ng-screening/NgWorkPermitsPage'));
+const NgAnalyticsPage      = lazy(() => import('@/pages/ng-screening/NgAnalyticsPage'));
+
 // ─── Page loading skeleton ────────────────────────────────────────────────────
 
 function PageSkeleton() {
@@ -143,6 +153,7 @@ function Router() {
         <Route path="/field-agents" component={FieldAgentsPage} />
         <Route path="/data-sources" component={DataSourcesPage} />
         <Route path="/billing" component={BillingPage} />
+        <Route path="/stablecoin" component={StablecoinPage} />
         <Route path="/payment-rails" component={PaymentRailsPage} />
         <Route path="/payment-rails/accounts/:accountId" component={AccountDetailPage} />
         <Route path="/payment-rails/frozen" component={FrozenAccountsDashboard} />
@@ -208,6 +219,14 @@ function Router() {
         <Route path="/infra/redis" component={RedisPage} />
         <Route path="/infra/gateway" component={GatewayHealthPage} />
         <Route path="/infra/health" component={SystemHealthDashboard} />
+        {/* NG Background Screening */}
+        <Route path="/ng-screening" component={NgScreeningDashboard} />
+        <Route path="/ng-screening/packages" component={NgPackagesPage} />
+        <Route path="/ng-screening/candidates" component={NgCandidatesPage} />
+        <Route path="/ng-screening/adverse-actions" component={NgAdverseActionsPage} />
+        <Route path="/ng-screening/continuous" component={NgContinuousPage} />
+        <Route path="/ng-screening/work-permits" component={NgWorkPermitsPage} />
+        <Route path="/ng-screening/analytics" component={NgAnalyticsPage} />
         {/* Fallback */}
         <Route path="/verify/:token" component={VerifyKYC} />
         <Route path="/search" component={SearchResults} />

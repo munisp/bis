@@ -4,6 +4,7 @@ import {
   pgTable,
   text,
   timestamp,
+  date,
   varchar,
   real,
   boolean,
@@ -267,7 +268,33 @@ export const dataSourceStatusEnum = pgEnum("data_source_status", ["active", "deg
 export const dataSourceCategoryEnum = pgEnum("data_source_category", ["identity", "financial", "legal", "social", "biometric", "government", "commercial"]);
 export const monitorStatusEnum = pgEnum("monitor_status", ["active", "paused", "triggered", "expired"]);
 export const monitorTypeEnum = pgEnum("monitor_type", ["sanctions", "pep", "adverse_media", "social", "transaction", "biometric"]);
-export const screeningTypeEnum = pgEnum("screening_type", ["mvr", "drug", "work_authorization", "biometric", "zero_footprint"]);
+export const screeningTypeEnum = pgEnum("screening_type", [
+  // Legacy types
+  "mvr", "drug", "work_authorization", "biometric", "zero_footprint",
+  // Nigerian Identity
+  "nin_trace", "bvn_fraud_check", "nin_address_history",
+  // Criminal & Watchlist
+  "npf_criminal", "efcc_watchlist", "icpc_debarment", "ndlea_drug",
+  "state_court", "federal_court", "pep_check", "adverse_media_ng",
+  // Driving & Transport
+  "frsc_mvr", "frsc_commercial_driver",
+  // Education
+  "waec_education", "neco_education", "nabteb_education",
+  // Employment & Pension
+  "employment_verification", "pencom_history", "nysc_discharge",
+  // Professional Licences
+  "professional_licence",
+  // Corporate
+  "cac_directorship",
+  // Healthcare
+  "mdcn_licence",
+  // Work Permits
+  "nis_work_permit",
+  // International
+  "international_criminal", "international_education", "international_employment",
+  // Continuous
+  "continuous_check"
+]);
 export const screeningStatusEnum = pgEnum("screening_status", ["pending", "processing", "completed", "failed", "review"]);
 
 // ─── Field Agents ─────────────────────────────────────────────────────────────
@@ -2080,3 +2107,462 @@ export const accessReviews = pgTable("access_reviews", {
 }));
 export type AccessReview       = typeof accessReviews.$inferSelect;
 export type InsertAccessReview = typeof accessReviews.$inferInsert;
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// NIGERIAN BACKGROUND SCREENING PLATFORM — Checkr.com Equivalent
+// Regulatory basis: NDPR 2019, CBN AML/CFT, EFCC Act, ICPC Act, CAC Act 2020,
+//                   Labour Act, Immigration Act, NIMC Act, NIBSS Standards
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ─── Enums ────────────────────────────────────────────────────────────────────
+
+export const candidateStatusEnum = pgEnum("candidate_status", [
+  "invited", "applying", "submitted", "processing", "completed", "withdrawn", "expired"
+]);
+
+export const adverseActionStatusEnum = pgEnum("adverse_action_status", [
+  "pending_pre_adverse", "pre_adverse_sent", "dispute_received",
+  "dispute_resolved", "final_adverse_sent", "withdrawn", "cleared"
+]);
+
+export const consentPurposeEnum = pgEnum("consent_purpose", [
+  "pre_employment", "employment", "contractor", "volunteer",
+  "tenancy", "financial_services", "healthcare", "government"
+]);
+
+export const workPermitTypeEnum = pgEnum("work_permit_type", [
+  "expatriate_quota", "combined_expatriate_residence_permit",
+  "temporary_work_permit", "subject_to_regularisation", "business_visa"
+]);
+
+export const professionalBodyEnum = pgEnum("professional_body", [
+  "COREN", "NBA", "MDCN", "ICAN", "CIBN", "NIM", "NSE", "NIPR",
+  "TOPREC", "ARCON", "ICSAN", "ACCA", "CIS", "CIPD", "HRCI"
+]);
+
+export const assessmentOutcomeEnum = pgEnum("assessment_outcome", [
+  "clear", "consider", "suspended_licence", "revoked_licence",
+  "adverse", "pending", "unverified"
+]);
+
+export const courtTypeEnum = pgEnum("court_type", [
+  "magistrate", "high_court", "federal_high_court", "court_of_appeal",
+  "supreme_court", "national_industrial_court", "sharia_court", "customary_court"
+]);
+
+export const packageTierEnum = pgEnum("package_tier", [
+  "basic", "standard", "executive", "transport", "healthcare", "financial", "custom"
+]);
+
+// ─── Candidate Profiles ───────────────────────────────────────────────────────
+
+export const candidateProfiles = pgTable("candidate_profiles", {
+  id:                serial("id").primaryKey(),
+  candidateRef:      varchar("candidateRef", { length: 32 }).notNull().unique(),
+  tenantId:          integer("tenantId").references(() => tenants.id, { onDelete: "cascade" }).notNull(),
+  firstName:         varchar("firstName", { length: 128 }).notNull(),
+  middleName:        varchar("middleName", { length: 128 }),
+  lastName:          varchar("lastName", { length: 128 }).notNull(),
+  email:             varchar("email", { length: 320 }).notNull(),
+  phone:             varchar("phone", { length: 20 }),
+  nin:               varchar("nin", { length: 11 }),          // NIMC NIN (masked at rest)
+  bvn:               varchar("bvn", { length: 11 }),          // NIBSS BVN (masked at rest)
+  dob:               date("dob"),
+  gender:            varchar("gender", { length: 16 }),
+  nationality:       varchar("nationality", { length: 64 }).default("Nigerian"),
+  stateOfOrigin:     varchar("stateOfOrigin", { length: 64 }),
+  lgaOfOrigin:       varchar("lgaOfOrigin", { length: 64 }),
+  currentAddress:    text("currentAddress"),
+  currentState:      varchar("currentState", { length: 64 }),
+  currentLga:        varchar("currentLga", { length: 64 }),
+  addressHistory:    json("addressHistory").$type<Array<{
+    address: string; state: string; lga: string; from: string; to?: string;
+  }>>().default([]),
+  passportNumber:    varchar("passportNumber", { length: 20 }),
+  passportExpiry:    date("passportExpiry"),
+  consentStatus:     candidateStatusEnum("consentStatus").notNull().default("invited"),
+  ndprConsentAt:     timestamp("ndprConsentAt"),
+  ndprConsentIp:     varchar("ndprConsentIp", { length: 45 }),
+  inviteToken:       varchar("inviteToken", { length: 128 }).unique(),
+  inviteExpiresAt:   timestamp("inviteExpiresAt"),
+  invitedBy:         integer("invitedBy").references(() => users.id, { onDelete: "set null" }),
+  createdAt:         timestamp("createdAt").defaultNow().notNull(),
+  updatedAt:         timestamp("updatedAt").defaultNow().notNull(),
+}, (t) => ({
+  cp_tenant_idx:  index("cp_tenant_idx").on(t.tenantId),
+  cp_email_idx:   index("cp_email_idx").on(t.email),
+  cp_nin_idx:     index("cp_nin_idx").on(t.nin),
+  cp_bvn_idx:     index("cp_bvn_idx").on(t.bvn),
+}));
+export type CandidateProfile       = typeof candidateProfiles.$inferSelect;
+export type InsertCandidateProfile = typeof candidateProfiles.$inferInsert;
+
+// ─── Screening Packages ───────────────────────────────────────────────────────
+
+export const screeningPackages = pgTable("screening_packages", {
+  id:              serial("id").primaryKey(),
+  packageRef:      varchar("packageRef", { length: 32 }).notNull().unique(),
+  tenantId:        integer("tenantId").references(() => tenants.id, { onDelete: "cascade" }),
+  name:            varchar("name", { length: 128 }).notNull(),
+  description:     text("description"),
+  tier:            packageTierEnum("tier").notNull().default("standard"),
+  screeningTypes:  json("screeningTypes").$type<string[]>().notNull().default([]),
+  priceNgn:        integer("priceNgn").notNull().default(0),   // kobo
+  etaHours:        integer("etaHours").notNull().default(48),
+  isPublic:        boolean("isPublic").notNull().default(false),
+  isActive:        boolean("isActive").notNull().default(true),
+  config:          json("config"),
+  createdBy:       integer("createdBy").references(() => users.id, { onDelete: "set null" }),
+  createdAt:       timestamp("createdAt").defaultNow().notNull(),
+  updatedAt:       timestamp("updatedAt").defaultNow().notNull(),
+}, (t) => ({
+  sp_tenant_idx: index("sp_tenant_idx").on(t.tenantId),
+  sp_tier_idx:   index("sp_tier_idx").on(t.tier),
+}));
+export type ScreeningPackage       = typeof screeningPackages.$inferSelect;
+export type InsertScreeningPackage = typeof screeningPackages.$inferInsert;
+
+// ─── Screening Programs ───────────────────────────────────────────────────────
+
+export const screeningPrograms = pgTable("screening_programs", {
+  id:           serial("id").primaryKey(),
+  programRef:   varchar("programRef", { length: 32 }).notNull().unique(),
+  tenantId:     integer("tenantId").references(() => tenants.id, { onDelete: "cascade" }).notNull(),
+  name:         varchar("name", { length: 128 }).notNull(),
+  description:  text("description"),
+  packageId:    integer("packageId").references(() => screeningPackages.id, { onDelete: "set null" }),
+  geoRules:     json("geoRules"),   // state-level compliance overrides
+  assessRules:  json("assessRules"), // auto-assess thresholds
+  isActive:     boolean("isActive").notNull().default(true),
+  createdBy:    integer("createdBy").references(() => users.id, { onDelete: "set null" }),
+  createdAt:    timestamp("createdAt").defaultNow().notNull(),
+  updatedAt:    timestamp("updatedAt").defaultNow().notNull(),
+}, (t) => ({
+  sprog_tenant_idx: index("sprog_tenant_idx").on(t.tenantId),
+}));
+export type ScreeningProgram       = typeof screeningPrograms.$inferSelect;
+export type InsertScreeningProgram = typeof screeningPrograms.$inferInsert;
+
+// ─── Screening Orders ─────────────────────────────────────────────────────────
+
+export const screeningOrders = pgTable("screening_orders", {
+  id:              serial("id").primaryKey(),
+  orderRef:        varchar("orderRef", { length: 32 }).notNull().unique(),
+  tenantId:        integer("tenantId").references(() => tenants.id, { onDelete: "cascade" }).notNull(),
+  candidateId:     integer("candidateId").references(() => candidateProfiles.id, { onDelete: "restrict" }).notNull(),
+  packageId:       integer("packageId").references(() => screeningPackages.id, { onDelete: "set null" }),
+  programId:       integer("programId").references(() => screeningPrograms.id, { onDelete: "set null" }),
+  status:          screeningStatusEnum("status").notNull().default("pending"),
+  overallOutcome:  assessmentOutcomeEnum("overallOutcome"),
+  screeningTypes:  json("screeningTypes").$type<string[]>().notNull().default([]),
+  etaAt:           timestamp("etaAt"),
+  completedAt:     timestamp("completedAt"),
+  tags:            json("tags").$type<string[]>().default([]),
+  temporalRunId:   varchar("temporalRunId", { length: 128 }),
+  tigerBeetleRef:  varchar("tigerBeetleRef", { length: 64 }),
+  priceNgn:        integer("priceNgn").default(0),
+  notes:           text("notes"),
+  createdBy:       integer("createdBy").references(() => users.id, { onDelete: "set null" }),
+  createdAt:       timestamp("createdAt").defaultNow().notNull(),
+  updatedAt:       timestamp("updatedAt").defaultNow().notNull(),
+}, (t) => ({
+  so_tenant_idx:    index("so_tenant_idx").on(t.tenantId),
+  so_candidate_idx: index("so_candidate_idx").on(t.candidateId),
+  so_status_idx:    index("so_status_idx").on(t.status),
+  so_created_idx:   index("so_created_idx").on(t.createdAt),
+}));
+export type ScreeningOrder       = typeof screeningOrders.$inferSelect;
+export type InsertScreeningOrder = typeof screeningOrders.$inferInsert;
+
+// ─── Screening Results ────────────────────────────────────────────────────────
+
+export const screeningResults = pgTable("screening_results", {
+  id:              serial("id").primaryKey(),
+  orderId:         integer("orderId").references(() => screeningOrders.id, { onDelete: "cascade" }).notNull(),
+  screeningType:   screeningTypeEnum("screeningType").notNull(),
+  status:          screeningStatusEnum("status").notNull().default("pending"),
+  outcome:         assessmentOutcomeEnum("outcome"),
+  rawResult:       json("rawResult"),
+  summary:         text("summary"),
+  riskScore:       real("riskScore"),
+  dataSourceRef:   varchar("dataSourceRef", { length: 64 }),
+  externalRef:     varchar("externalRef", { length: 128 }),
+  completedAt:     timestamp("completedAt"),
+  expiresAt:       timestamp("expiresAt"),
+  createdAt:       timestamp("createdAt").defaultNow().notNull(),
+  updatedAt:       timestamp("updatedAt").defaultNow().notNull(),
+}, (t) => ({
+  sr_order_idx:  index("sr_order_idx").on(t.orderId),
+  sr_type_idx:   index("sr_type_idx").on(t.screeningType),
+  sr_status_idx: index("sr_status_idx").on(t.status),
+}));
+export type ScreeningResult       = typeof screeningResults.$inferSelect;
+export type InsertScreeningResult = typeof screeningResults.$inferInsert;
+
+// ─── Adverse Actions ──────────────────────────────────────────────────────────
+
+export const adverseActions = pgTable("adverse_actions", {
+  id:                  serial("id").primaryKey(),
+  adverseRef:          varchar("adverseRef", { length: 32 }).notNull().unique(),
+  orderId:             integer("orderId").references(() => screeningOrders.id, { onDelete: "cascade" }).notNull(),
+  candidateId:         integer("candidateId").references(() => candidateProfiles.id, { onDelete: "restrict" }).notNull(),
+  status:              adverseActionStatusEnum("status").notNull().default("pending_pre_adverse"),
+  preAdverseSentAt:    timestamp("preAdverseSentAt"),
+  preAdverseDeadline:  timestamp("preAdverseDeadline"),  // NDPR: 5 business days
+  disputeReceivedAt:   timestamp("disputeReceivedAt"),
+  disputeResolvedAt:   timestamp("disputeResolvedAt"),
+  finalAdverseSentAt:  timestamp("finalAdverseSentAt"),
+  candidateEmail:      varchar("candidateEmail", { length: 320 }),
+  preAdversePdfUrl:    text("preAdversePdfUrl"),
+  finalAdversePdfUrl:  text("finalAdversePdfUrl"),
+  reason:              text("reason"),
+  createdBy:           integer("createdBy").references(() => users.id, { onDelete: "set null" }),
+  createdAt:           timestamp("createdAt").defaultNow().notNull(),
+  updatedAt:           timestamp("updatedAt").defaultNow().notNull(),
+}, (t) => ({
+  aa_order_idx:     index("aa_order_idx").on(t.orderId),
+  aa_candidate_idx: index("aa_candidate_idx").on(t.candidateId),
+  aa_status_idx:    index("aa_status_idx").on(t.status),
+}));
+export type AdverseAction       = typeof adverseActions.$inferSelect;
+export type InsertAdverseAction = typeof adverseActions.$inferInsert;
+
+// ─── Adverse Items ────────────────────────────────────────────────────────────
+
+export const adverseItems = pgTable("adverse_items", {
+  id:              serial("id").primaryKey(),
+  adverseActionId: integer("adverseActionId").references(() => adverseActions.id, { onDelete: "cascade" }).notNull(),
+  resultId:        integer("resultId").references(() => screeningResults.id, { onDelete: "set null" }),
+  screeningType:   screeningTypeEnum("screeningType").notNull(),
+  description:     text("description").notNull(),
+  source:          varchar("source", { length: 128 }),
+  date:            date("date"),
+  jurisdiction:    varchar("jurisdiction", { length: 128 }),
+  disputed:        boolean("disputed").notNull().default(false),
+  disputeNote:     text("disputeNote"),
+  createdAt:       timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  ai_adverse_idx: index("ai_adverse_idx").on(t.adverseActionId),
+}));
+export type AdverseItem       = typeof adverseItems.$inferSelect;
+export type InsertAdverseItem = typeof adverseItems.$inferInsert;
+
+// ─── Candidate Consents (NDPR Art. 2.2) ──────────────────────────────────────
+
+export const candidateConsents = pgTable("candidate_consents", {
+  id:             serial("id").primaryKey(),
+  consentRef:     varchar("consentRef", { length: 32 }).notNull().unique(),
+  candidateId:    integer("candidateId").references(() => candidateProfiles.id, { onDelete: "restrict" }).notNull(),
+  orderId:        integer("orderId").references(() => screeningOrders.id, { onDelete: "set null" }),
+  purpose:        consentPurposeEnum("purpose").notNull().default("pre_employment"),
+  consentText:    text("consentText").notNull(),
+  signatureData:  text("signatureData"),   // base64 eSignature PNG
+  signedAt:       timestamp("signedAt"),
+  signerIp:       varchar("signerIp", { length: 45 }),
+  signerUserAgent: text("signerUserAgent"),
+  pdfUrl:         text("pdfUrl"),          // S3 URL of consent PDF
+  revokedAt:      timestamp("revokedAt"),
+  revokeReason:   text("revokeReason"),
+  ndprVersion:    varchar("ndprVersion", { length: 16 }).default("2019"),
+  createdAt:      timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  cc_candidate_idx: index("cc_candidate_idx").on(t.candidateId),
+  cc_order_idx:     index("cc_order_idx").on(t.orderId),
+}));
+export type CandidateConsent       = typeof candidateConsents.$inferSelect;
+export type InsertCandidateConsent = typeof candidateConsents.$inferInsert;
+
+// ─── Work Permits (NIS) ───────────────────────────────────────────────────────
+
+export const workPermits = pgTable("work_permits", {
+  id:              serial("id").primaryKey(),
+  permitRef:       varchar("permitRef", { length: 32 }).notNull().unique(),
+  candidateId:     integer("candidateId").references(() => candidateProfiles.id, { onDelete: "restrict" }).notNull(),
+  orderId:         integer("orderId").references(() => screeningOrders.id, { onDelete: "set null" }),
+  permitType:      workPermitTypeEnum("permitType").notNull(),
+  permitNumber:    varchar("permitNumber", { length: 64 }),
+  issueDate:       date("issueDate"),
+  expiryDate:      date("expiryDate"),
+  issuingAuthority: varchar("issuingAuthority", { length: 128 }).default("Nigerian Immigration Service"),
+  employerName:    varchar("employerName", { length: 255 }),
+  worksiteId:      integer("worksiteId"),
+  verificationStatus: assessmentOutcomeEnum("verificationStatus").default("pending"),
+  verificationData:   json("verificationData"),
+  createdAt:       timestamp("createdAt").defaultNow().notNull(),
+  updatedAt:       timestamp("updatedAt").defaultNow().notNull(),
+}, (t) => ({
+  wp_candidate_idx: index("wp_candidate_idx").on(t.candidateId),
+}));
+export type WorkPermit       = typeof workPermits.$inferSelect;
+export type InsertWorkPermit = typeof workPermits.$inferInsert;
+
+// ─── Worksites ────────────────────────────────────────────────────────────────
+
+export const worksites = pgTable("worksites", {
+  id:           serial("id").primaryKey(),
+  tenantId:     integer("tenantId").references(() => tenants.id, { onDelete: "cascade" }).notNull(),
+  name:         varchar("name", { length: 255 }).notNull(),
+  address:      text("address"),
+  state:        varchar("state", { length: 64 }),
+  lga:          varchar("lga", { length: 64 }),
+  rcNumber:     varchar("rcNumber", { length: 32 }),   // CAC RC number
+  isActive:     boolean("isActive").notNull().default(true),
+  createdAt:    timestamp("createdAt").defaultNow().notNull(),
+  updatedAt:    timestamp("updatedAt").defaultNow().notNull(),
+}, (t) => ({
+  ws_tenant_idx: index("ws_tenant_idx").on(t.tenantId),
+}));
+export type Worksite       = typeof worksites.$inferSelect;
+export type InsertWorksite = typeof worksites.$inferInsert;
+
+// ─── Screening Geo Rules (36 states + FCT) ────────────────────────────────────
+
+export const screeningGeos = pgTable("screening_geos", {
+  id:                serial("id").primaryKey(),
+  tenantId:          integer("tenantId").references(() => tenants.id, { onDelete: "cascade" }),
+  state:             varchar("state", { length: 64 }).notNull(),
+  screeningType:     screeningTypeEnum("screeningType").notNull(),
+  lookbackYears:     integer("lookbackYears"),          // null = no limit
+  excludedOffences:  json("excludedOffences").$type<string[]>().default([]),
+  requiresConsent:   boolean("requiresConsent").notNull().default(true),
+  disclosureText:    text("disclosureText"),
+  isActive:          boolean("isActive").notNull().default(true),
+  notes:             text("notes"),
+  createdAt:         timestamp("createdAt").defaultNow().notNull(),
+  updatedAt:         timestamp("updatedAt").defaultNow().notNull(),
+}, (t) => ({
+  sg_state_type_idx: index("sg_state_type_idx").on(t.state, t.screeningType),
+}));
+export type ScreeningGeo       = typeof screeningGeos.$inferSelect;
+export type InsertScreeningGeo = typeof screeningGeos.$inferInsert;
+
+// ─── Candidate Stories (NDPR right to explanation) ────────────────────────────
+
+export const candidateStories = pgTable("candidate_stories", {
+  id:              serial("id").primaryKey(),
+  orderId:         integer("orderId").references(() => screeningOrders.id, { onDelete: "cascade" }).notNull(),
+  candidateId:     integer("candidateId").references(() => candidateProfiles.id, { onDelete: "restrict" }).notNull(),
+  screeningType:   screeningTypeEnum("screeningType").notNull(),
+  story:           text("story").notNull(),
+  attachmentUrls:  json("attachmentUrls").$type<string[]>().default([]),
+  reviewedBy:      integer("reviewedBy").references(() => users.id, { onDelete: "set null" }),
+  reviewNote:      text("reviewNote"),
+  reviewedAt:      timestamp("reviewedAt"),
+  createdAt:       timestamp("createdAt").defaultNow().notNull(),
+  updatedAt:       timestamp("updatedAt").defaultNow().notNull(),
+}, (t) => ({
+  cs_order_idx:     index("cs_order_idx").on(t.orderId),
+  cs_candidate_idx: index("cs_candidate_idx").on(t.candidateId),
+}));
+export type CandidateStory       = typeof candidateStories.$inferSelect;
+export type InsertCandidateStory = typeof candidateStories.$inferInsert;
+
+// ─── Report Tags ──────────────────────────────────────────────────────────────
+
+export const reportTags = pgTable("report_tags", {
+  id:        serial("id").primaryKey(),
+  tenantId:  integer("tenantId").references(() => tenants.id, { onDelete: "cascade" }).notNull(),
+  name:      varchar("name", { length: 64 }).notNull(),
+  color:     varchar("color", { length: 16 }).default("#6B7280"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  rt_tenant_idx: index("rt_tenant_idx").on(t.tenantId),
+}));
+export type ReportTag       = typeof reportTags.$inferSelect;
+export type InsertReportTag = typeof reportTags.$inferInsert;
+
+// ─── Screening Assessments (Auto-assess rules) ────────────────────────────────
+
+export const screeningAssessments = pgTable("screening_assessments", {
+  id:              serial("id").primaryKey(),
+  tenantId:        integer("tenantId").references(() => tenants.id, { onDelete: "cascade" }).notNull(),
+  packageId:       integer("packageId").references(() => screeningPackages.id, { onDelete: "set null" }),
+  screeningType:   screeningTypeEnum("screeningType").notNull(),
+  clearConditions: json("clearConditions"),   // conditions that auto-clear
+  considerConditions: json("considerConditions"), // conditions that require manual review
+  adverseConditions:  json("adverseConditions"),  // conditions that auto-adverse
+  isActive:        boolean("isActive").notNull().default(true),
+  createdBy:       integer("createdBy").references(() => users.id, { onDelete: "set null" }),
+  createdAt:       timestamp("createdAt").defaultNow().notNull(),
+  updatedAt:       timestamp("updatedAt").defaultNow().notNull(),
+}, (t) => ({
+  sa_tenant_type_idx: index("sa_tenant_type_idx").on(t.tenantId, t.screeningType),
+}));
+export type ScreeningAssessment       = typeof screeningAssessments.$inferSelect;
+export type InsertScreeningAssessment = typeof screeningAssessments.$inferInsert;
+
+// ─── NG Court Records ─────────────────────────────────────────────────────────
+
+export const ngCourtRecords = pgTable("ng_court_records", {
+  id:              serial("id").primaryKey(),
+  resultId:        integer("resultId").references(() => screeningResults.id, { onDelete: "cascade" }).notNull(),
+  candidateId:     integer("candidateId").references(() => candidateProfiles.id, { onDelete: "restrict" }).notNull(),
+  courtType:       courtTypeEnum("courtType").notNull(),
+  courtName:       varchar("courtName", { length: 255 }),
+  state:           varchar("state", { length: 64 }),
+  caseNumber:      varchar("caseNumber", { length: 128 }),
+  offence:         text("offence"),
+  verdict:         varchar("verdict", { length: 128 }),
+  sentence:        text("sentence"),
+  hearingDate:     date("hearingDate"),
+  dispositionDate: date("dispositionDate"),
+  isAppeal:        boolean("isAppeal").default(false),
+  rawData:         json("rawData"),
+  createdAt:       timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  ncr_result_idx:    index("ncr_result_idx").on(t.resultId),
+  ncr_candidate_idx: index("ncr_candidate_idx").on(t.candidateId),
+  ncr_state_idx:     index("ncr_state_idx").on(t.state),
+}));
+export type NgCourtRecord       = typeof ngCourtRecords.$inferSelect;
+export type InsertNgCourtRecord = typeof ngCourtRecords.$inferInsert;
+
+// ─── NG Professional Licences ─────────────────────────────────────────────────
+
+export const ngProfessionalLicences = pgTable("ng_professional_licences", {
+  id:                serial("id").primaryKey(),
+  resultId:          integer("resultId").references(() => screeningResults.id, { onDelete: "cascade" }).notNull(),
+  candidateId:       integer("candidateId").references(() => candidateProfiles.id, { onDelete: "restrict" }).notNull(),
+  professionalBody:  professionalBodyEnum("professionalBody").notNull(),
+  licenceNumber:     varchar("licenceNumber", { length: 128 }),
+  membershipGrade:   varchar("membershipGrade", { length: 64 }),
+  issueDate:         date("issueDate"),
+  expiryDate:        date("expiryDate"),
+  status:            assessmentOutcomeEnum("status").notNull().default("pending"),
+  suspensionReason:  text("suspensionReason"),
+  verificationDate:  date("verificationDate"),
+  rawData:           json("rawData"),
+  createdAt:         timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  npl_result_idx:    index("npl_result_idx").on(t.resultId),
+  npl_candidate_idx: index("npl_candidate_idx").on(t.candidateId),
+  npl_body_idx:      index("npl_body_idx").on(t.professionalBody),
+}));
+export type NgProfessionalLicence       = typeof ngProfessionalLicences.$inferSelect;
+export type InsertNgProfessionalLicence = typeof ngProfessionalLicences.$inferInsert;
+
+// ─── Continuous Checks (Post-hire monitoring subscriptions) ───────────────────
+
+export const continuousChecks = pgTable("continuous_checks", {
+  id:              serial("id").primaryKey(),
+  checkRef:        varchar("checkRef", { length: 32 }).notNull().unique(),
+  tenantId:        integer("tenantId").references(() => tenants.id, { onDelete: "cascade" }).notNull(),
+  candidateId:     integer("candidateId").references(() => candidateProfiles.id, { onDelete: "restrict" }).notNull(),
+  screeningTypes:  json("screeningTypes").$type<string[]>().notNull().default([]),
+  frequency:       varchar("frequency", { length: 32 }).notNull().default("monthly"),
+  status:          monitorStatusEnum("status").notNull().default("active"),
+  lastCheckedAt:   timestamp("lastCheckedAt"),
+  nextCheckAt:     timestamp("nextCheckAt"),
+  alertCount:      integer("alertCount").notNull().default(0),
+  lastAlertAt:     timestamp("lastAlertAt"),
+  expiresAt:       timestamp("expiresAt"),
+  createdBy:       integer("createdBy").references(() => users.id, { onDelete: "set null" }),
+  createdAt:       timestamp("createdAt").defaultNow().notNull(),
+  updatedAt:       timestamp("updatedAt").defaultNow().notNull(),
+}, (t) => ({
+  cont_tenant_idx:    index("cont_tenant_idx").on(t.tenantId),
+  cont_candidate_idx: index("cont_candidate_idx").on(t.candidateId),
+  cont_status_idx:    index("cont_status_idx").on(t.status),
+}));
+export type ContinuousCheck       = typeof continuousChecks.$inferSelect;
+export type InsertContinuousCheck = typeof continuousChecks.$inferInsert;
