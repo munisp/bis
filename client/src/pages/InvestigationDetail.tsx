@@ -13,7 +13,8 @@ import {
   Clock, Loader2, FileText, Download, RefreshCw, Trash2,
   Shield, Activity, Globe, CreditCard, Fingerprint, Search,
   Link2, MessageSquare, Send, Camera, Paperclip, MapPin, X,
-  ChevronDown, UserCheck, Truck, ChevronLeft, ChevronRight
+  ChevronDown, UserCheck, Truck, ChevronLeft, ChevronRight,
+  ClipboardCheck, ExternalLink, Plus
 } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetFooter } from "@/components/ui/sheet";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -154,7 +155,60 @@ export default function InvestigationDetail() {
     toast.info(`@${user} will be notified when this note is saved`);
     setTimeout(() => noteRef.current?.focus(), 0);
   };
-  const [activeTab, setActiveTab] = useState<'overview' | 'evidence' | 'timeline'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'evidence' | 'timeline' | 'screening'>('overview');
+
+  // ── Background Screening integration ─────────────────────────────────────────
+  const invRef = (liveInv as any)?.ref ?? params.id ?? "";
+  const { data: linkedScreening, isLoading: screeningLoading, refetch: refetchScreening } =
+    trpc.investigations.getLinkedScreening.useQuery(
+      { investigationRef: invRef },
+      { enabled: !!invRef && activeTab === 'screening' }
+    );
+
+  const [bgCheckOpen, setBgCheckOpen] = useState(false);
+  const [bgCheckTypes, setBgCheckTypes] = useState<string[]>([]);
+  const [bgCheckNotes, setBgCheckNotes] = useState("");
+
+  const COMMON_SCREENING_TYPES = [
+    { value: 'nin_trace',               label: 'NIN Identity Trace' },
+    { value: 'bvn_fraud_check',         label: 'BVN Fraud Check' },
+    { value: 'npf_criminal',            label: 'NPF Criminal Records' },
+    { value: 'efcc_watchlist',          label: 'EFCC Watchlist' },
+    { value: 'pep_check',               label: 'PEP & Sanctions' },
+    { value: 'adverse_media_ng',        label: 'Adverse Media (NG)' },
+    { value: 'waec_education',          label: 'WAEC Education' },
+    { value: 'employment_verification', label: 'Employment Verification' },
+    { value: 'nysc_discharge',          label: 'NYSC Discharge' },
+    { value: 'cac_directorship',        label: 'CAC Directorship' },
+    { value: 'frsc_mvr',                label: 'FRSC Driver Licence' },
+    { value: 'nis_work_permit',         label: 'NIS Work Permit' },
+  ];
+
+  const runBackgroundCheckMutation = trpc.investigations.runBackgroundCheck.useMutation({
+    onSuccess: (result) => {
+      toast.success(`Background check ${result.orderRef} initiated — ETA ${new Date(result.etaAt).toLocaleDateString()}`);
+      setBgCheckOpen(false);
+      setBgCheckTypes([]);
+      setBgCheckNotes("");
+      refetchScreening();
+    },
+    onError: (e) => toast.error(`Failed to start background check: ${e.message}`),
+  });
+
+  const handleRunBackgroundCheck = () => {
+    if (bgCheckTypes.length === 0) { toast.error("Select at least one check type"); return; }
+    runBackgroundCheckMutation.mutate({
+      investigationRef: invRef,
+      screeningTypes: bgCheckTypes,
+      notes: bgCheckNotes || undefined,
+    });
+  };
+
+  const toggleBgCheckType = (value: string) => {
+    setBgCheckTypes(prev =>
+      prev.includes(value) ? prev.filter(v => v !== value) : [...prev, value]
+    );
+  };
   // Seed evidence items from live audit log when available, else fall back to mock
   const liveEvidenceItems: EvidenceItem[] = (auditData?.items ?? []).map(a => ({
     id: String(a.id),
@@ -663,9 +717,10 @@ export default function InvestigationDetail() {
       {/* Tab bar */}
       <div className="flex gap-1 mb-4 border-b border-border">
         {([
-          { id: 'overview', label: 'Overview' },
-          { id: 'evidence', label: `Evidence (${mergedEvidence.length})` },
-          { id: 'timeline', label: 'Processing Log' },
+          { id: 'overview',  label: 'Overview' },
+          { id: 'evidence',  label: `Evidence (${mergedEvidence.length})` },
+          { id: 'screening', label: `Background Screening${(linkedScreening?.orders?.length ?? 0) > 0 ? ` (${linkedScreening!.orders.length})` : ''}` },
+          { id: 'timeline',  label: 'Processing Log' },
         ] as const).map(tab => (
           <button
             key={tab.id}
@@ -1031,6 +1086,204 @@ export default function InvestigationDetail() {
           </div>
         </>
       )}
+
+      {/* ── Background Screening Tab ── */}
+      {activeTab === 'screening' && (
+        <div className="space-y-4">
+          {/* Header row */}
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                <ClipboardCheck size={14} className="text-primary" /> Background Screening Orders
+              </h3>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                All structured background checks linked to investigation{" "}
+                <span className="font-mono text-primary">{invRef}</span>
+              </p>
+            </div>
+            <Button
+              size="sm"
+              className="h-8 text-xs gap-1.5"
+              onClick={() => setBgCheckOpen(true)}
+            >
+              <Plus size={12} /> Run Background Check
+            </Button>
+          </div>
+
+          {/* Loading state */}
+          {screeningLoading && (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground py-8 justify-center">
+              <Loader2 size={14} className="animate-spin" /> Loading linked screening orders…
+            </div>
+          )}
+
+          {/* Empty state */}
+          {!screeningLoading && (linkedScreening?.orders ?? []).length === 0 && (
+            <div className="bis-card p-8 flex flex-col items-center gap-3 text-center">
+              <ClipboardCheck size={32} className="text-muted-foreground/40" />
+              <div>
+                <p className="text-sm font-semibold text-foreground">No background checks yet</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Click "Run Background Check" to initiate a structured pre-employment or due-diligence screening
+                  linked to this investigation.
+                </p>
+              </div>
+              <Button size="sm" variant="outline" className="h-8 text-xs gap-1.5" onClick={() => setBgCheckOpen(true)}>
+                <Plus size={12} /> Run Background Check
+              </Button>
+            </div>
+          )}
+
+          {/* Orders list */}
+          {!screeningLoading && (linkedScreening?.orders ?? []).length > 0 && (
+            <div className="space-y-3">
+              {(linkedScreening!.orders).map((order: any) => {
+                const outcomeColor =
+                  order.outcome === 'clear'    ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' :
+                  order.outcome === 'consider' ? 'text-amber-400 bg-amber-500/10 border-amber-500/20' :
+                  order.outcome === 'adverse'  ? 'text-red-400 bg-red-500/10 border-red-500/20' :
+                                                 'text-muted-foreground bg-muted/20 border-border/50';
+                const statusColor =
+                  order.status === 'completed'  ? 'text-emerald-400' :
+                  order.status === 'processing' ? 'text-blue-400' :
+                  order.status === 'failed'     ? 'text-red-400' :
+                  order.status === 'review'     ? 'text-amber-400' :
+                                                  'text-muted-foreground';
+                return (
+                  <div key={order.orderRef} className="bis-card p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-mono text-xs font-semibold text-primary">{order.orderRef}</span>
+                          <span className={`text-[10px] font-mono uppercase ${statusColor}`}>{order.status}</span>
+                          {order.outcome && (
+                            <span className={`text-[10px] font-mono uppercase px-1.5 py-0.5 rounded border ${outcomeColor}`}>
+                              {order.outcome}
+                            </span>
+                          )}
+                          {order.riskScore != null && (
+                            <span className="text-[10px] font-mono text-muted-foreground">
+                              Risk: {order.riskScore}/100
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {order.candidateName ?? order.candidateEmail ?? 'Candidate'}
+                          {order.candidateNin ? ` · NIN: ${order.candidateNin}` : ''}
+                        </p>
+                        {order.screeningTypes && (
+                          <div className="flex flex-wrap gap-1 mt-2">
+                            {(order.screeningTypes as string[]).slice(0, 6).map((t: string) => (
+                              <span key={t} className="text-[9px] font-mono bg-muted/30 text-muted-foreground px-1.5 py-0.5 rounded">
+                                {t.replace(/_/g, ' ')}
+                              </span>
+                            ))}
+                            {(order.screeningTypes as string[]).length > 6 && (
+                              <span className="text-[9px] font-mono text-muted-foreground">+{(order.screeningTypes as string[]).length - 6} more</span>
+                            )}
+                          </div>
+                        )}
+                        {order.etaAt && (
+                          <p className="text-[10px] text-muted-foreground mt-1">
+                            ETA: {new Date(order.etaAt).toLocaleDateString()}
+                            {order.completedAt ? ` · Completed: ${new Date(order.completedAt).toLocaleDateString()}` : ''}
+                          </p>
+                        )}
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-[10px] gap-1 shrink-0"
+                        onClick={() => navigate(`/ng-screening?order=${order.orderRef}`)}
+                      >
+                        <ExternalLink size={10} /> View
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Candidate profile summary if linked */}
+          {!screeningLoading && linkedScreening?.candidateProfile && (
+            <div className="bis-card p-4 border-primary/20">
+              <h4 className="text-xs font-semibold text-foreground mb-2 flex items-center gap-2">
+                <User size={12} className="text-primary" /> Linked Candidate Profile
+              </h4>
+              <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs">
+                <div><span className="text-muted-foreground">Name: </span><span className="font-mono">{linkedScreening.candidateProfile.firstName} {linkedScreening.candidateProfile.lastName}</span></div>
+                <div><span className="text-muted-foreground">Email: </span><span className="font-mono">{linkedScreening.candidateProfile.email ?? '—'}</span></div>
+                <div><span className="text-muted-foreground">NIN: </span><span className="font-mono">{linkedScreening.candidateProfile.nin ?? '—'}</span></div>
+                <div><span className="text-muted-foreground">BVN: </span><span className="font-mono">{linkedScreening.candidateProfile.bvn ?? '—'}</span></div>
+                <div><span className="text-muted-foreground">Ref: </span><span className="font-mono">{linkedScreening.candidateProfile.candidateRef}</span></div>
+                <div><span className="text-muted-foreground">Phone: </span><span className="font-mono">{linkedScreening.candidateProfile.phone ?? '—'}</span></div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Run Background Check Dialog ── */}
+      <Dialog open={bgCheckOpen} onOpenChange={setBgCheckOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-sm">
+              <ClipboardCheck size={14} className="text-primary" /> Run Background Check
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <p className="text-xs text-muted-foreground">
+              Select the check types to run against subject{" "}
+              <span className="font-mono text-foreground">{(liveInv as any)?.subjectName ?? invRef}</span>.
+              Results will be linked to this investigation.
+            </p>
+            <div>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2 block">Check Types *</Label>
+              <div className="grid grid-cols-2 gap-1.5">
+                {COMMON_SCREENING_TYPES.map(ct => (
+                  <button
+                    key={ct.value}
+                    onClick={() => toggleBgCheckType(ct.value)}
+                    className={cn(
+                      "text-left text-[11px] font-mono px-2.5 py-2 rounded border transition-all",
+                      bgCheckTypes.includes(ct.value)
+                        ? "bg-primary/10 border-primary text-primary"
+                        : "bg-muted/20 border-border text-muted-foreground hover:border-primary/50"
+                    )}
+                  >
+                    {ct.label}
+                  </button>
+                ))}
+              </div>
+              {bgCheckTypes.length > 0 && (
+                <p className="text-[10px] text-primary mt-1.5">{bgCheckTypes.length} check{bgCheckTypes.length > 1 ? 's' : ''} selected</p>
+              )}
+            </div>
+            <div>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1 block">Notes (optional)</Label>
+              <Textarea
+                value={bgCheckNotes}
+                onChange={e => setBgCheckNotes(e.target.value)}
+                placeholder="Add context for the screening team…"
+                className="text-xs h-20 resize-none"
+              />
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => setBgCheckOpen(false)}>Cancel</Button>
+            <Button
+              size="sm"
+              className="h-8 text-xs gap-1.5"
+              onClick={handleRunBackgroundCheck}
+              disabled={runBackgroundCheckMutation.isPending || bgCheckTypes.length === 0}
+            >
+              {runBackgroundCheckMutation.isPending ? <Loader2 size={12} className="animate-spin" /> : <ClipboardCheck size={12} />}
+              {runBackgroundCheckMutation.isPending ? 'Initiating…' : 'Run Check'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* ── Processing Log Tab ── */}
       {activeTab === 'timeline' && (

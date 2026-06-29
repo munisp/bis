@@ -78,6 +78,8 @@ export const investigations = pgTable("investigations", {
   gatewayResults: json("gatewayResults"),
   riskFactors: json("riskFactors"),
   dueAt: timestamp("dueAt"),
+  // Link to NG Screening candidate profile — set when a background check is initiated from this investigation
+  candidateProfileId: integer("candidateProfileId"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
   completedAt: timestamp("completedAt"),
@@ -2260,6 +2262,8 @@ export const screeningOrders = pgTable("screening_orders", {
   tags:            json("tags").$type<string[]>().default([]),
   temporalRunId:   varchar("temporalRunId", { length: 128 }),
   tigerBeetleRef:  varchar("tigerBeetleRef", { length: 64 }),
+  // Link back to BIS investigation — set when order is created from investigation context
+  investigationRef: varchar("investigationRef", { length: 32 }),
   priceNgn:        integer("priceNgn").default(0),
   notes:           text("notes"),
   createdBy:       integer("createdBy").references(() => users.id, { onDelete: "set null" }),

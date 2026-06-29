@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2, ShieldCheck, Clock, AlertTriangle, CheckCircle, XCircle, Search, Plus, RefreshCw, TrendingUp, Users, Eye } from 'lucide-react';
+import { Loader2, ShieldCheck, Clock, AlertTriangle, CheckCircle, XCircle, Search, Plus, RefreshCw, TrendingUp, Users, Eye, Link2 } from 'lucide-react';
 import { useLocation } from 'wouter';
 import { formatDistanceToNow } from 'date-fns';
 
@@ -143,6 +143,7 @@ export default function NgScreeningDashboard() {
                     <th className="text-left px-4 py-3">Outcome</th>
                     <th className="text-left px-4 py-3">ETA</th>
                     <th className="text-left px-4 py-3">Ordered</th>
+                    <th className="text-left px-4 py-3">Investigation</th>
                     <th className="text-left px-4 py-3">Actions</th>
                   </tr>
                 </thead>
@@ -151,7 +152,8 @@ export default function NgScreeningDashboard() {
                     const oc = OUTCOME_CONFIG[order.overallOutcome ?? 'pending'] ?? OUTCOME_CONFIG.pending;
                     return (
                       <tr key={order.id} className="border-b border-border/30 hover:bg-muted/20 transition-colors cursor-pointer"
-                        onClick={() => navigate(`/ng-screening/orders/${order.orderRef}`)}>
+                        onClick={() => navigate(`/ng-screening/orders/${order.orderRef}`)}
+                        title={order.investigationRef ? `Linked to investigation ${order.investigationRef}` : undefined}>
                         <td className="px-4 py-3 text-primary">{order.orderRef}</td>
                         <td className="px-4 py-3">
                           <div className="font-medium text-foreground">{candidateFirstName} {candidateLastName}</div>
@@ -165,6 +167,16 @@ export default function NgScreeningDashboard() {
                         </td>
                         <td className="px-4 py-3 text-xs text-muted-foreground">{order.etaAt ? new Date(order.etaAt).toLocaleDateString() : '—'}</td>
                         <td className="px-4 py-3 text-xs text-muted-foreground">{formatDistanceToNow(new Date(order.createdAt), { addSuffix: true })}</td>
+                        <td className="px-4 py-3">
+                          {order.investigationRef ? (
+                            <Button size="sm" variant="ghost" className="h-7 text-[10px] gap-1 text-primary/70 hover:text-primary"
+                              onClick={e => { e.stopPropagation(); navigate(`/investigations/${order.investigationRef}`); }}>
+                              <Link2 size={10} /> {order.investigationRef}
+                            </Button>
+                          ) : (
+                            <span className="text-xs text-muted-foreground/40">—</span>
+                          )}
+                        </td>
                         <td className="px-4 py-3">
                           <Button size="sm" variant="ghost" className="h-7 text-xs"
                             onClick={e => { e.stopPropagation(); navigate(`/ng-screening/orders/${order.orderRef}`); }}>
