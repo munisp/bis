@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect, useCallback, useMemo } from "react";
+import React, { useRef, useState, useEffect, useCallback, useMemo } from "react";
 import { MapView } from "@/components/Map";
 import { trpc } from "@/lib/trpc";
 import BISLayout from "@/components/BISLayout";
@@ -18,7 +18,7 @@ import {
 import {
   MapPin, Users, CheckCircle2, Clock, Layers, X, RefreshCw,
   Navigation, AlertTriangle, HelpCircle, XCircle, Route, Download, FileJson,
-  Play, Pause, SkipBack, BarChart2, Loader2,
+  Play, Pause, SkipBack, BarChart2, Loader2, Map as MapIcon, Filter,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -29,24 +29,27 @@ import { MarkerClusterer } from "@googlemaps/markerclusterer";
 type OutcomeFilter = "all" | "confirmed" | "unconfirmed" | "inconclusive" | "failed";
 type DateRange = "7d" | "30d" | "90d" | "all";
 
-type VisitPoint = {
-  visitRef: string;
-  taskRef: string;
-  agentId: string;
-  agentName: string;
-  investigationId: number | null;
-  checkInLat: number | null;
-  checkInLng: number | null;
-  checkOutLat: number | null;
-  checkOutLng: number | null;
-  outcome: string | null;
-  subjectPresent: boolean | null;
-  addressConfirmed: boolean | null;
-  findings: string | null;
-  durationMinutes: number | null;
-  submittedAt: Date | null;
-  createdAt: Date;
-};
+// Re-export pure helpers from the testable helpers module
+export type { VisitPoint, AgentSummary, StateDensity } from "./fieldVisitHelpers";
+export {
+  computeStateDensity,
+  densityToColor,
+  buildAgentSummaries,
+  sortByCreatedAt,
+  sliceUpTo,
+  toGeoJSON,
+  toCSV,
+} from "./fieldVisitHelpers";
+import type { VisitPoint, AgentSummary } from "./fieldVisitHelpers";
+import {
+  computeStateDensity as _computeStateDensity,
+  densityToColor,
+  buildAgentSummaries,
+  sortByCreatedAt,
+  sliceUpTo,
+  toGeoJSON,
+  toCSV,
+} from "./fieldVisitHelpers";
 
 // ─── Outcome config ───────────────────────────────────────────────────────────
 
@@ -61,113 +64,14 @@ function getOutcomeHex(outcome: string | null): string {
   return OUTCOME_CONFIG[outcome ?? ""]?.hex ?? "#6366f1";
 }
 
-// ─── Agent summary helpers (exported for testing) ─────────────────────────────
-
-export type AgentSummary = {
-  agentId: string;
-  agentName: string;
-  total: number;
-  confirmed: number;
-  confirmedPct: number;
-  avgDuration: number;
-  weeklyFrequency: number[]; // visits per week for last 8 weeks
+// ─── Nigeria state name normalisation ────────────────────────────────────────
+const STATE_NAME_MAP: Record<string, string> = {
+  "Federal Capital Territory": "FCT — Abuja",
+  "Fct": "FCT — Abuja",
+  "FCT": "FCT — Abuja",
 };
-
-export function buildAgentSummaries(points: VisitPoint[]): AgentSummary[] {
-  const now = Date.now();
-  const agentMap = new Map<string, VisitPoint[]>();
-  for (const p of points) {
-    const arr = agentMap.get(p.agentId) ?? [];
-    arr.push(p);
-    agentMap.set(p.agentId, arr);
-  }
-
-  return Array.from(agentMap.entries())
-    .map(([agentId, visits]) => {
-      const total = visits.length;
-      const confirmed = visits.filter(v => v.outcome === "confirmed").length;
-      const confirmedPct = total > 0 ? Math.round((confirmed / total) * 100) : 0;
-      const durRows = visits.filter(v => v.durationMinutes != null);
-      const avgDuration = durRows.length > 0
-        ? Math.round(durRows.reduce((s, v) => s + (v.durationMinutes ?? 0), 0) / durRows.length)
-        : 0;
-
-      // 8-week sparkline
-      const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
-      const weeklyFrequency = Array.from({ length: 8 }, (_, i) => {
-        const weekStart = now - (8 - i) * WEEK_MS;
-        const weekEnd = weekStart + WEEK_MS;
-        return visits.filter(v => {
-          const t = new Date(v.createdAt).getTime();
-          return t >= weekStart && t < weekEnd;
-        }).length;
-      });
-
-      return { agentId, agentName: visits[0].agentName, total, confirmed, confirmedPct, avgDuration, weeklyFrequency };
-    })
-    .sort((a, b) => b.total - a.total);
-}
-
-// ─── Time-lapse helpers (exported for testing) ────────────────────────────────
-
-export function sortByCreatedAt(points: VisitPoint[]): VisitPoint[] {
-  return [...points].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
-}
-
-export function sliceUpTo(sorted: VisitPoint[], index: number): VisitPoint[] {
-  return sorted.slice(0, index + 1);
-}
-
-// ─── Export helpers (exported for testing) ────────────────────────────────────
-
-export function toGeoJSON(points: VisitPoint[]): string {
-  const features = points
-    .filter(p => p.checkInLat != null && p.checkInLng != null)
-    .map(p => ({
-      type: "Feature",
-      geometry: { type: "Point", coordinates: [p.checkInLng!, p.checkInLat!] },
-      properties: {
-        visitRef: p.visitRef,
-        taskRef: p.taskRef,
-        agentId: p.agentId,
-        agentName: p.agentName,
-        outcome: p.outcome,
-        subjectPresent: p.subjectPresent,
-        addressConfirmed: p.addressConfirmed,
-        durationMinutes: p.durationMinutes,
-        findings: p.findings,
-        submittedAt: p.submittedAt?.toISOString() ?? null,
-        createdAt: p.createdAt.toISOString(),
-      },
-    }));
-  return JSON.stringify({ type: "FeatureCollection", features }, null, 2);
-}
-
-export function toCSV(points: VisitPoint[]): string {
-  const header = [
-    "visitRef","taskRef","agentId","agentName",
-    "checkInLat","checkInLng","checkOutLat","checkOutLng",
-    "outcome","subjectPresent","addressConfirmed",
-    "durationMinutes","findings","submittedAt","createdAt",
-  ].join(",");
-  const rows = points.map(p => [
-    p.visitRef,
-    p.taskRef,
-    p.agentId,
-    `"${p.agentName.replace(/"/g, '""')}"`,
-    p.checkInLat ?? "",
-    p.checkInLng ?? "",
-    p.checkOutLat ?? "",
-    p.checkOutLng ?? "",
-    p.outcome ?? "",
-    p.subjectPresent == null ? "" : p.subjectPresent ? "true" : "false",
-    p.addressConfirmed == null ? "" : p.addressConfirmed ? "true" : "false",
-    p.durationMinutes ?? "",
-    `"${(p.findings ?? "").replace(/"/g, '""')}"`,
-    p.submittedAt?.toISOString() ?? "",
-    p.createdAt.toISOString(),
-  ].join(","));
-  return [header, ...rows].join("\n");
+function normaliseStateName(raw: string): string {
+  return STATE_NAME_MAP[raw] ?? raw;
 }
 
 function downloadBlob(content: string, filename: string, mimeType: string) {
@@ -289,7 +193,7 @@ function VisitDetailPanel({
             <div className="min-w-0">
               <span className="text-muted-foreground">Check-in GPS:</span>
               <p className="font-mono text-xs mt-0.5">{visit.checkInLat.toFixed(6)}, {visit.checkInLng.toFixed(6)}</p>
-              {/* Reverse-geocoded address */}
+              {/* Reverse-geocoded address (cached) */}
               {geocoding ? (
                 <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
                   <Loader2 className="w-3 h-3 animate-spin" />Resolving address…
@@ -354,7 +258,17 @@ function VisitDetailPanel({
 
 // ─── Agent Summary Panel ──────────────────────────────────────────────────────
 
-function AgentSummaryPanel({ summaries }: { summaries: AgentSummary[] }) {
+function AgentSummaryPanel({
+  summaries,
+  activeAgentId,
+  onSelectAgent,
+  onClearAgent,
+}: {
+  summaries: AgentSummary[];
+  activeAgentId: string | null;
+  onSelectAgent: (id: string) => void;
+  onClearAgent: () => void;
+}) {
   if (summaries.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-40 text-center text-muted-foreground">
@@ -364,37 +278,91 @@ function AgentSummaryPanel({ summaries }: { summaries: AgentSummary[] }) {
     );
   }
   return (
-    <ScrollArea className="h-full max-h-[420px]">
-      <div className="space-y-2 pr-2">
-        {summaries.map(a => (
-          <div key={a.agentId} className="rounded-lg border border-border/50 bg-muted/30 p-3 space-y-2">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 min-w-0">
-                <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                  <span className="text-[10px] font-bold text-primary">{a.agentName.charAt(0).toUpperCase()}</span>
+    <div className="space-y-3">
+      {activeAgentId && (
+        <div className="flex items-center gap-2 p-2 rounded-lg bg-primary/10 border border-primary/20">
+          <Filter className="w-3.5 h-3.5 text-primary shrink-0" />
+          <span className="text-xs text-primary font-medium flex-1">Map filtered to selected agent</span>
+          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={onClearAgent} title="Clear filter">
+            <X className="w-3 h-3 text-primary" />
+          </Button>
+        </div>
+      )}
+      <ScrollArea className="h-full max-h-[380px]">
+        <div className="space-y-2 pr-2">
+          {summaries.map(a => {
+            const isActive = activeAgentId === a.agentId;
+            return (
+              <button
+                key={a.agentId}
+                onClick={() => isActive ? onClearAgent() : onSelectAgent(a.agentId)}
+                className={cn(
+                  "w-full text-left rounded-lg border p-3 space-y-2 transition-all",
+                  isActive
+                    ? "border-primary/60 bg-primary/10 shadow-sm"
+                    : "border-border/50 bg-muted/30 hover:bg-muted/60 hover:border-border"
+                )}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className={cn(
+                      "w-7 h-7 rounded-full flex items-center justify-center shrink-0",
+                      isActive ? "bg-primary text-primary-foreground" : "bg-primary/10"
+                    )}>
+                      <span className={cn("text-[10px] font-bold", isActive ? "text-primary-foreground" : "text-primary")}>
+                        {a.agentName.charAt(0).toUpperCase()}
+                      </span>
+                    </div>
+                    <span className="text-sm font-medium truncate">{a.agentName}</span>
+                  </div>
+                  <Badge variant={isActive ? "default" : "outline"} className="text-xs shrink-0">
+                    {a.total} visit{a.total !== 1 ? "s" : ""}
+                  </Badge>
                 </div>
-                <span className="text-sm font-medium truncate">{a.agentName}</span>
-              </div>
-              <Badge variant="outline" className="text-xs shrink-0">{a.total} visit{a.total !== 1 ? "s" : ""}</Badge>
-            </div>
-            <div className="grid grid-cols-3 gap-2 text-center">
-              <div>
-                <p className="text-[10px] text-muted-foreground">Confirmed</p>
-                <p className="text-sm font-semibold text-emerald-500">{a.confirmedPct}%</p>
-              </div>
-              <div>
-                <p className="text-[10px] text-muted-foreground">Avg Duration</p>
-                <p className="text-sm font-semibold">{a.avgDuration}m</p>
-              </div>
-              <div className="flex flex-col items-center">
-                <p className="text-[10px] text-muted-foreground mb-1">Frequency</p>
-                <Sparkline data={a.weeklyFrequency} color={a.confirmedPct >= 70 ? "#10b981" : a.confirmedPct >= 40 ? "#f59e0b" : "#ef4444"} />
-              </div>
-            </div>
-          </div>
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  <div>
+                    <p className="text-[10px] text-muted-foreground">Confirmed</p>
+                    <p className="text-sm font-semibold text-emerald-500">{a.confirmedPct}%</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-muted-foreground">Avg Duration</p>
+                    <p className="text-sm font-semibold">{a.avgDuration}m</p>
+                  </div>
+                  <div className="flex flex-col items-center">
+                    <p className="text-[10px] text-muted-foreground mb-1">Frequency</p>
+                    <Sparkline data={a.weeklyFrequency} color={a.confirmedPct >= 70 ? "#10b981" : a.confirmedPct >= 40 ? "#f59e0b" : "#ef4444"} />
+                  </div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </ScrollArea>
+    </div>
+  );
+}
+
+// ─── Choropleth Legend ────────────────────────────────────────────────────────
+
+function ChoroplethLegend({ maxCount }: { maxCount: number }) {
+  const steps = [0, 0.25, 0.5, 0.75, 1];
+  return (
+    <div className="absolute top-4 left-4 bg-card/90 backdrop-blur-sm rounded-lg p-3 shadow-md border border-border/50 z-10 min-w-[120px]">
+      <p className="text-xs font-semibold text-muted-foreground mb-2">Visit Density</p>
+      <div className="flex items-center gap-1 mb-1">
+        {steps.map((r, i) => (
+          <div
+            key={i}
+            className="h-3 flex-1 rounded-sm"
+            style={{ backgroundColor: densityToColor(Math.round(r * maxCount), maxCount) }}
+          />
         ))}
       </div>
-    </ScrollArea>
+      <div className="flex justify-between text-[10px] text-muted-foreground">
+        <span>0</span>
+        <span>{maxCount}</span>
+      </div>
+    </div>
   );
 }
 
@@ -461,6 +429,9 @@ function TimeLapseControls({
   );
 }
 
+// ─── Nigeria states GeoJSON URL ───────────────────────────────────────────────
+const NGA_STATES_GEOJSON_URL = "/manus-storage/nga_states_slim_849a075f.json";
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function FieldVisitMapPage() {
@@ -470,14 +441,20 @@ export default function FieldVisitMapPage() {
   const heatmapRef = useRef<google.maps.visualization.HeatmapLayer | null>(null);
   const routePolylineRef = useRef<google.maps.Polyline | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const choroplethLayerRef = useRef<google.maps.Data | null>(null);
+
+  // Geocode cache: visitRef → resolved address string
+  const geocodeCacheRef = useRef<Map<string, string>>(new Map());
 
   const [outcomeFilter, setOutcomeFilter] = useState<OutcomeFilter>("all");
   const [dateRange, setDateRange] = useState<DateRange>("30d");
   const [showHeatmap, setShowHeatmap] = useState(false);
+  const [showChoropleth, setShowChoropleth] = useState(false);
   const [selectedVisit, setSelectedVisit] = useState<VisitPoint | null>(null);
   const [routeVisible, setRouteVisible] = useState(false);
   const [mapReady, setMapReady] = useState(false);
   const [activeTab, setActiveTab] = useState<"map" | "agents">("map");
+  const [activeAgentId, setActiveAgentId] = useState<string | null>(null);
 
   // Reverse-geocode state
   const [geocodedAddress, setGeocodedAddress] = useState<string | null>(null);
@@ -488,6 +465,9 @@ export default function FieldVisitMapPage() {
   const [tlIndex, setTlIndex] = useState(0);
   const [tlPlaying, setTlPlaying] = useState(false);
   const [tlSpeed, setTlSpeed] = useState(1);
+
+  // Choropleth: state density map (stateName → count) derived from Data layer
+  const [choroplethMaxCount, setChoroplethMaxCount] = useState(0);
 
   const { data, isLoading, refetch } = trpc.fieldTasks.getVisitGeoData.useQuery(
     { outcome: outcomeFilter, dateRange, limit: 200 },
@@ -500,29 +480,54 @@ export default function FieldVisitMapPage() {
   // Sorted points for time-lapse
   const sortedPoints = useMemo(() => sortByCreatedAt(allPoints), [allPoints]);
 
-  // Visible points: either time-lapse slice or all
-  const points = useMemo(() => {
-    if (!timelapse || sortedPoints.length === 0) return allPoints;
-    return sliceUpTo(sortedPoints, tlIndex);
-  }, [timelapse, sortedPoints, tlIndex, allPoints]);
+  // Agent-filtered points (for drill-down)
+  const agentFilteredPoints = useMemo(() => {
+    if (!activeAgentId) return allPoints;
+    return allPoints.filter(p => p.agentId === activeAgentId);
+  }, [allPoints, activeAgentId]);
 
-  // Agent summaries
+  // Visible points: either time-lapse slice or agent-filtered
+  const points = useMemo(() => {
+    const base = agentFilteredPoints;
+    if (!timelapse || sortedPoints.length === 0) return base;
+    // Time-lapse uses sorted allPoints but filtered by agent
+    const sortedFiltered = sortByCreatedAt(base);
+    return sliceUpTo(sortedFiltered, tlIndex);
+  }, [timelapse, sortedPoints.length, tlIndex, agentFilteredPoints]);
+
+  // Agent summaries (always from all points, not filtered)
   const agentSummaries = useMemo(() => buildAgentSummaries(allPoints), [allPoints]);
 
-  // ── Reverse geocode when selected visit changes ──────────────────────────
+  // ── Reverse geocode with caching ────────────────────────────────────────
   useEffect(() => {
-    setGeocodedAddress(null);
-    if (!selectedVisit || selectedVisit.checkInLat == null || selectedVisit.checkInLng == null) return;
+    if (!selectedVisit || selectedVisit.checkInLat == null || selectedVisit.checkInLng == null) {
+      setGeocodedAddress(null);
+      return;
+    }
     if (!mapReady || !window.google?.maps?.Geocoder) return;
 
+    // Check cache first
+    const cached = geocodeCacheRef.current.get(selectedVisit.visitRef);
+    if (cached !== undefined) {
+      setGeocodedAddress(cached);
+      setGeocoding(false);
+      return;
+    }
+
     setGeocoding(true);
+    setGeocodedAddress(null);
     const geocoder = new window.google.maps.Geocoder();
     geocoder.geocode(
       { location: { lat: selectedVisit.checkInLat, lng: selectedVisit.checkInLng } },
       (results, status) => {
         setGeocoding(false);
         if (status === "OK" && results && results[0]) {
-          setGeocodedAddress(results[0].formatted_address);
+          const addr = results[0].formatted_address;
+          geocodeCacheRef.current.set(selectedVisit.visitRef, addr);
+          setGeocodedAddress(addr);
+        } else {
+          // Cache empty string to avoid re-querying
+          geocodeCacheRef.current.set(selectedVisit.visitRef, "");
         }
       }
     );
@@ -604,6 +609,92 @@ export default function FieldVisitMapPage() {
     mapRef.current.fitBounds(bounds, 120);
   }, [selectedVisit, routeVisible, clearRoute]);
 
+  // ── Choropleth layer ─────────────────────────────────────────────────────
+  const buildChoropleth = useCallback(async () => {
+    if (!mapRef.current || !window.google) return;
+
+    // Remove existing layer
+    if (choroplethLayerRef.current) {
+      choroplethLayerRef.current.setMap(null);
+      choroplethLayerRef.current = null;
+    }
+    if (!showChoropleth) return;
+
+    try {
+      const resp = await fetch(NGA_STATES_GEOJSON_URL);
+      if (!resp.ok) throw new Error(`GeoJSON fetch failed: ${resp.status}`);
+      const geojson = await resp.json();
+
+      // Count visits per state using point-in-polygon via Google Maps Data layer
+      const dataLayer = new window.google.maps.Data({ map: mapRef.current });
+      dataLayer.addGeoJson(geojson);
+
+      // Build density map: stateName → count
+      const densityMap = new Map<string, number>();
+      const validPoints = allPoints.filter(p => p.checkInLat != null && p.checkInLng != null);
+
+      // For each feature, count points inside using containsLocation
+      dataLayer.forEach(feature => {
+        const rawName = feature.getProperty("name") as string ?? "";
+        const stateName = normaliseStateName(rawName);
+        let count = 0;
+        for (const p of validPoints) {
+          const latLng = new window.google.maps.LatLng(p.checkInLat!, p.checkInLng!);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          if (window.google.maps.geometry.poly.containsLocation(latLng, feature.getGeometry() as any)) {
+            count++;
+          }
+        }
+        densityMap.set(stateName, count);
+      });
+
+      const maxCount = Math.max(...Array.from(densityMap.values()), 1);
+      setChoroplethMaxCount(maxCount);
+
+      // Style each state polygon
+      dataLayer.setStyle(feature => {
+        const rawName = feature.getProperty("name") as string ?? "";
+        const stateName = normaliseStateName(rawName);
+        const count = densityMap.get(stateName) ?? 0;
+        return {
+          fillColor: densityToColor(count, maxCount),
+          fillOpacity: 1,
+          strokeColor: "#6366f1",
+          strokeWeight: 1,
+          strokeOpacity: 0.4,
+        };
+      });
+
+      // Tooltip on hover
+      dataLayer.addListener("mouseover", (event: google.maps.Data.MouseEvent) => {
+        const rawName = event.feature.getProperty("name") as string ?? "";
+        const stateName = normaliseStateName(rawName);
+        const count = densityMap.get(stateName) ?? 0;
+        dataLayer.overrideStyle(event.feature, { strokeWeight: 2, strokeOpacity: 0.8 });
+        // Show info window
+        const infoWindow = new window.google.maps.InfoWindow({
+          content: `<div style="font-size:12px;padding:4px 6px"><strong>${stateName}</strong><br/>${count} visit${count !== 1 ? "s" : ""}</div>`,
+          position: event.latLng,
+        });
+        infoWindow.open(mapRef.current);
+        // Auto-close after 2s
+        setTimeout(() => infoWindow.close(), 2000);
+      });
+      dataLayer.addListener("mouseout", (event: google.maps.Data.MouseEvent) => {
+        dataLayer.revertStyle(event.feature);
+      });
+
+      choroplethLayerRef.current = dataLayer;
+    } catch (err) {
+      console.error("[Choropleth] Failed to load GeoJSON:", err);
+      toast.error("Could not load state boundary data");
+    }
+  }, [showChoropleth, allPoints]);
+
+  useEffect(() => {
+    if (mapReady) buildChoropleth();
+  }, [mapReady, buildChoropleth]);
+
   const placeMarkers = useCallback(() => {
     if (!mapRef.current || !window.google) return;
 
@@ -648,7 +739,7 @@ export default function FieldVisitMapPage() {
   }, [points, showHeatmap, buildPin, clearRoute, timelapse]);
 
   useEffect(() => { if (mapReady) placeMarkers(); }, [mapReady, placeMarkers]);
-  useEffect(() => { clearRoute(); setGeocodedAddress(null); }, [selectedVisit?.visitRef, clearRoute]);
+  useEffect(() => { clearRoute(); }, [selectedVisit?.visitRef, clearRoute]);
 
   const handleMapReady = useCallback((map: google.maps.Map) => {
     mapRef.current = map;
@@ -684,6 +775,16 @@ export default function FieldVisitMapPage() {
     }
   };
 
+  const handleSelectAgent = (agentId: string) => {
+    setActiveAgentId(agentId);
+    setActiveTab("map");
+    toast.success(`Map filtered to ${agentSummaries.find(a => a.agentId === agentId)?.agentName ?? agentId}`);
+  };
+
+  const handleClearAgent = () => {
+    setActiveAgentId(null);
+  };
+
   const tlCurrentDate = sortedPoints[tlIndex]
     ? new Date(sortedPoints[tlIndex].createdAt).toLocaleDateString()
     : "—";
@@ -709,6 +810,9 @@ export default function FieldVisitMapPage() {
             </Select>
             <Button variant={showHeatmap ? "default" : "outline"} size="sm" className="h-8 text-xs gap-1.5" onClick={() => setShowHeatmap(h => !h)}>
               <Layers className="w-3.5 h-3.5" />Heatmap
+            </Button>
+            <Button variant={showChoropleth ? "default" : "outline"} size="sm" className="h-8 text-xs gap-1.5" onClick={() => setShowChoropleth(c => !c)} disabled={allPoints.length === 0}>
+              <MapIcon className="w-3.5 h-3.5" />Choropleth
             </Button>
             <Button variant={timelapse ? "default" : "outline"} size="sm" className="h-8 text-xs gap-1.5" onClick={handleToggleTimelapse} disabled={allPoints.length === 0}>
               <Play className="w-3.5 h-3.5" />Time-lapse
@@ -753,8 +857,17 @@ export default function FieldVisitMapPage() {
               </button>
             );
           })}
-          {outcomeFilter !== "all" && (
-            <span className="text-xs text-muted-foreground ml-1">{allPoints.length} point{allPoints.length !== 1 ? "s" : ""} shown</span>
+          {activeAgentId && (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border border-primary/40 bg-primary/10 text-primary">
+              <Filter className="w-3 h-3" />
+              {agentSummaries.find(a => a.agentId === activeAgentId)?.agentName ?? activeAgentId}
+              <button onClick={handleClearAgent} className="ml-0.5 hover:opacity-70">
+                <X className="w-3 h-3" />
+              </button>
+            </span>
+          )}
+          {(outcomeFilter !== "all" || activeAgentId) && (
+            <span className="text-xs text-muted-foreground ml-1">{points.length} point{points.length !== 1 ? "s" : ""} shown</span>
           )}
         </div>
 
@@ -800,24 +913,31 @@ export default function FieldVisitMapPage() {
                 </div>
               )}
 
-              {/* Legend */}
-              <div className="absolute bottom-4 left-4 bg-card/90 backdrop-blur-sm rounded-lg p-3 shadow-md border border-border/50 z-10">
-                <p className="text-xs font-semibold text-muted-foreground mb-2">Legend</p>
-                <div className="space-y-1.5">
-                  {Object.entries(OUTCOME_CONFIG).map(([key, cfg]) => (
-                    <div key={key} className="flex items-center gap-2">
-                      <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: cfg.hex }} />
-                      <span className="text-xs">{cfg.label}</span>
+              {/* Choropleth legend */}
+              {showChoropleth && choroplethMaxCount > 0 && (
+                <ChoroplethLegend maxCount={choroplethMaxCount} />
+              )}
+
+              {/* Marker legend (shown when choropleth is off) */}
+              {!showChoropleth && (
+                <div className="absolute bottom-4 left-4 bg-card/90 backdrop-blur-sm rounded-lg p-3 shadow-md border border-border/50 z-10">
+                  <p className="text-xs font-semibold text-muted-foreground mb-2">Legend</p>
+                  <div className="space-y-1.5">
+                    {Object.entries(OUTCOME_CONFIG).map(([key, cfg]) => (
+                      <div key={key} className="flex items-center gap-2">
+                        <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: cfg.hex }} />
+                        <span className="text-xs">{cfg.label}</span>
+                      </div>
+                    ))}
+                    <div className="flex items-center gap-2 mt-2 pt-2 border-t border-border/40">
+                      <div className="w-4 h-4 rounded-full shrink-0 bg-slate-600 border-2 border-white flex items-center justify-center">
+                        <span className="text-[7px] text-white font-bold leading-none">N</span>
+                      </div>
+                      <span className="text-xs text-muted-foreground">Cluster</span>
                     </div>
-                  ))}
-                  <div className="flex items-center gap-2 mt-2 pt-2 border-t border-border/40">
-                    <div className="w-4 h-4 rounded-full shrink-0 bg-slate-600 border-2 border-white flex items-center justify-center">
-                      <span className="text-[7px] text-white font-bold leading-none">N</span>
-                    </div>
-                    <span className="text-xs text-muted-foreground">Cluster</span>
                   </div>
                 </div>
-              </div>
+              )}
 
               {/* Time-lapse controls */}
               {timelapse && (
@@ -852,10 +972,15 @@ export default function FieldVisitMapPage() {
             <Card className="h-full">
               <CardHeader className="pb-3">
                 <CardTitle className="text-sm">Agent Performance Summary</CardTitle>
-                <p className="text-xs text-muted-foreground">Confirmed rate, average duration, and 8-week visit frequency per agent</p>
+                <p className="text-xs text-muted-foreground">Click an agent row to filter the map to their visits. Confirmed rate, average duration, and 8-week frequency.</p>
               </CardHeader>
               <CardContent className="pt-0">
-                <AgentSummaryPanel summaries={agentSummaries} />
+                <AgentSummaryPanel
+                  summaries={agentSummaries}
+                  activeAgentId={activeAgentId}
+                  onSelectAgent={handleSelectAgent}
+                  onClearAgent={handleClearAgent}
+                />
               </CardContent>
             </Card>
           </TabsContent>
