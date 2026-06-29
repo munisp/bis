@@ -15,7 +15,8 @@ import {
   Link2, MessageSquare, Send, Camera, Paperclip, MapPin, X,
   ChevronDown, UserCheck, Truck, ChevronLeft, ChevronRight,
   ClipboardCheck, ExternalLink, Plus, Sparkles, AlertOctagon,
-  CheckCircle, Info, Building
+  CheckCircle, Info, Building, Eye, Copy, Table2, Users, BadgeAlert,
+  ShieldCheck, ShieldX, ShieldAlert
 } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetFooter } from "@/components/ui/sheet";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -202,6 +203,17 @@ export default function InvestigationDetail() {
   const [corpChecks, setCorpChecks] = useState<string[]>(['cac_full_profile', 'beneficial_owner']);
   const [corpRcNumber, setCorpRcNumber] = useState('');
   const [corpTinNumber, setCorpTinNumber] = useState('');
+
+  // Corporate detail modal state
+  const [corpDetailOpen, setCorpDetailOpen] = useState(false);
+  const [corpDetailProfile, setCorpDetailProfile] = useState<any>(null);
+  const [corpDetailTab, setCorpDetailTab] = useState<'overview' | 'cac' | 'firs' | 'directors' | 'sanctions'>('overview');
+
+  const openCorpDetail = (cp: any) => {
+    setCorpDetailProfile(cp);
+    setCorpDetailTab('overview');
+    setCorpDetailOpen(true);
+  };
 
   const generateSummaryMutation = trpc.investigations.generateScreeningSummary.useMutation({
     onSuccess: () => {
@@ -1332,7 +1344,11 @@ export default function InvestigationDetail() {
                   cp.overallOutcome === 'adverse'  ? 'text-red-400 bg-red-500/10 border-red-500/20' :
                                                      'text-muted-foreground bg-muted/20 border-border/50';
                 return (
-                  <div key={cp.profileRef} className="bis-card p-4">
+                  <div
+                    key={cp.profileRef}
+                    className="bis-card p-4 cursor-pointer hover:border-primary/40 transition-colors group"
+                    onClick={() => openCorpDetail(cp)}
+                  >
                     <div className="flex items-center justify-between mb-2">
                       <span className="font-mono text-xs font-semibold text-primary">{cp.profileRef}</span>
                       <div className="flex items-center gap-2">
@@ -1344,6 +1360,9 @@ export default function InvestigationDetail() {
                         {cp.riskScore != null && (
                           <span className="text-[10px] font-mono text-muted-foreground">Risk: {cp.riskScore}/100</span>
                         )}
+                        <span className="text-[10px] text-muted-foreground group-hover:text-primary transition-colors flex items-center gap-0.5">
+                          <Eye size={10} /> View
+                        </span>
                       </div>
                     </div>
                     <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs mb-2">
@@ -1359,7 +1378,7 @@ export default function InvestigationDetail() {
                       {cp.sanctionsResult && <span className="text-[9px] font-mono bg-primary/10 text-primary px-1.5 py-0.5 rounded">Sanctions ✓</span>}
                     </div>
                     <p className="text-[9px] text-muted-foreground/50 font-mono mt-2">
-                      {new Date(cp.createdAt).toLocaleString()}
+                      {new Date(cp.createdAt).toLocaleString()} · Click to view full details
                     </p>
                   </div>
                 );
@@ -1615,6 +1634,415 @@ export default function InvestigationDetail() {
               {runCorporateCheckMutation.isPending ? 'Running…' : 'Run Corporate Check'}
             </Button>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Corporate Check Detail Modal ── */}
+      <Dialog open={corpDetailOpen} onOpenChange={setCorpDetailOpen}>
+        <DialogContent className="max-w-3xl max-h-[85vh] overflow-hidden flex flex-col">
+          <DialogHeader className="shrink-0">
+            <DialogTitle className="flex items-center gap-2 text-sm">
+              <Building size={14} className="text-primary" />
+              Corporate Check Details
+              {corpDetailProfile && (
+                <span className="font-mono text-xs text-muted-foreground ml-1">— {corpDetailProfile.profileRef}</span>
+              )}
+            </DialogTitle>
+          </DialogHeader>
+
+          {corpDetailProfile && (
+            <div className="flex flex-col gap-4 overflow-hidden flex-1 min-h-0">
+              {/* Summary header */}
+              <div className="shrink-0 grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="bis-card p-3 text-center">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Company</p>
+                  <p className="text-xs font-mono font-semibold text-foreground truncate">{corpDetailProfile.companyName}</p>
+                </div>
+                <div className="bis-card p-3 text-center">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">RC Number</p>
+                  <p className="text-xs font-mono font-semibold text-primary">{corpDetailProfile.rcNumber}</p>
+                </div>
+                <div className="bis-card p-3 text-center">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Risk Score</p>
+                  <p className={`text-xs font-mono font-semibold ${
+                    (corpDetailProfile.riskScore ?? 0) >= 50 ? 'text-red-400' :
+                    (corpDetailProfile.riskScore ?? 0) >= 20 ? 'text-amber-400' : 'text-emerald-400'
+                  }`}>{corpDetailProfile.riskScore ?? 0}/100</p>
+                </div>
+                <div className="bis-card p-3 text-center">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Outcome</p>
+                  <p className={`text-xs font-mono font-semibold uppercase ${
+                    corpDetailProfile.overallOutcome === 'clear'   ? 'text-emerald-400' :
+                    corpDetailProfile.overallOutcome === 'consider' ? 'text-amber-400' :
+                    corpDetailProfile.overallOutcome === 'adverse'  ? 'text-red-400' :
+                    'text-muted-foreground'
+                  }`}>{corpDetailProfile.overallOutcome ?? 'pending'}</p>
+                </div>
+              </div>
+
+              {/* Tab navigation */}
+              <div className="shrink-0 flex gap-1 border-b border-border/50 pb-0">
+                {[
+                  { id: 'overview',   label: 'Overview',  icon: <Building size={10} /> },
+                  { id: 'cac',        label: 'CAC',       icon: <Table2 size={10} />,    disabled: !corpDetailProfile.cacResult },
+                  { id: 'firs',       label: 'FIRS',      icon: <ShieldCheck size={10} />, disabled: !corpDetailProfile.firsResult },
+                  { id: 'directors',  label: 'Directors', icon: <Users size={10} />,     disabled: !corpDetailProfile.directorsResult },
+                  { id: 'sanctions',  label: 'Sanctions', icon: <BadgeAlert size={10} />, disabled: !corpDetailProfile.sanctionsResult },
+                ].map(tab => (
+                  <button
+                    key={tab.id}
+                    disabled={tab.disabled}
+                    onClick={() => setCorpDetailTab(tab.id as any)}
+                    className={cn(
+                      "flex items-center gap-1 text-[11px] font-mono px-3 py-1.5 border-b-2 transition-all",
+                      corpDetailTab === tab.id
+                        ? "border-primary text-primary"
+                        : "border-transparent text-muted-foreground hover:text-foreground",
+                      tab.disabled && "opacity-30 cursor-not-allowed"
+                    )}
+                  >
+                    {tab.icon} {tab.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Tab content */}
+              <div className="flex-1 overflow-y-auto min-h-0 space-y-3">
+
+                {/* Overview tab */}
+                {corpDetailTab === 'overview' && (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-x-8 gap-y-2 text-xs">
+                      <div className="flex justify-between border-b border-border/30 pb-1">
+                        <span className="text-muted-foreground">Profile Ref</span>
+                        <span className="font-mono text-foreground">{corpDetailProfile.profileRef}</span>
+                      </div>
+                      <div className="flex justify-between border-b border-border/30 pb-1">
+                        <span className="text-muted-foreground">Company Name</span>
+                        <span className="font-mono text-foreground">{corpDetailProfile.companyName}</span>
+                      </div>
+                      <div className="flex justify-between border-b border-border/30 pb-1">
+                        <span className="text-muted-foreground">RC Number</span>
+                        <span className="font-mono text-primary">{corpDetailProfile.rcNumber}</span>
+                      </div>
+                      {corpDetailProfile.tinNumber && (
+                        <div className="flex justify-between border-b border-border/30 pb-1">
+                          <span className="text-muted-foreground">TIN</span>
+                          <span className="font-mono text-foreground">{corpDetailProfile.tinNumber}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between border-b border-border/30 pb-1">
+                        <span className="text-muted-foreground">Status</span>
+                        <span className="font-mono capitalize text-foreground">{corpDetailProfile.status}</span>
+                      </div>
+                      <div className="flex justify-between border-b border-border/30 pb-1">
+                        <span className="text-muted-foreground">Overall Outcome</span>
+                        <span className={`font-mono uppercase font-semibold ${
+                          corpDetailProfile.overallOutcome === 'clear'   ? 'text-emerald-400' :
+                          corpDetailProfile.overallOutcome === 'consider' ? 'text-amber-400' :
+                          corpDetailProfile.overallOutcome === 'adverse'  ? 'text-red-400' :
+                          'text-muted-foreground'
+                        }`}>{corpDetailProfile.overallOutcome ?? '—'}</span>
+                      </div>
+                      <div className="flex justify-between border-b border-border/30 pb-1">
+                        <span className="text-muted-foreground">Risk Score</span>
+                        <span className="font-mono text-foreground">{corpDetailProfile.riskScore ?? 0}/100</span>
+                      </div>
+                      <div className="flex justify-between border-b border-border/30 pb-1">
+                        <span className="text-muted-foreground">Run At</span>
+                        <span className="font-mono text-foreground">{new Date(corpDetailProfile.createdAt).toLocaleString()}</span>
+                      </div>
+                    </div>
+
+                    {/* Checks run summary */}
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">Checks Performed</p>
+                      <div className="grid grid-cols-2 gap-2">
+                        {[
+                          { key: 'cacResult',       label: 'CAC Full Profile',      icon: <Table2 size={12} /> },
+                          { key: 'firsResult',      label: 'FIRS Tax Clearance',    icon: <ShieldCheck size={12} /> },
+                          { key: 'directorsResult', label: 'Directors / UBO',       icon: <Users size={12} /> },
+                          { key: 'sanctionsResult', label: 'Corporate Sanctions',   icon: <BadgeAlert size={12} /> },
+                        ].map(({ key, label, icon }) => {
+                          const ran = !!corpDetailProfile[key];
+                          const isAdverse = key === 'sanctionsResult' && (corpDetailProfile[key]?.hits?.length ?? 0) > 0;
+                          const isConsider = key === 'firsResult' && corpDetailProfile[key]?.status === 'not_cleared';
+                          return (
+                            <div
+                              key={key}
+                              className={cn(
+                                "flex items-center gap-2 p-2.5 rounded border text-xs",
+                                !ran        ? "border-border/30 text-muted-foreground/40 bg-muted/10" :
+                                isAdverse   ? "border-red-500/30 text-red-400 bg-red-500/5" :
+                                isConsider  ? "border-amber-500/30 text-amber-400 bg-amber-500/5" :
+                                              "border-emerald-500/30 text-emerald-400 bg-emerald-500/5"
+                              )}
+                            >
+                              {!ran ? <ShieldAlert size={12} className="shrink-0 opacity-40" /> :
+                               isAdverse ? <ShieldX size={12} className="shrink-0" /> :
+                               isConsider ? <ShieldAlert size={12} className="shrink-0" /> :
+                               <ShieldCheck size={12} className="shrink-0" />}
+                              <div className="flex-1 min-w-0">
+                                <p className="font-mono font-semibold truncate">{label}</p>
+                                <p className="text-[9px] opacity-70">
+                                  {!ran ? 'Not run' :
+                                   isAdverse ? 'Adverse — sanctions hit' :
+                                   isConsider ? 'Consider — not cleared' :
+                                   'Clear'}
+                                </p>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* CAC tab */}
+                {corpDetailTab === 'cac' && corpDetailProfile.cacResult && (
+                  <div className="space-y-3">
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">CAC Registry Data</p>
+                    {/* Key fields */}
+                    {(() => {
+                      const cac = corpDetailProfile.cacResult as any;
+                      const fields = [
+                        { label: 'Company Name',    value: cac?.name ?? cac?.company_name ?? cac?.companyName },
+                        { label: 'RC Number',       value: cac?.rc ?? cac?.rc_number ?? cac?.rcNumber },
+                        { label: 'Status',          value: cac?.status ?? cac?.company_status },
+                        { label: 'Type',            value: cac?.type ?? cac?.company_type },
+                        { label: 'Date Registered', value: cac?.date_registered ?? cac?.dateRegistered ?? cac?.incorporation_date },
+                        { label: 'Address',         value: cac?.address ?? cac?.registered_address },
+                        { label: 'LGA',             value: cac?.lga },
+                        { label: 'State',           value: cac?.state },
+                      ].filter(f => f.value != null && f.value !== '');
+                      return fields.length > 0 ? (
+                        <div className="grid grid-cols-2 gap-x-8 gap-y-2 text-xs">
+                          {fields.map(f => (
+                            <div key={f.label} className="flex justify-between border-b border-border/30 pb-1">
+                              <span className="text-muted-foreground">{f.label}</span>
+                              <span className="font-mono text-foreground text-right max-w-[60%] truncate">{String(f.value)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : null;
+                    })()}
+                    {/* Error state */}
+                    {(corpDetailProfile.cacResult as any)?.error && (
+                      <div className="p-3 rounded border border-red-500/30 bg-red-500/5 text-xs text-red-400">
+                        <p className="font-semibold mb-1">API Error</p>
+                        <p className="font-mono">{(corpDetailProfile.cacResult as any).error}</p>
+                      </div>
+                    )}
+                    {/* Raw JSON */}
+                    <details className="group">
+                      <summary className="text-[10px] text-muted-foreground cursor-pointer hover:text-foreground flex items-center gap-1 select-none">
+                        <ChevronDown size={10} className="group-open:rotate-180 transition-transform" /> Raw JSON
+                      </summary>
+                      <div className="relative mt-2">
+                        <button
+                          onClick={() => navigator.clipboard.writeText(JSON.stringify(corpDetailProfile.cacResult, null, 2))}
+                          className="absolute top-2 right-2 text-[9px] text-muted-foreground hover:text-foreground flex items-center gap-0.5 z-10"
+                        >
+                          <Copy size={9} /> Copy
+                        </button>
+                        <pre className="text-[10px] font-mono bg-muted/20 rounded p-3 overflow-x-auto max-h-48 text-muted-foreground whitespace-pre-wrap break-all">
+                          {JSON.stringify(corpDetailProfile.cacResult, null, 2)}
+                        </pre>
+                      </div>
+                    </details>
+                  </div>
+                )}
+
+                {/* FIRS tab */}
+                {corpDetailTab === 'firs' && corpDetailProfile.firsResult && (
+                  <div className="space-y-3">
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">FIRS Tax Clearance Data</p>
+                    {(() => {
+                      const firs = corpDetailProfile.firsResult as any;
+                      const cleared = firs?.status === 'cleared' || firs?.tax_clearance_status === 'cleared';
+                      const notCleared = firs?.status === 'not_cleared' || firs?.tax_clearance_status === 'not_cleared';
+                      return (
+                        <div className={cn(
+                          "p-3 rounded border flex items-start gap-3 text-xs",
+                          notCleared ? "border-amber-500/30 bg-amber-500/5 text-amber-400" :
+                          cleared    ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-400" :
+                          "border-border/30 bg-muted/10 text-muted-foreground"
+                        )}>
+                          {notCleared ? <ShieldX size={14} className="shrink-0 mt-0.5" /> :
+                           cleared    ? <ShieldCheck size={14} className="shrink-0 mt-0.5" /> :
+                           <ShieldAlert size={14} className="shrink-0 mt-0.5" />}
+                          <div>
+                            <p className="font-semibold font-mono uppercase">
+                              {firs?.status ?? firs?.tax_clearance_status ?? 'Unknown status'}
+                            </p>
+                            {firs?.message && <p className="mt-1 text-[10px] opacity-80">{firs.message}</p>}
+                            {firs?.year && <p className="mt-0.5 text-[10px] opacity-70">Tax year: {firs.year}</p>}
+                            {firs?.outstanding_amount != null && (
+                              <p className="mt-0.5 text-[10px] opacity-80 font-mono">
+                                Outstanding: ₦{Number(firs.outstanding_amount).toLocaleString()}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })()}
+                    {(corpDetailProfile.firsResult as any)?.error && (
+                      <div className="p-3 rounded border border-red-500/30 bg-red-500/5 text-xs text-red-400">
+                        <p className="font-semibold mb-1">API Error</p>
+                        <p className="font-mono">{(corpDetailProfile.firsResult as any).error}</p>
+                      </div>
+                    )}
+                    <details className="group">
+                      <summary className="text-[10px] text-muted-foreground cursor-pointer hover:text-foreground flex items-center gap-1 select-none">
+                        <ChevronDown size={10} className="group-open:rotate-180 transition-transform" /> Raw JSON
+                      </summary>
+                      <div className="relative mt-2">
+                        <button
+                          onClick={() => navigator.clipboard.writeText(JSON.stringify(corpDetailProfile.firsResult, null, 2))}
+                          className="absolute top-2 right-2 text-[9px] text-muted-foreground hover:text-foreground flex items-center gap-0.5 z-10"
+                        >
+                          <Copy size={9} /> Copy
+                        </button>
+                        <pre className="text-[10px] font-mono bg-muted/20 rounded p-3 overflow-x-auto max-h-48 text-muted-foreground whitespace-pre-wrap break-all">
+                          {JSON.stringify(corpDetailProfile.firsResult, null, 2)}
+                        </pre>
+                      </div>
+                    </details>
+                  </div>
+                )}
+
+                {/* Directors tab */}
+                {corpDetailTab === 'directors' && corpDetailProfile.directorsResult && (
+                  <div className="space-y-3">
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Directors & UBO Data</p>
+                    {(() => {
+                      const dir = corpDetailProfile.directorsResult as any;
+                      const directors: any[] = dir?.directors ?? dir?.data?.directors ?? dir?.data ?? [];
+                      return directors.length > 0 ? (
+                        <div className="space-y-2">
+                          {directors.map((d: any, i: number) => (
+                            <div key={i} className="p-3 rounded border border-border/30 bg-muted/10 text-xs">
+                              <div className="flex items-center justify-between">
+                                <span className="font-mono font-semibold text-foreground">{d.name ?? d.full_name ?? `Director ${i + 1}`}</span>
+                                {d.role && <span className="text-[9px] font-mono text-muted-foreground bg-muted/30 px-1.5 py-0.5 rounded">{d.role}</span>}
+                              </div>
+                              <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 mt-1.5 text-[10px] text-muted-foreground">
+                                {d.nationality && <span>Nationality: <span className="text-foreground font-mono">{d.nationality}</span></span>}
+                                {d.date_of_birth && <span>DOB: <span className="text-foreground font-mono">{d.date_of_birth}</span></span>}
+                                {d.shares && <span>Shares: <span className="text-foreground font-mono">{d.shares}</span></span>}
+                                {d.address && <span className="col-span-2">Address: <span className="text-foreground font-mono">{d.address}</span></span>}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-muted-foreground text-center py-4">No director records in response</p>
+                      );
+                    })()}
+                    {(corpDetailProfile.directorsResult as any)?.error && (
+                      <div className="p-3 rounded border border-red-500/30 bg-red-500/5 text-xs text-red-400">
+                        <p className="font-semibold mb-1">API Error</p>
+                        <p className="font-mono">{(corpDetailProfile.directorsResult as any).error}</p>
+                      </div>
+                    )}
+                    <details className="group">
+                      <summary className="text-[10px] text-muted-foreground cursor-pointer hover:text-foreground flex items-center gap-1 select-none">
+                        <ChevronDown size={10} className="group-open:rotate-180 transition-transform" /> Raw JSON
+                      </summary>
+                      <div className="relative mt-2">
+                        <button
+                          onClick={() => navigator.clipboard.writeText(JSON.stringify(corpDetailProfile.directorsResult, null, 2))}
+                          className="absolute top-2 right-2 text-[9px] text-muted-foreground hover:text-foreground flex items-center gap-0.5 z-10"
+                        >
+                          <Copy size={9} /> Copy
+                        </button>
+                        <pre className="text-[10px] font-mono bg-muted/20 rounded p-3 overflow-x-auto max-h-48 text-muted-foreground whitespace-pre-wrap break-all">
+                          {JSON.stringify(corpDetailProfile.directorsResult, null, 2)}
+                        </pre>
+                      </div>
+                    </details>
+                  </div>
+                )}
+
+                {/* Sanctions tab */}
+                {corpDetailTab === 'sanctions' && corpDetailProfile.sanctionsResult && (
+                  <div className="space-y-3">
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Corporate Sanctions Data</p>
+                    {(() => {
+                      const sanc = corpDetailProfile.sanctionsResult as any;
+                      const hits: any[] = sanc?.hits ?? sanc?.data?.hits ?? sanc?.matches ?? [];
+                      return hits.length > 0 ? (
+                        <div className="space-y-2">
+                          <div className="p-2.5 rounded border border-red-500/30 bg-red-500/5 text-xs text-red-400 flex items-center gap-2 mb-3">
+                            <BadgeAlert size={12} className="shrink-0" />
+                            <span className="font-semibold">{hits.length} sanctions hit{hits.length > 1 ? 's' : ''} found</span>
+                          </div>
+                          {hits.map((h: any, i: number) => (
+                            <div key={i} className="p-3 rounded border border-red-500/20 bg-red-500/5 text-xs">
+                              <div className="flex items-center justify-between mb-1">
+                                <span className="font-mono font-semibold text-red-300">{h.name ?? h.entity_name ?? `Hit ${i + 1}`}</span>
+                                {h.list && <span className="text-[9px] font-mono text-red-400 bg-red-500/10 px-1.5 py-0.5 rounded border border-red-500/20">{h.list}</span>}
+                              </div>
+                              <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-[10px] text-red-300/70">
+                                {h.type && <span>Type: <span className="text-red-300 font-mono">{h.type}</span></span>}
+                                {h.score != null && <span>Score: <span className="text-red-300 font-mono">{h.score}</span></span>}
+                                {h.program && <span>Program: <span className="text-red-300 font-mono">{h.program}</span></span>}
+                                {h.date_listed && <span>Listed: <span className="text-red-300 font-mono">{h.date_listed}</span></span>}
+                                {h.reason && <span className="col-span-2">Reason: <span className="text-red-300 font-mono">{h.reason}</span></span>}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="p-3 rounded border border-emerald-500/30 bg-emerald-500/5 text-xs text-emerald-400 flex items-center gap-2">
+                          <ShieldCheck size={12} className="shrink-0" />
+                          <span>No sanctions hits found for this entity</span>
+                        </div>
+                      );
+                    })()}
+                    {(corpDetailProfile.sanctionsResult as any)?.error && (
+                      <div className="p-3 rounded border border-red-500/30 bg-red-500/5 text-xs text-red-400">
+                        <p className="font-semibold mb-1">API Error</p>
+                        <p className="font-mono">{(corpDetailProfile.sanctionsResult as any).error}</p>
+                      </div>
+                    )}
+                    <details className="group">
+                      <summary className="text-[10px] text-muted-foreground cursor-pointer hover:text-foreground flex items-center gap-1 select-none">
+                        <ChevronDown size={10} className="group-open:rotate-180 transition-transform" /> Raw JSON
+                      </summary>
+                      <div className="relative mt-2">
+                        <button
+                          onClick={() => navigator.clipboard.writeText(JSON.stringify(corpDetailProfile.sanctionsResult, null, 2))}
+                          className="absolute top-2 right-2 text-[9px] text-muted-foreground hover:text-foreground flex items-center gap-0.5 z-10"
+                        >
+                          <Copy size={9} /> Copy
+                        </button>
+                        <pre className="text-[10px] font-mono bg-muted/20 rounded p-3 overflow-x-auto max-h-48 text-muted-foreground whitespace-pre-wrap break-all">
+                          {JSON.stringify(corpDetailProfile.sanctionsResult, null, 2)}
+                        </pre>
+                      </div>
+                    </details>
+                  </div>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div className="shrink-0 flex justify-between items-center pt-2 border-t border-border/50">
+                <p className="text-[9px] text-muted-foreground/50 font-mono">
+                  {corpDetailProfile.profileRef} · {new Date(corpDetailProfile.createdAt).toLocaleString()}
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={() => setCorpDetailOpen(false)}
+                >
+                  Close
+                </Button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 
