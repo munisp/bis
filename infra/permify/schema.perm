@@ -137,3 +137,64 @@ entity document {
   permission delete     = org.admin
   permission download   = uploader or org.admin or org.member
 }
+
+// ─── Criminal Records (P0 gap closure) ───────────────────────────────────────
+entity criminal_record_request {
+  relation creator    @user
+  relation reviewer   @user
+  relation supervisor @user
+  relation org        @organization
+
+  permission create   = org.admin or org.member
+  permission read     = creator or reviewer or supervisor or org.admin
+  permission update   = creator or supervisor or org.admin
+  permission delete   = supervisor or org.admin
+  permission ingest   = supervisor or org.admin
+  permission verify   = reviewer or supervisor or org.admin
+  permission export   = supervisor or org.admin
+}
+
+entity criminal_record {
+  relation request @criminal_record_request
+  relation org     @organization
+
+  permission read   = request.read
+  permission create = request.ingest
+  permission verify = request.verify
+  permission delete = org.admin
+}
+
+// ─── Corporate Profiles (P0 gap closure) ─────────────────────────────────────
+entity corporate_profile {
+  relation owner      @user
+  relation supervisor @user
+  relation org        @organization
+
+  permission create     = org.admin or org.member
+  permission read       = owner or supervisor or org.admin or org.member
+  permission update     = owner or supervisor or org.admin
+  permission delete     = supervisor or org.admin
+  permission run_check  = org.admin or org.member
+  permission view_firs  = supervisor or org.admin
+}
+
+// ─── Mojaloop Compliance Decisions (P1 gap closure) ──────────────────────────
+entity compliance_decision {
+  relation initiator @user
+  relation org       @organization
+
+  permission create   = org.admin or org.member
+  permission read     = initiator or org.admin or org.member
+  permission override = org.admin
+  permission export   = org.admin
+}
+
+// ─── AI Screening Summaries (P2 gap closure) ─────────────────────────────────
+entity screening_summary {
+  relation investigation @investigation
+  relation org           @organization
+
+  permission read     = investigation.read
+  permission generate = investigation.update
+  permission delete   = org.admin
+}

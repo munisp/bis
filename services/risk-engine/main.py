@@ -843,8 +843,135 @@ def get_analytics(req: AnalyticsRequest):
     return result
 
 
-# ─── Entry Point ─────────────────────────────────────────────────────────────
+# ─── Extended V2 Scoring (Criminal Records, Corporate, Field Visit, Thin-File) ─
 
+try:
+    from criminal_corporate_scoring import (
+        CriminalRecordSignals,
+        CorporateCheckSignals,
+        FieldVisitSignals,
+        ThinFileSignals,
+        apply_extended_signals,
+    )
+    _V2_AVAILABLE = True
+except ImportError:
+    _V2_AVAILABLE = False
+    logger.warning("criminal_corporate_scoring not found — /v2/score will be unavailable")
+
+if _V2_AVAILABLE:
+    class RiskScoreRequestV2(RiskScoreRequest):
+        """Backwards-compatible V2 request with four extended signal domains."""
+        criminal_records: Optional[CriminalRecordSignals] = None
+        corporate_check: Optional[CorporateCheckSignals] = None
+        field_visit: Optional[FieldVisitSignals] = None
+        thin_file: Optional[ThinFileSignals] = None
+
+    @app.post("/v2/score", response_model=RiskScoreResponse, dependencies=[Depends(verify_key)])
+    def score_subject_v2(req: RiskScoreRequestV2, background_tasks: BackgroundTasks):
+        """
+        V2 composite risk scorer — extends /v1/score with:
+          - Criminal record signals (NPF, EFCC, ICPC, NDLEA)
+          - Corporate check signals (CAC, FIRS, directors, sanctions)
+          - Field visit confirmation boost
+          - Thin-file data completeness penalty
+        """
+        start = time.time()
+        logger.info(f"[V2] Scoring subject {req.subject_id} ({req.subject_type})")
+
+        cache_key = f"risk:v2:score:{req.subject_id}:{req.tier}"
+        cached = cache_get(cache_key)
+        if cached:
+            result = json.loads(cached)
+            result["cache_hit"] = True
+            return result
+
+        all_flags: list[str] = []
+        factors: list[RiskFactor] = []
+
+        scorers = [
+            ("identity",      "Identity Verification",  score_identity,      req.identity),
+            ("sanctions",     "Sanctions Screening",    score_sanctions,     req.sanctions),
+            ("pep",           "PEP Screening",          score_pep,           req.pep),
+            ("credit",        "Credit Risk",            score_credit,        req.credit),
+            ("adverse_media", "Adverse Media",          score_adverse_media, req.adverse_media),
+            ("behavioural",   "Behavioural Signals",    score_behavioural,   req.behavioural),
+        ]
+
+        base_composite = 0.0
+        for key, label, scorer_fn, signals in scorers:
+            raw, flags = scorer_fn(signals)
+            weight = WEIGHTS[key]
+            weighted = raw * weight
+            base_composite += weighted
+            all_flags.extend(flags)
+            factors.append(RiskFactor(
+                category=key, label=label, weight=weight,
+                raw_score=round(raw, 2), weighted_score=round(weighted, 2),
+                flag=len(flags) > 0,
+            ))
+
+        adjusted_composite, ext_flags, ext_factors = apply_extended_signals(
+            base_composite=base_composite,
+            criminal=req.criminal_records,
+            corporate=req.corporate_check,
+            field_visit=req.field_visit,
+            thin_file=req.thin_file,
+        )
+        all_flags.extend(ext_flags)
+        for ef in ext_factors:
+            factors.append(RiskFactor(**ef))
+
+        composite_int = min(int(round(adjusted_composite)), 100)
+        tier = compute_risk_tier(composite_int)
+        recommendation = build_recommendation(tier, all_flags)
+
+        verified_count = sum([
+            req.identity.nin_verified,
+            req.identity.bvn_verified,
+            req.identity.biometric_match,
+        ])
+        extended_count = sum([
+            req.criminal_records is not None,
+            req.corporate_check is not None,
+            req.field_visit is not None,
+        ])
+        confidence = min(0.55 + (verified_count / 3) * 0.25 + (extended_count / 3) * 0.15, 0.99)
+
+        ms = int((time.time() - start) * 1000)
+        result = RiskScoreResponse(
+            subject_id=req.subject_id,
+            composite_score=composite_int,
+            score=composite_int,
+            risk_tier=tier,
+            tier=tier,
+            confidence=round(confidence, 3),
+            factors=factors,
+            recommendation=recommendation,
+            flags=all_flags,
+            model_version="v2.1.0-extended",
+            scored_at=datetime.now(timezone.utc).isoformat(),
+            processing_ms=ms,
+        )
+
+        cache_set(cache_key, result.model_dump(), ttl_seconds=3600)
+        background_tasks.add_task(publish_event, "bis.risk.v2_score_computed", {
+            "subject_id": req.subject_id,
+            "subject_type": req.subject_type,
+            "composite_score": composite_int,
+            "risk_tier": tier,
+            "flags": all_flags,
+            "extended_signals": {
+                "criminal_records": req.criminal_records is not None,
+                "corporate_check": req.corporate_check is not None,
+                "field_visit": req.field_visit is not None,
+                "thin_file": req.thin_file is not None,
+            },
+            "processing_ms": ms,
+            "timestamp": result.scored_at,
+        })
+        return result
+
+# ─── Entry Point ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=PORT, reload=False, log_level="info")

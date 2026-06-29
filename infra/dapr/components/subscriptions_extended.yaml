@@ -1,0 +1,255 @@
+# ─── BIS Dapr Subscriptions — Extended (P0–P2 gap closure) ──────────────────
+# These subscriptions wire the new domain events introduced in the P0–P4
+# implementation to the correct consumer services.
+#
+# Topic naming convention: bis.{domain}.{event_type}
+# All topics use the bis-pubsub component (Redis Streams).
+
+# ── Criminal Records ──────────────────────────────────────────────────────────
+
+apiVersion: dapr.io/v2alpha1
+kind: Subscription
+metadata:
+  name: criminal-record-request-submitted
+  namespace: default
+spec:
+  pubsubname: bis-pubsub
+  topic: bis.criminal_records.request_submitted
+  routes:
+    default: /dapr/subscribe/criminal-records/request-submitted
+  scopes:
+    - bis-bff
+    - bis-risk-engine
+    - bis-gateway
+---
+apiVersion: dapr.io/v2alpha1
+kind: Subscription
+metadata:
+  name: criminal-record-ingested
+  namespace: default
+spec:
+  pubsubname: bis-pubsub
+  topic: bis.criminal_records.record_ingested
+  routes:
+    default: /dapr/subscribe/criminal-records/record-ingested
+  scopes:
+    - bis-bff
+    - bis-risk-engine
+    - bis-aml-engine
+---
+apiVersion: dapr.io/v2alpha1
+kind: Subscription
+metadata:
+  name: criminal-record-warrant-detected
+  namespace: default
+spec:
+  pubsubname: bis-pubsub
+  topic: bis.criminal_records.warrant_detected
+  routes:
+    default: /dapr/subscribe/criminal-records/warrant-detected
+  # Warrant alerts go to all consumer services for immediate action
+  scopes:
+    - bis-bff
+    - bis-risk-engine
+    - bis-aml-engine
+    - bis-gateway
+---
+apiVersion: dapr.io/v2alpha1
+kind: Subscription
+metadata:
+  name: criminal-record-verified
+  namespace: default
+spec:
+  pubsubname: bis-pubsub
+  topic: bis.criminal_records.record_verified
+  routes:
+    default: /dapr/subscribe/criminal-records/record-verified
+  scopes:
+    - bis-bff
+    - bis-risk-engine
+
+# ── Corporate Check ───────────────────────────────────────────────────────────
+
+---
+apiVersion: dapr.io/v2alpha1
+kind: Subscription
+metadata:
+  name: corporate-check-completed
+  namespace: default
+spec:
+  pubsubname: bis-pubsub
+  topic: bis.corporate_check.completed
+  routes:
+    default: /dapr/subscribe/corporate-check/completed
+  scopes:
+    - bis-bff
+    - bis-risk-engine
+    - bis-aml-engine
+---
+apiVersion: dapr.io/v2alpha1
+kind: Subscription
+metadata:
+  name: corporate-check-sanctions-hit
+  namespace: default
+spec:
+  pubsubname: bis-pubsub
+  topic: bis.corporate_check.sanctions_hit
+  routes:
+    default: /dapr/subscribe/corporate-check/sanctions-hit
+  scopes:
+    - bis-bff
+    - bis-risk-engine
+    - bis-aml-engine
+    - bis-gateway
+---
+apiVersion: dapr.io/v2alpha1
+kind: Subscription
+metadata:
+  name: corporate-check-firs-failed
+  namespace: default
+spec:
+  pubsubname: bis-pubsub
+  topic: bis.corporate_check.firs_clearance_failed
+  routes:
+    default: /dapr/subscribe/corporate-check/firs-failed
+  scopes:
+    - bis-bff
+    - bis-risk-engine
+
+# ── Field Visit ───────────────────────────────────────────────────────────────
+
+---
+apiVersion: dapr.io/v2alpha1
+kind: Subscription
+metadata:
+  name: field-visit-dispatched
+  namespace: default
+spec:
+  pubsubname: bis-pubsub
+  topic: bis.field_visit.dispatched
+  routes:
+    default: /dapr/subscribe/field-visit/dispatched
+  scopes:
+    - bis-bff
+    - bis-gateway
+---
+apiVersion: dapr.io/v2alpha1
+kind: Subscription
+metadata:
+  name: field-visit-checked-in
+  namespace: default
+spec:
+  pubsubname: bis-pubsub
+  topic: bis.field_visit.checked_in
+  routes:
+    default: /dapr/subscribe/field-visit/checked-in
+  scopes:
+    - bis-bff
+---
+apiVersion: dapr.io/v2alpha1
+kind: Subscription
+metadata:
+  name: field-visit-completed
+  namespace: default
+spec:
+  pubsubname: bis-pubsub
+  topic: bis.field_visit.completed
+  routes:
+    default: /dapr/subscribe/field-visit/completed
+  scopes:
+    - bis-bff
+    - bis-risk-engine
+---
+apiVersion: dapr.io/v2alpha1
+kind: Subscription
+metadata:
+  name: field-visit-escalated
+  namespace: default
+spec:
+  pubsubname: bis-pubsub
+  topic: bis.field_visit.escalated
+  routes:
+    default: /dapr/subscribe/field-visit/escalated
+  scopes:
+    - bis-bff
+    - bis-gateway
+
+# ── Thin-File ─────────────────────────────────────────────────────────────────
+
+---
+apiVersion: dapr.io/v2alpha1
+kind: Subscription
+metadata:
+  name: thin-file-flagged
+  namespace: default
+spec:
+  pubsubname: bis-pubsub
+  topic: bis.thin_file.flagged
+  routes:
+    default: /dapr/subscribe/thin-file/flagged
+  scopes:
+    - bis-bff
+    - bis-risk-engine
+---
+apiVersion: dapr.io/v2alpha1
+kind: Subscription
+metadata:
+  name: thin-file-cleared
+  namespace: default
+spec:
+  pubsubname: bis-pubsub
+  topic: bis.thin_file.cleared
+  routes:
+    default: /dapr/subscribe/thin-file/cleared
+  scopes:
+    - bis-bff
+    - bis-risk-engine
+
+# ── AI Screening Summary ──────────────────────────────────────────────────────
+
+---
+apiVersion: dapr.io/v2alpha1
+kind: Subscription
+metadata:
+  name: screening-summary-generated
+  namespace: default
+spec:
+  pubsubname: bis-pubsub
+  topic: bis.screening_summary.generated
+  routes:
+    default: /dapr/subscribe/screening-summary/generated
+  scopes:
+    - bis-bff
+    - bis-risk-engine
+
+# ── Mojaloop Compliance ───────────────────────────────────────────────────────
+
+---
+apiVersion: dapr.io/v2alpha1
+kind: Subscription
+metadata:
+  name: mojaloop-compliance-blocked
+  namespace: default
+spec:
+  pubsubname: bis-pubsub
+  topic: bis.mojaloop.compliance_blocked
+  routes:
+    default: /dapr/subscribe/mojaloop/compliance-blocked
+  scopes:
+    - bis-bff
+    - bis-aml-engine
+    - bis-gateway
+---
+apiVersion: dapr.io/v2alpha1
+kind: Subscription
+metadata:
+  name: mojaloop-compliance-cleared
+  namespace: default
+spec:
+  pubsubname: bis-pubsub
+  topic: bis.mojaloop.compliance_cleared
+  routes:
+    default: /dapr/subscribe/mojaloop/compliance-cleared
+  scopes:
+    - bis-bff
+    - bis-gateway

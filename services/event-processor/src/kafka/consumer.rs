@@ -199,6 +199,9 @@ pub async fn process_event(event: BisEvent, audit_log: AuditLog) {
         }
     }
 
+    // Dispatch to domain-specific handler (criminal, corporate, field visit, thin-file, mojaloop)
+    super::handlers::dispatch_domain_event(&event, audit_log.clone()).await;
+
     // Fan-out: forward high-severity events to BFF webhook
     let severity = event.severity.clone();
     if matches!(severity.as_str(), "high" | "critical") {

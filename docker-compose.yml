@@ -607,7 +607,7 @@ services:
       LAKEHOUSE_PORT: "8085"
       LAKEHOUSE_BASE_PATH: /data/lakehouse
       KAFKA_BROKERS: kafka:9092
-      KAFKA_TOPICS: bis.investigations,bis.alerts,bis.kyc
+      KAFKA_TOPICS: bis.investigations,bis.alerts,bis.kyc,bis.criminal_records,bis.corporate_checks,bis.field_visits,bis.thin_file
       LOG_LEVEL: INFO
     volumes:
       - lakehouse_data:/data/lakehouse
@@ -753,7 +753,7 @@ services:
       PORT: "8093"
       KAFKA_BROKERS: kafka:9092
       KAFKA_CONSUMER_GROUP: bis-event-emitter
-      KAFKA_TOPICS: bis.cases,bis.investigations,bis.alerts,bis.kyc
+      KAFKA_TOPICS: bis.cases,bis.investigations,bis.alerts,bis.kyc,bis.criminal_records,bis.corporate_checks,bis.field_visits,bis.thin_file
       DATABASE_URL: ${DATABASE_URL}
       LOG_LEVEL: INFO
     ports:

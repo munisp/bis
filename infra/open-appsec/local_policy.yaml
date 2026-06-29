@@ -182,3 +182,177 @@ triggers:
     log-to-server: false
     format: json
     cef-severity: 3
+
+    # ── Criminal Records (P0 — high sensitivity, prevent mode) ───────────────
+    - asset: criminal-records-submit
+      url: /v1/criminal-records/request
+      mode: prevent
+      practices:
+        - name: Criminal-Records-Submit-Practice
+      triggers:
+        - name: BIS-Default-Log
+    - asset: criminal-records-ingest
+      url: /v1/criminal-records/ingest
+      mode: prevent
+      practices:
+        - name: Criminal-Records-Ingest-Practice
+      triggers:
+        - name: BIS-Default-Log
+    - asset: criminal-records-list
+      url: /v1/criminal-records/requests
+      mode: prevent
+      practices:
+        - name: Criminal-Records-Read-Practice
+      triggers:
+        - name: BIS-Default-Log
+
+    # ── Corporate Check (P0 — prevent mode, body size limit) ─────────────────
+    - asset: corporate-check-run
+      url: /v1/corporate/check
+      mode: prevent
+      practices:
+        - name: Corporate-Check-Practice
+      triggers:
+        - name: BIS-Default-Log
+    - asset: corporate-profiles
+      url: /v1/corporate/profiles
+      mode: prevent
+      practices:
+        - name: Corporate-Check-Practice
+      triggers:
+        - name: BIS-Default-Log
+
+    # ── Mojaloop Compliance (P1 — strict, financial-grade) ────────────────────
+    - asset: mojaloop-compliance-individual
+      url: /v1/mojaloop/compliance/individual
+      mode: prevent
+      practices:
+        - name: Mojaloop-Compliance-Practice
+      triggers:
+        - name: BIS-Default-Log
+    - asset: mojaloop-compliance-corporate
+      url: /v1/mojaloop/compliance/corporate
+      mode: prevent
+      practices:
+        - name: Mojaloop-Compliance-Practice
+      triggers:
+        - name: BIS-Default-Log
+
+    # ── AI Screening Summary (P2 — rate-sensitive, prevent mode) ─────────────
+    - asset: ai-screening-generate
+      url: /v1/screening/summary/generate
+      mode: prevent
+      practices:
+        - name: AI-Screening-Practice
+      triggers:
+        - name: BIS-Default-Log
+
+    # ── Field Visit (P1 — mobile agent endpoints, larger body) ───────────────
+    - asset: field-visit-submit
+      url: /v1/field-tasks/submit
+      mode: prevent
+      practices:
+        - name: Field-Visit-Practice
+      triggers:
+        - name: BIS-Default-Log
+    - asset: field-visit-checkin
+      url: /v1/field-tasks/checkin
+      mode: prevent
+      practices:
+        - name: Field-Visit-Practice
+      triggers:
+        - name: BIS-Default-Log
+
+    # ── Thin-File (P2 — standard prevent) ────────────────────────────────────
+    - asset: thin-file-flag
+      url: /v1/investigations/thin-file/flag
+      mode: prevent
+      practices:
+        - name: BIS-Default-Practice
+      triggers:
+        - name: BIS-Default-Log
+
+practices:
+  - name: Criminal-Records-Submit-Practice
+    type: WebApplication
+    web-attacks:
+      override-mode: prevent
+      minimum-confidence: medium
+      advanced-setting:
+        body-size: 256
+        url-size: 4096
+        header-size: 16384
+        max-object-depth: 10
+        illegal-http-methods: true
+
+  - name: Criminal-Records-Ingest-Practice
+    type: WebApplication
+    web-attacks:
+      override-mode: prevent
+      minimum-confidence: medium
+      advanced-setting:
+        body-size: 1024
+        url-size: 4096
+        header-size: 16384
+        max-object-depth: 15
+        illegal-http-methods: true
+
+  - name: Criminal-Records-Read-Practice
+    type: WebApplication
+    web-attacks:
+      override-mode: prevent
+      minimum-confidence: high
+      advanced-setting:
+        body-size: 64
+        url-size: 8192
+        header-size: 16384
+        max-object-depth: 5
+        illegal-http-methods: true
+
+  - name: Corporate-Check-Practice
+    type: WebApplication
+    web-attacks:
+      override-mode: prevent
+      minimum-confidence: medium
+      advanced-setting:
+        body-size: 512
+        url-size: 8192
+        header-size: 16384
+        max-object-depth: 10
+        illegal-http-methods: true
+
+  - name: Mojaloop-Compliance-Practice
+    type: WebApplication
+    web-attacks:
+      override-mode: prevent
+      minimum-confidence: medium
+      advanced-setting:
+        body-size: 256
+        url-size: 4096
+        header-size: 16384
+        max-object-depth: 8
+        illegal-http-methods: true
+
+  - name: AI-Screening-Practice
+    type: WebApplication
+    web-attacks:
+      override-mode: prevent
+      minimum-confidence: high
+      advanced-setting:
+        body-size: 128
+        url-size: 4096
+        header-size: 16384
+        max-object-depth: 5
+        illegal-http-methods: true
+
+  - name: Field-Visit-Practice
+    type: WebApplication
+    web-attacks:
+      override-mode: prevent
+      minimum-confidence: medium
+      advanced-setting:
+        body-size: 10240
+        url-size: 4096
+        header-size: 16384
+        max-object-depth: 8
+        illegal-http-methods: true

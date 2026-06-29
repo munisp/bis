@@ -19,7 +19,7 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import risk, adverse_media, ollama_proxy, lakehouse, case_enrichment, ueba
+from app.routers import risk, adverse_media, ollama_proxy, lakehouse, case_enrichment, ueba, criminal_enrichment
 from app.services.ollama_client import OllamaClient
 from app.services import kafka_ueba_consumer
 from app.models.config import Settings
@@ -104,6 +104,7 @@ app.include_router(ollama_proxy.router, prefix="/api/v1/ollama", tags=["Ollama L
 app.include_router(lakehouse.router, prefix="/api/v1/lakehouse", tags=["Lakehouse AI"])
 app.include_router(case_enrichment.router, prefix="/api/v1/cases", tags=["Case Enrichment"])
 app.include_router(ueba.router, prefix="/api/v1/ueba", tags=["UEBA"])
+app.include_router(criminal_enrichment.router, prefix="/api/v1/criminal", tags=["Criminal Enrichment"])
 
 
 @app.get("/health", tags=["System"])

@@ -52,9 +52,12 @@ BATCH_SIZE      = int(os.environ.get("BATCH_SIZE", "500"))
 OS_AUTH = HTTPBasicAuth(OS_USER, OS_PASSWORD)
 OS_HEADERS = {"Content-Type": "application/x-ndjson"}
 
-INDEX_INVESTIGATIONS = "bis-investigations"
-INDEX_ALERTS         = "bis-alerts"
-INDEX_KYC            = "bis-kyc"
+INDEX_INVESTIGATIONS  = "bis-investigations"
+INDEX_ALERTS          = "bis-alerts"
+INDEX_KYC             = "bis-kyc"
+INDEX_CRIMINAL        = "bis-criminal-records"
+INDEX_FIELD_VISITS    = "bis-field-visits"
+INDEX_CORPORATE       = "bis-corporate-checks"
 
 
 # ─── Database helpers ─────────────────────────────────────────────────────────
@@ -151,6 +154,101 @@ def fetch_kyc_records(conn, since: Optional[datetime] = None) -> Generator[Dict,
             yield dict(row)
 
 
+
+def fetch_criminal_records(conn, since=None):
+    """Yield criminal record rows from PostgreSQL."""
+    query = """
+        SELECT
+            cr.id,
+            cr.record_ref          AS "recordRef",
+            cr.subject_name        AS "subjectName",
+            cr.subject_type        AS "subjectType",
+            cr.nin,
+            cr.bvn,
+            cr.agency,
+            cr.offence_category    AS "offenceCategory",
+            cr.offence_description AS "offenceDescription",
+            cr.verdict,
+            cr.outstanding_warrant AS "outstandingWarrant",
+            COALESCE(cr.confidence_score, 0)::float AS "confidenceScore",
+            cr.created_at          AS "createdAt",
+            COALESCE(u.tenant_id::text, '') AS "tenantId"
+        FROM criminal_records cr
+        LEFT JOIN criminal_record_requests crr ON crr.id = cr.request_id
+        LEFT JOIN users u ON u.id = crr.created_by
+    """
+    params = []
+    if since:
+        query += " WHERE cr.created_at >= %s"
+        params.append(since)
+    query += " ORDER BY cr.created_at DESC"
+    with conn.cursor() as cur:
+        cur.execute(query, params)
+        for row in cur:
+            yield dict(row)
+
+
+def fetch_field_visits(conn, since=None):
+    """Yield field visit report rows from PostgreSQL."""
+    query = """
+        SELECT
+            fvr.id,
+            fvr.task_ref           AS "taskRef",
+            fvr.subject_name       AS "subjectName",
+            fvr.outcome,
+            fvr.address_confirmed  AS "addressConfirmed",
+            fvr.subject_present    AS "subjectPresent",
+            COALESCE(fvr.gps_lat, 0)::float  AS "gpsLat",
+            COALESCE(fvr.gps_lng, 0)::float  AS "gpsLng",
+            COALESCE(fvr.duration_minutes, 0)::int AS "durationMinutes",
+            fvr.narrative,
+            fvr.created_at         AS "createdAt",
+            COALESCE(u.tenant_id::text, '') AS "tenantId"
+        FROM field_visit_reports fvr
+        LEFT JOIN field_tasks ft ON ft.id = fvr.task_id
+        LEFT JOIN users u ON u.id = ft.assigned_to
+    """
+    params = []
+    if since:
+        query += " WHERE fvr.created_at >= %s"
+        params.append(since)
+    query += " ORDER BY fvr.created_at DESC"
+    with conn.cursor() as cur:
+        cur.execute(query, params)
+        for row in cur:
+            yield dict(row)
+
+
+def fetch_corporate_checks(conn, since=None):
+    """Yield corporate screening profile rows from PostgreSQL."""
+    query = """
+        SELECT
+            csp.id,
+            csp.profile_ref        AS "profileRef",
+            csp.company_name       AS "companyName",
+            csp.rc_number          AS "rcNumber",
+            csp.tin,
+            csp.cac_status         AS "cacStatus",
+            csp.firs_cleared       AS "firsCleared",
+            csp.sanctions_hit      AS "sanctionsHit",
+            COALESCE(csp.risk_score, 0)::float AS "riskScore",
+            csp.outcome,
+            csp.created_at         AS "createdAt",
+            COALESCE(u.tenant_id::text, '') AS "tenantId"
+        FROM corporate_screening_profiles csp
+        LEFT JOIN users u ON u.id = csp.created_by
+    """
+    params = []
+    if since:
+        query += " WHERE csp.created_at >= %s"
+        params.append(since)
+    query += " ORDER BY csp.created_at DESC"
+    with conn.cursor() as cur:
+        cur.execute(query, params)
+        for row in cur:
+            yield dict(row)
+
+
 # ─── OpenSearch helpers ───────────────────────────────────────────────────────
 
 def _serialize(obj: Any) -> Any:
@@ -219,9 +317,12 @@ def run_full_index():
     conn = get_db_conn()
     try:
         for index, id_field, fetcher in [
-            (INDEX_INVESTIGATIONS, "ref",      fetch_investigations),
-            (INDEX_ALERTS,         "alertRef", fetch_alerts),
-            (INDEX_KYC,            "id",       fetch_kyc_records),
+            (INDEX_INVESTIGATIONS, "ref",       fetch_investigations),
+            (INDEX_ALERTS,         "alertRef",  fetch_alerts),
+            (INDEX_KYC,            "id",        fetch_kyc_records),
+            (INDEX_CRIMINAL,       "id",        fetch_criminal_records),
+            (INDEX_FIELD_VISITS,   "id",        fetch_field_visits),
+            (INDEX_CORPORATE,      "id",        fetch_corporate_checks),
         ]:
             log.info("Indexing %s ...", index)
             ok, err = bulk_index(index, id_field, fetcher(conn))
@@ -236,9 +337,12 @@ def run_incremental_index(since: datetime):
     conn = get_db_conn()
     try:
         for index, id_field, fetcher in [
-            (INDEX_INVESTIGATIONS, "ref",      fetch_investigations),
-            (INDEX_ALERTS,         "alertRef", fetch_alerts),
-            (INDEX_KYC,            "id",       fetch_kyc_records),
+            (INDEX_INVESTIGATIONS, "ref",       fetch_investigations),
+            (INDEX_ALERTS,         "alertRef",  fetch_alerts),
+            (INDEX_KYC,            "id",        fetch_kyc_records),
+            (INDEX_CRIMINAL,       "id",        fetch_criminal_records),
+            (INDEX_FIELD_VISITS,   "id",        fetch_field_visits),
+            (INDEX_CORPORATE,      "id",        fetch_corporate_checks),
         ]:
             log.info("Incremental %s ...", index)
             ok, err = bulk_index(index, id_field, fetcher(conn, since=since))

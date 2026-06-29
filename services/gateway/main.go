@@ -1553,6 +1553,10 @@ func newRouter() http.Handler {
 	// ── Velocity alert ingest (from Rust fluvio-velocity sidecar) ─────────────
 	mux.HandleFunc("/v1/velocity/alert", protected(handleVelocityAlert))
 
+	// ── Criminal Records, Corporate Check, AI Summary, Field Visit, Thin-File ──
+	RegisterCriminalRecordsRoutes(mux)
+	RegisterMojaloopComplianceRoutes(mux, protected)
+
 	// ── Dapr pub/sub subscriber endpoints ────────────────────────────────────
 	// Dapr calls GET /dapr/subscribe to discover subscriptions
 	mux.HandleFunc("/dapr/subscribe", func(w http.ResponseWriter, r *http.Request) {
@@ -1576,6 +1580,9 @@ func main() {
 	if err := ospkg.EnsureIndices(); err != nil {
 		log.Printf("[OpenSearch] index setup warning: %v", err)
 	}
+	// Ensure all Kafka topics exist at startup (best-effort)
+	RegisterCriminalRecordsTopics()
+
 	log.Printf("BIS API Gateway v2.0 starting on :%s", port)
 	log.Printf("Risk Engine URL: %s", riskEngineURL)
 	log.Printf("Event Processor URL: %s", eventProcURL)

@@ -1132,13 +1132,20 @@ Please generate a comprehensive screening summary.`;
         generatedBy: ctx.user!.id,
       }).returning();
 
-      await writeAuditLog(db, {
+            await writeAuditLog(db, {
         userId: ctx.user!.id,
         category: 'investigation',
         action: `AI screening summary generated (risk: ${summaryData.overallRisk})`,
         targetRef: input.investigationRef,
       });
-
+      // Publish Kafka event for downstream consumers (risk engine, OpenSearch indexer, ML enrichment)
+      await publishEvent('SCREENING_SUMMARY_GENERATED', input.investigationRef, summaryData.overallRisk, {
+        summaryRef,
+        overallRisk: summaryData.overallRisk,
+        compositeScore: summaryData.compositeScore,
+        redFlagCount: summaryData.redFlags.length,
+        pendingCount,
+      });
       return inserted;
     }),
 
@@ -1281,13 +1288,29 @@ Please generate a comprehensive screening summary.`;
         .where(eq(corporateScreeningProfiles.profileRef, profileRef))
         .returning();
 
-      await writeAuditLog(db, {
+            await writeAuditLog(db, {
         userId: ctx.user!.id,
         category: 'investigation',
         action: `Corporate check run: ${input.checks.join(', ')} (outcome: ${overallOutcome})`,
         targetRef: input.investigationRef,
       });
-
+      // Publish Kafka events for downstream consumers
+      const corpSeverity = overallOutcome === 'adverse' ? 'high' : overallOutcome === 'consider' ? 'medium' : 'info';
+      await publishEvent('CORPORATE_CHECK_COMPLETED', input.investigationRef, corpSeverity, {
+        profileRef,
+        rcNumber: input.rcNumber,
+        overallOutcome,
+        riskScore,
+        sanctionsHit: (sanctionsResult as any)?.hits?.length > 0,
+        firsCleared: (firsResult as any)?.cleared === true,
+      });
+      if ((sanctionsResult as any)?.hits?.length > 0) {
+        await publishEvent('CORPORATE_SANCTIONS_HIT', input.investigationRef, 'critical', {
+          profileRef,
+          rcNumber: input.rcNumber,
+          hitCount: (sanctionsResult as any).hits.length,
+        });
+      }
       return updated;
     }),
 
@@ -6266,6 +6289,14 @@ const criminalRecordsRouter = router({
         title: `New Criminal Record Request — ${input.agency.toUpperCase()}`,
         content: `Request ${requestRef} submitted for ${input.subjectName} to ${input.agency.toUpperCase()}. Priority: ${input.priority}.`,
       }).catch(() => {});
+      // Publish Kafka event for criminal records request submitted
+      await publishEvent('CRIMINAL_RECORD_REQUEST_SUBMITTED', requestRef, input.priority === 'critical' ? 'critical' : input.priority === 'high' ? 'high' : 'info', {
+        requestRef,
+        agency: input.agency,
+        subjectName: input.subjectName,
+        requestedChecks: input.requestedChecks,
+        investigationRef: input.investigationRef,
+      });
       return { requestRef, status: "submitted" };
     }),
 
@@ -6461,6 +6492,24 @@ const criminalRecordsRouter = router({
           body:        `Criminal record ${recordRef} from ${input.agency.toUpperCase()} indicates an outstanding warrant. Agency ref: ${input.agencyRef ?? "N/A"}. ${input.warrantDetails ?? ""}`,
           subjectRef:  input.investigationRef ?? input.requestRef ?? recordRef,
           read:        false,
+        });
+      }
+      // Publish Kafka event for criminal record ingested
+      const ingestSeverity = input.outstandingWarrant ? 'critical' : input.verdict === 'convicted' ? 'high' : 'info';
+      await publishEvent('CRIMINAL_RECORD_INGESTED', input.requestRef ?? recordRef, ingestSeverity, {
+        recordRef,
+        agency: input.agency,
+        offenceCategory: input.offenceCategory,
+        verdict: input.verdict,
+        outstandingWarrant: input.outstandingWarrant ?? false,
+        investigationRef: input.investigationRef,
+      });
+      if (input.outstandingWarrant) {
+        await publishEvent('CRIMINAL_RECORD_WARRANT_DETECTED', input.requestRef ?? recordRef, 'critical', {
+          recordRef,
+          agency: input.agency,
+          subjectName: input.subjectName ?? 'unknown',
+          warrantDetails: input.warrantDetails ?? '',
         });
       }
       return { recordRef, status: "ingested" };

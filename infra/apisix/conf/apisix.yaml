@@ -259,4 +259,268 @@ routes:
           set:
             Content-Type: "application/json"
 
+  # ── Criminal Records endpoints ────────────────────────────────────────────────
+  - id: criminal-records-submit
+    name: "Criminal Records: Submit Request"
+    uri: /v1/criminal-records/request
+    upstream_id: bis-gateway
+    methods: [POST]
+    plugins:
+      openid-connect:
+        bearer_only: true
+        realm: bis
+        client_id: bis-gateway
+        discovery: "${KEYCLOAK_URL}/realms/bis/.well-known/openid-configuration"
+      request-id: {}
+      limit-req:
+        rate: 20
+        burst: 5
+        key: consumer_name
+      response-rewrite:
+        headers:
+          set:
+            X-BIS-Module: "criminal-records"
+
+  - id: criminal-records-list
+    name: "Criminal Records: List Requests"
+    uri: /v1/criminal-records/requests
+    upstream_id: bis-gateway
+    methods: [GET]
+    plugins:
+      openid-connect:
+        bearer_only: true
+        realm: bis
+        client_id: bis-gateway
+        discovery: "${KEYCLOAK_URL}/realms/bis/.well-known/openid-configuration"
+      proxy-cache:
+        cache_ttl: 30
+        cache_method: [GET]
+        cache_http_status: [200]
+        hide_cache_headers: false
+
+  - id: criminal-records-get
+    name: "Criminal Records: Get Request"
+    uri: /v1/criminal-records/request/*
+    upstream_id: bis-gateway
+    methods: [GET, PATCH]
+    plugins:
+      openid-connect:
+        bearer_only: true
+        realm: bis
+        client_id: bis-gateway
+        discovery: "${KEYCLOAK_URL}/realms/bis/.well-known/openid-configuration"
+
+  - id: criminal-records-ingest
+    name: "Criminal Records: Ingest Agency Response"
+    uri: /v1/criminal-records/ingest
+    upstream_id: bis-gateway
+    methods: [POST]
+    plugins:
+      openid-connect:
+        bearer_only: true
+        realm: bis
+        client_id: bis-gateway
+        discovery: "${KEYCLOAK_URL}/realms/bis/.well-known/openid-configuration"
+      # Restrict ingest to supervisor+ role via Permify header injection
+      serverless-pre-function:
+        phase: access
+        functions:
+          - "return function(conf, ctx) local role = ngx.req.get_headers()['X-BIS-Role'] if role ~= 'admin' and role ~= 'supervisor' then ngx.exit(403) end end"
+      request-id: {}
+
+  # ── Corporate Check endpoints ─────────────────────────────────────────────────
+  - id: corporate-check-run
+    name: "Corporate Check: Run"
+    uri: /v1/corporate/check
+    upstream_id: bis-gateway
+    methods: [POST]
+    plugins:
+      openid-connect:
+        bearer_only: true
+        realm: bis
+        client_id: bis-gateway
+        discovery: "${KEYCLOAK_URL}/realms/bis/.well-known/openid-configuration"
+      limit-req:
+        rate: 10
+        burst: 3
+        key: consumer_name
+      request-id: {}
+
+  - id: corporate-check-profiles
+    name: "Corporate Check: List Profiles"
+    uri: /v1/corporate/profiles
+    upstream_id: bis-gateway
+    methods: [GET]
+    plugins:
+      openid-connect:
+        bearer_only: true
+        realm: bis
+        client_id: bis-gateway
+        discovery: "${KEYCLOAK_URL}/realms/bis/.well-known/openid-configuration"
+      proxy-cache:
+        cache_ttl: 60
+        cache_method: [GET]
+        cache_http_status: [200]
+        hide_cache_headers: false
+
+  # ── Mojaloop Compliance endpoints ─────────────────────────────────────────────
+  - id: mojaloop-compliance-individual
+    name: "Mojaloop Compliance: Individual"
+    uri: /v1/mojaloop/compliance/individual
+    upstream_id: bis-gateway
+    methods: [POST]
+    plugins:
+      openid-connect:
+        bearer_only: true
+        realm: bis
+        client_id: bis-gateway
+        discovery: "${KEYCLOAK_URL}/realms/bis/.well-known/openid-configuration"
+      limit-req:
+        rate: 50
+        burst: 10
+        key: consumer_name
+      request-id: {}
+
+  - id: mojaloop-compliance-corporate
+    name: "Mojaloop Compliance: Corporate"
+    uri: /v1/mojaloop/compliance/corporate
+    upstream_id: bis-gateway
+    methods: [POST]
+    plugins:
+      openid-connect:
+        bearer_only: true
+        realm: bis
+        client_id: bis-gateway
+        discovery: "${KEYCLOAK_URL}/realms/bis/.well-known/openid-configuration"
+      limit-req:
+        rate: 30
+        burst: 5
+        key: consumer_name
+      request-id: {}
+
+  - id: mojaloop-compliance-status
+    name: "Mojaloop Compliance: Status"
+    uri: /v1/mojaloop/compliance/status/*
+    upstream_id: bis-gateway
+    methods: [GET]
+    plugins:
+      openid-connect:
+        bearer_only: true
+        realm: bis
+        client_id: bis-gateway
+        discovery: "${KEYCLOAK_URL}/realms/bis/.well-known/openid-configuration"
+      proxy-cache:
+        cache_ttl: 10
+        cache_method: [GET]
+        cache_http_status: [200]
+        hide_cache_headers: false
+
+  # ── AI Screening Summary endpoints ────────────────────────────────────────────
+  - id: ai-screening-summary-generate
+    name: "AI Screening: Generate Summary"
+    uri: /v1/screening/summary/generate
+    upstream_id: bis-gateway
+    methods: [POST]
+    plugins:
+      openid-connect:
+        bearer_only: true
+        realm: bis
+        client_id: bis-gateway
+        discovery: "${KEYCLOAK_URL}/realms/bis/.well-known/openid-configuration"
+      limit-req:
+        rate: 5
+        burst: 2
+        key: consumer_name
+      request-id: {}
+
+  - id: ai-screening-summary-get
+    name: "AI Screening: Get Summary"
+    uri: /v1/screening/summary/*
+    upstream_id: bis-gateway
+    methods: [GET]
+    plugins:
+      openid-connect:
+        bearer_only: true
+        realm: bis
+        client_id: bis-gateway
+        discovery: "${KEYCLOAK_URL}/realms/bis/.well-known/openid-configuration"
+      proxy-cache:
+        cache_ttl: 120
+        cache_method: [GET]
+        cache_http_status: [200]
+        hide_cache_headers: false
+
+  # ── Field Visit endpoints ─────────────────────────────────────────────────────
+  - id: field-visit-checkin
+    name: "Field Visit: Check In"
+    uri: /v1/field-tasks/checkin
+    upstream_id: bis-gateway
+    methods: [POST]
+    plugins:
+      openid-connect:
+        bearer_only: true
+        realm: bis
+        client_id: bis-gateway
+        discovery: "${KEYCLOAK_URL}/realms/bis/.well-known/openid-configuration"
+      request-id: {}
+
+  - id: field-visit-submit
+    name: "Field Visit: Submit Findings"
+    uri: /v1/field-tasks/submit
+    upstream_id: bis-gateway
+    methods: [POST]
+    plugins:
+      openid-connect:
+        bearer_only: true
+        realm: bis
+        client_id: bis-gateway
+        discovery: "${KEYCLOAK_URL}/realms/bis/.well-known/openid-configuration"
+      request-id: {}
+      # Larger body limit for photo metadata
+      client-control:
+        max_body_size: 10485760
+
+  - id: field-visit-report
+    name: "Field Visit: Get Report"
+    uri: /v1/field-tasks/report/*
+    upstream_id: bis-gateway
+    methods: [GET]
+    plugins:
+      openid-connect:
+        bearer_only: true
+        realm: bis
+        client_id: bis-gateway
+        discovery: "${KEYCLOAK_URL}/realms/bis/.well-known/openid-configuration"
+
+  # ── Thin-File endpoints ───────────────────────────────────────────────────────
+  - id: thin-file-flag
+    name: "Thin File: Flag Investigation"
+    uri: /v1/investigations/thin-file/flag
+    upstream_id: bis-gateway
+    methods: [POST]
+    plugins:
+      openid-connect:
+        bearer_only: true
+        realm: bis
+        client_id: bis-gateway
+        discovery: "${KEYCLOAK_URL}/realms/bis/.well-known/openid-configuration"
+      request-id: {}
+
+  - id: thin-file-completeness
+    name: "Thin File: Data Completeness"
+    uri: /v1/investigations/*/completeness
+    upstream_id: bis-gateway
+    methods: [GET]
+    plugins:
+      openid-connect:
+        bearer_only: true
+        realm: bis
+        client_id: bis-gateway
+        discovery: "${KEYCLOAK_URL}/realms/bis/.well-known/openid-configuration"
+      proxy-cache:
+        cache_ttl: 60
+        cache_method: [GET]
+        cache_http_status: [200]
+        hide_cache_headers: false
+
 #END

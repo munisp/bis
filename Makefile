@@ -12,7 +12,7 @@ SHELL := /bin/bash
 SERVICES_DIR := services
 GO_SERVICES := gateway case-manager lex-intake ollama-adapter payment-rails
 RUST_SERVICES := event-processor event-emitter aml-engine
-PYTHON_SERVICES := risk-engine lex-validator ml-enrichment biometric-engine risk-scoring
+PYTHON_SERVICES := risk-engine lex-validator ml-enrichment biometric-engine risk-scoring opensearch-indexer
 
 # ─── Infrastructure Bootstrap (Devin/OpenHands pattern) ─────────────────────
 # Docker socket must be accessible: /var/run/docker.sock
@@ -236,3 +236,12 @@ waf-policy-reload: ## Reload open-appsec policy without container restart
 # ─── CI ──────────────────────────────────────────────────────────────────────────────
 ci: lint test-all ## Run all CI checks (lint + all tests)
 	@echo "✓ CI checks passed"
+
+# ─── Criminal Records / Corporate / Field Visit ───────────────────────────────
+check-criminal: ## Validate criminal records service compilation and syntax
+	@echo "Checking criminal records gateway extension..."
+	@cd $(SERVICES_DIR)/gateway && /usr/lib/go-1.22/bin/go build ./... && echo "  ✓ gateway builds"
+	@python3 -c "import ast; ast.parse(open('$(SERVICES_DIR)/risk-engine/criminal_corporate_scoring.py').read())" && echo "  ✓ risk-engine criminal scoring syntax OK"
+	@python3 -c "import ast; ast.parse(open('$(SERVICES_DIR)/ml-enrichment/app/routers/criminal_enrichment.py').read())" && echo "  ✓ ml-enrichment criminal enrichment syntax OK"
+	@python3 -c "import ast; ast.parse(open('$(SERVICES_DIR)/opensearch-indexer/indexer.py').read())" && echo "  ✓ opensearch-indexer syntax OK"
+	@echo "✓ All criminal records service checks passed"

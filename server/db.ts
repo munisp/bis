@@ -15,6 +15,9 @@ import {
   InsertScreeningRequest, screeningRequests,
   cases, lexSubmissions,
   biometricSessionLogs, InsertBiometricSessionLog,
+  criminalRecordRequests, criminalRecords,
+  corporateScreeningProfiles,
+  fieldVisitReports,
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
@@ -280,6 +283,10 @@ export async function getDashboardStats() {
     totalKyc, kycToday, kycPassed, totalAlerts, unreadAlerts,
     totalMonitors, activeMonitors,
     totalCases, openCases, casesBreachingSLA, pendingLex, validatedLex,
+    totalCrimReqs, pendingCrimReqs, warrantCount,
+    totalCorpChecks, adverseCorpChecks,
+    totalFVReports, confirmedFVReports,
+    avgRiskResult, avgProcResult,
   ] = await Promise.all([
     db.select({ c: count() }).from(investigations),
     db.select({ c: count() }).from(investigations).where(eq(investigations.status, "processing")),
@@ -297,6 +304,20 @@ export async function getDashboardStats() {
     db.select({ c: count() }).from(cases).where(and(inArray(cases.status, ["open", "under_review"]), lte(cases.dueAt, now))),
     db.select({ c: count() }).from(lexSubmissions).where(eq(lexSubmissions.status, "pending")),
     db.select({ c: count() }).from(lexSubmissions).where(eq(lexSubmissions.status, "validated")),
+    // Criminal records
+    db.select({ c: count() }).from(criminalRecordRequests),
+    db.select({ c: count() }).from(criminalRecordRequests).where(inArray(criminalRecordRequests.status, ["submitted", "acknowledged", "processing"] as any[])),
+    db.select({ c: count() }).from(criminalRecords).where(eq(criminalRecords.outstandingWarrant, true)),
+    // Corporate checks
+    db.select({ c: count() }).from(corporateScreeningProfiles),
+    db.select({ c: count() }).from(corporateScreeningProfiles).where(eq(corporateScreeningProfiles.overallOutcome, "adverse")),
+    // Field visits
+    db.select({ c: count() }).from(fieldVisitReports),
+    db.select({ c: count() }).from(fieldVisitReports).where(eq(fieldVisitReports.outcome, "confirmed")),
+    // Live avg risk score
+    db.select({ avg: sql<number>`COALESCE(AVG(risk_score), 0)` }).from(investigations).where(sql`risk_score IS NOT NULL`),
+    // Live avg processing time (minutes)
+    db.select({ avg: sql<number>`COALESCE(AVG(EXTRACT(EPOCH FROM (completed_at - created_at)) / 60), 0)` }).from(investigations).where(and(eq(investigations.status, "completed"), sql`completed_at IS NOT NULL`)),
   ]);
 
   const totalKycCount = Number(totalKyc[0]?.c ?? 0);
@@ -313,8 +334,15 @@ export async function getDashboardStats() {
     kycPassRate: totalKycCount > 0 ? Math.round((kycPassedCount / totalKycCount) * 100) : 0,
     activeMonitors: Number(activeMonitors[0]?.c ?? 0),
     alertsToday: Number(unreadAlerts[0]?.c ?? 0),
-    avgProcessingTimeMin: 4.7,
-    avgRiskScore: 34.2,
+    avgProcessingTimeMin: Math.round(Number(avgProcResult[0]?.avg ?? 0) * 10) / 10,
+    avgRiskScore: Math.round(Number(avgRiskResult[0]?.avg ?? 0) * 10) / 10,
+    totalCriminalRecordRequests: Number(totalCrimReqs[0]?.c ?? 0),
+    pendingCriminalRecordRequests: Number(pendingCrimReqs[0]?.c ?? 0),
+    activeWarrantAlerts: Number(warrantCount[0]?.c ?? 0),
+    totalCorporateChecks: Number(totalCorpChecks[0]?.c ?? 0),
+    adverseCorporateChecks: Number(adverseCorpChecks[0]?.c ?? 0),
+    totalFieldVisits: Number(totalFVReports[0]?.c ?? 0),
+    confirmedFieldVisits: Number(confirmedFVReports[0]?.c ?? 0),
     totalCases: Number(totalCases[0]?.c ?? 0),
     openCases: Number(openCases[0]?.c ?? 0),
     casesBreachingSLA: Number(casesBreachingSLA[0]?.c ?? 0),
