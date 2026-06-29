@@ -55,6 +55,9 @@ func NewCaseRepository(db *sql.DB) *CaseRepository {
 	return &CaseRepository{db: db}
 }
 
+// DB returns the underlying *sql.DB for direct queries in handlers.
+func (r *CaseRepository) DB() *sql.DB { return r.db }
+
 // List returns cases matching the given filter.
 func (r *CaseRepository) List(ctx context.Context, f ListCasesFilter) ([]Case, int, error) {
 	if f.Limit <= 0 {

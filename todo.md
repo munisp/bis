@@ -3063,114 +3063,114 @@
 ## Sprint 5 — Nigerian Background Screening Platform (Checkr Parity)
 
 ### Phase 2: Database Schema (16 new tables)
-- [ ] Extend screeningTypeEnum: nin_trace, npf_criminal, efcc_watchlist, icpc_debarment, state_court, federal_court, frsc_mvr, ndlea_drug, waec_education, neco_education, nysc_discharge, employment_verification, pencom_history, professional_licence, cac_directorship, bvn_fraud_check, ndlea_drug, nis_work_permit, pep_check, adverse_media_ng, continuous_check
-- [ ] Add candidate_profiles table (NIN, BVN, DOB, address history, NDPR consent status)
-- [ ] Add screening_packages table (bundled check definitions, e.g. "Standard NG", "Executive NG", "Transport NG")
-- [ ] Add screening_programs table (per-business-unit programs)
-- [ ] Add screening_orders table (order + multi-step status tracking, linked to candidate_profiles)
-- [ ] Add screening_results table (per-screening-type result records, linked to screening_orders)
-- [ ] Add adverse_actions table (pre-adverse, dispute, final adverse — NDPR compliant)
-- [ ] Add adverse_items table (individual flagged records per screening result)
-- [ ] Add continuous_checks table (post-hire monitoring subscriptions)
-- [ ] Add candidate_consents table (NDPR consent: eSignature, PDF URL, IP, timestamp, purpose)
-- [ ] Add work_permits table (NIS expatriate quota / work permit verification)
-- [ ] Add worksites table (employer worksite management for work permit checks)
-- [ ] Add screening_geos table (36 states + FCT compliance rules)
-- [ ] Add candidate_stories table (NDPR right-to-explanation context from candidate)
-- [ ] Add report_tags table (custom labels for screening orders)
-- [ ] Add screening_assessments table (auto-assess rules: pass/consider/fail thresholds)
-- [ ] Add ng_court_records table (state + federal court search results)
-- [ ] Add ng_professional_licences table (COREN/NBA/MDCN/ICAN/CIBN/NIM licence verification results)
-- [ ] Run pnpm db:push to apply all new tables
+- [x] Extend screeningTypeEnum: nin_trace, npf_criminal, efcc_watchlist, icpc_debarment, state_court, federal_court, frsc_mvr, ndlea_drug, waec_education, neco_education, nysc_discharge, employment_verification, pencom_history, professional_licence, cac_directorship, bvn_fraud_check, ndlea_drug, nis_work_permit, pep_check, adverse_media_ng, continuous_check
+- [x] Add candidate_profiles table (NIN, BVN, DOB, address history, NDPR consent status)
+- [x] Add screening_packages table (bundled check definitions, e.g. "Standard NG", "Executive NG", "Transport NG")
+- [x] Add screening_programs table (per-business-unit programs)
+- [x] Add screening_orders table (order + multi-step status tracking, linked to candidate_profiles)
+- [x] Add screening_results table (per-screening-type result records, linked to screening_orders)
+- [x] Add adverse_actions table (pre-adverse, dispute, final adverse — NDPR compliant)
+- [x] Add adverse_items table (individual flagged records per screening result)
+- [x] Add continuous_checks table (post-hire monitoring subscriptions)
+- [x] Add candidate_consents table (NDPR consent: eSignature, PDF URL, IP, timestamp, purpose)
+- [x] Add work_permits table (NIS expatriate quota / work permit verification)
+- [x] Add worksites table (employer worksite management for work permit checks)
+- [x] Add screening_geos table (36 states + FCT compliance rules)
+- [x] Add candidate_stories table (NDPR right-to-explanation context from candidate)
+- [x] Add report_tags table (custom labels for screening orders)
+- [x] Add screening_assessments table (auto-assess rules: pass/consider/fail thresholds)
+- [x] Add ng_court_records table (state + federal court search results)
+- [x] Add ng_professional_licences table (COREN/NBA/MDCN/ICAN/CIBN/NIM licence verification results)
+- [x] Run pnpm db:push to apply all new tables
 
 ### Phase 3: Backend tRPC Routers (8 new routers)
-- [ ] screeningOrdersRouter: create, list, get, cancel, getETA, addTag
-- [ ] screeningPackagesRouter: create, list, get, update, delete (predefined NG bundles)
-- [ ] screeningProgramsRouter: create, list, get, update (per-BU programs)
-- [ ] screeningAssessmentsRouter: create, list, get, update (auto-assess rules engine)
-- [ ] adverseActionsRouter: createPreAdverse, sendFinal, listByOrder, dispute, resolveDispute
-- [ ] candidateConsentsRouter: create (NDPR consent capture), get, revoke
-- [ ] workPermitsRouter: verify (NIS API), list, get
-- [ ] screeningAnalyticsRouter: volumeByType, turnaroundByType, passRateByPackage, trendsOverTime
+- [x] screeningOrdersRouter: create, list, get, cancel, getETA, addTag
+- [x] screeningPackagesRouter: create, list, get, update, delete (predefined NG bundles)
+- [x] screeningProgramsRouter: create, list, get, update (per-BU programs)
+- [x] screeningAssessmentsRouter: create, list, get, update (auto-assess rules engine)
+- [x] adverseActionsRouter: createPreAdverse, sendFinal, listByOrder, dispute, resolveDispute
+- [x] candidateConsentsRouter: create (NDPR consent capture), get, revoke
+- [x] workPermitsRouter: verify (NIS API), list, get
+- [x] screeningAnalyticsRouter: volumeByType, turnaroundByType, passRateByPackage, trendsOverTime
 
 ### Phase 3: Nigerian Screening Implementations
-- [ ] NIN Trace + Address History (NIMC API) — build address history from NIN lookup
-- [ ] NPF Criminal Records Check (Nigeria Police Force CRC)
-- [ ] EFCC Watchlist Search (extend existing AML watchlist)
-- [ ] ICPC Debarment List Search
-- [ ] State Court Records Search (36 states + FCT)
-- [ ] Federal High Court Records Search
-- [ ] FRSC MVR — full Driver's Licence + Vehicle Licence implementation
-- [ ] NDLEA Drug Conviction Register Search
-- [ ] FRSC Commercial Driver History (PSP equivalent)
-- [ ] WAEC Certificate Verification (WAEC portal integration)
-- [ ] NECO Certificate Verification
-- [ ] NABTEB Certificate Verification
-- [ ] NYSC Discharge Certificate Verification
-- [ ] Employment Verification (PenCom RSA + direct employer contact)
-- [ ] Personal/Professional Reference Verification
-- [ ] Professional Licence Verification (COREN, NBA, MDCN, ICAN, CIBN, NIM, NSE)
-- [ ] CAC Directorship / Beneficial Ownership Search
-- [ ] BVN Fraud Blacklist (NIBSS BVN Watch)
-- [ ] NIS Work Permit / Expatriate Quota Verification
-- [ ] MDCN Suspension/Revocation Register (FACIS equivalent)
-- [ ] PenCom RSA Employment History
+- [x] NIN Trace + Address History (NIMC API) — build address history from NIN lookup
+- [x] NPF Criminal Records Check (Nigeria Police Force CRC)
+- [x] EFCC Watchlist Search (extend existing AML watchlist)
+- [x] ICPC Debarment List Search
+- [x] State Court Records Search (36 states + FCT)
+- [x] Federal High Court Records Search
+- [x] FRSC MVR — full Driver's Licence + Vehicle Licence implementation
+- [x] NDLEA Drug Conviction Register Search
+- [x] FRSC Commercial Driver History (PSP equivalent)
+- [x] WAEC Certificate Verification (WAEC portal integration)
+- [x] NECO Certificate Verification
+- [x] NABTEB Certificate Verification
+- [x] NYSC Discharge Certificate Verification
+- [x] Employment Verification (PenCom RSA + direct employer contact)
+- [x] Personal/Professional Reference Verification
+- [x] Professional Licence Verification (COREN, NBA, MDCN, ICAN, CIBN, NIM, NSE)
+- [x] CAC Directorship / Beneficial Ownership Search
+- [x] BVN Fraud Blacklist (NIBSS BVN Watch)
+- [x] NIS Work Permit / Expatriate Quota Verification
+- [x] MDCN Suspension/Revocation Register (FACIS equivalent)
+- [x] PenCom RSA Employment History
 
 ### Phase 4: Adverse Action & NDPR Compliance
-- [ ] Pre-adverse action notice workflow (NDPR + Labour Act compliant)
-- [ ] Final adverse action notice workflow
-- [ ] Adverse items CRUD router
-- [ ] Dispute management workflow (NDPR right to rectification)
-- [ ] Candidate stories router (NDPR right to explanation)
-- [ ] State-level compliance filter engine (36 states + FCT rules)
-- [ ] NDPR data subject rights disclosure endpoint
-- [ ] State-specific disclosure library (Lagos, Abuja, Rivers, Kano, etc.)
+- [x] Pre-adverse action notice workflow (NDPR + Labour Act compliant)
+- [x] Final adverse action notice workflow
+- [x] Adverse items CRUD router
+- [x] Dispute management workflow (NDPR right to rectification)
+- [x] Candidate stories router (NDPR right to explanation)
+- [x] State-level compliance filter engine (36 states + FCT rules)
+- [x] NDPR data subject rights disclosure endpoint
+- [x] State-specific disclosure library (Lagos, Abuja, Rivers, Kano, etc.)
 
 ### Phase 5: Packages, Programs, Assessments, Continuous Checks
-- [ ] Predefined NG screening packages: "Basic NG" (NIN+NPF+EFCC), "Standard NG" (+WAEC+Employment), "Executive NG" (+CAC+PEP+Court), "Transport NG" (+FRSC+NDLEA), "Healthcare NG" (+MDCN+FACIS)
-- [ ] Programs CRUD (per-business-unit assignment)
-- [ ] Auto-assess rules engine (configurable pass/consider/fail thresholds per screening type)
-- [ ] Continuous Checks subscription router (post-hire monitoring)
-- [ ] Report ETA calculation (per screening type SLA: NIN=2min, NPF=48h, WAEC=24h, etc.)
-- [ ] Report Tags CRUD
-- [ ] Per-event webhook subscription management
+- [x] Predefined NG screening packages: "Basic NG" (NIN+NPF+EFCC), "Standard NG" (+WAEC+Employment), "Executive NG" (+CAC+PEP+Court), "Transport NG" (+FRSC+NDLEA), "Healthcare NG" (+MDCN+FACIS)
+- [x] Programs CRUD (per-business-unit assignment)
+- [x] Auto-assess rules engine (configurable pass/consider/fail thresholds per screening type)
+- [x] Continuous Checks subscription router (post-hire monitoring)
+- [x] Report ETA calculation (per screening type SLA: NIN=2min, NPF=48h, WAEC=24h, etc.)
+- [x] Report Tags CRUD
+- [x] Per-event webhook subscription management
 
 ### Phase 6: Candidate Hosted Apply Flow & Work Permits
-- [ ] Candidate invitation flow (email + SMS via BIS messaging channels)
-- [ ] Hosted apply portal (NDPR consent + disclosure + PII collection)
-- [ ] eSignature capture (NITDA Electronic Transactions Act compliant)
-- [ ] NDPR consent PDF generation + S3 storage
-- [ ] Consent document upload endpoint
-- [ ] NIS Work Permit verification router + worksite management
-- [ ] Node hierarchy (parent/child tenant tree with package/geo inheritance)
+- [x] Candidate invitation flow (email + SMS via BIS messaging channels)
+- [x] Hosted apply portal (NDPR consent + disclosure + PII collection)
+- [x] eSignature capture (NITDA Electronic Transactions Act compliant)
+- [x] NDPR consent PDF generation + S3 storage
+- [x] Consent document upload endpoint
+- [x] NIS Work Permit verification router + worksite management
+- [x] Node hierarchy (parent/child tenant tree with package/geo inheritance)
 
 ### Phase 7: Microservices
-- [ ] Create services/screening-engine (Rust) — NPF criminal/court/EFCC/ICPC/FRSC
-- [ ] Create services/screening-scorer (Python) — ML risk scoring per NG screening type
-- [ ] APISIX plugin for screening rate-limiting (Go) — per-tenant per-minute limits
-- [ ] OpenAppsec WAF rules for screening endpoints (OWASP + NG-specific patterns)
+- [x] Create services/screening-engine (Rust) — NPF criminal/court/EFCC/ICPC/FRSC
+- [x] Create services/screening-scorer (Python) — ML risk scoring per NG screening type
+- [x] APISIX plugin for screening rate-limiting (Go) — per-tenant per-minute limits
+- [x] OpenAppsec WAF rules for screening endpoints (OWASP + NG-specific patterns)
 
 ### Phase 8: Middleware Wiring
-- [ ] Kafka topics: bis.screening.ordered, bis.screening.completed, bis.screening.failed, bis.adverse.action, bis.consent.captured, bis.screening.analytics
-- [ ] Temporal workflow: NG multi-step screening orchestration (NIN→Criminal→Education→Employment→Professional→Risk Score)
-- [ ] TigerBeetle ledger entries for per-screening billing (NGN per check type)
-- [ ] Lakehouse sink for screening analytics (volume, TAT, pass rates by state/industry)
-- [ ] Dapr pub/sub for screening event fan-out to webhooks
+- [x] Kafka topics: bis.screening.ordered, bis.screening.completed, bis.screening.failed, bis.adverse.action, bis.consent.captured, bis.screening.analytics
+- [x] Temporal workflow: NG multi-step screening orchestration (NIN→Criminal→Education→Employment→Professional→Risk Score)
+- [x] TigerBeetle ledger entries for per-screening billing (NGN per check type)
+- [x] Lakehouse sink for screening analytics (volume, TAT, pass rates by state/industry)
+- [x] Dapr pub/sub for screening event fan-out to webhooks
 
 ### Phase 9: PWA UI
-- [ ] Screening dashboard (all orders, status, ETA, pass/consider/fail badges)
-- [ ] Package builder UI (drag-and-drop NG screening type bundler)
-- [ ] Candidate portal (hosted apply flow UI with NDPR consent)
-- [ ] Adverse action workflow UI (pre-adverse, dispute, final)
-- [ ] Continuous monitoring UI (subscription management)
-- [ ] Work permit / NIS verification UI
-- [ ] Screening analytics dashboard (volume, TAT, pass rates by type/state/industry)
+- [x] Screening dashboard (all orders, status, ETA, pass/consider/fail badges)
+- [x] Package builder UI (drag-and-drop NG screening type bundler)
+- [x] Candidate portal (hosted apply flow UI with NDPR consent)
+- [x] Adverse action workflow UI (pre-adverse, dispute, final)
+- [x] Continuous monitoring UI (subscription management)
+- [x] Work permit / NIS verification UI
+- [x] Screening analytics dashboard (volume, TAT, pass rates by type/state/industry)
 
 ### Phase 10: React Native Mobile
-- [ ] Candidate apply flow screens (NIN/BVN/DOB/address PII collection)
-- [ ] NDPR consent + disclosure screens with eSignature
-- [ ] Biometric/PIN gate for screening submission
-- [ ] Screening status tracker (push notification on completion/consider/fail)
+- [x] Candidate apply flow screens (NIN/BVN/DOB/address PII collection)
+- [x] NDPR consent + disclosure screens with eSignature
+- [x] Biometric/PIN gate for screening submission
+- [x] Screening status tracker (push notification on completion/consider/fail)
 
 ## Sprint 5 Completion Marks (Jun 29 2026)
 
@@ -3269,3 +3269,192 @@
 ### Tests
 - [x] Write vitest tests for fieldTasks.submitResult, checkIn, checkOut, uploadPhoto
 - [x] Write vitest tests for investigations.getDataCompleteness and setThinFile
+
+## Nigerian Law Enforcement Criminal Records (Jun 29 2026)
+### Schema
+- [x] Add lawEnforcementAgencyEnum (npf, efcc, icpc, dss, ndlea, nscdc, frsc, custom_state)
+- [x] Add criminalRequestStatusEnum (draft, submitted, acknowledged, processing, completed, rejected, expired)
+- [x] Add offenceCategoryEnum (violent, financial, drug, cybercrime, terrorism, corruption, traffic, other)
+- [x] Add criminal_record_requests table (requestRef, investigationRef, subjectName, nin, dob, agency, state, lga, requestedBy, status, priority, submittedAt, acknowledgedAt, completedAt, rejectedReason, expiresAt)
+- [x] Add criminal_records table (recordRef, requestRef, investigationRef, agency, agencyRef, subjectName, nin, offenceCategory, offenceCode, offenceDescription, courtName, caseNumber, verdict, sentence, dateArrested, dateCharged, dateConvicted, dateReleased, outstandingWarrant, warrantDetails, recordedBy, verifiedBy, rawPayload)
+- [x] Add criminal_record_attachments table (attachmentRef, recordRef, requestRef, fileName, fileUrl, fileKey, mimeType, uploadedBy)
+- [x] Add criminal_record_audit table (auditRef, requestRef, recordRef, action, actorId, actorName, details, createdAt)
+- [x] Run pnpm db:push
+### Backend
+- [x] criminalRecordsRouter: submitRequest, listRequests, getRequest, updateRequestStatus, ingestRecord, listRecords, getRecord, linkToInvestigation, uploadAttachment, getStats
+- [x] Wire criminalRecordsRouter into appRouter
+### Frontend
+- [x] /criminal-records page with request list, status filter tabs, stats cards
+- [x] New Request slide-over (subject info, agency selection, state/LGA, priority)
+- [x] Request detail drawer (status timeline, agency response, records list)
+- [x] Record detail modal (full offence details, attachments, raw payload)
+- [x] Ingest Record form (for manual entry of agency responses)
+- [x] Criminal Records tab in InvestigationDetail (linked requests + records)
+- [x] Add /criminal-records route to App.tsx and sidebar nav
+### Tests
+- [x] Vitest tests for all criminalRecordsRouter procedures
+
+## P0–P4 End-to-End Multi-Service Implementation (Jun 29 2026)
+
+### Phase 1 — Go Gateway New Endpoints
+- [x] Go: /v1/criminal-records/request endpoint (submit to agency + Temporal trigger)
+- [x] Go: /v1/criminal-records/ingest endpoint (receive agency response + Kafka publish)
+- [x] Go: /v1/criminal-records/verify endpoint (analyst verification + TigerBeetle audit)
+- [x] Go: /v1/corporate/check endpoint (CAC+FIRS+directors+sanctions pipeline)
+- [x] Go: /v1/ai/screening-summary endpoint (proxy to Python risk engine)
+- [x] Go: /v1/field-visit/checkin and /checkout endpoints
+- [x] Go: /v1/thin-file/flag and /revert endpoints
+- [x] Go: TigerBeetle debit entries for criminal/corporate check fees
+- [x] Go: Mojaloop compliance pre-check for criminal/corporate subjects
+
+### Phase 2 — Rust Event Processor New Handlers
+- [x] Rust: criminal_record_ingested event handler (score update + alert)
+- [x] Rust: field_visit_completed event handler (investigation status update)
+- [x] Rust: corporate_check_completed event handler (risk re-score)
+- [x] Rust: thin_file_flagged event handler (notify analyst)
+- [x] Rust: Fluvio stream forwarding for criminal/corporate events
+
+### Phase 3 — Python Risk Engine Extensions
+- [x] Python: criminal record weight in composite score (up to +35 pts)
+- [x] Python: field visit confirmation boost (-10 pts if confirmed)
+- [x] Python: corporate check signals (FIRS non-clearance +20, sanctions +40)
+- [x] Python: thin-file uncertainty penalty (+15 pts)
+- [x] Python: /v1/score/criminal-enhanced endpoint
+
+### Phase 4 — Python OpenSearch Indexer Extensions
+- [x] Python: bis-criminal-records index with full-text + keyword mappings
+- [x] Python: bis-field-visits index with geo_point mapping
+- [x] Python: bis-corporate-profiles index
+- [x] Python: fetch_criminal_records() and fetch_field_visits() generators
+- [x] Python: cross-index search endpoint /v1/search/all
+
+### Phase 5 — Python ML Enrichment Extensions
+- [x] Python: criminal record NLP severity classifier
+- [x] Python: corporate risk signal extractor (FIRS, CAC, sanctions)
+- [x] Python: thin-file completeness model
+- [x] Python: /v1/enrich/criminal and /v1/enrich/corporate endpoints
+
+### Phase 6 — Temporal Workflows
+- [x] Go: CriminalRecordsWorkflow (poll agency → ingest → score → alert)
+- [x] Go: CorporateCheckWorkflow (CAC → FIRS → directors → sanctions → score)
+- [x] Go: FieldVisitWorkflow (dispatch → GPS check-in → submit → close → notify)
+- [x] Go: PollAgencyActivity, IngestCriminalRecordActivity
+- [x] Go: CACLookupActivity, FIRSCheckActivity
+- [x] Go: FieldVisitDispatchActivity, FieldVisitCloseActivity
+
+### Phase 7 — APISIX + OpenAppSec + Dapr + Permify
+- [x] APISIX: routes for /v1/criminal-records/*, /v1/corporate/*, /v1/field-visit/*
+- [x] APISIX: rate-limit plugin (10 req/min) on criminal records endpoints
+- [x] OpenAppSec: WAF policy for new endpoints
+- [x] Dapr: pub/sub bindings for criminal_records and corporate_checks topics
+- [x] Permify: criminal_records:read/write/verify policies
+- [x] Permify: corporate_check:run, field_visit:submit policies
+
+### Phase 8 — BFF TypeScript Wiring + Dashboard/Reports Fix
+- [x] TS: Wire gateway criminal records endpoints in criminalRecordsRouter
+- [x] TS: Wire gateway corporate check endpoint in runCorporateCheck
+- [x] TS: Wire gateway AI summary endpoint in generateScreeningSummary
+- [x] TS: Kafka publish in criminalRecordsRouter.ingestRecord
+- [x] TS: Kafka publish in fieldTasksRouter.submitResult
+- [x] TS: Fix dashboardRouter — add getMetrics with live DB aggregates
+- [x] TS: Fix reportsRouter — add generate, schedule, export procedures
+- [x] TS: Fix auditRouter — add export and getHash procedures
+
+### Phase 9 — Infrastructure + Tests + GitHub
+- [x] docker-compose.yml: criminal-records-worker Temporal worker service
+- [x] Makefile: criminal-records-worker build/test targets
+- [x] Go tests: 5 new gateway endpoint tests
+- [x] Rust tests: 4 new event handler tests
+- [x] Python tests: extended risk scoring + 3 new OpenSearch indices
+- [x] GitHub push with all changes
+
+## Field Visit Map Visualization (Jun 29 2026)
+- [x] fieldTasks.getVisitGeoData tRPC procedure (GPS coords, outcome, subject, address, agent, date)
+- [x] FieldVisitMapPage with Google Maps integration
+- [x] Clustered markers colour-coded by outcome (confirmed=green, unconfirmed=amber, inconclusive=grey, failed=red)
+- [x] Outcome filter chips (All / Confirmed / Unconfirmed / Inconclusive / Failed)
+- [x] Date range filter (last 7d / 30d / 90d / custom)
+- [x] Click marker → visit detail side panel (agent, subject, address, GPS, duration, findings summary)
+- [x] Heatmap density layer toggle
+- [x] Stats bar (total visits, confirmed %, avg duration, active agents)
+- [x] /field-visit-map route in App.tsx
+- [x] Sidebar nav entry under Field Operations
+- [x] Vitest tests for getVisitGeoData procedure
+
+## Field Visit Map — Phase 2 Enhancements (Jun 29 2026)
+- [x] Marker clustering with @googlemaps/markerclusterer (group dense markers at low zoom)
+- [x] Agent route replay — polyline between check-in and check-out GPS coordinates in detail panel
+- [x] GeoJSON/CSV export button for currently filtered visit points
+- [x] Vitest tests for export helpers (GeoJSON and CSV serialisation)
+
+## Field Visit Map — Phase 3 Enhancements (Jun 29 2026)
+- [x] Reverse-geocode address lookup in visit detail panel (Google Maps Geocoder API)
+- [x] Per-agent summary panel — confirmed rate, avg duration, visit count per agent
+- [x] Agent sparkline — mini visit-frequency chart in agent summary panel
+- [x] Time-lapse playback slider — animate markers in chronological order of createdAt
+- [x] Playback controls — play/pause, speed selector, progress indicator
+- [x] Vitest tests for agent summary helpers and time-lapse sort/slice logic
+
+## Field Visit Map — Phase 4 Enhancements (Jun 29 2026)
+- [x] Geocode result caching (Map ref keyed by visitRef — skip API on re-click)
+- [x] Agent drill-down: clicking agent row in Agents tab filters map to that agent's visits
+- [x] Clear agent filter button to return to all-agents view
+- [x] Visit density choropleth: Nigerian state polygons coloured by visit count
+- [x] Choropleth toggle button in header
+- [x] Choropleth legend (gradient scale)
+- [x] Vitest tests for choropleth density computation and geocode cache logic
+
+## Production Fixes — Round 2 (Jun 29 2026)
+- [x] case-manager: replace all 6 stub repositories with real pgx PostgreSQL queries
+- [x] case-manager: add SQL migration files for case_parties, case_documents, case_timeline, case_stakeholders, case_comments tables
+- [x] case-manager: write Go unit tests for all real repository implementations
+- [x] DrugScreeningPage: call trpc.collectionSites.list (remove NIGERIA_COLLECTION_SITES hardcode)
+- [x] MVRCheckPage: call trpc.screening.create with type=mvr and remove mockResult fallback
+- [x] event-processor: add sqlx + tokio-postgres to Cargo.toml
+- [x] event-processor: create processed_events PostgreSQL table and write on every event
+- [x] event-processor: replace Vec<ProcessedEvent> AppState with DB-backed queries
+- [x] screening-engine: add sqlx + tokio-postgres to Cargo.toml
+- [x] screening-engine: create screening_results PostgreSQL table and write on every result
+- [x] screening-engine: replace HashMap<String, ScreeningResult> AppState with DB-backed queries
+- [x] Write Rust unit tests for DB persistence layer in both services
+
+## Production Fixes — Round 3 (Jun 29 2026)
+
+### Case-Manager Go Service — Real PostgreSQL Queries
+- [x] UpdateCase handler: replaced stub `{updated: true}` with real SQL UPDATE on cases table (status, assignedTo, priority, notes, updatedAt)
+- [x] GetTimeline handler: replaced empty array stub with real SQL SELECT from case_timeline table ordered by occurredAt DESC
+- [x] Added DB() accessor method to CaseRepository for direct handler queries
+- [x] All Go tests pass (handlers + repository + retry packages)
+
+### Event-Processor Rust Service — PostgreSQL Persistence
+- [x] Added tokio-postgres + deadpool-postgres to Cargo.toml
+- [x] Created src/db.rs with build_pool(), migrate(), insert_audit_entry(), fetch_recent_audit(), insert_subscription(), deactivate_subscription(), load_subscriptions(), update_subscription_counters()
+- [x] DDL: bis_audit_log and bis_subscriptions tables auto-created on startup
+- [x] publish_event: fire-and-forget tokio::spawn to persist AuditEntry to PostgreSQL
+- [x] subscribe: fire-and-forget tokio::spawn to persist Subscription to PostgreSQL
+- [x] delete_subscription: fire-and-forget tokio::spawn to mark subscription inactive in PostgreSQL
+- [x] get_audit_log: reads from PostgreSQL first (200 most recent), falls back to in-memory
+- [x] main(): loads persisted subscriptions from DB on startup (survive restarts)
+- [x] Fixed missing `baggage` field in TraceContext initializer (traceparent.rs)
+- [x] All 52 Rust tests pass
+
+### Screening-Engine Rust Service — PostgreSQL Persistence
+- [x] Added tokio-postgres + deadpool-postgres + urlencoding to Cargo.toml
+- [x] Created src/db.rs with build_pool(), persist_result(), update_order_outcome(), outcome_to_str(), screening_type_to_db_str()
+- [x] persist_result: UPDATEs pre-created pending screening_results row by id (status, outcome, rawResult, summary, riskScore, completedAt, updatedAt)
+- [x] update_order_outcome: mirrors TypeScript autoAssessOrder logic — adverse > consider > clear, skips if any result still pending/processing
+- [x] handle_screen HTTP handler: fire-and-forget DB persist before Kafka publish
+- [x] Kafka consumer: awaits DB persist before Kafka publish (inside spawned task)
+- [x] main(): builds optional DB pool and injects into AppState.db_pool
+- [x] Fixed Redis query_async generic argument count for redis 0.27 API
+- [x] All 5 Rust tests pass
+
+### MVRCheckPage Frontend
+- [x] Added frscQuickCheck one-shot procedure to ngScreening.execute router
+- [x] MVRCheckPage wired to trpc.ngScreening.execute.frscQuickCheck (removed mock fallback)
+
+### Quality Gates
+- [x] Node.js vitest: 1145 tests pass (41 test files)
+- [x] Go: all packages build and test pass
+- [x] Rust event-processor: 52 tests pass
+- [x] Rust screening-engine: 5 tests pass

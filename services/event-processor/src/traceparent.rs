@@ -35,9 +35,20 @@ pub struct TraceContext {
     pub flags: u8,
     /// Raw `tracestate` value (passed through unchanged).
     pub tracestate: Option<String>,
+    /// W3C Baggage key-value pairs extracted from the `baggage` header.
+    /// See https://www.w3.org/TR/baggage/
+    pub baggage: Vec<(String, String)>,
     /// Whether this context was extracted from a real header (true) or is a
     /// freshly generated root context (false).
     pub is_remote: bool,
+}
+
+/// Parsed W3C Baggage entry.
+#[derive(Debug, Clone)]
+pub struct BaggageEntry {
+    pub key: String,
+    pub value: String,
+    pub metadata: Option<String>,
 }
 
 impl TraceContext {
@@ -50,6 +61,7 @@ impl TraceContext {
             parent_span_id: new_span_id(),
             flags:         1, // sampled
             tracestate:    None,
+            baggage:       Vec::new(),
             is_remote:     false,
         }
     }
@@ -91,6 +103,7 @@ impl TraceContext {
             parent_span_id: parent_span_id.to_lowercase(),
             flags,
             tracestate:    None,
+            baggage:       vec![],
             is_remote:     true,
         })
     }
@@ -116,13 +129,64 @@ impl TraceContext {
             }
         }
 
+        let mut baggage = Vec::new();
+        for (key, value) in headers {
+            if key.to_lowercase() == "baggage" {
+                if let Ok(s) = std::str::from_utf8(value) {
+                    baggage = parse_baggage(s);
+                }
+            }
+        }
+
         match ctx {
             Some(mut c) => {
                 c.tracestate = tracestate;
+                c.baggage = baggage;
                 c
             }
-            None => Self::new_root(),
+            None => {
+                let mut root = Self::new_root();
+                root.baggage = baggage;
+                root
+            }
         }
+    }
+
+    // ── Baggage ───────────────────────────────────────────────────────────────
+
+    /// Look up a baggage value by key (case-insensitive).
+    pub fn baggage_get(&self, key: &str) -> Option<&str> {
+        let key_lower = key.to_lowercase();
+        self.baggage
+            .iter()
+            .find(|(k, _)| k.to_lowercase() == key_lower)
+            .map(|(_, v)| v.as_str())
+    }
+
+    /// Produce a W3C `baggage` header value from the current baggage entries.
+    pub fn to_baggage_header(&self) -> Option<String> {
+        if self.baggage.is_empty() {
+            return None;
+        }
+        Some(
+            self.baggage
+                .iter()
+                .map(|(k, v)| format!("{}={}", k, v))
+                .collect::<Vec<_>>()
+                .join(", "),
+        )
+    }
+
+    /// Add or update a baggage entry, returning a new TraceContext.
+    pub fn with_baggage(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        let key = key.into();
+        let value = value.into();
+        if let Some(entry) = self.baggage.iter_mut().find(|(k, _)| *k == key) {
+            entry.1 = value;
+        } else {
+            self.baggage.push((key, value));
+        }
+        self
     }
 
     /// Extract trace context from HTTP-style headers (Vec<(String, String)>).
@@ -173,6 +237,28 @@ impl TraceContext {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+/// Parse a W3C Baggage header value into key-value pairs.
+///
+/// Format: `key=value, key2=value2; metadata`
+/// Metadata (after `;`) is stripped per the W3C spec.
+fn parse_baggage(header: &str) -> Vec<(String, String)> {
+    header
+        .split(',')
+        .filter_map(|entry| {
+            let entry = entry.trim();
+            // Strip metadata (anything after `;`)
+            let kv = entry.split(';').next().unwrap_or(entry).trim();
+            let mut parts = kv.splitn(2, '=');
+            let key = parts.next()?.trim().to_string();
+            let value = parts.next()?.trim().to_string();
+            if key.is_empty() || value.is_empty() {
+                return None;
+            }
+            Some((key, value))
+        })
+        .collect()
+}
 
 fn is_hex(s: &str) -> bool {
     s.chars().all(|c| c.is_ascii_hexdigit())
@@ -274,5 +360,66 @@ mod tests {
         assert_eq!(ctx.trace_id.len(), 32);
         assert!(is_hex(&ctx.trace_id));
         assert!(!ctx.is_remote);
+    }
+
+    // ── Baggage tests ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn parse_baggage_simple() {
+        let pairs = parse_baggage("userId=alice, env=prod");
+        assert_eq!(pairs.len(), 2);
+        assert_eq!(pairs[0], ("userId".to_string(), "alice".to_string()));
+        assert_eq!(pairs[1], ("env".to_string(), "prod".to_string()));
+    }
+
+    #[test]
+    fn parse_baggage_strips_metadata() {
+        let pairs = parse_baggage("key=value; property=1");
+        assert_eq!(pairs.len(), 1);
+        assert_eq!(pairs[0], ("key".to_string(), "value".to_string()));
+    }
+
+    #[test]
+    fn parse_baggage_empty() {
+        let pairs = parse_baggage("");
+        assert!(pairs.is_empty());
+    }
+
+    #[test]
+    fn from_kafka_headers_extracts_baggage() {
+        let headers = vec![
+            ("traceparent".to_string(), VALID_TRACEPARENT.as_bytes().to_vec()),
+            ("baggage".to_string(), b"userId=alice, tenantId=t-001".to_vec()),
+        ];
+        let ctx = TraceContext::from_kafka_headers(&headers);
+        assert_eq!(ctx.baggage_get("userId"), Some("alice"));
+        assert_eq!(ctx.baggage_get("tenantId"), Some("t-001"));
+        assert_eq!(ctx.baggage_get("missing"), None);
+    }
+
+    #[test]
+    fn to_baggage_header_roundtrip() {
+        let ctx = TraceContext::new_root()
+            .with_baggage("userId", "bob")
+            .with_baggage("env", "staging");
+        let header = ctx.to_baggage_header().expect("should have baggage header");
+        assert!(header.contains("userId=bob"));
+        assert!(header.contains("env=staging"));
+    }
+
+    #[test]
+    fn with_baggage_updates_existing_key() {
+        let ctx = TraceContext::new_root()
+            .with_baggage("env", "dev")
+            .with_baggage("env", "prod");
+        assert_eq!(ctx.baggage_get("env"), Some("prod"));
+        assert_eq!(ctx.baggage.len(), 1);
+    }
+
+    #[test]
+    fn new_root_has_empty_baggage() {
+        let ctx = TraceContext::new_root();
+        assert!(ctx.baggage.is_empty());
+        assert!(ctx.to_baggage_header().is_none());
     }
 }

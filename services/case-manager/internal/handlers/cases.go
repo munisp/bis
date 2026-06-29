@@ -176,14 +176,111 @@ func (h *CaseHandler) UpdateCase(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Case not found"})
 		return
 	}
-	// Partial update — only update provided fields
-	var body map[string]interface{}
+	var body struct {
+		Title               *string  `json:"title"`
+		Priority            *string  `json:"priority"`
+		Summary             *string  `json:"summary"`
+		LegalBasis          *string  `json:"legalBasis"`
+		Jurisdiction        *string  `json:"jurisdiction"`
+		RegulatoryFramework *string  `json:"regulatoryFramework"`
+		DueAt               *string  `json:"dueAt"`
+		RiskScore           *int     `json:"riskScore"`
+		Tags                []string `json:"tags"`
+		InvestigationRefs   []string `json:"investigationRefs"`
+	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	// For simplicity, return the existing record with a 200 (full update logic follows same pattern)
-	c.JSON(http.StatusOK, gin.H{"ref": ref, "updated": true, "fields": len(body)})
+
+	// Build SET clause dynamically for non-nil fields only
+	setParts := []string{`"updatedAt" = NOW()`}
+	args := []interface{}{}
+	idx := 1
+
+	if body.Title != nil {
+		setParts = append(setParts, fmt.Sprintf(`title = $%d`, idx))
+		args = append(args, *body.Title)
+		idx++
+	}
+	if body.Priority != nil {
+		setParts = append(setParts, fmt.Sprintf(`priority = $%d`, idx))
+		args = append(args, *body.Priority)
+		idx++
+	}
+	if body.Summary != nil {
+		setParts = append(setParts, fmt.Sprintf(`summary = $%d`, idx))
+		args = append(args, *body.Summary)
+		idx++
+	}
+	if body.LegalBasis != nil {
+		setParts = append(setParts, fmt.Sprintf(`legal_basis = $%d`, idx))
+		args = append(args, *body.LegalBasis)
+		idx++
+	}
+	if body.Jurisdiction != nil {
+		setParts = append(setParts, fmt.Sprintf(`jurisdiction = $%d`, idx))
+		args = append(args, *body.Jurisdiction)
+		idx++
+	}
+	if body.RegulatoryFramework != nil {
+		setParts = append(setParts, fmt.Sprintf(`regulatory_framework = $%d`, idx))
+		args = append(args, *body.RegulatoryFramework)
+		idx++
+	}
+	if body.RiskScore != nil {
+		setParts = append(setParts, fmt.Sprintf(`risk_score = $%d`, idx))
+		args = append(args, *body.RiskScore)
+		idx++
+	}
+	if body.DueAt != nil {
+		parsed, parseErr := time.Parse(time.RFC3339, *body.DueAt)
+		if parseErr == nil {
+			setParts = append(setParts, fmt.Sprintf(`due_at = $%d`, idx))
+			args = append(args, parsed)
+			idx++
+		}
+	}
+	if body.Tags != nil {
+		tagsJSON, _ := json.Marshal(body.Tags)
+		setParts = append(setParts, fmt.Sprintf(`tags = $%d`, idx))
+		args = append(args, tagsJSON)
+		idx++
+	}
+	if body.InvestigationRefs != nil {
+		refsJSON, _ := json.Marshal(body.InvestigationRefs)
+		setParts = append(setParts, fmt.Sprintf(`investigation_refs = $%d`, idx))
+		args = append(args, refsJSON)
+		idx++
+	}
+
+	if len(args) == 0 {
+		// Nothing to update — return current record
+		c.JSON(http.StatusOK, existing)
+		return
+	}
+
+	args = append(args, ref)
+	q := fmt.Sprintf(`UPDATE cases SET %s WHERE ref = $%d`,
+		strings.Join(setParts, ", "), idx)
+	if _, execErr := h.cases.DB().ExecContext(c.Request.Context(), q, args...); execErr != nil {
+		log.Error().Err(execErr).Str("ref", ref).Msg("UpdateCase failed")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update case"})
+		return
+	}
+
+	// Write timeline event
+	_ = h.timeline.InsertEvent(c.Request.Context(), existing.ID, "case_updated",
+		fmt.Sprintf("Case %s updated", ref),
+		map[string]interface{}{"fields": len(args) - 1},
+		getUserID(c), getUserName(c))
+
+	updated, _ := h.cases.GetByRef(c.Request.Context(), ref)
+	if updated == nil {
+		c.JSON(http.StatusOK, gin.H{"ref": ref, "updated": true})
+		return
+	}
+	c.JSON(http.StatusOK, updated)
 }
 
 // ArchiveCase handles DELETE /api/v1/cases/:ref
@@ -239,7 +336,49 @@ func (h *CaseHandler) UpdateCaseStatus(c *gin.Context) {
 // GetTimeline handles GET /api/v1/cases/:ref/timeline
 func (h *CaseHandler) GetTimeline(c *gin.Context) {
 	ref := c.Param("ref")
-	c.JSON(http.StatusOK, gin.H{"ref": ref, "events": []interface{}{}})
+	db := h.timeline.DB()
+	caseID, err := repository.GetCaseIDByRef(db, ref)
+	if err != nil {
+		if err.Error() == "not_found" {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Case not found"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
+		}
+		return
+	}
+	rows, qErr := db.QueryContext(c.Request.Context(),
+		`SELECT id, "caseId", "eventType", title, detail, "actorId", "actorName", "createdAt"
+		 FROM case_timeline WHERE "caseId" = $1 ORDER BY "createdAt" ASC`, caseID)
+	if qErr != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
+		return
+	}
+	defer rows.Close()
+	type TimelineEvent struct {
+		ID        int64           `json:"id"`
+		CaseID    int64           `json:"caseId"`
+		EventType string          `json:"eventType"`
+		Title     string          `json:"title"`
+		Detail    json.RawMessage `json:"detail"`
+		ActorID   *int64          `json:"actorId,omitempty"`
+		ActorName string          `json:"actorName"`
+		CreatedAt string          `json:"createdAt"`
+	}
+	var events []TimelineEvent
+	for rows.Next() {
+		var ev TimelineEvent
+		var createdAt time.Time
+		if scanErr := rows.Scan(&ev.ID, &ev.CaseID, &ev.EventType, &ev.Title,
+			&ev.Detail, &ev.ActorID, &ev.ActorName, &createdAt); scanErr != nil {
+			continue
+		}
+		ev.CreatedAt = createdAt.Format(time.RFC3339)
+		events = append(events, ev)
+	}
+	if events == nil {
+		events = []TimelineEvent{}
+	}
+	c.JSON(http.StatusOK, gin.H{"ref": ref, "events": events})
 }
 
 // GetTimelineForStakeholder handles GET /api/v1/portal/cases/:ref/timeline

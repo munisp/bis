@@ -1112,6 +1112,187 @@ const executeRouter = router({
     }),
 
   /**
+   * FRSC Quick Check — one-shot MVR check that creates a candidate, consent, order,
+   * and result row internally, then calls the FRSC API.
+   * Returns the full MVRResult shape expected by MVRCheckPage.
+   */
+  frscQuickCheck: writeProcedure
+    .input(z.object({
+      licenceNumber: z.string().min(3),
+      candidateName: z.string().min(2),
+      type: z.enum(["frsc_mvr", "frsc_commercial_driver"]).default("frsc_mvr"),
+      subjectId: z.string().optional(),
+      country: z.string().default("NG"),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      // 1. Create a transient candidate profile
+      const candidateRef = generateRef("CAND");
+      const [nameParts] = [input.candidateName.trim().split(/\s+/)];
+      const firstName = nameParts[0] ?? input.candidateName;
+      const lastName = nameParts.slice(1).join(" ") || firstName;
+      const { randomBytes } = require("crypto");
+      const inviteToken = randomBytes(32).toString("hex");
+      const inviteExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+      const [candidate] = await db.insert(candidateProfiles).values({
+        candidateRef,
+        tenantId: ctx.tenantId!,
+        firstName,
+        lastName,
+        email: `${candidateRef.toLowerCase()}@frsc-check.internal`,
+        nationality: "Nigerian",
+        consentStatus: "submitted",
+        inviteToken,
+        inviteExpiresAt,
+        ndprConsentAt: new Date(),
+        invitedBy: ctx.user!.id,
+      }).returning({ id: candidateProfiles.id });
+
+      // 2. Record NDPR consent
+      const consentRef = generateRef("CON");
+      await db.insert(candidateConsents).values({
+        consentRef,
+        candidateId: candidate.id,
+        purpose: "pre_employment",
+        consentText: "Automated FRSC licence verification consent recorded by BIS platform.",
+        signedAt: new Date(),
+      });
+
+      // 3. Create a screening order
+      const orderRef = generateRef("ORD");
+      const etaAt = new Date(Date.now() + 4 * 60 * 60 * 1000);
+      const [order] = await db.insert(screeningOrders).values({
+        orderRef,
+        tenantId: ctx.tenantId!,
+        candidateId: candidate.id,
+        status: "pending",
+        screeningTypes: [input.type] as any,
+        etaAt,
+        createdBy: ctx.user!.id,
+      }).returning({ id: screeningOrders.id });
+
+      // 4. Create a screening result row
+      await db.insert(screeningResults).values({
+        orderId: order.id,
+        screeningType: input.type as any,
+        status: "pending",
+      });
+
+      // 5. Call FRSC API
+      const apiResult = await callVerifyApi(
+        ENV.bisVerifyNibssUrl,
+        ENV.bisVerifyNibssKey,
+        {
+          check_type: input.type,
+          licence_number: input.licenceNumber,
+          candidate_name: input.candidateName,
+        }
+      );
+
+      const data = apiResult.data as any;
+      const isValid = data?.valid === true;
+      const isSuspended = data?.suspended === true;
+      const isRevoked = data?.revoked === true;
+      const outcome = isRevoked ? "revoked_licence"
+        : isSuspended ? "suspended_licence"
+        : isValid ? "clear"
+        : "unverified";
+
+      // 6. Update the result row
+      await db.update(screeningResults)
+        .set({
+          status: "completed",
+          outcome: outcome as any,
+          rawResult: apiResult.data as any,
+          summary: isRevoked
+            ? "FRSC licence revoked"
+            : isSuspended
+            ? "FRSC licence suspended"
+            : isValid
+            ? `FRSC licence valid — expires ${data?.expiry ?? "unknown"}`
+            : "FRSC licence not verified",
+          completedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(and(eq(screeningResults.orderId, order.id), eq(screeningResults.screeningType, input.type)));
+
+      // 7. Update order status
+      await db.update(screeningOrders)
+        .set({
+          status: "completed",
+          overallOutcome: outcome as any,
+          completedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(screeningOrders.id, order.id));
+
+      // 8. Build MVRResult shape
+      const violations: Array<{
+        date: string;
+        description: string;
+        severity: "minor" | "moderate" | "major" | "fatal";
+        points: number;
+        disposition: string;
+        state: string;
+      }> = (data?.violations ?? []).map((v: any) => ({
+        date: v.date ?? new Date().toISOString().split("T")[0],
+        description: v.description ?? v.offence ?? "Traffic violation",
+        severity: (v.severity ?? "minor") as "minor" | "moderate" | "major" | "fatal",
+        points: Number(v.points ?? 1),
+        disposition: v.disposition ?? "Convicted",
+        state: v.state ?? "Unknown",
+      }));
+
+      const totalPoints = violations.reduce((s, v) => s + v.points, 0);
+      const accidentsCount = Number(data?.accidents_count ?? 0);
+      const duiCount = Number(data?.dui_count ?? 0);
+      const suspensionsCount = isSuspended ? 1 : 0;
+      const riskScore = Math.min(100,
+        (violations.length * 5) + (accidentsCount * 10) + (duiCount * 20) + (suspensionsCount * 25) + (isRevoked ? 50 : 0)
+      );
+      const riskLevel = riskScore >= 60 ? "high" : riskScore >= 30 ? "medium" : "low";
+      const recommendation = isRevoked
+        ? "REJECT. Licence revoked."
+        : isSuspended
+        ? "REJECT. Licence currently suspended."
+        : riskLevel === "high"
+        ? "CONSIDER. Significant driving violations on record."
+        : riskLevel === "medium"
+        ? "REVIEW. Some violations on record — manual review recommended."
+        : "APPROVE. Clean or low-risk driving record.";
+
+      const licenseStatus: "valid" | "expired" | "suspended" | "revoked" | "not_found" =
+        isRevoked ? "revoked"
+        : isSuspended ? "suspended"
+        : isValid ? "valid"
+        : data?.expired === true ? "expired"
+        : "not_found";
+
+      return {
+        orderRef,
+        subjectId: input.subjectId ?? candidateRef,
+        country: input.country,
+        licenseNumber: input.licenceNumber,
+        licenseStatus,
+        licenseClass: data?.licence_class ?? data?.class ?? "B",
+        licenseExpiry: data?.expiry ?? data?.expiry_date ?? "",
+        totalPoints,
+        violations,
+        accidentsCount,
+        duiCount,
+        suspensionsCount,
+        riskScore,
+        riskLevel,
+        recommendation,
+        dataSource: "FRSC (Federal Road Safety Corps)",
+        verifiedAt: new Date().toISOString(),
+      };
+    }),
+
+  /**
    * Mark result for manual review / update outcome
    */
   updateResult: writeProcedure

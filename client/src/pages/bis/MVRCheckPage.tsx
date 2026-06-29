@@ -166,52 +166,34 @@ function MVRCheckPageInner() {
     "Niger","Ogun","Ondo","Osun","Oyo","Plateau","Rivers","Sokoto","Taraba","Yobe","Zamfara",
   ];
 
-  const createScreening = trpc.screening.create.useMutation({
-    onSuccess: (record) => {
-      const savedResult = record.result as MVRResult | null;
-      const mockResult: MVRResult = savedResult ?? {
-        subjectId: form.subjectId,
-        country: form.country,
-        licenseNumber: form.licenseNumber,
-        licenseStatus: "valid",
-        licenseClass: "B",
-        licenseExpiry: "2027-03-15",
-        totalPoints: 4,
-        violations: [],
-        accidentsCount: 0,
-        duiCount: 0,
-        suspensionsCount: 0,
-        riskScore: 18,
-        riskLevel: "low",
-        recommendation: "APPROVE. Clean driving record.",
-        dataSource: mvrConfig.agency,
-        verifiedAt: record.createdAt.toISOString(),
-      };
-      setResult(mockResult);
+  const frscQuickCheck = trpc.ngScreening.execute.frscQuickCheck.useMutation({
+    onSuccess: (result) => {
+      // result is the full MVRResult shape returned by the backend
+      setResult(result as MVRResult);
       setTab("result");
       setLoading(false);
+      toast.success("MVR check complete");
     },
     onError: (e) => { toast.error(`Check failed: ${e.message}`); setLoading(false); },
   });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!form.licenseNumber) {
+      toast.error("License number is required");
+      return;
+    }
+    if (!form.fullName) {
+      toast.error("Full name is required");
+      return;
+    }
     setLoading(true);
-    createScreening.mutate({
-      type: "mvr",
-      subjectName: form.fullName || form.subjectId || "Unknown",
-      subjectType: "individual",
-      priority: "medium",
-      requestData: {
-        subjectId: form.subjectId,
-        fullName: form.fullName,
-        dateOfBirth: form.dateOfBirth,
-        licenseNumber: form.licenseNumber,
-        country: form.country,
-        state: form.state,
-        lookbackYears: form.lookbackYears,
-        purpose: form.purpose,
-      },
+    frscQuickCheck.mutate({
+      licenceNumber: form.licenseNumber,
+      candidateName: form.fullName,
+      type: "frsc_mvr",
+      subjectId: form.subjectId || undefined,
+      country: form.country,
     });
   };
 

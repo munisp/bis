@@ -2,6 +2,7 @@
 // High-throughput event streaming processor.
 // Port: 8083
 
+pub mod db;
 pub mod insider_threat;
 pub mod kafka;
 pub mod otel;
@@ -176,6 +177,8 @@ pub struct AppState {
     pub event_count: Arc<std::sync::atomic::AtomicU64>,
     /// Insider-threat behaviour detector (shared across all request handlers)
     pub insider_detector: Arc<InsiderThreatDetector>,
+    /// Optional PostgreSQL connection pool — None in dev/test mode
+    pub db_pool: Option<Arc<deadpool_postgres::Pool>>,
 }
 
 impl AppState {
@@ -187,7 +190,13 @@ impl AppState {
             event_tx: tx,
             event_count: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             insider_detector: Arc::new(InsiderThreatDetector::with_default_config()),
+            db_pool: None,
         }
+    }
+
+    pub fn with_pool(mut self, pool: deadpool_postgres::Pool) -> Self {
+        self.db_pool = Some(Arc::new(pool));
+        self
     }
 }
 
@@ -319,7 +328,14 @@ async fn publish_event(
             log.drain(0..100);
             warn!("Audit log evicted 100 entries");
         }
-        log.push(audit_entry);
+        log.push(audit_entry.clone());
+    }
+    // Persist to PostgreSQL (fire-and-forget — does not block the response)
+    if let Some(pool) = state.db_pool.clone() {
+        let entry_clone = audit_entry.clone();
+        tokio::spawn(async move {
+            db::insert_audit_entry(&pool, &entry_clone).await;
+        });
     }
     state
         .event_count
@@ -360,6 +376,13 @@ async fn subscribe(
     };
     info!(sub_id = %sub.id, "New subscription registered");
     state.subscriptions.insert(sub.id.clone(), sub.clone());
+    // Persist to PostgreSQL
+    if let Some(pool) = state.db_pool.clone() {
+        let sub_clone = sub.clone();
+        tokio::spawn(async move {
+            db::insert_subscription(&pool, &sub_clone).await;
+        });
+    }
     Json(sub)
 }
 
@@ -378,6 +401,13 @@ async fn delete_subscription(
     Path(id): Path<String>,
 ) -> StatusCode {
     if state.subscriptions.remove(&id).is_some() {
+        // Mark inactive in PostgreSQL
+        if let Some(pool) = state.db_pool.clone() {
+            let id_clone = id.clone();
+            tokio::spawn(async move {
+                db::deactivate_subscription(&pool, &id_clone).await;
+            });
+        }
         StatusCode::NO_CONTENT
     } else {
         StatusCode::NOT_FOUND
@@ -385,6 +415,14 @@ async fn delete_subscription(
 }
 
 async fn get_audit_log(State(state): State<AppState>) -> Json<Vec<AuditEntry>> {
+    // Prefer DB if available (returns up to 200 most recent entries)
+    if let Some(pool) = &state.db_pool {
+        let entries = db::fetch_recent_audit(pool, 200).await;
+        if !entries.is_empty() {
+            return Json(entries);
+        }
+    }
+    // Fallback to in-memory log
     let log = state.audit_log.lock().unwrap();
     Json(log.iter().rev().take(200).cloned().collect())
 }
@@ -410,9 +448,24 @@ async fn main() {
     let (otel_sender, _otel_handle) = init_otel();
     OTEL_TX.set(otel_sender).ok();
 
-    let state = AppState::new();
+    // ── PostgreSQL pool (optional) ───────────────────────────────────────────────────────────────────
+    let db_pool = db::build_pool().await;
+    if let Some(pool) = &db_pool {
+        db::migrate(pool).await;
+    }
 
-    // ── Insider-threat routes (share the detector from AppState) ──────────────
+    let mut state = AppState::new();
+    if let Some(pool) = db_pool {
+        // Load persisted subscriptions so they survive service restarts
+        let subs = db::load_subscriptions(&pool).await;
+        for sub in subs {
+            info!(sub_id = %sub.id, "Restored subscription from DB");
+            state.subscriptions.insert(sub.id.clone(), sub);
+        }
+        state = state.with_pool(pool);
+    }
+
+    // ── Insider-threat routes (share the detector from AppState) ─────────────────────────────
     let insider_router = Router::new()
         .route(
             "/v1/insider/process",
