@@ -106,7 +106,7 @@ import {
   getMonitors, createMonitor, updateMonitor,
   getScreeningRequests, createScreeningRequest, updateScreeningRequest,
 } from "./db";
-import { eq, desc, asc, and, ilike, gte, lte, lt, sql, count, inArray } from "drizzle-orm";
+import { eq, desc, asc, and, ilike, gte, lte, lt, sql, count, inArray, isNotNull } from "drizzle-orm";
 import { z } from "zod";
 import { ENV } from "./_core/env";
 
@@ -2984,6 +2984,83 @@ const fieldTasksRouter = router({
       const conditions = [];
       if (input.investigationId) conditions.push(eq(fieldVisitReports.investigationId, input.investigationId));
       return db.select().from(fieldVisitReports).where(conditions.length ? and(...conditions) : undefined).orderBy(desc(fieldVisitReports.createdAt)).limit(input.limit);
+    }),
+
+  // ── Map geo-data endpoint ──────────────────────────────────────────────────
+  getVisitGeoData: protectedProcedure
+    .input(z.object({
+      outcome:   z.enum(['all', 'confirmed', 'unconfirmed', 'inconclusive', 'failed']).default('all'),
+      dateRange: z.enum(['7d', '30d', '90d', 'all']).default('30d'),
+      limit:     z.number().min(1).max(500).default(200),
+    }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return { points: [], stats: { total: 0, confirmed: 0, confirmedPct: 0, avgDuration: 0, activeAgents: 0 } };
+
+      const conditions: ReturnType<typeof eq>[] = [];
+
+      if (input.dateRange !== 'all') {
+        const days = input.dateRange === '7d' ? 7 : input.dateRange === '30d' ? 30 : 90;
+        const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+        conditions.push(gte(fieldVisitReports.createdAt, since));
+      }
+
+      if (input.outcome !== 'all') {
+        conditions.push(eq(fieldVisitReports.outcome, input.outcome));
+      }
+
+      const gpsConditions = [
+        ...conditions,
+        isNotNull(fieldVisitReports.checkInLat),
+        isNotNull(fieldVisitReports.checkInLng),
+      ];
+
+      const [points, allRows] = await Promise.all([
+        db.select({
+          visitRef:         fieldVisitReports.visitRef,
+          taskRef:          fieldVisitReports.taskRef,
+          agentId:          fieldVisitReports.agentId,
+          agentName:        fieldVisitReports.agentName,
+          investigationId:  fieldVisitReports.investigationId,
+          checkInLat:       fieldVisitReports.checkInLat,
+          checkInLng:       fieldVisitReports.checkInLng,
+          checkOutLat:      fieldVisitReports.checkOutLat,
+          checkOutLng:      fieldVisitReports.checkOutLng,
+          outcome:          fieldVisitReports.outcome,
+          subjectPresent:   fieldVisitReports.subjectPresent,
+          addressConfirmed: fieldVisitReports.addressConfirmed,
+          findings:         fieldVisitReports.findings,
+          durationMinutes:  fieldVisitReports.durationMinutes,
+          submittedAt:      fieldVisitReports.submittedAt,
+          createdAt:        fieldVisitReports.createdAt,
+        })
+        .from(fieldVisitReports)
+        .where(and(...gpsConditions))
+        .orderBy(desc(fieldVisitReports.createdAt))
+        .limit(input.limit),
+
+        db.select({
+          outcome:         fieldVisitReports.outcome,
+          durationMinutes: fieldVisitReports.durationMinutes,
+          agentId:         fieldVisitReports.agentId,
+        })
+        .from(fieldVisitReports)
+        .where(conditions.length ? and(...conditions) : undefined),
+      ]);
+
+      const total = allRows.length;
+      const confirmed = allRows.filter(r => r.outcome === 'confirmed').length;
+      const confirmedPct = total > 0 ? Math.round((confirmed / total) * 100) : 0;
+      const durRows = allRows.filter(r => r.durationMinutes != null);
+      const avgDuration = durRows.length > 0
+        ? Math.round(durRows.reduce((s, r) => s + (r.durationMinutes ?? 0), 0) / durRows.length)
+        : 0;
+      const activeAgents = new Set(allRows.map(r => r.agentId)).size;
+
+      return {
+        points,
+        stats: { total, confirmed, confirmedPct, avgDuration, activeAgents },
+      };
     }),
 });
 

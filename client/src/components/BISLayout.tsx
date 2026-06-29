@@ -10,7 +10,8 @@ import {
   Briefcase, Globe, MapPin, MessageSquare, Building2, Eye,
   UserCheck, BarChart3, Key, Zap, CheckCheck, ArrowRight, Sun, Moon, ClipboardList, Wallet, UserSearch, Shield, BarChart2,
   BookOpen, Link2, Brain, Gavel, ClipboardCheck, SendToBack, Smartphone, Download, Link as LinkIcon, BellRing, ShieldAlert,
-  FileBarChart, TrendingUp, Landmark, Scale, Lock, Server, Workflow, Database as DbIcon, ArrowLeftRight, Coins
+  FileBarChart, TrendingUp, Landmark, Scale, Lock, Server, Workflow, Database as DbIcon, ArrowLeftRight, Coins,
+  Map
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -108,6 +109,7 @@ const BASE_NAV_GROUPS: NavGroup[] = [
       { label: 'Field Agents', href: '/field-agents', icon: <Users size={15} /> },
       { label: 'Agent Playbooks', href: '/playbooks', icon: <BookOpen size={15} /> },
       { label: 'Criminal Records', href: '/criminal-records', icon: <Gavel size={15} /> },
+      { label: 'Field Visit Map', href: '/field-visit-map', icon: <Map size={15} /> },
       { label: 'Data Sources', href: '/data-sources', icon: <Database size={15} /> },
     ],
   },
