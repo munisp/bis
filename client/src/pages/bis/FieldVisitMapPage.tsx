@@ -14,20 +14,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  MapPin,
-  Users,
-  CheckCircle2,
-  Clock,
-  Layers,
-  X,
-  RefreshCw,
-  Navigation,
-  AlertTriangle,
-  HelpCircle,
-  XCircle,
+  MapPin, Users, CheckCircle2, Clock, Layers, X, RefreshCw,
+  Navigation, AlertTriangle, HelpCircle, XCircle, Route, Download, FileJson,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { MarkerClusterer } from "@googlemaps/markerclusterer";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -63,7 +55,69 @@ const OUTCOME_CONFIG: Record<string, { label: string; color: string; hex: string
 };
 
 function getOutcomeHex(outcome: string | null): string {
-  return OUTCOME_CONFIG[outcome ?? ""] ?.hex ?? "#6366f1";
+  return OUTCOME_CONFIG[outcome ?? ""]?.hex ?? "#6366f1";
+}
+
+// ─── Export helpers (exported for testing) ────────────────────────────────────
+
+export function toGeoJSON(points: VisitPoint[]): string {
+  const features = points
+    .filter(p => p.checkInLat != null && p.checkInLng != null)
+    .map(p => ({
+      type: "Feature",
+      geometry: { type: "Point", coordinates: [p.checkInLng!, p.checkInLat!] },
+      properties: {
+        visitRef: p.visitRef,
+        taskRef: p.taskRef,
+        agentId: p.agentId,
+        agentName: p.agentName,
+        outcome: p.outcome,
+        subjectPresent: p.subjectPresent,
+        addressConfirmed: p.addressConfirmed,
+        durationMinutes: p.durationMinutes,
+        findings: p.findings,
+        submittedAt: p.submittedAt?.toISOString() ?? null,
+        createdAt: p.createdAt.toISOString(),
+      },
+    }));
+  return JSON.stringify({ type: "FeatureCollection", features }, null, 2);
+}
+
+export function toCSV(points: VisitPoint[]): string {
+  const header = [
+    "visitRef","taskRef","agentId","agentName",
+    "checkInLat","checkInLng","checkOutLat","checkOutLng",
+    "outcome","subjectPresent","addressConfirmed",
+    "durationMinutes","findings","submittedAt","createdAt",
+  ].join(",");
+  const rows = points.map(p => [
+    p.visitRef,
+    p.taskRef,
+    p.agentId,
+    `"${p.agentName.replace(/"/g, '""')}"`,
+    p.checkInLat ?? "",
+    p.checkInLng ?? "",
+    p.checkOutLat ?? "",
+    p.checkOutLng ?? "",
+    p.outcome ?? "",
+    p.subjectPresent == null ? "" : p.subjectPresent ? "true" : "false",
+    p.addressConfirmed == null ? "" : p.addressConfirmed ? "true" : "false",
+    p.durationMinutes ?? "",
+    `"${(p.findings ?? "").replace(/"/g, '""')}"`,
+    p.submittedAt?.toISOString() ?? "",
+    p.createdAt.toISOString(),
+  ].join(","));
+  return [header, ...rows].join("\n");
+}
+
+function downloadBlob(content: string, filename: string, mimeType: string) {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 // ─── Stats Bar ────────────────────────────────────────────────────────────────
@@ -73,9 +127,7 @@ function StatsBar({ stats }: { stats: { total: number; confirmed: number; confir
     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
       <Card className="bg-card/80 backdrop-blur-sm">
         <CardContent className="p-4 flex items-center gap-3">
-          <div className="p-2 rounded-lg bg-primary/10">
-            <MapPin className="w-4 h-4 text-primary" />
-          </div>
+          <div className="p-2 rounded-lg bg-primary/10"><MapPin className="w-4 h-4 text-primary" /></div>
           <div>
             <p className="text-xs text-muted-foreground">Total Visits</p>
             <p className="text-xl font-bold">{stats.total}</p>
@@ -84,9 +136,7 @@ function StatsBar({ stats }: { stats: { total: number; confirmed: number; confir
       </Card>
       <Card className="bg-card/80 backdrop-blur-sm">
         <CardContent className="p-4 flex items-center gap-3">
-          <div className="p-2 rounded-lg bg-emerald-500/10">
-            <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-          </div>
+          <div className="p-2 rounded-lg bg-emerald-500/10"><CheckCircle2 className="w-4 h-4 text-emerald-500" /></div>
           <div>
             <p className="text-xs text-muted-foreground">Confirmed</p>
             <p className="text-xl font-bold">{stats.confirmed} <span className="text-sm font-normal text-muted-foreground">({stats.confirmedPct}%)</span></p>
@@ -95,9 +145,7 @@ function StatsBar({ stats }: { stats: { total: number; confirmed: number; confir
       </Card>
       <Card className="bg-card/80 backdrop-blur-sm">
         <CardContent className="p-4 flex items-center gap-3">
-          <div className="p-2 rounded-lg bg-blue-500/10">
-            <Clock className="w-4 h-4 text-blue-500" />
-          </div>
+          <div className="p-2 rounded-lg bg-blue-500/10"><Clock className="w-4 h-4 text-blue-500" /></div>
           <div>
             <p className="text-xs text-muted-foreground">Avg Duration</p>
             <p className="text-xl font-bold">{stats.avgDuration} <span className="text-sm font-normal text-muted-foreground">min</span></p>
@@ -106,9 +154,7 @@ function StatsBar({ stats }: { stats: { total: number; confirmed: number; confir
       </Card>
       <Card className="bg-card/80 backdrop-blur-sm">
         <CardContent className="p-4 flex items-center gap-3">
-          <div className="p-2 rounded-lg bg-violet-500/10">
-            <Users className="w-4 h-4 text-violet-500" />
-          </div>
+          <div className="p-2 rounded-lg bg-violet-500/10"><Users className="w-4 h-4 text-violet-500" /></div>
           <div>
             <p className="text-xs text-muted-foreground">Active Agents</p>
             <p className="text-xl font-bold">{stats.activeAgents}</p>
@@ -121,9 +167,18 @@ function StatsBar({ stats }: { stats: { total: number; confirmed: number; confir
 
 // ─── Visit Detail Panel ───────────────────────────────────────────────────────
 
-function VisitDetailPanel({ visit, onClose }: { visit: VisitPoint; onClose: () => void }) {
+function VisitDetailPanel({
+  visit, onClose, onShowRoute, routeVisible,
+}: {
+  visit: VisitPoint;
+  onClose: () => void;
+  onShowRoute: () => void;
+  routeVisible: boolean;
+}) {
   const cfg = OUTCOME_CONFIG[visit.outcome ?? ""] ?? { label: visit.outcome ?? "Unknown", color: "bg-slate-400", hex: "#94a3b8", icon: HelpCircle };
   const Icon = cfg.icon;
+  const hasRoute = visit.checkInLat != null && visit.checkOutLat != null &&
+    visit.checkInLng != null && visit.checkOutLng != null;
 
   return (
     <Card className="absolute top-4 right-4 w-80 z-10 shadow-xl border-border/60 bg-card/95 backdrop-blur-sm">
@@ -137,7 +192,6 @@ function VisitDetailPanel({ visit, onClose }: { visit: VisitPoint; onClose: () =
         </Button>
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
-        {/* Outcome badge */}
         <div className="flex items-center gap-2">
           <Icon className="w-4 h-4" style={{ color: cfg.hex }} />
           <Badge className={cn("text-white text-xs", cfg.color)}>{cfg.label}</Badge>
@@ -145,30 +199,41 @@ function VisitDetailPanel({ visit, onClose }: { visit: VisitPoint; onClose: () =
             <span className="text-xs text-muted-foreground ml-auto">{visit.durationMinutes} min</span>
           )}
         </div>
-
         <Separator />
-
-        {/* Agent */}
         <div className="flex items-center gap-2">
           <Users className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
           <span className="text-muted-foreground">Agent:</span>
           <span className="font-medium truncate">{visit.agentName}</span>
         </div>
-
-        {/* GPS check-in */}
         {visit.checkInLat != null && visit.checkInLng != null && (
           <div className="flex items-start gap-2">
             <Navigation className="w-3.5 h-3.5 text-muted-foreground shrink-0 mt-0.5" />
             <div>
               <span className="text-muted-foreground">Check-in GPS:</span>
-              <p className="font-mono text-xs mt-0.5">
-                {visit.checkInLat.toFixed(6)}, {visit.checkInLng.toFixed(6)}
-              </p>
+              <p className="font-mono text-xs mt-0.5">{visit.checkInLat.toFixed(6)}, {visit.checkInLng.toFixed(6)}</p>
             </div>
           </div>
         )}
-
-        {/* Subject present / Address confirmed */}
+        {visit.checkOutLat != null && visit.checkOutLng != null && (
+          <div className="flex items-start gap-2">
+            <Navigation className="w-3.5 h-3.5 text-emerald-500 shrink-0 mt-0.5" />
+            <div>
+              <span className="text-muted-foreground">Check-out GPS:</span>
+              <p className="font-mono text-xs mt-0.5">{visit.checkOutLat.toFixed(6)}, {visit.checkOutLng.toFixed(6)}</p>
+            </div>
+          </div>
+        )}
+        {hasRoute && (
+          <Button
+            variant={routeVisible ? "default" : "outline"}
+            size="sm"
+            className="w-full h-8 text-xs gap-1.5"
+            onClick={onShowRoute}
+          >
+            <Route className="w-3.5 h-3.5" />
+            {routeVisible ? "Hide Route" : "Show Route"}
+          </Button>
+        )}
         <div className="grid grid-cols-2 gap-2">
           <div className="rounded-md bg-muted/50 p-2 text-center">
             <p className="text-xs text-muted-foreground">Subject Present</p>
@@ -183,8 +248,6 @@ function VisitDetailPanel({ visit, onClose }: { visit: VisitPoint; onClose: () =
             </p>
           </div>
         </div>
-
-        {/* Findings */}
         {visit.findings && (
           <>
             <Separator />
@@ -194,13 +257,9 @@ function VisitDetailPanel({ visit, onClose }: { visit: VisitPoint; onClose: () =
             </div>
           </>
         )}
-
-        {/* Date */}
         <Separator />
         <p className="text-xs text-muted-foreground">
-          Submitted: {visit.submittedAt
-            ? new Date(visit.submittedAt).toLocaleString()
-            : new Date(visit.createdAt).toLocaleString()}
+          Submitted: {visit.submittedAt ? new Date(visit.submittedAt).toLocaleString() : new Date(visit.createdAt).toLocaleString()}
         </p>
       </CardContent>
     </Card>
@@ -212,13 +271,15 @@ function VisitDetailPanel({ visit, onClose }: { visit: VisitPoint; onClose: () =
 export default function FieldVisitMapPage() {
   const mapRef = useRef<google.maps.Map | null>(null);
   const markersRef = useRef<google.maps.marker.AdvancedMarkerElement[]>([]);
+  const clustererRef = useRef<MarkerClusterer | null>(null);
   const heatmapRef = useRef<google.maps.visualization.HeatmapLayer | null>(null);
-  const clustererRef = useRef<any>(null);
+  const routePolylineRef = useRef<google.maps.Polyline | null>(null);
 
   const [outcomeFilter, setOutcomeFilter] = useState<OutcomeFilter>("all");
   const [dateRange, setDateRange] = useState<DateRange>("30d");
   const [showHeatmap, setShowHeatmap] = useState(false);
   const [selectedVisit, setSelectedVisit] = useState<VisitPoint | null>(null);
+  const [routeVisible, setRouteVisible] = useState(false);
   const [mapReady, setMapReady] = useState(false);
 
   const { data, isLoading, refetch } = trpc.fieldTasks.getVisitGeoData.useQuery(
@@ -229,95 +290,125 @@ export default function FieldVisitMapPage() {
   const points: VisitPoint[] = data?.points ?? [];
   const stats = data?.stats ?? { total: 0, confirmed: 0, confirmedPct: 0, avgDuration: 0, activeAgents: 0 };
 
-  // ── Build custom SVG pin for a given outcome colour ──────────────────────
   const buildPin = useCallback((hex: string) => {
-    const svg = `
-      <svg xmlns="http://www.w3.org/2000/svg" width="32" height="40" viewBox="0 0 32 40">
-        <path d="M16 0C7.163 0 0 7.163 0 16c0 10 16 24 16 24S32 26 32 16C32 7.163 24.837 0 16 0z"
-              fill="${hex}" stroke="white" stroke-width="2"/>
-        <circle cx="16" cy="16" r="6" fill="white" opacity="0.9"/>
-      </svg>`;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="36" viewBox="0 0 28 36">
+      <path d="M14 0C6.268 0 0 6.268 0 14c0 8.75 14 22 14 22S28 22.75 28 14C28 6.268 21.732 0 14 0z"
+            fill="${hex}" stroke="white" stroke-width="1.5"/>
+      <circle cx="14" cy="14" r="5" fill="white" opacity="0.9"/>
+    </svg>`;
     const blob = new Blob([svg], { type: "image/svg+xml" });
     const url = URL.createObjectURL(blob);
     const img = document.createElement("img");
     img.src = url;
-    img.width = 32;
-    img.height = 40;
+    img.width = 28;
+    img.height = 36;
     return img;
   }, []);
 
-  // ── Place markers on the map ─────────────────────────────────────────────
+  const clearRoute = useCallback(() => {
+    if (routePolylineRef.current) {
+      routePolylineRef.current.setMap(null);
+      routePolylineRef.current = null;
+    }
+    setRouteVisible(false);
+  }, []);
+
+  const handleShowRoute = useCallback(() => {
+    if (!mapRef.current || !selectedVisit) return;
+    if (routeVisible) { clearRoute(); return; }
+    const { checkInLat, checkInLng, checkOutLat, checkOutLng } = selectedVisit;
+    if (checkInLat == null || checkInLng == null || checkOutLat == null || checkOutLng == null) return;
+
+    const polyline = new window.google.maps.Polyline({
+      path: [
+        { lat: checkInLat, lng: checkInLng },
+        { lat: checkOutLat, lng: checkOutLng },
+      ],
+      geodesic: true,
+      strokeColor: getOutcomeHex(selectedVisit.outcome),
+      strokeOpacity: 0.9,
+      strokeWeight: 3,
+      icons: [{
+        icon: { path: window.google.maps.SymbolPath.FORWARD_CLOSED_ARROW, scale: 3, strokeColor: "#ffffff" },
+        offset: "50%",
+      }],
+      map: mapRef.current,
+    });
+    routePolylineRef.current = polyline;
+    setRouteVisible(true);
+
+    const bounds = new window.google.maps.LatLngBounds();
+    bounds.extend({ lat: checkInLat, lng: checkInLng });
+    bounds.extend({ lat: checkOutLat, lng: checkOutLng });
+    mapRef.current.fitBounds(bounds, 120);
+  }, [selectedVisit, routeVisible, clearRoute]);
+
   const placeMarkers = useCallback(() => {
     if (!mapRef.current || !window.google) return;
 
-    // Clear existing markers
+    if (clustererRef.current) { clustererRef.current.clearMarkers(); clustererRef.current = null; }
     markersRef.current.forEach(m => { m.map = null; });
     markersRef.current = [];
-
-    // Clear heatmap
-    if (heatmapRef.current) {
-      heatmapRef.current.setMap(null);
-      heatmapRef.current = null;
-    }
+    if (heatmapRef.current) { heatmapRef.current.setMap(null); heatmapRef.current = null; }
 
     const validPoints = points.filter(p => p.checkInLat != null && p.checkInLng != null);
 
     if (showHeatmap) {
-      // Heatmap layer — requires visualization library
       const heatData = validPoints.map(p => ({
         location: new window.google.maps.LatLng(p.checkInLat!, p.checkInLng!),
         weight: p.outcome === "confirmed" ? 3 : p.outcome === "failed" ? 1 : 2,
       }));
       try {
         heatmapRef.current = new (window.google.maps as any).visualization.HeatmapLayer({
-          data: heatData,
-          map: mapRef.current,
-          radius: 40,
-          opacity: 0.7,
+          data: heatData, map: mapRef.current, radius: 40, opacity: 0.7,
         });
-      } catch {
-        // visualization library not loaded — fall through to markers
-      }
+      } catch { /* visualization library not loaded */ }
     }
 
-    // Always place markers (even with heatmap for click targets)
-    validPoints.forEach(point => {
-      const hex = getOutcomeHex(point.outcome);
+    const newMarkers: google.maps.marker.AdvancedMarkerElement[] = validPoints.map(point => {
       const marker = new window.google.maps.marker.AdvancedMarkerElement({
-        map: mapRef.current!,
         position: { lat: point.checkInLat!, lng: point.checkInLng! },
         title: `${point.visitRef} — ${point.outcome ?? "unknown"}`,
-        content: buildPin(hex),
+        content: buildPin(getOutcomeHex(point.outcome)),
       });
-
-      marker.addListener("click", () => {
-        setSelectedVisit(point);
-      });
-
-      markersRef.current.push(marker);
+      marker.addListener("click", () => { clearRoute(); setSelectedVisit(point); });
+      return marker;
     });
 
-    // Auto-fit bounds if we have points
+    markersRef.current = newMarkers;
+    clustererRef.current = new MarkerClusterer({ map: mapRef.current, markers: newMarkers });
+
     if (validPoints.length > 0) {
       const bounds = new window.google.maps.LatLngBounds();
       validPoints.forEach(p => bounds.extend({ lat: p.checkInLat!, lng: p.checkInLng! }));
       mapRef.current.fitBounds(bounds, { top: 60, right: 340, bottom: 60, left: 60 });
     }
-  }, [points, showHeatmap, buildPin]);
+  }, [points, showHeatmap, buildPin, clearRoute]);
 
-  // Re-place markers whenever data or heatmap toggle changes
-  useEffect(() => {
-    if (mapReady) placeMarkers();
-  }, [mapReady, placeMarkers]);
+  useEffect(() => { if (mapReady) placeMarkers(); }, [mapReady, placeMarkers]);
+  useEffect(() => { clearRoute(); }, [selectedVisit?.visitRef, clearRoute]);
 
   const handleMapReady = useCallback((map: google.maps.Map) => {
     mapRef.current = map;
     setMapReady(true);
   }, []);
 
-  const handleRefresh = () => {
-    refetch();
-    toast.success("Map data refreshed");
+  const handleRefresh = () => { refetch(); toast.success("Map data refreshed"); };
+
+  const handleExportGeoJSON = () => {
+    if (points.length === 0) { toast.error("No visit points to export"); return; }
+    const content = toGeoJSON(points);
+    const ts = new Date().toISOString().slice(0, 10);
+    downloadBlob(content, `field-visits-${ts}.geojson`, "application/geo+json");
+    toast.success(`Exported ${points.filter(p => p.checkInLat != null).length} points as GeoJSON`);
+  };
+
+  const handleExportCSV = () => {
+    if (points.length === 0) { toast.error("No visit points to export"); return; }
+    const content = toCSV(points);
+    const ts = new Date().toISOString().slice(0, 10);
+    downloadBlob(content, `field-visits-${ts}.csv`, "text/csv");
+    toast.success(`Exported ${points.length} rows as CSV`);
   };
 
   return (
@@ -327,16 +418,11 @@ export default function FieldVisitMapPage() {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Field Visit Map</h1>
-            <p className="text-sm text-muted-foreground mt-0.5">
-              GPS-tagged visit locations and outcomes across Nigeria
-            </p>
+            <p className="text-sm text-muted-foreground mt-0.5">GPS-tagged visit locations and outcomes across Nigeria</p>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
-            {/* Date range */}
             <Select value={dateRange} onValueChange={(v) => setDateRange(v as DateRange)}>
-              <SelectTrigger className="w-32 h-8 text-xs">
-                <SelectValue />
-              </SelectTrigger>
+              <SelectTrigger className="w-32 h-8 text-xs"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="7d">Last 7 days</SelectItem>
                 <SelectItem value="30d">Last 30 days</SelectItem>
@@ -344,27 +430,21 @@ export default function FieldVisitMapPage() {
                 <SelectItem value="all">All time</SelectItem>
               </SelectContent>
             </Select>
-
-            {/* Heatmap toggle */}
-            <Button
-              variant={showHeatmap ? "default" : "outline"}
-              size="sm"
-              className="h-8 text-xs gap-1.5"
-              onClick={() => setShowHeatmap(h => !h)}
-            >
-              <Layers className="w-3.5 h-3.5" />
-              Heatmap
+            <Button variant={showHeatmap ? "default" : "outline"} size="sm" className="h-8 text-xs gap-1.5" onClick={() => setShowHeatmap(h => !h)}>
+              <Layers className="w-3.5 h-3.5" />Heatmap
             </Button>
-
-            {/* Refresh */}
+            <Button variant="outline" size="sm" className="h-8 text-xs gap-1.5" onClick={handleExportGeoJSON} disabled={points.length === 0}>
+              <FileJson className="w-3.5 h-3.5" />GeoJSON
+            </Button>
+            <Button variant="outline" size="sm" className="h-8 text-xs gap-1.5" onClick={handleExportCSV} disabled={points.length === 0}>
+              <Download className="w-3.5 h-3.5" />CSV
+            </Button>
             <Button variant="outline" size="sm" className="h-8 text-xs gap-1.5" onClick={handleRefresh} disabled={isLoading}>
-              <RefreshCw className={cn("w-3.5 h-3.5", isLoading && "animate-spin")} />
-              Refresh
+              <RefreshCw className={cn("w-3.5 h-3.5", isLoading && "animate-spin")} />Refresh
             </Button>
           </div>
         </div>
 
-        {/* Stats bar */}
         <StatsBar stats={stats} />
 
         {/* Outcome filter chips */}
@@ -379,9 +459,7 @@ export default function FieldVisitMapPage() {
                 onClick={() => setOutcomeFilter(o)}
                 className={cn(
                   "inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border transition-all",
-                  isActive
-                    ? "border-transparent text-white shadow-sm"
-                    : "border-border bg-background text-muted-foreground hover:bg-muted"
+                  isActive ? "border-transparent text-white shadow-sm" : "border-border bg-background text-muted-foreground hover:bg-muted"
                 )}
                 style={isActive && cfg ? { backgroundColor: cfg.hex } : undefined}
               >
@@ -396,9 +474,7 @@ export default function FieldVisitMapPage() {
             );
           })}
           {outcomeFilter !== "all" && (
-            <span className="text-xs text-muted-foreground ml-1">
-              {points.length} point{points.length !== 1 ? "s" : ""} shown
-            </span>
+            <span className="text-xs text-muted-foreground ml-1">{points.length} point{points.length !== 1 ? "s" : ""} shown</span>
           )}
         </div>
 
@@ -406,23 +482,19 @@ export default function FieldVisitMapPage() {
         <div className="relative flex-1 min-h-[480px] rounded-xl overflow-hidden border border-border/50 shadow-sm">
           <MapView
             className="w-full h-full min-h-[480px]"
-            // Nigeria centroid
             initialCenter={{ lat: 9.082, lng: 8.6753 }}
             initialZoom={6}
             onMapReady={handleMapReady}
           />
 
-          {/* Loading overlay */}
           {isLoading && (
             <div className="absolute inset-0 bg-background/60 backdrop-blur-sm flex items-center justify-center z-20">
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <RefreshCw className="w-4 h-4 animate-spin" />
-                Loading visit data…
+                <RefreshCw className="w-4 h-4 animate-spin" />Loading visit data…
               </div>
             </div>
           )}
 
-          {/* Empty state overlay */}
           {!isLoading && points.length === 0 && mapReady && (
             <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
               <div className="bg-card/90 backdrop-blur-sm rounded-xl p-6 text-center shadow-lg max-w-xs">
@@ -446,14 +518,21 @@ export default function FieldVisitMapPage() {
                   <span className="text-xs">{cfg.label}</span>
                 </div>
               ))}
+              <div className="flex items-center gap-2 mt-2 pt-2 border-t border-border/40">
+                <div className="w-4 h-4 rounded-full shrink-0 bg-slate-600 border-2 border-white flex items-center justify-center">
+                  <span className="text-[7px] text-white font-bold leading-none">N</span>
+                </div>
+                <span className="text-xs text-muted-foreground">Cluster</span>
+              </div>
             </div>
           </div>
 
-          {/* Visit detail panel */}
           {selectedVisit && (
             <VisitDetailPanel
               visit={selectedVisit}
-              onClose={() => setSelectedVisit(null)}
+              onClose={() => { setSelectedVisit(null); clearRoute(); }}
+              onShowRoute={handleShowRoute}
+              routeVisible={routeVisible}
             />
           )}
         </div>
