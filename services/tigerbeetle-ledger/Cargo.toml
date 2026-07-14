@@ -1,0 +1,45 @@
+[package]
+name        = "bis-tigerbeetle-ledger"
+version     = "1.0.0"
+edition     = "2021"
+description = "BIS TigerBeetle Ledger Service — double-entry financial ledger for all BIS monetary operations"
+
+[[bin]]
+name = "bis-tigerbeetle-ledger"
+path = "src/main.rs"
+
+[lib]
+name = "tigerbeetle_ledger"
+path = "src/lib.rs"
+
+[dependencies]
+# Async runtime
+tokio        = { version = "1", features = ["full"] }
+# HTTP server
+axum         = { version = "0.7", features = ["json", "macros"] }
+tower-http   = { version = "0.5", features = ["cors", "trace", "timeout"] }
+# Serialization
+serde        = { version = "1", features = ["derive"] }
+serde_json   = "1"
+# Observability
+tracing            = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+# IDs and time
+uuid    = { version = "1", features = ["v4", "serde"] }
+chrono  = { version = "0.4", features = ["serde"] }
+# Error handling
+thiserror = "1"
+anyhow    = "1"
+# HTTP client (for TigerBeetle HTTP proxy + Dapr + Kafka)
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+# Metrics
+prometheus      = { version = "0.13", features = ["process"] }
+axum-prometheus = "0.7"
+# PostgreSQL (reconciliation writes)
+tokio-postgres    = { version = "0.7", features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
+deadpool-postgres  = "0.14"
+# Redis (idempotency keys)
+redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
+
+[dev-dependencies]
+tokio-test = "0.4"

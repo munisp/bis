@@ -10,6 +10,8 @@ import { getDb } from "./db";
 import { goamlFilings } from "../drizzle/schema";
 import { eq, desc, and, like, lt } from "drizzle-orm";
 import { ENV } from "./_core/env";
+import { publishGoamlEvent } from "./dapr";
+import { startGoAmlFilingWorkflow } from "./temporal";
 
 /**
  * Submit an XML filing to the NFIU goAML production API.
@@ -265,6 +267,8 @@ export const goamlRouter = router({
         })
         .returning();
 
+      // Publish goAML created event to Dapr pub/sub
+      publishGoamlEvent({ filingId: filing.id, filingRef: filing.filingRef, reportType: filing.reportType, status: "draft", tenantId: filing.tenantId ?? undefined, actorId: ctx.user.id }).catch(e => console.warn("[goAML] Dapr publish failed:", e));
       return { filingRef: filing.filingRef, id: filing.id };
     }),
 
@@ -339,6 +343,14 @@ export const goamlRouter = router({
         })
         .where(eq(goamlFilings.id, input.id));
 
+      // Trigger goAML filing Temporal workflow and publish Dapr event
+      startGoAmlFilingWorkflow({
+        filingId: input.id,
+        tenantId: filing.tenantId ?? undefined,
+        filingType: filing.reportType,
+        subjectRef: filing.subjectNin ?? filing.subjectBvn ?? `GOAML-${input.id}`,
+      }).catch(e => console.warn("[goAML] Temporal workflow start failed:", e));
+      publishGoamlEvent({ filingId: input.id, filingRef: filing.filingRef, reportType: filing.reportType, status: "submitted", tenantId: filing.tenantId ?? undefined, actorId: 0 }).catch(() => {});
       return { success: true, goamlReferenceNumber: nfiuResult.referenceNumber };
     }),
 

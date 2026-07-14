@@ -4,6 +4,9 @@ import { router, protectedProcedure, writeProcedure, adminProcedure } from "./_c
 import { getDb } from "./db";
 import { sarFilings } from "../drizzle/schema";
 import { eq, desc, and, like, or, count, sql, lte } from "drizzle-orm";
+import { publishSarEvent } from "./dapr";
+import { startSarFilingWorkflow } from "./temporal";
+import { ENV } from "./_core/env";
 
 function sarRef(): string {
   const year = new Date().getFullYear();
@@ -98,6 +101,8 @@ export const sarRouter = router({
         tenantId: ctx.tenantId ?? undefined,
         createdBy: ctx.user.id,
       }).returning();
+      // Publish SAR created event to Dapr pub/sub
+      publishSarEvent({ sarId: sar.id, sarRef: sar.sarRef, status: "draft", category: sar.category, tenantId: sar.tenantId ?? undefined, actorId: ctx.user.id }).catch(e => console.warn("[SAR] Dapr publish failed:", e));
       return sar;
     }),
 
@@ -134,6 +139,7 @@ export const sarRouter = router({
         .where(and(eq(sarFilings.id, input.id), eq(sarFilings.status, "draft")))
         .returning();
       if (!sar) throw new Error("SAR not found or not in draft status");
+      publishSarEvent({ sarId: sar.id, sarRef: sar.sarRef, status: "under_review", category: sar.category, tenantId: sar.tenantId ?? undefined, actorId: 0 }).catch(() => {});
       return sar;
     }),
 
@@ -146,6 +152,18 @@ export const sarRouter = router({
         .set({ status: "approved", approvedBy: ctx.user.id, approvedAt: new Date(), reviewNotes: input.notes, updatedAt: new Date() })
         .where(eq(sarFilings.id, input.id))
         .returning();
+      if (sar) {
+        // Trigger SAR filing Temporal workflow on approval
+        startSarFilingWorkflow({
+          sarId: sar.id,
+          tenantId: sar.tenantId ?? undefined,
+          subjectRef: sar.subjectNin ?? sar.subjectBvn ?? `SAR-${sar.id}`,
+          subjectName: sar.subjectName,
+          sarType: sar.category,
+          filingOfficer: ctx.user.id,
+        }).catch(e => console.warn("[SAR] Temporal workflow start failed:", e));
+        publishSarEvent({ sarId: sar.id, sarRef: sar.sarRef, status: "approved", category: sar.category, tenantId: sar.tenantId ?? undefined, actorId: ctx.user.id }).catch(() => {});
+      }
       return sar;
     }),
 
@@ -176,6 +194,7 @@ export const sarRouter = router({
         .where(and(eq(sarFilings.id, input.id), eq(sarFilings.status, "approved")))
         .returning();
       if (!sar) throw new Error("SAR not found or not approved");
+      publishSarEvent({ sarId: sar.id, sarRef: sar.sarRef, status: "filed", category: sar.category, tenantId: sar.tenantId ?? undefined, actorId: 0 }).catch(() => {});
       return sar;
     }),
 

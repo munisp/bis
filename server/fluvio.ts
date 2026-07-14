@@ -617,3 +617,112 @@ export async function fluvioPublish(topic: string, payload: unknown): Promise<Fl
     return { accepted: false, service_available: false, reason: err instanceof Error ? err.message : String(err) };
   }
 }
+
+// ─── Extended domain publishers ───────────────────────────────────────────────
+
+export interface FluvioSarEvent {
+  eventType: "created" | "submitted" | "reviewed" | "approved" | "filed" | "rejected";
+  sarRef: string;
+  sarId: number;
+  status: string;
+  category?: string;
+  subjectName?: string;
+  suspiciousAmount?: number;
+  tenantId?: number;
+  publishedAt: string;
+}
+
+export async function fluvioPublishSarEvent(opts: FluvioSarEvent): Promise<FluvioPublishResult> {
+  return fluvioPublish("bis.sar.events", opts);
+}
+
+export interface FluvioGoamlEvent {
+  eventType: "created" | "submitted" | "acknowledged" | "rejected" | "cancelled";
+  filingRef: string;
+  filingId: number;
+  status: string;
+  reportType?: string;
+  subjectName?: string;
+  tenantId?: number;
+  publishedAt: string;
+}
+
+export async function fluvioPublishGoamlEvent(opts: FluvioGoamlEvent): Promise<FluvioPublishResult> {
+  return fluvioPublish("bis.goaml.events", opts);
+}
+
+export interface FluvioTransactionEvent {
+  eventType: "created" | "flagged" | "cleared" | "blocked" | "reversed" | "completed";
+  txRef: string;
+  transactionId?: number;
+  amount?: number;
+  currency?: string;
+  riskScore?: number;
+  amlFlagged?: boolean;
+  tenantId?: number;
+  publishedAt: string;
+}
+
+export async function fluvioPublishTransactionEvent(opts: FluvioTransactionEvent): Promise<FluvioPublishResult> {
+  return fluvioPublish("bis.transaction.events", opts);
+}
+
+export interface FluvioStablecoinEvent {
+  eventType: "transfer_initiated" | "transfer_completed" | "transfer_failed" | "rate_limited" | "balance_queried";
+  txRef?: string;
+  fromAddress?: string;
+  toAddress?: string;
+  amount?: number;
+  currency?: string;
+  network?: string;
+  tenantId?: number;
+  publishedAt: string;
+}
+
+export async function fluvioPublishStablecoinEvent(opts: FluvioStablecoinEvent): Promise<FluvioPublishResult> {
+  return fluvioPublish("bis.stablecoin.events", opts);
+}
+
+export interface FluvioMojaloopEvent {
+  eventType: "transfer_initiated" | "transfer_completed" | "transfer_failed" | "compliance_blocked" | "status_polled";
+  txRef: string;
+  amountKobo?: number;
+  currency?: string;
+  rail?: "mojaloop" | "nip" | "sandbox";
+  beneficiaryBankCode?: string;
+  tenantId?: number;
+  publishedAt: string;
+}
+
+export async function fluvioPublishMojaloopEvent(opts: FluvioMojaloopEvent): Promise<FluvioPublishResult> {
+  return fluvioPublish("bis.mojaloop.events", opts);
+}
+
+export interface FluvioRiskProfileEvent {
+  eventType: "created" | "updated" | "escalated" | "cleared" | "expired";
+  subjectRef: string;
+  subjectType: "individual" | "corporate" | "account";
+  riskScore?: number;
+  riskTier?: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+  tenantId?: number;
+  publishedAt: string;
+}
+
+export async function fluvioPublishRiskProfileEvent(opts: FluvioRiskProfileEvent): Promise<FluvioPublishResult> {
+  return fluvioPublish("bis.risk_profile.events", opts);
+}
+
+export interface FluvioOpenAppsecEvent {
+  eventType: "blocked" | "detected" | "bypassed";
+  attackType?: string;
+  severity?: "low" | "medium" | "high" | "critical";
+  sourceIp?: string;
+  requestUri?: string;
+  method?: string;
+  tenantId?: number;
+  publishedAt: string;
+}
+
+export async function fluvioPublishOpenAppsecEvent(opts: FluvioOpenAppsecEvent): Promise<FluvioPublishResult> {
+  return fluvioPublish("bis.openappsec.events", opts);
+}

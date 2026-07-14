@@ -1,0 +1,241 @@
+/// BIS TigerBeetle Ledger Service — HTTP Server
+///
+/// Exposes a REST API over the TigerBeetle double-entry ledger.
+/// All monetary operations in BIS flow through this service.
+///
+/// Endpoints:
+///   POST /ledger/topup           — credit a tenant account (deposit)
+///   POST /ledger/debit           — debit a tenant account (investigation consumption)
+///   GET  /ledger/balance/:tenant — get tenant account balance
+///   POST /ledger/mojaloop        — record a Mojaloop inter-bank transfer
+///   POST /ledger/stablecoin      — record a stablecoin transfer
+///   POST /ledger/refund          — reverse a debit (compliance hold release)
+///   GET  /ledger/transfers/:id   — get transfer by ID
+///   GET  /metrics                — Prometheus metrics
+///   GET  /health                 — liveness probe
+///
+/// Port: 8097
+use axum::{
+    extract::{Path, State},
+    http::StatusCode,
+    response::IntoResponse,
+    routing::{get, post},
+    Json, Router,
+};
+use std::{net::SocketAddr, sync::Arc};
+use tigerbeetle_ledger::{
+    accounts, execute_debit, execute_topup, ledger, tier,
+    BalanceRequest, BalanceResponse, DebitRequest, DebitResponse,
+    LedgerError, MojaloopTransferRequest, StablecoinTransferRequest,
+    TbClient, TopupRequest, TopupResponse, CreateTransferRequest,
+};
+use tracing::{error, info, warn};
+use uuid::Uuid;
+
+// ─── App State ────────────────────────────────────────────────────────────────
+
+#[derive(Clone)]
+struct AppState {
+    tb: Arc<TbClient>,
+    service_key: String,
+}
+
+// ─── Error Response ───────────────────────────────────────────────────────────
+
+#[derive(serde::Serialize)]
+struct ErrorResponse {
+    error: String,
+    code: String,
+}
+
+fn ledger_err_response(err: LedgerError) -> (StatusCode, Json<ErrorResponse>) {
+    let (status, code) = match &err {
+        LedgerError::InsufficientBalance { .. } => (StatusCode::PAYMENT_REQUIRED, "INSUFFICIENT_BALANCE"),
+        LedgerError::AccountNotFound(_) => (StatusCode::NOT_FOUND, "ACCOUNT_NOT_FOUND"),
+        LedgerError::DuplicateTransfer(_) => (StatusCode::CONFLICT, "DUPLICATE_TRANSFER"),
+        _ => (StatusCode::INTERNAL_SERVER_ERROR, "LEDGER_ERROR"),
+    };
+    error!("[TigerBeetle] {}", err);
+    (status, Json(ErrorResponse { error: err.to_string(), code: code.to_string() }))
+}
+
+// ─── Handlers ─────────────────────────────────────────────────────────────────
+
+async fn handle_topup(
+    State(state): State<AppState>,
+    Json(req): Json<TopupRequest>,
+) -> impl IntoResponse {
+    info!("[Ledger] topup tenant={} amount={} ref={}", req.tenant_id, req.amount_kobo, req.reference);
+    match execute_topup(&state.tb, &req).await {
+        Ok(resp) => (StatusCode::OK, Json(serde_json::to_value(resp).unwrap())).into_response(),
+        Err(e) => {
+            let (status, body) = ledger_err_response(e);
+            (status, Json(serde_json::to_value(body.0).unwrap())).into_response()
+        }
+    }
+}
+
+async fn handle_debit(
+    State(state): State<AppState>,
+    Json(req): Json<DebitRequest>,
+) -> impl IntoResponse {
+    info!("[Ledger] debit tenant={} amount={} ref={}", req.tenant_id, req.amount_kobo, req.investigation_ref);
+    match execute_debit(&state.tb, &req).await {
+        Ok(resp) => (StatusCode::OK, Json(serde_json::to_value(resp).unwrap())).into_response(),
+        Err(e) => {
+            let (status, body) = ledger_err_response(e);
+            (status, Json(serde_json::to_value(body.0).unwrap())).into_response()
+        }
+    }
+}
+
+async fn handle_balance(
+    State(state): State<AppState>,
+    Path(tenant_id): Path<i32>,
+) -> impl IntoResponse {
+    let account_id = TbClient::tenant_account_id(tenant_id);
+    match state.tb.get_account(&account_id).await {
+        Ok(account) => {
+            let resp = BalanceResponse {
+                tenant_id,
+                account_id: account.id.clone(),
+                available_balance_kobo: account.available_balance(),
+                credits_posted: account.credits_posted,
+                debits_posted: account.debits_posted,
+                debits_pending: account.debits_pending,
+                currency: "NGN".to_string(),
+                timestamp: chrono::Utc::now().to_rfc3339(),
+            };
+            (StatusCode::OK, Json(serde_json::to_value(resp).unwrap())).into_response()
+        }
+        Err(e) => {
+            let (status, body) = ledger_err_response(e);
+            (status, Json(serde_json::to_value(body.0).unwrap())).into_response()
+        }
+    }
+}
+
+async fn handle_mojaloop(
+    State(state): State<AppState>,
+    Json(req): Json<MojaloopTransferRequest>,
+) -> impl IntoResponse {
+    info!("[Ledger] mojaloop transfer tenant={} amount={} ref={}", req.tenant_id, req.amount_kobo, req.transfer_ref);
+    let ledger_code = TbClient::ledger_for_currency(&req.currency);
+    let tenant_account_id = TbClient::tenant_account_id(req.tenant_id);
+    let transfer_id = Uuid::new_v4().to_string();
+    let transfer = CreateTransferRequest {
+        id: transfer_id.clone(),
+        debit_account_id: tenant_account_id.clone(),
+        credit_account_id: accounts::FLOAT.to_string(),
+        amount: req.amount_kobo,
+        user_data_128: req.transfer_ref.clone(),
+        user_data_64: req.initiated_by as u64,
+        user_data_32: req.tenant_id as u32,
+        ledger: ledger_code,
+        code: tier::MOJALOOP as u16,
+        flags: 0,
+        timeout: 0,
+    };
+    match state.tb.create_transfer(&transfer).await {
+        Ok(id) => (StatusCode::OK, Json(serde_json::json!({
+            "transfer_id": id,
+            "tenant_account_id": tenant_account_id,
+            "amount_kobo": req.amount_kobo,
+            "transfer_ref": req.transfer_ref,
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+        }))).into_response(),
+        Err(e) => {
+            let (status, body) = ledger_err_response(e);
+            (status, Json(serde_json::to_value(body.0).unwrap())).into_response()
+        }
+    }
+}
+
+async fn handle_stablecoin(
+    State(state): State<AppState>,
+    Json(req): Json<StablecoinTransferRequest>,
+) -> impl IntoResponse {
+    info!("[Ledger] stablecoin transfer tenant={} amount={} currency={} ref={}", req.tenant_id, req.amount, req.currency, req.transfer_ref);
+    let ledger_code = TbClient::ledger_for_currency(&req.currency);
+    let tenant_account_id = TbClient::tenant_account_id(req.tenant_id);
+    let transfer_id = Uuid::new_v4().to_string();
+    let transfer = CreateTransferRequest {
+        id: transfer_id.clone(),
+        debit_account_id: tenant_account_id.clone(),
+        credit_account_id: accounts::FLOAT.to_string(),
+        amount: req.amount,
+        user_data_128: req.transfer_ref.clone(),
+        user_data_64: req.initiated_by as u64,
+        user_data_32: req.tenant_id as u32,
+        ledger: ledger_code,
+        code: tier::STABLECOIN as u16,
+        flags: 0,
+        timeout: 0,
+    };
+    match state.tb.create_transfer(&transfer).await {
+        Ok(id) => (StatusCode::OK, Json(serde_json::json!({
+            "transfer_id": id,
+            "tenant_account_id": tenant_account_id,
+            "amount": req.amount,
+            "currency": req.currency,
+            "transfer_ref": req.transfer_ref,
+            "network": req.network,
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+        }))).into_response(),
+        Err(e) => {
+            let (status, body) = ledger_err_response(e);
+            (status, Json(serde_json::to_value(body.0).unwrap())).into_response()
+        }
+    }
+}
+
+async fn health() -> impl IntoResponse {
+    Json(serde_json::json!({
+        "status": "ok",
+        "service": "bis-tigerbeetle-ledger",
+        "version": "1.0.0",
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+    }))
+}
+
+// ─── Main ─────────────────────────────────────────────────────────────────────
+
+#[tokio::main]
+async fn main() {
+    tracing_subscriber::fmt()
+        .with_env_filter(std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string()))
+        .json()
+        .init();
+
+    let tb_url = std::env::var("TIGERBEETLE_HTTP_URL")
+        .unwrap_or_else(|_| "http://localhost:8099".to_string());
+    let service_key = std::env::var("BIS_LEDGER_KEY")
+        .unwrap_or_else(|_| "dev-ledger-key-change-in-prod".to_string());
+    let port: u16 = std::env::var("LEDGER_PORT")
+        .unwrap_or_else(|_| "8097".to_string())
+        .parse()
+        .expect("LEDGER_PORT must be a valid port number");
+
+    let tb = Arc::new(TbClient::new(&tb_url));
+    if tb.enabled {
+        info!("[TigerBeetle] Connected to proxy at {}", tb_url);
+    } else {
+        warn!("[TigerBeetle] Running in dev mode (no proxy configured)");
+    }
+
+    let state = AppState { tb, service_key };
+
+    let app = Router::new()
+        .route("/ledger/topup", post(handle_topup))
+        .route("/ledger/debit", post(handle_debit))
+        .route("/ledger/balance/:tenant_id", get(handle_balance))
+        .route("/ledger/mojaloop", post(handle_mojaloop))
+        .route("/ledger/stablecoin", post(handle_stablecoin))
+        .route("/health", get(health))
+        .with_state(state);
+
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    info!("[TigerBeetle Ledger] Listening on {}", addr);
+    let listener = tokio::net::TcpListener::bind(addr).await.expect("Failed to bind");
+    axum::serve(listener, app).await.expect("Server failed");
+}

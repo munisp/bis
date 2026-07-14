@@ -1,0 +1,44 @@
+[package]
+name        = "bis-risk-stream-processor"
+version     = "1.0.0"
+edition     = "2021"
+description = "BIS Risk Stream Processor — consumes Fluvio/Kafka risk events and feeds ML enrichment in real-time"
+
+[[bin]]
+name = "bis-risk-stream-processor"
+path = "src/main.rs"
+
+[lib]
+name = "risk_stream"
+path = "src/lib.rs"
+
+[dependencies]
+# Async runtime
+tokio        = { version = "1", features = ["full"] }
+# HTTP server (for health + metrics)
+axum         = { version = "0.7", features = ["json"] }
+tower-http   = { version = "0.5", features = ["cors", "trace"] }
+# Serialization
+serde        = { version = "1", features = ["derive"] }
+serde_json   = "1"
+# Kafka consumer (rdkafka for production Kafka/Fluvio compatibility)
+rdkafka      = { version = "0.36", features = ["cmake-build"] }
+# HTTP client (for ML enrichment service + Dapr + AML engine)
+reqwest      = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+# Redis (deduplication + state)
+redis        = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
+# Observability
+tracing            = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+# IDs and time
+uuid    = { version = "1", features = ["v4", "serde"] }
+chrono  = { version = "0.4", features = ["serde"] }
+# Error handling
+thiserror = "1"
+anyhow    = "1"
+# Metrics
+prometheus      = { version = "0.13", features = ["process"] }
+axum-prometheus = "0.7"
+
+[dev-dependencies]
+tokio-test = "0.4"

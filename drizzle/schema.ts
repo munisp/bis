@@ -3121,3 +3121,377 @@ export const keycloakSyncLog = pgTable("keycloak_sync_log", {
 }));
 export type KeycloakSyncLog = typeof keycloakSyncLog.$inferSelect;
 export type InsertKeycloakSyncLog = typeof keycloakSyncLog.$inferInsert;
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MISSING DOMAIN TABLES — Added in polyglot integration pass
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ── risk_profiles ─────────────────────────────────────────────────────────────
+export const riskProfileStatusEnum = pgEnum("risk_profile_status", [
+  "active", "under_review", "escalated", "archived",
+]);
+export const riskProfiles = pgTable("risk_profiles", {
+  id:              serial("id").primaryKey(),
+  tenantId:        integer("tenantId").references(() => tenants.id, { onDelete: "cascade" }),
+  subjectRef:      varchar("subjectRef", { length: 128 }).notNull(),
+  subjectName:     varchar("subjectName", { length: 255 }),
+  subjectType:     varchar("subjectType", { length: 32 }).notNull().default("individual"),
+  overallScore:    real("overallScore"),
+  amlScore:        real("amlScore"),
+  kycScore:        real("kycScore"),
+  sanctionsScore:  real("sanctionsScore"),
+  fraudScore:      real("fraudScore"),
+  pepExposure:     boolean("pepExposure").default(false),
+  sanctionsHit:    boolean("sanctionsHit").default(false),
+  adverseMedia:    boolean("adverseMedia").default(false),
+  riskBand:        varchar("riskBand", { length: 16 }).notNull().default("medium"),
+  status:          riskProfileStatusEnum("status").notNull().default("active"),
+  mlModelVersion:  varchar("mlModelVersion", { length: 64 }),
+  factors:         jsonb("factors"),
+  lastScoredAt:    timestamp("lastScoredAt"),
+  nextReviewAt:    timestamp("nextReviewAt"),
+  createdBy:       integer("createdBy").references(() => users.id, { onDelete: "set null" }),
+  createdAt:       timestamp("createdAt").defaultNow().notNull(),
+  updatedAt:       timestamp("updatedAt").defaultNow().notNull(),
+}, (t) => ({
+  rp_subject_idx:  index("rp_subject_idx").on(t.subjectRef),
+  rp_tenant_idx:   index("rp_tenant_idx").on(t.tenantId),
+  rp_band_idx:     index("rp_band_idx").on(t.riskBand),
+  rp_score_idx:    index("rp_score_idx").on(t.overallScore),
+  rp_subject_uniq: uniqueIndex("rp_subject_uniq").on(t.tenantId, t.subjectRef),
+  rp_score_check:  check("rp_score_check", sql`"overallScore" IS NULL OR ("overallScore" >= 0 AND "overallScore" <= 100)`),
+}));
+export type RiskProfile = typeof riskProfiles.$inferSelect;
+export type InsertRiskProfile = typeof riskProfiles.$inferInsert;
+
+// ── compliance_reports ────────────────────────────────────────────────────────
+export const complianceReportTypeEnum = pgEnum("compliance_report_type", [
+  "sar_xml", "goaml_str", "goaml_ctr", "cbn_monthly", "cbn_quarterly",
+  "fatf_risk", "nfiu_annual", "custom",
+]);
+export const complianceReportStatusEnum = pgEnum("compliance_report_status", [
+  "generating", "ready", "submitted", "failed",
+]);
+export const complianceReports = pgTable("compliance_reports", {
+  id:            serial("id").primaryKey(),
+  tenantId:      integer("tenantId").references(() => tenants.id, { onDelete: "cascade" }),
+  reportType:    complianceReportTypeEnum("reportType").notNull(),
+  status:        complianceReportStatusEnum("status").notNull().default("generating"),
+  title:         varchar("title", { length: 255 }).notNull(),
+  periodStart:   timestamp("periodStart"),
+  periodEnd:     timestamp("periodEnd"),
+  xmlPayload:    text("xmlPayload"),
+  pdfUrl:        varchar("pdfUrl", { length: 512 }),
+  submittedTo:   varchar("submittedTo", { length: 64 }),
+  submittedAt:   timestamp("submittedAt"),
+  referenceNumber: varchar("referenceNumber", { length: 128 }),
+  errorMessage:  text("errorMessage"),
+  metadata:      jsonb("metadata"),
+  generatedBy:   integer("generatedBy").references(() => users.id, { onDelete: "set null" }),
+  createdAt:     timestamp("createdAt").defaultNow().notNull(),
+  updatedAt:     timestamp("updatedAt").defaultNow().notNull(),
+}, (t) => ({
+  cr_tenant_idx:  index("cr_tenant_idx").on(t.tenantId),
+  cr_type_idx:    index("cr_type_idx").on(t.reportType),
+  cr_status_idx:  index("cr_status_idx").on(t.status),
+}));
+export type ComplianceReport = typeof complianceReports.$inferSelect;
+export type InsertComplianceReport = typeof complianceReports.$inferInsert;
+
+// ── waf_incidents ─────────────────────────────────────────────────────────────
+export const wafSeverityEnum = pgEnum("waf_severity", ["low", "medium", "high", "critical"]);
+export const wafIncidents = pgTable("waf_incidents", {
+  id:             serial("id").primaryKey(),
+  tenantId:       integer("tenantId").references(() => tenants.id, { onDelete: "set null" }),
+  sourceIp:       varchar("sourceIp", { length: 45 }),
+  method:         varchar("method", { length: 10 }),
+  uri:            text("uri"),
+  attackType:     varchar("attackType", { length: 64 }),
+  severity:       wafSeverityEnum("severity").notNull().default("medium"),
+  blocked:        boolean("blocked").notNull().default(true),
+  ruleId:         varchar("ruleId", { length: 64 }),
+  userAgent:      text("userAgent"),
+  requestBody:    text("requestBody"),
+  responseCode:   integer("responseCode"),
+  country:        varchar("country", { length: 3 }),
+  apisixRouteId:  varchar("apisixRouteId", { length: 128 }),
+  openappsecEventId: varchar("openappsecEventId", { length: 128 }),
+  metadata:       jsonb("metadata"),
+  resolvedAt:     timestamp("resolvedAt"),
+  resolvedBy:     integer("resolvedBy").references(() => users.id, { onDelete: "set null" }),
+  occurredAt:     timestamp("occurredAt").defaultNow().notNull(),
+  createdAt:      timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  waf_ip_idx:     index("waf_ip_idx").on(t.sourceIp),
+  waf_sev_idx:    index("waf_sev_idx").on(t.severity),
+  waf_time_idx:   index("waf_time_idx").on(t.occurredAt),
+  waf_tenant_idx: index("waf_tenant_idx").on(t.tenantId),
+}));
+export type WafIncident = typeof wafIncidents.$inferSelect;
+export type InsertWafIncident = typeof wafIncidents.$inferInsert;
+
+// ── mojaloop_transfers ────────────────────────────────────────────────────────
+export const mojaloopStatusEnum = pgEnum("mojaloop_status", [
+  "initiated", "pending", "completed", "failed", "reversed", "expired",
+]);
+export const mojaloopTransfers = pgTable("mojaloop_transfers", {
+  id:                  serial("id").primaryKey(),
+  tenantId:            integer("tenantId").references(() => tenants.id, { onDelete: "set null" }),
+  txRef:               varchar("txRef", { length: 128 }).notNull().unique(),
+  externalRef:         varchar("externalRef", { length: 128 }),
+  rail:                varchar("rail", { length: 32 }).notNull().default("mojaloop"),
+  originatorAccount:   varchar("originatorAccount", { length: 64 }).notNull(),
+  originatorName:      varchar("originatorName", { length: 255 }),
+  beneficiaryAccount:  varchar("beneficiaryAccount", { length: 64 }).notNull(),
+  beneficiaryName:     varchar("beneficiaryName", { length: 255 }),
+  beneficiaryBankCode: varchar("beneficiaryBankCode", { length: 16 }),
+  amountKobo:          bigint("amountKobo", { mode: "number" }).notNull(),
+  currency:            varchar("currency", { length: 3 }).notNull().default("NGN"),
+  narration:           text("narration"),
+  status:              mojaloopStatusEnum("status").notNull().default("initiated"),
+  failureReason:       text("failureReason"),
+  metadata:            jsonb("metadata"),
+  completedAt:         timestamp("completedAt"),
+  initiatedBy:         integer("initiatedBy").references(() => users.id, { onDelete: "set null" }),
+  createdAt:           timestamp("createdAt").defaultNow().notNull(),
+  updatedAt:           timestamp("updatedAt").defaultNow().notNull(),
+}, (t) => ({
+  mjl_txref_idx:   index("mjl_txref_idx").on(t.txRef),
+  mjl_tenant_idx:  index("mjl_tenant_idx").on(t.tenantId),
+  mjl_status_idx:  index("mjl_status_idx").on(t.status),
+  mjl_amount_check: check("mjl_amount_check", sql`"amountKobo" > 0`),
+}));
+export type MojaloopTransfer = typeof mojaloopTransfers.$inferSelect;
+export type InsertMojaloopTransfer = typeof mojaloopTransfers.$inferInsert;
+
+// ── stablecoin_transactions ───────────────────────────────────────────────────
+export const stablecoinStatusEnum = pgEnum("stablecoin_status", [
+  "pending", "confirmed", "failed", "reversed",
+]);
+export const stablecoinTransactions = pgTable("stablecoin_transactions", {
+  id:           serial("id").primaryKey(),
+  tenantId:     integer("tenantId").references(() => tenants.id, { onDelete: "set null" }),
+  txRef:        varchar("txRef", { length: 128 }).notNull().unique(),
+  txHash:       varchar("txHash", { length: 128 }),
+  network:      varchar("network", { length: 32 }).notNull(),
+  currency:     varchar("currency", { length: 16 }).notNull(),
+  fromAddress:  varchar("fromAddress", { length: 128 }),
+  toAddress:    varchar("toAddress", { length: 128 }),
+  amountUnits:  varchar("amountUnits", { length: 64 }).notNull(),
+  status:       stablecoinStatusEnum("status").notNull().default("pending"),
+  blockNumber:  bigint("blockNumber", { mode: "number" }),
+  gasUsed:      varchar("gasUsed", { length: 64 }),
+  sandbox:      boolean("sandbox").default(false),
+  metadata:     jsonb("metadata"),
+  confirmedAt:  timestamp("confirmedAt"),
+  initiatedBy:  integer("initiatedBy").references(() => users.id, { onDelete: "set null" }),
+  createdAt:    timestamp("createdAt").defaultNow().notNull(),
+  updatedAt:    timestamp("updatedAt").defaultNow().notNull(),
+}, (t) => ({
+  sc_txref_idx:  index("sc_txref_idx").on(t.txRef),
+  sc_txhash_idx: index("sc_txhash_idx").on(t.txHash),
+  sc_tenant_idx: index("sc_tenant_idx").on(t.tenantId),
+  sc_status_idx: index("sc_status_idx").on(t.status),
+}));
+export type StablecoinTransaction = typeof stablecoinTransactions.$inferSelect;
+export type InsertStablecoinTransaction = typeof stablecoinTransactions.$inferInsert;
+
+// ── sanctions_lists ───────────────────────────────────────────────────────────
+export const sanctionsListTypeEnum = pgEnum("sanctions_list_type", [
+  "un_sc", "ofac_sdn", "eu_consolidated", "uk_hmt", "cbn_watchlist",
+  "nfiu_watchlist", "interpol_red", "custom",
+]);
+export const sanctionsLists = pgTable("sanctions_lists", {
+  id:          serial("id").primaryKey(),
+  listType:    sanctionsListTypeEnum("listType").notNull(),
+  listName:    varchar("listName", { length: 128 }).notNull(),
+  source:      varchar("source", { length: 255 }),
+  version:     varchar("version", { length: 32 }),
+  entryCount:  integer("entryCount").default(0),
+  isActive:    boolean("isActive").default(true),
+  lastSyncAt:  timestamp("lastSyncAt"),
+  nextSyncAt:  timestamp("nextSyncAt"),
+  metadata:    jsonb("metadata"),
+  createdAt:   timestamp("createdAt").defaultNow().notNull(),
+  updatedAt:   timestamp("updatedAt").defaultNow().notNull(),
+}, (t) => ({
+  sl_type_idx:  index("sl_type_idx").on(t.listType),
+  sl_active_idx: index("sl_active_idx").on(t.isActive),
+}));
+export type SanctionsList = typeof sanctionsLists.$inferSelect;
+export type InsertSanctionsList = typeof sanctionsLists.$inferInsert;
+
+// ── sanctions_matches ─────────────────────────────────────────────────────────
+export const sanctionsMatchStatusEnum = pgEnum("sanctions_match_status", [
+  "pending_review", "confirmed_hit", "false_positive", "escalated",
+]);
+export const sanctionsMatches = pgTable("sanctions_matches", {
+  id:            serial("id").primaryKey(),
+  tenantId:      integer("tenantId").references(() => tenants.id, { onDelete: "cascade" }),
+  listId:        integer("listId").references(() => sanctionsLists.id, { onDelete: "set null" }),
+  subjectRef:    varchar("subjectRef", { length: 128 }).notNull(),
+  subjectName:   varchar("subjectName", { length: 255 }),
+  matchedName:   varchar("matchedName", { length: 255 }),
+  matchScore:    real("matchScore"),
+  matchType:     varchar("matchType", { length: 32 }),
+  status:        sanctionsMatchStatusEnum("status").notNull().default("pending_review"),
+  reviewedBy:    integer("reviewedBy").references(() => users.id, { onDelete: "set null" }),
+  reviewedAt:    timestamp("reviewedAt"),
+  reviewNotes:   text("reviewNotes"),
+  linkedAlertId: integer("linkedAlertId"),
+  metadata:      jsonb("metadata"),
+  detectedAt:    timestamp("detectedAt").defaultNow().notNull(),
+  createdAt:     timestamp("createdAt").defaultNow().notNull(),
+  updatedAt:     timestamp("updatedAt").defaultNow().notNull(),
+}, (t) => ({
+  sm_subject_idx: index("sm_subject_idx").on(t.subjectRef),
+  sm_tenant_idx:  index("sm_tenant_idx").on(t.tenantId),
+  sm_status_idx:  index("sm_status_idx").on(t.status),
+  sm_score_idx:   index("sm_score_idx").on(t.matchScore),
+  sm_score_check: check("sm_score_check", sql`"matchScore" IS NULL OR ("matchScore" >= 0 AND "matchScore" <= 100)`),
+}));
+export type SanctionsMatch = typeof sanctionsMatches.$inferSelect;
+export type InsertSanctionsMatch = typeof sanctionsMatches.$inferInsert;
+
+// ── document_vault ────────────────────────────────────────────────────────────
+export const documentVaultStatusEnum = pgEnum("document_vault_status", [
+  "pending", "verified", "rejected", "expired",
+]);
+export const documentVault = pgTable("document_vault", {
+  id:            serial("id").primaryKey(),
+  tenantId:      integer("tenantId").references(() => tenants.id, { onDelete: "cascade" }),
+  ownerId:       integer("ownerId").references(() => users.id, { onDelete: "set null" }),
+  ownerRef:      varchar("ownerRef", { length: 128 }),
+  documentType:  varchar("documentType", { length: 64 }).notNull(),
+  documentName:  varchar("documentName", { length: 255 }).notNull(),
+  storageKey:    varchar("storageKey", { length: 512 }).notNull(),
+  mimeType:      varchar("mimeType", { length: 128 }),
+  sizeBytes:     bigint("sizeBytes", { mode: "number" }),
+  checksum:      varchar("checksum", { length: 128 }),
+  status:        documentVaultStatusEnum("status").notNull().default("pending"),
+  expiresAt:     timestamp("expiresAt"),
+  verifiedBy:    integer("verifiedBy").references(() => users.id, { onDelete: "set null" }),
+  verifiedAt:    timestamp("verifiedAt"),
+  tags:          jsonb("tags"),
+  metadata:      jsonb("metadata"),
+  deletedAt:     timestamp("deletedAt"),
+  createdAt:     timestamp("createdAt").defaultNow().notNull(),
+  updatedAt:     timestamp("updatedAt").defaultNow().notNull(),
+}, (t) => ({
+  dv_owner_idx:  index("dv_owner_idx").on(t.ownerId),
+  dv_ref_idx:    index("dv_ref_idx").on(t.ownerRef),
+  dv_tenant_idx: index("dv_tenant_idx").on(t.tenantId),
+  dv_type_idx:   index("dv_type_idx").on(t.documentType),
+  dv_deleted_idx: index("dv_deleted_idx").on(t.deletedAt),
+}));
+export type DocumentVault = typeof documentVault.$inferSelect;
+export type InsertDocumentVault = typeof documentVault.$inferInsert;
+
+// ── field_visit_schedules ─────────────────────────────────────────────────────
+export const fieldVisitScheduleStatusEnum = pgEnum("field_visit_schedule_status", [
+  "scheduled", "confirmed", "in_progress", "completed", "cancelled", "rescheduled",
+]);
+export const fieldVisitSchedules = pgTable("field_visit_schedules", {
+  id:              serial("id").primaryKey(),
+  tenantId:        integer("tenantId").references(() => tenants.id, { onDelete: "cascade" }),
+  investigationId: integer("investigationId").references(() => investigations.id, { onDelete: "set null" }),
+  caseId:          integer("caseId").references(() => cases.id, { onDelete: "set null" }),
+  agentId:         integer("agentId").references(() => fieldAgents.id, { onDelete: "set null" }),
+  subjectName:     varchar("subjectName", { length: 255 }),
+  subjectAddress:  text("subjectAddress"),
+  visitType:       varchar("visitType", { length: 64 }).notNull().default("residential"),
+  status:          fieldVisitScheduleStatusEnum("status").notNull().default("scheduled"),
+  scheduledAt:     timestamp("scheduledAt").notNull(),
+  confirmedAt:     timestamp("confirmedAt"),
+  completedAt:     timestamp("completedAt"),
+  cancelledAt:     timestamp("cancelledAt"),
+  cancellationReason: text("cancellationReason"),
+  notes:           text("notes"),
+  coordinates:     jsonb("coordinates"),
+  metadata:        jsonb("metadata"),
+  createdBy:       integer("createdBy").references(() => users.id, { onDelete: "set null" }),
+  createdAt:       timestamp("createdAt").defaultNow().notNull(),
+  updatedAt:       timestamp("updatedAt").defaultNow().notNull(),
+}, (t) => ({
+  fvs_agent_idx:  index("fvs_agent_idx").on(t.agentId),
+  fvs_inv_idx:    index("fvs_inv_idx").on(t.investigationId),
+  fvs_sched_idx:  index("fvs_sched_idx").on(t.scheduledAt),
+  fvs_status_idx: index("fvs_status_idx").on(t.status),
+}));
+export type FieldVisitSchedule = typeof fieldVisitSchedules.$inferSelect;
+export type InsertFieldVisitSchedule = typeof fieldVisitSchedules.$inferInsert;
+
+// ── ml_model_versions ─────────────────────────────────────────────────────────
+export const mlModelStatusEnum = pgEnum("ml_model_status", [
+  "training", "staging", "production", "deprecated", "failed",
+]);
+export const mlModelVersions = pgTable("ml_model_versions", {
+  id:            serial("id").primaryKey(),
+  modelName:     varchar("modelName", { length: 128 }).notNull(),
+  version:       varchar("version", { length: 32 }).notNull(),
+  modelType:     varchar("modelType", { length: 64 }).notNull(),
+  status:        mlModelStatusEnum("status").notNull().default("staging"),
+  artifactPath:  varchar("artifactPath", { length: 512 }),
+  metrics:       jsonb("metrics"),
+  hyperparams:   jsonb("hyperparams"),
+  trainedOn:     timestamp("trainedOn"),
+  promotedAt:    timestamp("promotedAt"),
+  deprecatedAt:  timestamp("deprecatedAt"),
+  promotedBy:    integer("promotedBy").references(() => users.id, { onDelete: "set null" }),
+  description:   text("description"),
+  createdAt:     timestamp("createdAt").defaultNow().notNull(),
+  updatedAt:     timestamp("updatedAt").defaultNow().notNull(),
+}, (t) => ({
+  mlm_name_idx:    index("mlm_name_idx").on(t.modelName),
+  mlm_status_idx:  index("mlm_status_idx").on(t.status),
+  mlm_version_uniq: uniqueIndex("mlm_version_uniq").on(t.modelName, t.version),
+}));
+export type MlModelVersion = typeof mlModelVersions.$inferSelect;
+export type InsertMlModelVersion = typeof mlModelVersions.$inferInsert;
+
+// ── tenant_billing_accounts ───────────────────────────────────────────────────
+export const tenantBillingAccounts = pgTable("tenant_billing_accounts", {
+  id:                  serial("id").primaryKey(),
+  tenantId:            integer("tenantId").notNull().references(() => tenants.id, { onDelete: "cascade" }).unique(),
+  tigerbeetleAccountId: varchar("tigerbeetleAccountId", { length: 64 }),
+  currency:            varchar("currency", { length: 3 }).notNull().default("NGN"),
+  balanceKobo:         bigint("balanceKobo", { mode: "number" }).notNull().default(0),
+  creditLimitKobo:     bigint("creditLimitKobo", { mode: "number" }).default(0),
+  billingEmail:        varchar("billingEmail", { length: 255 }),
+  billingCycle:        varchar("billingCycle", { length: 16 }).notNull().default("monthly"),
+  nextBillingAt:       timestamp("nextBillingAt"),
+  lastBilledAt:        timestamp("lastBilledAt"),
+  metadata:            jsonb("metadata"),
+  createdAt:           timestamp("createdAt").defaultNow().notNull(),
+  updatedAt:           timestamp("updatedAt").defaultNow().notNull(),
+}, (t) => ({
+  tba_tenant_idx:  index("tba_tenant_idx").on(t.tenantId),
+  tba_balance_check: check("tba_balance_check", sql`"balanceKobo" >= 0`),
+}));
+export type TenantBillingAccount = typeof tenantBillingAccounts.$inferSelect;
+export type InsertTenantBillingAccount = typeof tenantBillingAccounts.$inferInsert;
+
+// ── payment_rails_log ─────────────────────────────────────────────────────────
+export const paymentRailsLog = pgTable("payment_rails_log", {
+  id:           serial("id").primaryKey(),
+  tenantId:     integer("tenantId").references(() => tenants.id, { onDelete: "set null" }),
+  txRef:        varchar("txRef", { length: 128 }).notNull(),
+  rail:         varchar("rail", { length: 32 }).notNull(),
+  direction:    varchar("direction", { length: 8 }).notNull().default("outbound"),
+  amountKobo:   bigint("amountKobo", { mode: "number" }),
+  currency:     varchar("currency", { length: 3 }).default("NGN"),
+  status:       varchar("status", { length: 32 }).notNull(),
+  requestBody:  jsonb("requestBody"),
+  responseBody: jsonb("responseBody"),
+  errorMessage: text("errorMessage"),
+  latencyMs:    integer("latencyMs"),
+  initiatedBy:  integer("initiatedBy").references(() => users.id, { onDelete: "set null" }),
+  createdAt:    timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  prl_txref_idx:  index("prl_txref_idx").on(t.txRef),
+  prl_tenant_idx: index("prl_tenant_idx").on(t.tenantId),
+  prl_rail_idx:   index("prl_rail_idx").on(t.rail),
+  prl_time_idx:   index("prl_time_idx").on(t.createdAt),
+}));
+export type PaymentRailsLog = typeof paymentRailsLog.$inferSelect;
+export type InsertPaymentRailsLog = typeof paymentRailsLog.$inferInsert;

@@ -31,6 +31,18 @@ export const ENV = {
   // TigerBeetle ledger HTTP proxy
   tigerBeetleUrl: process.env.TIGERBEETLE_URL ?? "",
   tigerBeetleHttpUrl: process.env.TIGERBEETLE_HTTP_URL ?? "http://localhost:3001",
+  // TigerBeetle ledger service (Rust) — full double-entry CQRS ledger
+  tigerbeetleLedgerUrl: process.env.TIGERBEETLE_LEDGER_URL ?? "http://localhost:8097",
+  // Risk stream processor (Rust) — real-time Fluvio/Kafka risk event consumer
+  riskStreamProcessorUrl: process.env.RISK_STREAM_PROCESSOR_URL ?? "http://localhost:8098",
+  // Compliance reporter (Python) — SAR/goAML XML generation and risk profiles
+  complianceReporterUrl: process.env.COMPLIANCE_REPORTER_URL ?? "http://localhost:8094",
+  // OpenAppSec reporter (Go) — WAF event ingestion and incident management
+  openappsecReporterUrl: process.env.OPENAPPSEC_REPORTER_URL ?? "http://localhost:8095",
+  // Compliance worker (Go/Temporal) — SAR, goAML, KYC expiry Temporal workflows
+  complianceWorkerUrl: process.env.COMPLIANCE_WORKER_URL ?? "http://localhost:8096",
+  // WAF shared key for OpenAppSec reporter auth
+  bisWafKey: process.env.BIS_WAF_KEY ?? "dev-waf-key-change-in-prod",
   // Paystack payment gateway
   paystackSecretKey: process.env.PAYSTACK_SECRET_KEY ?? "",
   // CORS allowed origins (comma-separated)
@@ -169,6 +181,11 @@ export function validateEnv(): void {
     ["VAPID_PRIVATE_KEY", ENV.vapidPrivateKey, "Web Push notifications disabled — browser alerts will not be delivered"],
     ["SMTP_USER", ENV.smtpUser, "Email notifications disabled"],
     ["SMTP_PASS", ENV.smtpPass, "Email notifications disabled"],
+    ["TIGERBEETLE_LEDGER_URL", ENV.tigerbeetleLedgerUrl, "TigerBeetle ledger service defaults to localhost:8097"],
+    ["COMPLIANCE_REPORTER_URL", ENV.complianceReporterUrl, "Compliance reporter defaults to localhost:8094 — SAR/goAML XML generation unavailable"],
+    ["OPENAPPSEC_REPORTER_URL", ENV.openappsecReporterUrl, "OpenAppSec reporter defaults to localhost:8095 — WAF incident management unavailable"],
+    ["COMPLIANCE_WORKER_URL", ENV.complianceWorkerUrl, "Compliance worker defaults to localhost:8096 — SAR/KYC Temporal workflows unavailable"],
+    ["BIS_WAF_KEY", ENV.bisWafKey, "WAF key uses insecure dev default — change before production"],
   ];
 
   const missing = required.filter(([, v]) => !v).map(([k]) => k);

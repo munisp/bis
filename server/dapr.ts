@@ -37,6 +37,12 @@ export const TOPICS = {
   billing:         "bis.billing.events",
   screening:       "bis.screening.events",
   insider:         "bis.insider.events",
+  // Compliance & regulatory topics
+  sar:             "bis.sar.events",
+  goaml:           "bis.goaml.events",
+  transaction:     "bis.transaction.events",
+  riskProfile:     "bis.risk_profile.events",
+  openappsec:      "bis.openappsec.events",
 } as const;
 
 export type Topic = (typeof TOPICS)[keyof typeof TOPICS];
@@ -431,4 +437,92 @@ export async function publishInsiderThreatEvent(data: {
 
 export function isDaprEnabled(): boolean {
   return DAPR_ENABLED;
+}
+
+// ─── Extended compliance & regulatory publishers ──────────────────────────────
+
+export async function publishSarEvent(data: {
+  eventType: "created" | "submitted" | "reviewed" | "approved" | "filed" | "rejected" | "withdrawn";
+  sarRef: string;
+  sarId: number;
+  status: string;
+  category?: string;
+  subjectName?: string;
+  suspiciousAmount?: number;
+  filedWith?: string;
+  tenantId?: number;
+  createdBy?: number;
+  timestamp?: string;
+}): Promise<void> {
+  return daprPublish({
+    topic: TOPICS.sar,
+    data: { ...data, timestamp: data.timestamp ?? new Date().toISOString() },
+  });
+}
+
+export async function publishGoamlEvent(data: {
+  eventType: "created" | "submitted" | "acknowledged" | "rejected" | "cancelled";
+  filingRef: string;
+  filingId: number;
+  status: string;
+  reportType?: string;
+  subjectName?: string;
+  tenantId?: number;
+  createdBy?: number;
+  timestamp?: string;
+}): Promise<void> {
+  return daprPublish({
+    topic: TOPICS.goaml,
+    data: { ...data, timestamp: data.timestamp ?? new Date().toISOString() },
+  });
+}
+
+export async function publishTransactionEvent(data: {
+  eventType: "created" | "flagged" | "cleared" | "blocked" | "reversed" | "completed";
+  txRef: string;
+  transactionId?: number;
+  amount?: number;
+  currency?: string;
+  riskScore?: number;
+  amlFlagged?: boolean;
+  tenantId?: number;
+  timestamp?: string;
+}): Promise<void> {
+  return daprPublish({
+    topic: TOPICS.transaction,
+    data: { ...data, timestamp: data.timestamp ?? new Date().toISOString() },
+  });
+}
+
+export async function publishRiskProfileEvent(data: {
+  eventType: "created" | "updated" | "escalated" | "cleared" | "expired";
+  subjectRef: string;
+  subjectType: "individual" | "corporate" | "account";
+  riskScore?: number;
+  riskTier?: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+  tenantId?: number;
+  triggeredBy?: string;
+  timestamp?: string;
+}): Promise<void> {
+  return daprPublish({
+    topic: TOPICS.riskProfile,
+    data: { ...data, timestamp: data.timestamp ?? new Date().toISOString() },
+  });
+}
+
+export async function publishOpenAppsecEvent(data: {
+  eventType: "blocked" | "detected" | "bypassed";
+  attackType?: string;
+  severity?: "low" | "medium" | "high" | "critical";
+  sourceIp?: string;
+  requestUri?: string;
+  method?: string;
+  userAgent?: string;
+  tenantId?: number;
+  timestamp?: string;
+}): Promise<void> {
+  return daprPublish({
+    topic: TOPICS.openappsec,
+    data: { ...data, timestamp: data.timestamp ?? new Date().toISOString() },
+  });
 }

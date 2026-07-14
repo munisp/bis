@@ -1162,3 +1162,127 @@ services:
       - ./infra/dapr/components:/components:ro
     network_mode: "service:bff"
     profiles: ["dapr"]
+
+  # ─── TigerBeetle Ledger Service (Rust) ────────────────────────────────────
+  tigerbeetle-ledger:
+    build:
+      context: ./services/tigerbeetle-ledger
+      dockerfile: Dockerfile
+    container_name: bis-tigerbeetle-ledger
+    restart: unless-stopped
+    ports:
+      - "8097:8097"
+    environment:
+      - TIGERBEETLE_URL=${TIGERBEETLE_URL:-}
+      - TIGERBEETLE_CLUSTER_ID=${TIGERBEETLE_CLUSTER_ID:-0}
+      - RUST_LOG=info
+      - PORT=8097
+    networks: [bis-net]
+    profiles: ["polyglot"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8097/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ─── Risk Stream Processor (Rust) ─────────────────────────────────────────
+  risk-stream-processor:
+    build:
+      context: ./services/risk-stream-processor
+      dockerfile: Dockerfile
+    container_name: bis-risk-stream-processor
+    restart: unless-stopped
+    ports:
+      - "8098:8098"
+    environment:
+      - KAFKA_BROKERS=${KAFKA_BROKERS:-kafka:9092}
+      - FLUVIO_ENDPOINT=${FLUVIO_ENDPOINT:-localhost:9003}
+      - DAPR_HTTP_ENDPOINT=${DAPR_HTTP_ENDPOINT:-http://dapr:3500}
+      - RISK_ENGINE_URL=${RISK_ENGINE_URL:-http://risk-engine:8082}
+      - RUST_LOG=info
+      - PORT=8098
+    depends_on:
+      - kafka
+    networks: [bis-net]
+    profiles: ["polyglot"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8098/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ─── Compliance Reporter (Python) ─────────────────────────────────────────
+  compliance-reporter:
+    build:
+      context: ./services/compliance-reporter
+      dockerfile: Dockerfile
+    container_name: bis-compliance-reporter
+    restart: unless-stopped
+    ports:
+      - "8094:8094"
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - GOAML_API_URL=${GOAML_API_URL:-https://goaml.nfiu.gov.ng/api}
+      - GOAML_API_KEY=${GOAML_API_KEY:-}
+      - GOAML_INSTITUTION_CODE=${GOAML_INSTITUTION_CODE:-}
+      - LAKEHOUSE_URL=${LAKEHOUSE_URL:-http://lakehouse-writer:8085}
+      - PORT=8094
+    depends_on:
+      - postgres
+    networks: [bis-net]
+    profiles: ["polyglot"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8094/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ─── OpenAppSec Reporter (Go) ─────────────────────────────────────────────
+  openappsec-reporter:
+    build:
+      context: ./services/openappsec-reporter
+      dockerfile: Dockerfile
+    container_name: bis-openappsec-reporter
+    restart: unless-stopped
+    ports:
+      - "8095:8095"
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - DAPR_HTTP_ENDPOINT=${DAPR_HTTP_ENDPOINT:-http://dapr:3500}
+      - BIS_WAF_KEY=${BIS_WAF_KEY:-dev-waf-key-change-in-prod}
+      - PORT=8095
+    depends_on:
+      - postgres
+    networks: [bis-net]
+    profiles: ["polyglot"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8095/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ─── Compliance Worker (Go/Temporal) ──────────────────────────────────────
+  compliance-worker:
+    build:
+      context: ./services/compliance-worker
+      dockerfile: Dockerfile
+    container_name: bis-compliance-worker
+    restart: unless-stopped
+    ports:
+      - "8096:8096"
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - TEMPORAL_HOST=${TEMPORAL_HOST:-temporal:7233}
+      - TEMPORAL_NAMESPACE=${TEMPORAL_NAMESPACE:-default}
+      - COMPLIANCE_REPORTER_URL=${COMPLIANCE_REPORTER_URL:-http://compliance-reporter:8094}
+      - LAKEHOUSE_URL=${LAKEHOUSE_URL:-http://lakehouse-writer:8085}
+      - PORT=8096
+    depends_on:
+      - postgres
+    networks: [bis-net]
+    profiles: ["polyglot"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8096/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3

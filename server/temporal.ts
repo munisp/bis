@@ -391,3 +391,112 @@ export async function startScreeningWorkflow(input: ScreeningWorkflowInput): Pro
   }
   return { workflowId, status: "started" };
 }
+
+// ── SAR Filing Workflow ───────────────────────────────────────────────────────
+export interface SarFilingWorkflowInput {
+  sarId: number;
+  tenantId?: number;
+  subjectRef: string;
+  subjectName: string;
+  sarType: string;
+  filingOfficer: number;
+}
+export async function startSarFilingWorkflow(input: SarFilingWorkflowInput): Promise<{ workflowId: string; status: string }> {
+  const workflowId = `sar-filing-${input.sarId}-${Date.now()}`;
+  if (!TEMPORAL_HOST) {
+    console.info("[Temporal] SAR filing workflow (dev mode):", workflowId);
+    return { workflowId, status: "dev_mode" };
+  }
+  const resp = await fetch(`${ENV.gatewayUrl}/v1/workflow/start`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-BIS-Key": ENV.bisGatewayKey },
+    body: JSON.stringify({
+      workflow_type: "SarFilingWorkflow",
+      workflow_id: workflowId,
+      task_queue: "bis-compliance",
+      input: {
+        ...input,
+        gatewayUrl: ENV.bisGatewayUrl,
+        complianceUrl: ENV.complianceReporterUrl,
+        lakehouseUrl: ENV.lakehouseUrl,
+      },
+    }),
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!resp.ok) {
+    const text = await resp.text();
+    throw new Error(`[Temporal] SAR filing workflow start failed: ${resp.status} ${text}`);
+  }
+  return { workflowId, status: "started" };
+}
+
+// ── goAML Filing Workflow ─────────────────────────────────────────────────────
+export interface GoAmlFilingWorkflowInput {
+  filingId: number;
+  tenantId?: number;
+  filingType: string;
+  subjectRef: string;
+}
+export async function startGoAmlFilingWorkflow(input: GoAmlFilingWorkflowInput): Promise<{ workflowId: string; status: string }> {
+  const workflowId = `goaml-filing-${input.filingId}-${Date.now()}`;
+  if (!TEMPORAL_HOST) {
+    console.info("[Temporal] goAML filing workflow (dev mode):", workflowId);
+    return { workflowId, status: "dev_mode" };
+  }
+  const resp = await fetch(`${ENV.gatewayUrl}/v1/workflow/start`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-BIS-Key": ENV.bisGatewayKey },
+    body: JSON.stringify({
+      workflow_type: "GoAmlFilingWorkflow",
+      workflow_id: workflowId,
+      task_queue: "bis-compliance",
+      input: {
+        ...input,
+        gatewayUrl: ENV.bisGatewayUrl,
+        complianceUrl: ENV.complianceReporterUrl,
+      },
+    }),
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!resp.ok) {
+    const text = await resp.text();
+    throw new Error(`[Temporal] goAML filing workflow start failed: ${resp.status} ${text}`);
+  }
+  return { workflowId, status: "started" };
+}
+
+// ── Risk Profile Workflow ─────────────────────────────────────────────────────
+export interface RiskProfileWorkflowInput {
+  subjectRef: string;
+  subjectName?: string;
+  tenantId?: number;
+  trigger: string;
+}
+export async function startRiskProfileWorkflow(input: RiskProfileWorkflowInput): Promise<{ workflowId: string; status: string }> {
+  const workflowId = `risk-profile-${input.subjectRef}-${Date.now()}`;
+  if (!TEMPORAL_HOST) {
+    console.info("[Temporal] Risk profile workflow (dev mode):", workflowId);
+    return { workflowId, status: "dev_mode" };
+  }
+  const resp = await fetch(`${ENV.gatewayUrl}/v1/workflow/start`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-BIS-Key": ENV.bisGatewayKey },
+    body: JSON.stringify({
+      workflow_type: "RiskProfileWorkflow",
+      workflow_id: workflowId,
+      task_queue: "bis-compliance",
+      input: {
+        ...input,
+        gatewayUrl: ENV.bisGatewayUrl,
+        mlServiceUrl: ENV.riskEngineUrl,
+        lakehouseUrl: ENV.lakehouseUrl,
+      },
+    }),
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!resp.ok) {
+    const text = await resp.text();
+    throw new Error(`[Temporal] Risk profile workflow start failed: ${resp.status} ${text}`);
+  }
+  return { workflowId, status: "started" };
+}

@@ -24,6 +24,7 @@ import { z } from "zod";
 import { protectedProcedure, router } from "./_core/trpc";
 import { ENV } from "./_core/env";
 import { TRPCError } from "@trpc/server";
+import { publishStablecoinEvent } from "./dapr";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -111,7 +112,7 @@ export const stablecoinRouter = router({
         initiatedBy: ctx.user.id,
       });
 
-      return {
+      const transferResult = {
         txRef: result.txRef,
         txHash: result.txHash,
         status: result.status,
@@ -121,6 +122,17 @@ export const stablecoinRouter = router({
         sandbox: result.sandbox ?? false,
         initiatedAt: new Date().toISOString(),
       };
+      // Publish stablecoin transfer event to Dapr pub/sub for AML monitoring
+      publishStablecoinEvent({
+        txRef: result.txRef,
+        network: result.network,
+        currency: result.currency,
+        amountUnits: input.amountUnits,
+        status: result.status,
+        actorId: ctx.user.id,
+        tenantId: ctx.tenantId ?? undefined,
+      }).catch(e => console.warn("[Stablecoin] Dapr publish failed:", e));
+      return transferResult;
     }),
 
   /**

@@ -3,8 +3,12 @@ import { z } from "zod";
 import { router, protectedProcedure, writeProcedure, adminProcedure } from "./_core/trpc";
 import { ENV } from "./_core/env";
 import { getDb } from "./db";
-import { publishAmlAlert } from "./dapr";
-import { fluvioPublishAmlEvent } from "./fluvio";
+import { publishAmlAlert, publishTransactionEvent } from "./dapr";
+import { withCache, invalidateCache, TTL } from "./cache";
+import { permifyCheck, permifyWriteRelationship } from "./permify";
+import { startAmlWorkflow } from "./temporal";
+import { writeLakehouseEvent } from "./lakehouse";
+import { fluvioPublishAmlEvent, fluvioPublishTransactionEvent } from "./fluvio";
 import {
   transactions, amlRules, amlAlerts, swiftMessages, sepaPayments, travelRuleRecords, cases, alertRules, webhooks, velocityBlocks,
 } from "../drizzle/schema";
@@ -318,6 +322,25 @@ export const amlRouter = router({
             tenant_id: String((ctx.user as { tenantId?: string | number } | null)?.tenantId ?? "default"),
             auto_escalated: score >= 70,
           }).catch(() => {});
+          // Temporal: start AML workflow for critical/high alerts (non-blocking)
+          if (score >= 70) {
+            startAmlWorkflow({
+              alertRef: newAlert.alertRef,
+              alertId: newAlert.id,
+              riskScore: score,
+              transactionRef: tx.txRef,
+              subjectName: input.originatorName,
+            }).catch(e => console.warn("[AML Temporal]", e));
+          }
+          // Lakehouse: write AML alert event for analytics (non-blocking)
+          writeLakehouseEvent("aml_alert", {
+            alertRef: newAlert.alertRef, alertId: newAlert.id, riskScore: score,
+            riskLevel, transactionRef: tx.txRef, amount: input.amount,
+            currency: input.currency, originatorName: input.originatorName,
+            beneficiaryName: input.beneficiaryName,
+          }).catch(() => {});
+          // Permify: write AML alert relationship for access control
+          void permifyWriteRelationship([{ entity: { type: "aml_alert", id: String(newAlert.id) }, relation: "owner", subject: { type: "user", id: String(ctx.user.id) } }]).catch(e => console.warn("[AML Permify]", e));
           // Webhook fan-out: notify all subscribed tenants (non-blocking)
           dispatchAmlWebhook({
             event: "aml.alert",
@@ -438,19 +461,22 @@ export const amlRouter = router({
         status: z.string().optional(), riskLevel: z.string().optional(),
       }))
       .query(async ({ input, ctx }) => {
-        const db = await getDb();
-        if (!db) throw new Error("Database unavailable");
-        const conditions = [];
-        // Tenant isolation: non-admin users only see their own tenant's AML alerts
-        if (ctx.tenantId !== null) conditions.push(eq(amlAlerts.tenantId, ctx.tenantId));
-        if (input.status) conditions.push(eq(amlAlerts.status, input.status as any));
-        if (input.riskLevel) conditions.push(eq(amlAlerts.riskLevel, input.riskLevel as any));
-        const where = conditions.length > 0 ? and(...conditions) : undefined;
-        const [rows, [{ total }]] = await Promise.all([
-          db.select().from(amlAlerts).where(where).orderBy(desc(amlAlerts.createdAt)).limit(input.limit).offset(input.offset),
-          db.select({ total: count() }).from(amlAlerts).where(where),
-        ]);
-        return { items: rows, total };
+        const cacheKey = `aml:alerts:tenant:${ctx.tenantId ?? "global"}:${input.status ?? "all"}:${input.riskLevel ?? "all"}:${input.offset}`;
+        return withCache(cacheKey, TTL.ALERTS_LIST, async () => {
+          const db = await getDb();
+          if (!db) throw new Error("Database unavailable");
+          const conditions = [];
+          // Tenant isolation: non-admin users only see their own tenant's AML alerts
+          if (ctx.tenantId !== null) conditions.push(eq(amlAlerts.tenantId, ctx.tenantId));
+          if (input.status) conditions.push(eq(amlAlerts.status, input.status as any));
+          if (input.riskLevel) conditions.push(eq(amlAlerts.riskLevel, input.riskLevel as any));
+          const where = conditions.length > 0 ? and(...conditions) : undefined;
+          const [rows, [{ total }]] = await Promise.all([
+            db.select().from(amlAlerts).where(where).orderBy(desc(amlAlerts.createdAt)).limit(input.limit).offset(input.offset),
+            db.select({ total: count() }).from(amlAlerts).where(where),
+          ]);
+          return { items: rows, total };
+        });
       }),
 
     review: writeProcedure
@@ -463,9 +489,20 @@ export const amlRouter = router({
       .mutation(async ({ input, ctx }) => {
         const db = await getDb();
         if (!db) throw new Error("Database unavailable");
+        // Permify: check that user can review this AML alert
+        const canReview = await permifyCheck("aml_alert", String(input.id), "update", String(ctx.user.id));
+        if (!canReview) throw new Error("Permission denied: cannot review AML alert");
         const [alert] = await db.update(amlAlerts)
           .set({ status: input.status, reviewedBy: ctx.user.id, reviewedAt: new Date(), reviewNotes: input.notes, investigationId: input.investigationId, updatedAt: new Date() })
           .where(eq(amlAlerts.id, input.id)).returning();
+        // Dapr: publish status change event
+        void publishAmlAlert({ alertId: alert.id, alertType: alert.riskLevel ?? "medium", riskScore: 0, autoEscalated: false }).catch(() => {});
+        // Temporal: start AML escalation workflow if escalated
+        if (input.status === "escalated") {
+          startAmlWorkflow({ alertRef: alert.alertRef, alertId: alert.id, riskScore: 0, subjectName: "" }).catch(e => console.warn("[AML Temporal escalate]", e));
+        }
+        // Invalidate cached alert lists
+        void invalidateCache(`aml:alerts:tenant:${ctx.tenantId ?? "global"}`).catch(() => {});
         return alert;
       }),
 
