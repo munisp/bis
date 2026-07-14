@@ -9,10 +9,18 @@ import {
   real,
   boolean,
   json,
+  jsonb,
   serial,
   index,
+  uniqueIndex,
   bigint,
+  uuid,
+  inet,
+  check,
+  pgView,
+  pgMaterializedView,
 } from "drizzle-orm/pg-core";
+import { sql, relations } from "drizzle-orm";
 
 // ─── Enums ────────────────────────────────────────────────────────────────────
 
@@ -36,7 +44,7 @@ export const reportStatusEnum = pgEnum("report_status", ["generating", "ready", 
 
 export const users = pgTable("users", {
   id: serial("id").primaryKey(),
-  tenantId: integer("tenantId"),  // FK to tenants.id — null for platform admins
+  tenantId: integer("tenantId").references(() => tenants.id, { onDelete: "set null" }),  // null for platform admins
   openId: varchar("openId", { length: 64 }).notNull().unique(),
   name: text("name"),
   email: varchar("email", { length: 320 }),
@@ -74,13 +82,15 @@ export const investigations = pgTable("investigations", {
   purpose: text("purpose"),
   assignedTo: integer("assignedTo"),
   createdBy: integer("createdBy").notNull(),
-  dataSources: json("dataSources"),
-  gatewayResults: json("gatewayResults"),
-  riskFactors: json("riskFactors"),
+  dataSources: jsonb("dataSources"),
+  gatewayResults: jsonb("gatewayResults"),
+  riskFactors: jsonb("riskFactors"),
   dueAt: timestamp("dueAt"),
   // Link to NG Screening candidate profile — set when a background check is initiated from this investigation
   candidateProfileId: integer("candidateProfileId"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  deletedAt: timestamp("deletedAt"),
+  deletedBy: integer("deletedBy"),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
   completedAt: timestamp("completedAt"),
 },
@@ -94,6 +104,10 @@ export const investigations = pgTable("investigations", {
     investigations_subject_name_idx: index("investigations_subject_name_idx").on(table.subjectName),
     investigations_nin_idx: index("investigations_nin_idx").on(table.nin),
     investigations_bvn_idx: index("investigations_bvn_idx").on(table.bvn),
+    investigations_tenant_status_idx: uniqueIndex("investigations_tenant_status_idx").on(table.tenantId, table.ref),
+    investigations_deleted_at_idx: index("investigations_deleted_at_idx").on(table.deletedAt),
+    investigations_risk_score_check: check("investigations_risk_score_check", sql`"riskScore" IS NULL OR ("riskScore" >= 0 AND "riskScore" <= 100)`),
+    investigations_search_idx: index("investigations_search_idx").using("gin", sql`to_tsvector('english', coalesce("subjectName", '') || ' ' || coalesce("ref", '') || ' ' || coalesce("nin", '') || ' ' || coalesce("bvn", ''))`),
   }));
 
 export type Investigation = typeof investigations.$inferSelect;
@@ -119,6 +133,8 @@ export const alerts = pgTable("alerts", {
   resolvedBy: integer("resolvedBy"),
   resolvedAt: timestamp("resolvedAt"),
   dismissed: boolean("dismissed").notNull().default(false),
+  deletedAt: timestamp("deletedAt"),
+  deletedBy: integer("deletedBy"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 },
   (table) => ({
@@ -146,18 +162,20 @@ export const kycRecords = pgTable("kyc_records", {
   phone: varchar("phone", { length: 20 }),
   status: kycStatusEnum("status").notNull().default("pending"),
   riskScore: real("riskScore"),
-  ninResult: json("ninResult"),
-  bvnResult: json("bvnResult"),
-  sanctionsResult: json("sanctionsResult"),
-  pepResult: json("pepResult"),
-  creditResult: json("creditResult"),
+  ninResult: jsonb("ninResult"),
+  bvnResult: jsonb("bvnResult"),
+  sanctionsResult: jsonb("sanctionsResult"),
+  pepResult: jsonb("pepResult"),
+  creditResult: jsonb("creditResult"),
   subjectRef: varchar("subjectRef", { length: 64 }),
   onboardingApplicationId: integer("onboardingApplicationId"),
   biometricStatus: varchar("biometricStatus", { length: 32 }).default("not_enrolled"),
   biometricFaceId: varchar("biometricFaceId", { length: 128 }),
-  documentOcrData: json("documentOcrData"),
+  documentOcrData: jsonb("documentOcrData"),
   createdBy: integer("createdBy").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  deletedAt: timestamp("deletedAt"),
+  deletedBy: integer("deletedBy"),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
 },
   (table) => ({
@@ -168,6 +186,8 @@ export const kycRecords = pgTable("kyc_records", {
     kyc_records_nin_idx: index("kyc_records_nin_idx").on(table.nin),
     kyc_records_bvn_idx: index("kyc_records_bvn_idx").on(table.bvn),
     kyc_records_onboarding_app_idx: index("kyc_records_onboarding_app_idx").on(table.onboardingApplicationId),
+    kyc_records_risk_score_check: check("kyc_records_risk_score_check", sql`"riskScore" IS NULL OR ("riskScore" >= 0 AND "riskScore" <= 100)`),
+    kyc_records_search_idx: index("kyc_records_search_idx").using("gin", sql`to_tsvector('english', coalesce("subjectName", '') || ' ' || coalesce("nin", '') || ' ' || coalesce("bvn", ''))`),
   }));
 export type KycRecord = typeof kycRecords.$inferSelect;
 export type InsertKycRecord = typeof kycRecords.$inferInsert;
@@ -184,7 +204,7 @@ export const auditLog = pgTable("audit_log", {
   targetRef: varchar("targetRef", { length: 64 }),
   result: auditResultEnum("result").notNull().default("success"),
   ipAddress: varchar("ipAddress", { length: 45 }),
-  detail: json("detail"),
+  detail: jsonb("detail"),
   // HMAC-SHA256 integrity hash for tamper detection
   // Computed as: HMAC-SHA256(AUDIT_HMAC_SECRET, userId|category|action|targetRef|result|createdAt)
   integrityHash: varchar("integrityHash", { length: 64 }),
@@ -219,9 +239,11 @@ export const fieldTasks = pgTable("field_tasks", {
   gpsLng: real("gpsLng"),
   deadline: timestamp("deadline"),
   instructions: text("instructions"),
-  result: json("result"),
+  result: jsonb("result"),
   createdBy: integer("createdBy").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  deletedAt: timestamp("deletedAt"),
+  deletedBy: integer("deletedBy"),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
   completedAt: timestamp("completedAt"),
 },
@@ -247,9 +269,11 @@ export const reports = pgTable("reports", {
   format: reportFormatEnum("format").notNull().default("pdf"),
   status: reportStatusEnum("status").notNull().default("generating"),
   fileUrl: text("fileUrl"),
-  sections: json("sections"),
+  sections: jsonb("sections"),
   generatedBy: integer("generatedBy").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  deletedAt: timestamp("deletedAt"),
+  deletedBy: integer("deletedBy"),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
 },
   (table) => ({
@@ -315,7 +339,7 @@ export const fieldAgents = pgTable("field_agents", {
   lga: varchar("lga", { length: 64 }),
   status: agentStatusEnum("status").notNull().default("active"),
   tier: agentTierEnum("tier").notNull().default("junior"),
-  specializations: json("specializations").$type<string[]>().default([]),
+  specializations: jsonb("specializations").$type<string[]>().default([]),
   tasksCompleted: integer("tasksCompleted").notNull().default(0),
   tasksActive: integer("tasksActive").notNull().default(0),
   rating: real("rating").default(0),
@@ -325,6 +349,8 @@ export const fieldAgents = pgTable("field_agents", {
   notes: text("notes"),
   createdBy: integer("createdBy").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  deletedAt: timestamp("deletedAt"),
+  deletedBy: integer("deletedBy"),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
 },
   (table) => ({
@@ -354,7 +380,7 @@ export const dataSources = pgTable("data_sources", {
   requestsToday: integer("requestsToday").default(0),
   requestsTotal: integer("requestsTotal").default(0),
   enabled: boolean("enabled").notNull().default(true),
-  config: json("config"),
+  config: jsonb("config"),
   lastCheckedAt: timestamp("lastCheckedAt"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
@@ -378,7 +404,7 @@ export const monitors = pgTable("monitors", {
   alertCount: integer("alertCount").notNull().default(0),
   lastAlertAt: timestamp("lastAlertAt"),
   expiresAt: timestamp("expiresAt"),
-  config: json("config"),
+  config: jsonb("config"),
   createdBy: integer("createdBy").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
@@ -402,8 +428,8 @@ export const screeningRequests = pgTable("screening_requests", {
   subjectName: varchar("subjectName", { length: 255 }).notNull(),
   subjectType: subjectTypeEnum("subjectType").notNull().default("individual"),
   priority: priorityEnum("priority").notNull().default("medium"),
-  requestData: json("requestData"),
-  result: json("result"),
+  requestData: jsonb("requestData"),
+  result: jsonb("result"),
   resultSummary: text("resultSummary"),
   riskScore: real("riskScore"),
   processedBy: integer("processedBy"),
@@ -456,7 +482,7 @@ export const apiKeys = pgTable("api_keys", {
   keyHash: varchar("keyHash", { length: 128 }).notNull().unique(),
   keyPrefix: varchar("keyPrefix", { length: 16 }).notNull(),
   status: keyStatusEnum("status").notNull().default("active"),
-  permissions: json("permissions").$type<string[]>().default([]),
+  permissions: jsonb("permissions").$type<string[]>().default([]),
   lastUsedAt: timestamp("lastUsedAt"),
   expiresAt: timestamp("expiresAt"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
@@ -469,7 +495,7 @@ export const webhooks = pgTable("webhooks", {
   tenantId: integer("tenantId").notNull(),
   url: text("url").notNull(),
   status: webhookStatusEnum("status").notNull().default("active"),
-  events: json("events").$type<string[]>().default([]),
+  events: jsonb("events").$type<string[]>().default([]),
   secret: varchar("secret", { length: 64 }),
   failureCount: integer("failureCount").notNull().default(0),
   lastDeliveredAt: timestamp("lastDeliveredAt"),
@@ -483,7 +509,7 @@ export const platformSettings = pgTable("platform_settings", {
   id: serial("id").primaryKey(),
   namespace: varchar("namespace", { length: 64 }).notNull().default("default"),
   key: varchar("key", { length: 128 }).notNull(),
-  value: json("value"),
+  value: jsonb("value"),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
   updatedBy: varchar("updatedBy", { length: 255 }),
 });
@@ -514,11 +540,11 @@ export const onboardingApplications = pgTable("onboarding_applications", {
   pepDeclaration: boolean("pepDeclaration").default(false),
   agreedToTerms: boolean("agreedToTerms").default(false),
   status: onboardingApplicationStatusEnum("status").notNull().default("draft"),
-  stakeholders: json("stakeholders").$type<any[]>().default([]),
-  documentUrls: json("documentUrls").$type<{ name: string; url: string; key: string; uploadedAt: string }[]>().default([]),
+  stakeholders: jsonb("stakeholders").$type<any[]>().default([]),
+  documentUrls: jsonb("documentUrls").$type<{ name: string; url: string; key: string; uploadedAt: string }[]>().default([]),
   createdBy: varchar("createdBy", { length: 255 }),
   adminNotes: text("adminNotes"),
-  reviewerLog: json("reviewerLog").$type<Array<{ authorId: number; authorName: string; note: string; createdAt: string }>>().default([]),
+  reviewerLog: jsonb("reviewerLog").$type<Array<{ authorId: number; authorName: string; note: string; createdAt: string }>>().default([]),
   slaDeadline: timestamp("slaDeadline"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
@@ -622,7 +648,7 @@ export const apiTokens = pgTable("api_tokens", {
   prefix: varchar("prefix", { length: 20 }).notNull(),
   /** SHA-256 hash of the full token — never store plaintext */
   tokenHash: varchar("tokenHash", { length: 64 }).notNull().unique(),
-  scopes: json("scopes").$type<string[]>().notNull().default([]),
+  scopes: jsonb("scopes").$type<string[]>().notNull().default([]),
   /** Requests per minute limit */
   rateLimit: integer("rateLimit").notNull().default(60),
   usageCount: integer("usageCount").notNull().default(0),
@@ -896,14 +922,16 @@ export const cases = pgTable("cases", {
   regulatoryFramework: varchar("regulatoryFramework", { length: 200 }),
   leadAnalystId: integer("leadAnalystId"),
   tenantId: integer("tenantId"),
-  investigationRefs: json("investigationRefs").$type<string[]>().default([]),
-  tags: json("tags").$type<string[]>().default([]),
+  investigationRefs: jsonb("investigationRefs").$type<string[]>().default([]),
+  tags: jsonb("tags").$type<string[]>().default([]),
   dueAt: timestamp("dueAt"),
   closedAt: timestamp("closedAt"),
   closureReason: text("closureReason"),
   riskScore: integer("riskScore"),
   createdBy: integer("createdBy"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  deletedAt: timestamp("deletedAt"),
+  deletedBy: integer("deletedBy"),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
 },
   (table) => ({
@@ -911,6 +939,11 @@ export const cases = pgTable("cases", {
     cases_created_at_idx: index("cases_created_at_idx").on(table.createdAt),
     cases_lead_analyst_id_idx: index("cases_lead_analyst_id_idx").on(table.leadAnalystId),
     cases_priority_idx: index("cases_priority_idx").on(table.priority),
+    cases_created_by_idx: index("cases_created_by_idx").on(table.createdBy),
+    cases_tenant_idx: index("cases_tenant_idx").on(table.tenantId),
+    cases_deleted_at_idx: index("cases_deleted_at_idx").on(table.deletedAt),
+    cases_search_idx: index("cases_search_idx").using("gin", sql`to_tsvector('english', coalesce("title", '') || ' ' || coalesce("ref", '') || ' ' || coalesce("summary", ''))`),
+    cases_risk_score_check: check("cases_risk_score_check", sql`"riskScore" IS NULL OR ("riskScore" >= 0 AND "riskScore" <= 100)`),
   }));
 export type Case = typeof cases.$inferSelect;
 export type InsertCase = typeof cases.$inferInsert;
@@ -960,7 +993,7 @@ export const caseTimeline = pgTable("case_timeline", {
   caseId: integer("caseId").notNull().references(() => cases.id, { onDelete: "cascade" }),
   eventType: caseTimelineEventTypeEnum("eventType").notNull(),
   title: varchar("title", { length: 300 }).notNull(),
-  detail: json("detail"),
+  detail: jsonb("detail"),
   actorId: integer("actorId"),
   actorName: varchar("actorName", { length: 200 }),
   actorRole: varchar("actorRole", { length: 100 }),
@@ -1015,7 +1048,7 @@ export const ollamaModels = pgTable("ollama_models", {
   quantization: varchar("quantization", { length: 20 }),
   sizeBytes: integer("sizeBytes"),
   status: varchar("status", { length: 20 }).notNull().default("available"),
-  useCase: json("useCase").$type<string[]>().default([]),
+  useCase: jsonb("useCase").$type<string[]>().default([]),
   isDefault: boolean("isDefault").notNull().default(false),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
@@ -1116,15 +1149,17 @@ export const lexSubmissions = pgTable("lex_submissions", {
   subjectPhone: varchar("subjectPhone", { length: 20 }),
   subjectAddress: text("subjectAddress"),
   narrative: text("narrative").notNull(),
-  documents: json("documents").$type<string[]>().default([]),
+  documents: jsonb("documents").$type<string[]>().default([]),
   status: lexSubmissionStatusEnum("status").notNull().default("pending"),
   validationScore: integer("validationScore"),
-  validationNotes: json("validationNotes"),
+  validationNotes: jsonb("validationNotes"),
   reviewedBy: integer("reviewedBy"),
   reviewedAt: timestamp("reviewedAt"),
   linkedCaseId: integer("linkedCaseId").references(() => cases.id),
   rejectionReason: text("rejectionReason"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  deletedAt: timestamp("deletedAt"),
+  deletedBy: integer("deletedBy"),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
 },
   (table) => ({
@@ -1159,7 +1194,7 @@ export const userTotpSecrets = pgTable("user_totp_secrets", {
   userId: integer("userId").notNull().references(() => users.id, { onDelete: "cascade" }).unique(),
   secret: varchar("secret", { length: 64 }).notNull(),
   verified: boolean("verified").notNull().default(false),
-  backupCodes: json("backupCodes").$type<string[]>().default([]),
+  backupCodes: jsonb("backupCodes").$type<string[]>().default([]),
   enabledAt: timestamp("enabledAt"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
@@ -1202,7 +1237,7 @@ export const exportSchedules = pgTable("export_schedules", {
   name: varchar("name", { length: 255 }).notNull(),
   exportType: varchar("exportType", { length: 64 }).notNull(),
   format: varchar("format", { length: 16 }).notNull().default("csv"),
-  filters: json("filters"),
+  filters: jsonb("filters"),
   cronExpression: varchar("cronExpression", { length: 64 }).notNull().default("0 8 * * 1"),
   enabled: boolean("enabled").notNull().default(true),
   lastRunAt: timestamp("lastRunAt"),
@@ -1250,7 +1285,7 @@ export const transactions = pgTable("transactions", {
   narration: text("narration"),
   amlRiskLevel: amlRiskLevelEnum("amlRiskLevel").default("low"),
   amlScore: real("amlScore").default(0),
-  amlFlags: json("amlFlags"),
+  amlFlags: jsonb("amlFlags"),
   flaggedAt: timestamp("flaggedAt"),
   flaggedBy: integer("flaggedBy").references(() => users.id),
   investigationId: integer("investigationId").references(() => investigations.id),
@@ -1260,6 +1295,8 @@ export const transactions = pgTable("transactions", {
   archivedTier: varchar("archivedTier", { length: 8 }),  // 'warm' | 'cold' | null
   archivedAt: timestamp("archivedAt"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  deletedAt: timestamp("deletedAt"),
+  deletedBy: integer("deletedBy"),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
 },
   (table) => ({
@@ -1315,6 +1352,8 @@ export const amlAlerts = pgTable("aml_alerts", {
   reviewNotes: text("reviewNotes"),
   investigationId: integer("investigationId").references(() => investigations.id),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  deletedAt: timestamp("deletedAt"),
+  deletedBy: integer("deletedBy"),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
 },
   (table) => ({
@@ -1346,7 +1385,7 @@ export const swiftMessages = pgTable("swift_messages", {
   beneficiaryCustomer: varchar("beneficiaryCustomer", { length: 255 }),
   remittanceInfo: text("remittanceInfo"),
   rawMessage: text("rawMessage"),
-  parsedFields: json("parsedFields"),
+  parsedFields: jsonb("parsedFields"),
   complianceStatus: varchar("complianceStatus", { length: 32 }).default("pending"),
   complianceNotes: text("complianceNotes"),
   transactionId: integer("transactionId").references(() => transactions.id),
@@ -1440,7 +1479,7 @@ export const sarFilings = pgTable("sar_filings", {
   suspiciousCurrency: varchar("suspiciousCurrency", { length: 3 }).default("NGN"),
   activityStartDate: timestamp("activityStartDate"),
   activityEndDate: timestamp("activityEndDate"),
-  relatedTransactions: json("relatedTransactions"),
+  relatedTransactions: jsonb("relatedTransactions"),
   relatedInvestigationId: integer("relatedInvestigationId").references(() => investigations.id),
   relatedGoamlFilingId: integer("relatedGoamlFilingId").references(() => goamlFilings.id),
   createdBy: integer("createdBy").references(() => users.id),
@@ -1454,6 +1493,8 @@ export const sarFilings = pgTable("sar_filings", {
   filingReference: varchar("filingReference", { length: 64 }),
   acknowledgedAt: timestamp("acknowledgedAt"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+  deletedAt: timestamp("deletedAt"),
+  deletedBy: integer("deletedBy"),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
 },
   (table) => ({
@@ -1493,9 +1534,9 @@ export const lettersOfCredit = pgTable("letters_of_credit", {
   latestShipmentDate: timestamp("latestShipmentDate"),
   expiryDate: timestamp("expiryDate"),
   presentationPeriod: integer("presentationPeriod").default(21),
-  documents: json("documents"),
-  amendments: json("amendments"),
-  discrepancies: json("discrepancies"),
+  documents: jsonb("documents"),
+  amendments: jsonb("amendments"),
+  discrepancies: jsonb("discrepancies"),
   investigationId: integer("investigationId").references(() => investigations.id),
   createdBy: integer("createdBy").references(() => users.id),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
@@ -1519,8 +1560,8 @@ export const correspondentBanks = pgTable("correspondent_banks", {
   relationshipSince: timestamp("relationshipSince"),
   lastReviewDate: timestamp("lastReviewDate"),
   nextReviewDate: timestamp("nextReviewDate"),
-  services: json("services"),
-  currencies: json("currencies"),
+  services: jsonb("services"),
+  currencies: jsonb("currencies"),
   nostroAccountCount: integer("nostroAccountCount").default(0),
   annualVolume: real("annualVolume"),
   amlPolicyUrl: text("amlPolicyUrl"),
@@ -1567,7 +1608,7 @@ export const evidenceItems = pgTable("evidence_items", {
   collectedBy: integer("collectedBy").references(() => users.id),
   collectedAt: timestamp("collectedAt").defaultNow(),
   collectionLocation: text("collectionLocation"),
-  chainOfCustody: json("chainOfCustody"),
+  chainOfCustody: jsonb("chainOfCustody"),
   integrityVerified: boolean("integrityVerified").default(false),
   integrityVerifiedAt: timestamp("integrityVerifiedAt"),
   integrityVerifiedBy: integer("integrityVerifiedBy").references(() => users.id),
@@ -1601,7 +1642,7 @@ export const regulatoryReports = pgTable("regulatory_reports", {
   submittedBy: integer("submittedBy").references(() => users.id),
   acknowledgementRef: varchar("acknowledgementRef", { length: 64 }),
   rejectionReason: text("rejectionReason"),
-  metadata: json("metadata"),
+  metadata: jsonb("metadata"),
   createdBy: integer("createdBy").references(() => users.id),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
@@ -1644,8 +1685,8 @@ export const nigerianDataBundleRuns = pgTable("nigerian_data_bundle_runs", {
   bvn: varchar("bvn", { length: 22 }),
   phone: varchar("phone", { length: 20 }),
   dateOfBirth: varchar("dateOfBirth", { length: 20 }),
-  selectedSources: json("selectedSources").$type<string[]>().notNull(),
-  results: json("results").$type<Record<string, unknown>[]>().notNull(),
+  selectedSources: jsonb("selectedSources").$type<string[]>().notNull(),
+  results: jsonb("results").$type<Record<string, unknown>[]>().notNull(),
   overallScore: integer("overallScore").notNull().default(0),
   verifiedCount: integer("verifiedCount").notNull().default(0),
   errorCount: integer("errorCount").notNull().default(0),
@@ -1827,7 +1868,7 @@ export const kycDocuments = pgTable("kyc_documents", {
   capturedAt: timestamp("capturedAt"),
   // previousOcrData: snapshot of documentOcrData taken before the most recent re-run,
   // used to render a before/after diff view in the DocumentReviewQueue ReviewDialog.
-  previousOcrData: json("previousOcrData"),
+  previousOcrData: jsonb("previousOcrData"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
 },
@@ -2038,7 +2079,7 @@ export const insiderEvents = pgTable("insider_events", {
   resourcePath: text("resourcePath"),
   payloadBytes: bigint("payloadBytes", { mode: "number" }),
   ruleId:       varchar("ruleId", { length: 64 }),
-  evidence:     json("evidence"),
+  evidence:     jsonb("evidence"),
   assignedTo:   integer("assignedTo").references(() => users.id, { onDelete: "set null" }),
   resolvedAt:   timestamp("resolvedAt"),
   resolvedBy:   integer("resolvedBy").references(() => users.id, { onDelete: "set null" }),
@@ -2068,8 +2109,8 @@ export const uebaProfiles = pgTable("ueba_profiles", {
   anomalyScore:    real("anomalyScore").notNull().default(0),
   driftScore:      real("driftScore").notNull().default(0),
   riskLevel:       insiderSeverityEnum("riskLevel").notNull().default("info"),
-  hourHistogram:   json("hourHistogram"),
-  dayHistogram:    json("dayHistogram"),
+  hourHistogram:   jsonb("hourHistogram"),
+  dayHistogram:    jsonb("dayHistogram"),
   uniqueIpCount:   integer("uniqueIpCount").notNull().default(0),
   offHoursRatio:   real("offHoursRatio").notNull().default(0),
   privChangeCount: integer("privChangeCount").notNull().default(0),
@@ -2103,7 +2144,7 @@ export const accessReviews = pgTable("access_reviews", {
   completedAt:    timestamp("completedAt"),
   completedBy:    integer("completedBy").references(() => users.id, { onDelete: "set null" }),
   decision:       text("decision"),
-  permifyChanges: json("permifyChanges"),
+  permifyChanges: jsonb("permifyChanges"),
   createdAt:      timestamp("createdAt").defaultNow().notNull(),
   updatedAt:      timestamp("updatedAt").defaultNow().notNull(),
 }, (t) => ({
@@ -2181,7 +2222,7 @@ export const candidateProfiles = pgTable("candidate_profiles", {
   currentAddress:    text("currentAddress"),
   currentState:      varchar("currentState", { length: 64 }),
   currentLga:        varchar("currentLga", { length: 64 }),
-  addressHistory:    json("addressHistory").$type<Array<{
+  addressHistory:    jsonb("addressHistory").$type<Array<{
     address: string; state: string; lga: string; from: string; to?: string;
   }>>().default([]),
   passportNumber:    varchar("passportNumber", { length: 20 }),
@@ -2212,12 +2253,12 @@ export const screeningPackages = pgTable("screening_packages", {
   name:            varchar("name", { length: 128 }).notNull(),
   description:     text("description"),
   tier:            packageTierEnum("tier").notNull().default("standard"),
-  screeningTypes:  json("screeningTypes").$type<string[]>().notNull().default([]),
+  screeningTypes:  jsonb("screeningTypes").$type<string[]>().notNull().default([]),
   priceNgn:        integer("priceNgn").notNull().default(0),   // kobo
   etaHours:        integer("etaHours").notNull().default(48),
   isPublic:        boolean("isPublic").notNull().default(false),
   isActive:        boolean("isActive").notNull().default(true),
-  config:          json("config"),
+  config:          jsonb("config"),
   createdBy:       integer("createdBy").references(() => users.id, { onDelete: "set null" }),
   createdAt:       timestamp("createdAt").defaultNow().notNull(),
   updatedAt:       timestamp("updatedAt").defaultNow().notNull(),
@@ -2237,8 +2278,8 @@ export const screeningPrograms = pgTable("screening_programs", {
   name:         varchar("name", { length: 128 }).notNull(),
   description:  text("description"),
   packageId:    integer("packageId").references(() => screeningPackages.id, { onDelete: "set null" }),
-  geoRules:     json("geoRules"),   // state-level compliance overrides
-  assessRules:  json("assessRules"), // auto-assess thresholds
+  geoRules:     jsonb("geoRules"),   // state-level compliance overrides
+  assessRules:  jsonb("assessRules"), // auto-assess thresholds
   isActive:     boolean("isActive").notNull().default(true),
   createdBy:    integer("createdBy").references(() => users.id, { onDelete: "set null" }),
   createdAt:    timestamp("createdAt").defaultNow().notNull(),
@@ -2260,10 +2301,10 @@ export const screeningOrders = pgTable("screening_orders", {
   programId:       integer("programId").references(() => screeningPrograms.id, { onDelete: "set null" }),
   status:          screeningStatusEnum("status").notNull().default("pending"),
   overallOutcome:  assessmentOutcomeEnum("overallOutcome"),
-  screeningTypes:  json("screeningTypes").$type<string[]>().notNull().default([]),
+  screeningTypes:  jsonb("screeningTypes").$type<string[]>().notNull().default([]),
   etaAt:           timestamp("etaAt"),
   completedAt:     timestamp("completedAt"),
-  tags:            json("tags").$type<string[]>().default([]),
+  tags:            jsonb("tags").$type<string[]>().default([]),
   temporalRunId:   varchar("temporalRunId", { length: 128 }),
   tigerBeetleRef:  varchar("tigerBeetleRef", { length: 64 }),
   // Link back to BIS investigation — set when order is created from investigation context
@@ -2271,6 +2312,8 @@ export const screeningOrders = pgTable("screening_orders", {
   priceNgn:        integer("priceNgn").default(0),
   notes:           text("notes"),
   createdBy:       integer("createdBy").references(() => users.id, { onDelete: "set null" }),
+  deletedAt:       timestamp("deletedAt"),
+  deletedBy:       integer("deletedBy"),
   createdAt:       timestamp("createdAt").defaultNow().notNull(),
   updatedAt:       timestamp("updatedAt").defaultNow().notNull(),
 }, (t) => ({
@@ -2290,7 +2333,7 @@ export const screeningResults = pgTable("screening_results", {
   screeningType:   screeningTypeEnum("screeningType").notNull(),
   status:          screeningStatusEnum("status").notNull().default("pending"),
   outcome:         assessmentOutcomeEnum("outcome"),
-  rawResult:       json("rawResult"),
+  rawResult:       jsonb("rawResult"),
   summary:         text("summary"),
   riskScore:       real("riskScore"),
   dataSourceRef:   varchar("dataSourceRef", { length: 64 }),
@@ -2395,7 +2438,7 @@ export const workPermits = pgTable("work_permits", {
   employerName:    varchar("employerName", { length: 255 }),
   worksiteId:      integer("worksiteId"),
   verificationStatus: assessmentOutcomeEnum("verificationStatus").default("pending"),
-  verificationData:   json("verificationData"),
+  verificationData:   jsonb("verificationData"),
   createdAt:       timestamp("createdAt").defaultNow().notNull(),
   updatedAt:       timestamp("updatedAt").defaultNow().notNull(),
 }, (t) => ({
@@ -2431,7 +2474,7 @@ export const screeningGeos = pgTable("screening_geos", {
   state:             varchar("state", { length: 64 }).notNull(),
   screeningType:     screeningTypeEnum("screeningType").notNull(),
   lookbackYears:     integer("lookbackYears"),          // null = no limit
-  excludedOffences:  json("excludedOffences").$type<string[]>().default([]),
+  excludedOffences:  jsonb("excludedOffences").$type<string[]>().default([]),
   requiresConsent:   boolean("requiresConsent").notNull().default(true),
   disclosureText:    text("disclosureText"),
   isActive:          boolean("isActive").notNull().default(true),
@@ -2452,7 +2495,7 @@ export const candidateStories = pgTable("candidate_stories", {
   candidateId:     integer("candidateId").references(() => candidateProfiles.id, { onDelete: "restrict" }).notNull(),
   screeningType:   screeningTypeEnum("screeningType").notNull(),
   story:           text("story").notNull(),
-  attachmentUrls:  json("attachmentUrls").$type<string[]>().default([]),
+  attachmentUrls:  jsonb("attachmentUrls").$type<string[]>().default([]),
   reviewedBy:      integer("reviewedBy").references(() => users.id, { onDelete: "set null" }),
   reviewNote:      text("reviewNote"),
   reviewedAt:      timestamp("reviewedAt"),
@@ -2486,9 +2529,9 @@ export const screeningAssessments = pgTable("screening_assessments", {
   tenantId:        integer("tenantId").references(() => tenants.id, { onDelete: "cascade" }).notNull(),
   packageId:       integer("packageId").references(() => screeningPackages.id, { onDelete: "set null" }),
   screeningType:   screeningTypeEnum("screeningType").notNull(),
-  clearConditions: json("clearConditions"),   // conditions that auto-clear
-  considerConditions: json("considerConditions"), // conditions that require manual review
-  adverseConditions:  json("adverseConditions"),  // conditions that auto-adverse
+  clearConditions: jsonb("clearConditions"),   // conditions that auto-clear
+  considerConditions: jsonb("considerConditions"), // conditions that require manual review
+  adverseConditions:  jsonb("adverseConditions"),  // conditions that auto-adverse
   isActive:        boolean("isActive").notNull().default(true),
   createdBy:       integer("createdBy").references(() => users.id, { onDelete: "set null" }),
   createdAt:       timestamp("createdAt").defaultNow().notNull(),
@@ -2515,7 +2558,7 @@ export const ngCourtRecords = pgTable("ng_court_records", {
   hearingDate:     date("hearingDate"),
   dispositionDate: date("dispositionDate"),
   isAppeal:        boolean("isAppeal").default(false),
-  rawData:         json("rawData"),
+  rawData:         jsonb("rawData"),
   createdAt:       timestamp("createdAt").defaultNow().notNull(),
 }, (t) => ({
   ncr_result_idx:    index("ncr_result_idx").on(t.resultId),
@@ -2539,7 +2582,7 @@ export const ngProfessionalLicences = pgTable("ng_professional_licences", {
   status:            assessmentOutcomeEnum("status").notNull().default("pending"),
   suspensionReason:  text("suspensionReason"),
   verificationDate:  date("verificationDate"),
-  rawData:           json("rawData"),
+  rawData:           jsonb("rawData"),
   createdAt:         timestamp("createdAt").defaultNow().notNull(),
 }, (t) => ({
   npl_result_idx:    index("npl_result_idx").on(t.resultId),
@@ -2556,7 +2599,7 @@ export const continuousChecks = pgTable("continuous_checks", {
   checkRef:        varchar("checkRef", { length: 32 }).notNull().unique(),
   tenantId:        integer("tenantId").references(() => tenants.id, { onDelete: "cascade" }).notNull(),
   candidateId:     integer("candidateId").references(() => candidateProfiles.id, { onDelete: "restrict" }).notNull(),
-  screeningTypes:  json("screeningTypes").$type<string[]>().notNull().default([]),
+  screeningTypes:  jsonb("screeningTypes").$type<string[]>().notNull().default([]),
   frequency:       varchar("frequency", { length: 32 }).notNull().default("monthly"),
   status:          monitorStatusEnum("status").notNull().default("active"),
   lastCheckedAt:   timestamp("lastCheckedAt"),
@@ -2580,12 +2623,12 @@ export const screeningAiSummaries = pgTable("screening_ai_summaries", {
   id:              serial("id").primaryKey(),
   summaryRef:      varchar("summaryRef", { length: 32 }).notNull().unique(),
   investigationRef: varchar("investigationRef", { length: 32 }).notNull(),
-  orderRefs:       json("orderRefs").$type<string[]>().notNull().default([]),
+  orderRefs:       jsonb("orderRefs").$type<string[]>().notNull().default([]),
   overallRisk:     varchar("overallRisk", { length: 16 }).notNull(),
   headline:        text("headline").notNull(),
-  keyFindings:     json("keyFindings").$type<string[]>().notNull().default([]),
-  redFlags:        json("redFlags").$type<string[]>().notNull().default([]),
-  recommendations: json("recommendations").$type<string[]>().notNull().default([]),
+  keyFindings:     jsonb("keyFindings").$type<string[]>().notNull().default([]),
+  redFlags:        jsonb("redFlags").$type<string[]>().notNull().default([]),
+  recommendations: jsonb("recommendations").$type<string[]>().notNull().default([]),
   fullNarrative:   text("fullNarrative").notNull(),
   compositeScore:  real("compositeScore"),
   modelVersion:    varchar("modelVersion", { length: 32 }).default("gpt-4o"),
@@ -2612,10 +2655,10 @@ export const corporateScreeningProfiles = pgTable("corporate_screening_profiles"
   registeredAddress: text("registeredAddress"),
   status:          screeningStatusEnum("status").notNull().default("pending"),
   overallOutcome:  assessmentOutcomeEnum("overallOutcome"),
-  cacResult:       json("cacResult"),
-  firsResult:      json("firsResult"),
-  directorsResult: json("directorsResult"),
-  sanctionsResult: json("sanctionsResult"),
+  cacResult:       jsonb("cacResult"),
+  firsResult:      jsonb("firsResult"),
+  directorsResult: jsonb("directorsResult"),
+  sanctionsResult: jsonb("sanctionsResult"),
   riskScore:       real("riskScore"),
   notes:           text("notes"),
   createdBy:       integer("createdBy").references(() => users.id, { onDelete: "set null" }),
@@ -2650,13 +2693,13 @@ export const fieldVisitReports = pgTable("field_visit_reports", {
   subjectPresent:    boolean("subjectPresent"),
   addressConfirmed:  boolean("addressConfirmed"),
   findings:          text("findings"),
-  structuredFindings: json("structuredFindings"),
-  photoUrls:         json("photoUrls").$type<string[]>().default([]),
+  structuredFindings: jsonb("structuredFindings"),
+  photoUrls:         jsonb("photoUrls").$type<string[]>().default([]),
   // Data completeness
   dataCompleteness:  real("dataCompleteness"),           // 0–100 coverage score
-  sourcesChecked:    json("sourcesChecked").$type<string[]>().default([]),
-  sourcesReturned:   json("sourcesReturned").$type<string[]>().default([]),
-  recommendedNextSteps: json("recommendedNextSteps").$type<string[]>().default([]),
+  sourcesChecked:    jsonb("sourcesChecked").$type<string[]>().default([]),
+  sourcesReturned:   jsonb("sourcesReturned").$type<string[]>().default([]),
+  recommendedNextSteps: jsonb("recommendedNextSteps").$type<string[]>().default([]),
   // Status
   outcome:           varchar("outcome", { length: 32 }),  // confirmed / unconfirmed / inconclusive
   submittedAt:       timestamp("submittedAt"),
@@ -2744,7 +2787,7 @@ export const criminalRecordRequests = pgTable("criminal_record_requests", {
   priority:         priorityEnum("priority").default("medium").notNull(),
   status:           criminalRequestStatusEnum("status").default("draft").notNull(),
   purpose:          text("purpose"),                           // reason for request
-  requestedChecks:  json("requestedChecks").$type<string[]>().default([]), // e.g. ["arrest", "conviction", "warrant"]
+  requestedChecks:  jsonb("requestedChecks").$type<string[]>().default([]), // e.g. ["arrest", "conviction", "warrant"]
   // Timestamps
   submittedAt:      timestamp("submittedAt"),
   acknowledgedAt:   timestamp("acknowledgedAt"),
@@ -2789,7 +2832,7 @@ export const criminalRecords = pgTable("criminal_records", {
   dob:               date("dob"),
   gender:            varchar("gender", { length: 16 }),
   nationality:       varchar("nationality", { length: 64 }),
-  aliases:           json("aliases").$type<string[]>().default([]),
+  aliases:           jsonb("aliases").$type<string[]>().default([]),
   // Offence
   offenceCategory:   offenceCategoryEnum("offenceCategory").notNull(),
   offenceCode:       varchar("offenceCode", { length: 32 }),    // e.g. "S.319 CC"
@@ -2819,7 +2862,7 @@ export const criminalRecords = pgTable("criminal_records", {
   confidence:        real("confidence"),                        // 0–1 confidence score
   verifiedBy:        integer("verifiedBy").references(() => users.id, { onDelete: "set null" }),
   verifiedAt:        timestamp("verifiedAt"),
-  rawPayload:        json("rawPayload"),                        // original API/form payload
+  rawPayload:        jsonb("rawPayload"),                        // original API/form payload
   // Tracking
   recordedBy:        integer("recordedBy").references(() => users.id, { onDelete: "set null" }),
   createdAt:         timestamp("createdAt").defaultNow().notNull(),
@@ -2874,7 +2917,7 @@ export const criminalRecordAudit = pgTable("criminal_record_audit", {
   action:     varchar("action", { length: 64 }).notNull(),  // submitted | acknowledged | record_ingested | status_changed | attachment_uploaded | verified
   actorId:    integer("actorId").references(() => users.id, { onDelete: "set null" }),
   actorName:  text("actorName"),
-  details:    json("details"),
+  details:    jsonb("details"),
   createdAt:  timestamp("createdAt").defaultNow().notNull(),
 }, (t) => ({
   cra2_req_idx: index("cra2_req_idx").on(t.requestRef),
@@ -2919,7 +2962,7 @@ export const tigerbeetleTransfers = pgTable("tigerbeetle_transfers", {
   ledger:          integer("ledger").notNull().default(1),
   code:            integer("code").notNull().default(1),
   flags:           integer("flags").default(0),
-  userData:        json("userData"),
+  userData:        jsonb("userData"),
   tenantId:        integer("tenantId").references(() => tenants.id, { onDelete: "set null" }),
   txRef:           varchar("txRef", { length: 128 }),
   reconciledAt:    timestamp("reconciledAt"),
@@ -2934,15 +2977,15 @@ export type TigerBeetleTransfer = typeof tigerbeetleTransfers.$inferSelect;
 export type InsertTigerBeetleTransfer = typeof tigerbeetleTransfers.$inferInsert;
 
 // ── temporal_workflow_state ───────────────────────────────────────────────────
-export const temporalWorkflowState = pgTable("temporal_workflow_state", {
+export const temporalWorkflowStates = pgTable("temporal_workflow_state", {
   id:             serial("id").primaryKey(),
   workflowId:     varchar("workflowId", { length: 256 }).notNull().unique(),
   runId:          varchar("runId", { length: 256 }),
   workflowType:   varchar("workflowType", { length: 128 }).notNull(),
   namespace:      varchar("namespace", { length: 128 }).notNull().default("bis"),
   status:         varchar("status", { length: 32 }).notNull().default("running"),
-  input:          json("input"),
-  result:         json("result"),
+  input:          jsonb("input"),
+  result:         jsonb("result"),
   errorMessage:   text("errorMessage"),
   tenantId:       integer("tenantId").references(() => tenants.id, { onDelete: "set null" }),
   initiatedBy:    integer("initiatedBy").references(() => users.id, { onDelete: "set null" }),
@@ -2957,15 +3000,15 @@ export const temporalWorkflowState = pgTable("temporal_workflow_state", {
   tws_tenant_idx:  index("tws_tenant_idx").on(t.tenantId),
   tws_type_idx:    index("tws_type_idx").on(t.workflowType),
 }));
-export type TemporalWorkflowState = typeof temporalWorkflowState.$inferSelect;
-export type InsertTemporalWorkflowState = typeof temporalWorkflowState.$inferInsert;
+export type TemporalWorkflowState = typeof temporalWorkflowStates.$inferSelect;
+export type InsertTemporalWorkflowState = typeof temporalWorkflowStates.$inferInsert;
 
 // ── dapr_event_log ────────────────────────────────────────────────────────────
-export const daprEventLog = pgTable("dapr_event_log", {
+export const daprSubscriptionStates = pgTable("dapr_event_log", {
   id:          serial("id").primaryKey(),
   topic:       varchar("topic", { length: 128 }).notNull(),
   pubsubName:  varchar("pubsubName", { length: 64 }).notNull().default("bis-pubsub"),
-  payload:     json("payload").notNull(),
+  payload:     jsonb("payload").notNull(),
   status:      varchar("status", { length: 32 }).notNull().default("published"),
   tenantId:    integer("tenantId").references(() => tenants.id, { onDelete: "set null" }),
   entityRef:   varchar("entityRef", { length: 128 }),
@@ -2977,11 +3020,11 @@ export const daprEventLog = pgTable("dapr_event_log", {
   del_tenant_idx: index("del_tenant_idx").on(t.tenantId),
   del_ts_idx:     index("del_ts_idx").on(t.publishedAt),
 }));
-export type DaprEventLog = typeof daprEventLog.$inferSelect;
-export type InsertDaprEventLog = typeof daprEventLog.$inferInsert;
+export type DaprEventLog = typeof daprSubscriptionStates.$inferSelect;
+export type InsertDaprEventLog = typeof daprSubscriptionStates.$inferInsert;
 
 // ── apisix_audit_log ─────────────────────────────────────────────────────────
-export const apisixAuditLog = pgTable("apisix_audit_log", {
+export const apisixAuditLogs = pgTable("apisix_audit_log", {
   id:           serial("id").primaryKey(),
   requestId:    varchar("requestId", { length: 64 }),
   routeId:      varchar("routeId", { length: 64 }),
@@ -2994,7 +3037,7 @@ export const apisixAuditLog = pgTable("apisix_audit_log", {
   wafAttackType: varchar("wafAttackType", { length: 64 }),
   tenantId:     integer("tenantId").references(() => tenants.id, { onDelete: "set null" }),
   userId:       integer("userId").references(() => users.id, { onDelete: "set null" }),
-  rawLog:       json("rawLog"),
+  rawLog:       jsonb("rawLog"),
   loggedAt:     timestamp("loggedAt").defaultNow().notNull(),
 }, (t) => ({
   aal_ip_idx:     index("aal_ip_idx").on(t.clientIp),
@@ -3003,8 +3046,8 @@ export const apisixAuditLog = pgTable("apisix_audit_log", {
   aal_ts_idx:     index("aal_ts_idx").on(t.loggedAt),
   aal_tenant_idx: index("aal_tenant_idx").on(t.tenantId),
 }));
-export type ApisixAuditLog = typeof apisixAuditLog.$inferSelect;
-export type InsertApisixAuditLog = typeof apisixAuditLog.$inferInsert;
+export type ApisixAuditLog = typeof apisixAuditLogs.$inferSelect;
+export type InsertApisixAuditLog = typeof apisixAuditLogs.$inferInsert;
 
 // ── permify_relationship_log ──────────────────────────────────────────────────
 export const permifyRelationshipLog = pgTable("permify_relationship_log", {
@@ -3032,7 +3075,7 @@ export const serviceHealthHistory = pgTable("service_health_history", {
   service:   varchar("service", { length: 64 }).notNull(),
   status:    varchar("status", { length: 16 }).notNull(),
   latencyMs: integer("latencyMs"),
-  detail:    json("detail"),
+  detail:    jsonb("detail"),
   checkedAt: timestamp("checkedAt").defaultNow().notNull(),
 }, (t) => ({
   shh_service_idx: index("shh_service_idx").on(t.service),
@@ -3068,7 +3111,7 @@ export const keycloakSyncLog = pgTable("keycloak_sync_log", {
   bisUserId:   integer("bisUserId").references(() => users.id, { onDelete: "set null" }),
   operation:   varchar("operation", { length: 32 }).notNull(),
   status:      varchar("status", { length: 16 }).notNull(),
-  detail:      json("detail"),
+  detail:      jsonb("detail"),
   errorMessage: text("errorMessage"),
   syncedAt:    timestamp("syncedAt").defaultNow().notNull(),
 }, (t) => ({

@@ -454,7 +454,7 @@ describe("PostgreSQL Schema — Integrity & Completeness", () => {
 
   it("new infrastructure tables are defined", async () => {
     const schema = await import("../drizzle/schema");
-    const infra = ["tigerbeetleAccounts","tigerbeetleTransfers","temporalWorkflowState","daprEventLog","apisixAuditLog","permifyRelationshipLog","serviceHealthHistory","fluvioTopicRegistry","keycloakSyncLog"];
+    const infra = ["tigerbeetleAccounts","tigerbeetleTransfers","temporalWorkflowStates","daprSubscriptionStates","apisixAuditLogs","permifyRelationshipLog","serviceHealthHistory","fluvioTopicRegistry","keycloakSyncLog"];
     for (const t of infra) {
       expect(schema[t as keyof typeof schema], `Infra table '${t}' should be defined`).toBeDefined();
     }
@@ -473,7 +473,7 @@ describe("PostgreSQL Schema — Integrity & Completeness", () => {
 describe("OpenAppSec — WAF Integration", () => {
   it("apisixAuditLog table is defined in schema", async () => {
     const schema = await import("../drizzle/schema");
-    expect(schema.apisixAuditLog).toBeDefined();
+    expect(schema.apisixAuditLogs).toBeDefined();
   });
 
   it("OpenAppSec local_policy.yaml exists", async () => {

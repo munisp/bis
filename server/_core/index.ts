@@ -214,8 +214,8 @@ async function startServer() {
     if (appsecStatus && (appsecStatus === "detect" || appsecStatus === "block")) {
       getDb().then(db => {
         if (!db) return;
-        const { apisixAuditLog } = require("../../drizzle/schema");
-        db.insert(apisixAuditLog).values({
+        const { apisixAuditLogs } = require("../../drizzle/schema");
+        db.insert(apisixAuditLogs).values({
           requestId: (req as Request & { id?: string }).id ?? null,
           clientIp: req.ip ?? null,
           method: req.method,

@@ -120,6 +120,7 @@ import {
 import { eq, desc, asc, and, ilike, gte, lte, lt, sql, count, inArray, isNotNull } from "drizzle-orm";
 import { z } from "zod";
 import { ENV } from "./_core/env";
+import { analyticsRouter } from "./orm/analyticsRouter"; // analytics.getDashboardStats is separate from db.getDashboardStats
 
 // ─── Service URLs ─────────────────────────────────────────────────────────────
 
@@ -6865,6 +6866,7 @@ export const appRouter = router({
   ngScreening: ngScreeningRouter,
   ngScreeningExt: ngScreeningExtRouter,
   criminalRecords: criminalRecordsRouter,
+  analytics: analyticsRouter,
 });
 export type AppRouter = typeof appRouter;
 
