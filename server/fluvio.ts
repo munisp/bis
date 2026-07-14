@@ -447,3 +447,173 @@ export async function fluvioPublishUebaScore(
     };
   }
 }
+
+// ── Fluvio KYC event stream ───────────────────────────────────────────────────
+export interface FluvioKycEvent {
+  eventType: "started" | "completed" | "failed" | "expired" | "rerun_scheduled";
+  kycRecordId?: number;
+  subjectRef: string;
+  status?: string;
+  riskScore?: number;
+  tenantId?: number;
+  publishedAt: string;
+}
+export async function fluvioPublishKycEvent(opts: FluvioKycEvent): Promise<FluvioPublishResult> {
+  try {
+    const res = await fetch(`${FLUVIO_VELOCITY_URL}/publish/bis.kyc.events`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ topic: "bis.kyc.events", partition: 0, payload: opts }),
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (!res.ok) return { accepted: false, service_available: true, reason: `HTTP ${res.status}` };
+    return { accepted: true, service_available: true };
+  } catch (err) {
+    return { accepted: false, service_available: false, reason: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+// ── Fluvio Investigation event stream ────────────────────────────────────────
+export interface FluvioInvestigationEvent {
+  eventType: "created" | "updated" | "escalated" | "closed" | "risk_scored" | "assigned";
+  ref: string;
+  subjectName?: string;
+  riskScore?: number;
+  status?: string;
+  tenantId?: number;
+  publishedAt: string;
+}
+export async function fluvioPublishInvestigationEvent(opts: FluvioInvestigationEvent): Promise<FluvioPublishResult> {
+  try {
+    const res = await fetch(`${FLUVIO_VELOCITY_URL}/publish/bis.investigation.events`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ topic: "bis.investigation.events", partition: 0, payload: opts }),
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (!res.ok) return { accepted: false, service_available: true, reason: `HTTP ${res.status}` };
+    return { accepted: true, service_available: true };
+  } catch (err) {
+    return { accepted: false, service_available: false, reason: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+// ── Fluvio Case event stream ──────────────────────────────────────────────────
+export interface FluvioCaseEvent {
+  eventType: "created" | "updated" | "closed" | "escalated" | "assigned";
+  ref: string;
+  caseId?: number;
+  status?: string;
+  priority?: string;
+  tenantId?: number;
+  publishedAt: string;
+}
+export async function fluvioPublishCaseEvent(opts: FluvioCaseEvent): Promise<FluvioPublishResult> {
+  try {
+    const res = await fetch(`${FLUVIO_VELOCITY_URL}/publish/bis.case.events`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ topic: "bis.case.events", partition: 0, payload: opts }),
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (!res.ok) return { accepted: false, service_available: true, reason: `HTTP ${res.status}` };
+    return { accepted: true, service_available: true };
+  } catch (err) {
+    return { accepted: false, service_available: false, reason: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+// ── Fluvio LEX event stream ───────────────────────────────────────────────────
+export interface FluvioLexEvent {
+  eventType: "submitted" | "reviewed" | "escalated" | "closed";
+  submissionRef?: string;
+  agencyCode?: string;
+  severity?: string;
+  tenantId?: number;
+  publishedAt: string;
+}
+export async function fluvioPublishLexEvent(opts: FluvioLexEvent): Promise<FluvioPublishResult> {
+  try {
+    const res = await fetch(`${FLUVIO_VELOCITY_URL}/publish/bis.lex.events`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ topic: "bis.lex.events", partition: 0, payload: opts }),
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (!res.ok) return { accepted: false, service_available: true, reason: `HTTP ${res.status}` };
+    return { accepted: true, service_available: true };
+  } catch (err) {
+    return { accepted: false, service_available: false, reason: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+// ── Fluvio Screening event stream ─────────────────────────────────────────────
+export interface FluvioScreeningEvent {
+  eventType: "order_created" | "result_updated" | "adverse_action_initiated" | "adverse_action_resolved";
+  orderRef?: string;
+  candidateRef?: string;
+  status?: string;
+  tenantId?: number;
+  publishedAt: string;
+}
+export async function fluvioPublishScreeningEvent(opts: FluvioScreeningEvent): Promise<FluvioPublishResult> {
+  try {
+    const res = await fetch(`${FLUVIO_VELOCITY_URL}/publish/bis.screening.events`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ topic: "bis.screening.events", partition: 0, payload: opts }),
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (!res.ok) return { accepted: false, service_available: true, reason: `HTTP ${res.status}` };
+    return { accepted: true, service_available: true };
+  } catch (err) {
+    return { accepted: false, service_available: false, reason: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+// ── Fluvio Criminal Records event stream ──────────────────────────────────────
+export interface FluvioCriminalRecordEvent {
+  eventType: "request_submitted" | "record_ingested" | "warrant_detected" | "record_verified";
+  requestRef?: string;
+  subjectRef?: string;
+  agency?: string;
+  tenantId?: number;
+  publishedAt: string;
+}
+export async function fluvioPublishCriminalRecordEvent(opts: FluvioCriminalRecordEvent): Promise<FluvioPublishResult> {
+  try {
+    const res = await fetch(`${FLUVIO_VELOCITY_URL}/publish/bis.criminal_records.events`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ topic: "bis.criminal_records.events", partition: 0, payload: opts }),
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (!res.ok) return { accepted: false, service_available: true, reason: `HTTP ${res.status}` };
+    return { accepted: true, service_available: true };
+  } catch (err) {
+    return { accepted: false, service_available: false, reason: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+// ── Generic base publisher (used by smoke tests and generic callers) ──────────
+/**
+ * Generic Fluvio publish helper.
+ * Posts a JSON payload to the fluvio-velocity sidecar on the given topic.
+ * When FLUVIO_VELOCITY_URL is not set or the sidecar is unavailable, logs and
+ * returns without throwing.
+ */
+export async function fluvioPublish(topic: string, payload: unknown): Promise<FluvioPublishResult> {
+  try {
+    const res = await fetch(`${FLUVIO_VELOCITY_URL}/publish/${topic}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ topic, partition: 0, payload }),
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (!res.ok) return { accepted: false, service_available: true, reason: `HTTP ${res.status}` };
+    return { accepted: true, service_available: true };
+  } catch (err) {
+    console.info(`[Fluvio] (dev) publish → ${topic}:`, JSON.stringify(payload).slice(0, 120));
+    return { accepted: false, service_available: false, reason: err instanceof Error ? err.message : String(err) };
+  }
+}

@@ -21,11 +21,22 @@ const DAPR_ENABLED = Boolean(process.env.DAPR_HTTP_PORT);
 // ── Topic names ──────────────────────────────────────────────────────────────
 
 export const TOPICS = {
-  biometric: "bis.biometric.events",
-  aml: "bis.aml.alerts",
-  investigation: "bis.investigation.events",
-  kyc: "bis.kyc.events",
-  payment: "bis.payment.events",
+  biometric:       "bis.biometric.events",
+  aml:             "bis.aml.alerts",
+  investigation:   "bis.investigation.events",
+  kyc:             "bis.kyc.events",
+  payment:         "bis.payment.events",
+  // Extended domain topics
+  case:            "bis.case.events",
+  lex:             "bis.lex.events",
+  fieldVisit:      "bis.field_visit.events",
+  criminalRecords: "bis.criminal_records.events",
+  corporateCheck:  "bis.corporate_check.events",
+  mojaloop:        "bis.mojaloop.events",
+  stablecoin:      "bis.stablecoin.events",
+  billing:         "bis.billing.events",
+  screening:       "bis.screening.events",
+  insider:         "bis.insider.events",
 } as const;
 
 export type Topic = (typeof TOPICS)[keyof typeof TOPICS];
@@ -33,7 +44,7 @@ export type Topic = (typeof TOPICS)[keyof typeof TOPICS];
 // ── Pub/Sub publisher ────────────────────────────────────────────────────────
 
 export interface DaprPublishOptions {
-  topic: Topic;
+  topic: Topic | string;
   data: Record<string, unknown>;
   /** Optional metadata to attach to the CloudEvent */
   metadata?: Record<string, string>;
@@ -109,11 +120,13 @@ export async function publishAmlAlert(data: {
 }
 
 export async function publishInvestigationEvent(data: {
-  eventType: "created" | "updated" | "escalated" | "closed" | "risk_scored";
+  eventType: "created" | "updated" | "escalated" | "closed" | "risk_scored" | "assigned";
   ref: string;
   subjectName?: string;
   riskScore?: number;
   status?: string;
+  assignedTo?: string;
+  tenantId?: number;
   timestamp?: string;
 }): Promise<void> {
   return daprPublish({
@@ -137,15 +150,152 @@ export async function publishKycEvent(data: {
 }
 
 export async function publishPaymentEvent(data: {
-  eventType: "initiated" | "completed" | "failed" | "reversed";
+  eventType: "initiated" | "completed" | "failed" | "reversed" | "velocity_blocked";
   txRef: string;
   amountKobo: number;
   currency?: string;
   rail?: string;
+  tenantId?: number;
   timestamp?: string;
 }): Promise<void> {
   return daprPublish({
     topic: TOPICS.payment,
+    data: { ...data, timestamp: data.timestamp ?? new Date().toISOString() },
+  });
+}
+
+export async function publishCaseEvent(data: {
+  eventType: "created" | "updated" | "closed" | "escalated" | "assigned" | "comment_added" | "document_added";
+  ref: string;
+  caseId?: number;
+  status?: string;
+  priority?: string;
+  assignedTo?: string;
+  tenantId?: number;
+  timestamp?: string;
+}): Promise<void> {
+  return daprPublish({
+    topic: TOPICS.case,
+    data: { ...data, timestamp: data.timestamp ?? new Date().toISOString() },
+  });
+}
+
+export async function publishLexEvent(data: {
+  eventType: "submitted" | "reviewed" | "escalated" | "closed" | "agency_registered" | "agency_deactivated";
+  submissionRef?: string;
+  agencyCode?: string;
+  status?: string;
+  severity?: string;
+  tenantId?: number;
+  timestamp?: string;
+}): Promise<void> {
+  return daprPublish({
+    topic: TOPICS.lex,
+    data: { ...data, timestamp: data.timestamp ?? new Date().toISOString() },
+  });
+}
+
+export async function publishFieldVisitEvent(data: {
+  eventType: "dispatched" | "checked_in" | "completed" | "escalated" | "cancelled";
+  taskRef?: string;
+  agentId?: number;
+  subjectRef?: string;
+  location?: { lat: number; lng: number };
+  tenantId?: number;
+  timestamp?: string;
+}): Promise<void> {
+  return daprPublish({
+    topic: TOPICS.fieldVisit,
+    data: { ...data, timestamp: data.timestamp ?? new Date().toISOString() },
+  });
+}
+
+export async function publishCriminalRecordEvent(data: {
+  eventType: "request_submitted" | "record_ingested" | "warrant_detected" | "record_verified" | "request_rejected";
+  requestRef?: string;
+  recordId?: number;
+  subjectRef?: string;
+  agency?: string;
+  tenantId?: number;
+  timestamp?: string;
+}): Promise<void> {
+  return daprPublish({
+    topic: TOPICS.criminalRecords,
+    data: { ...data, timestamp: data.timestamp ?? new Date().toISOString() },
+  });
+}
+
+export async function publishCorporateCheckEvent(data: {
+  eventType: "completed" | "sanctions_hit" | "firs_clearance_failed" | "started";
+  rcNumber?: string;
+  companyName?: string;
+  sanctionsHit?: boolean;
+  riskScore?: number;
+  tenantId?: number;
+  timestamp?: string;
+}): Promise<void> {
+  return daprPublish({
+    topic: TOPICS.corporateCheck,
+    data: { ...data, timestamp: data.timestamp ?? new Date().toISOString() },
+  });
+}
+
+export async function publishMojaloopEvent(data: {
+  eventType: "compliance_blocked" | "compliance_cleared" | "transfer_initiated" | "transfer_completed";
+  transferRef?: string;
+  amount?: number;
+  currency?: string;
+  blockedReason?: string;
+  tenantId?: number;
+  timestamp?: string;
+}): Promise<void> {
+  return daprPublish({
+    topic: TOPICS.mojaloop,
+    data: { ...data, timestamp: data.timestamp ?? new Date().toISOString() },
+  });
+}
+
+export async function publishStablecoinEvent(data: {
+  eventType: "transfer_initiated" | "transfer_completed" | "transfer_failed" | "rate_limited";
+  txRef?: string;
+  amount?: number;
+  currency?: string;
+  fromAddress?: string;
+  toAddress?: string;
+  tenantId?: number;
+  timestamp?: string;
+}): Promise<void> {
+  return daprPublish({
+    topic: TOPICS.stablecoin,
+    data: { ...data, timestamp: data.timestamp ?? new Date().toISOString() },
+  });
+}
+
+export async function publishBillingEvent(data: {
+  eventType: "topup_initiated" | "topup_completed" | "topup_failed" | "debit_recorded" | "balance_low";
+  tenantId: number;
+  amountKobo?: number;
+  reference?: string;
+  balanceKobo?: number;
+  timestamp?: string;
+}): Promise<void> {
+  return daprPublish({
+    topic: TOPICS.billing,
+    data: { ...data, timestamp: data.timestamp ?? new Date().toISOString() },
+  });
+}
+
+export async function publishDaprScreeningEvent(data: {
+  eventType: "order_created" | "result_updated" | "adverse_action_initiated" | "adverse_action_resolved" | "candidate_invited";
+  orderRef?: string;
+  candidateRef?: string;
+  packageId?: number;
+  status?: string;
+  tenantId?: number;
+  timestamp?: string;
+}): Promise<void> {
+  return daprPublish({
+    topic: TOPICS.screening,
     data: { ...data, timestamp: data.timestamp ?? new Date().toISOString() },
   });
 }
@@ -202,6 +352,82 @@ export async function daprInvoke<T = unknown>(opts: DaprInvokeOptions): Promise<
 //
 // Dapr sidecar is injected via docker-compose.yml:
 //   bis-bff service: DAPR_HTTP_PORT=3500, dapr sidecar container
+
+/**
+ * Get/set state via Dapr state store (Redis-backed).
+ */
+export async function daprStateGet<T = unknown>(key: string): Promise<T | null> {
+  if (!DAPR_ENABLED) return null;
+  try {
+    const resp = await fetch(
+      `${DAPR_BASE}/v1.0/state/bis-statestore/${encodeURIComponent(key)}`,
+      { signal: AbortSignal.timeout(3_000) }
+    );
+    if (resp.status === 204 || resp.status === 404) return null;
+    if (!resp.ok) return null;
+    return resp.json() as Promise<T>;
+  } catch {
+    return null;
+  }
+}
+
+export async function daprStateSet(key: string, value: unknown, ttlSeconds?: number): Promise<void> {
+  if (!DAPR_ENABLED) return;
+  try {
+    const entry: Record<string, unknown> = { key, value };
+    if (ttlSeconds) entry.metadata = { ttlInSeconds: String(ttlSeconds) };
+    await fetch(`${DAPR_BASE}/v1.0/state/bis-statestore`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify([entry]),
+      signal: AbortSignal.timeout(3_000),
+    });
+  } catch (err) {
+    console.error("[Dapr] stateSet error:", err);
+  }
+}
+
+export async function daprStateDel(key: string): Promise<void> {
+  if (!DAPR_ENABLED) return;
+  try {
+    await fetch(`${DAPR_BASE}/v1.0/state/bis-statestore/${encodeURIComponent(key)}`, {
+      method: "DELETE",
+      signal: AbortSignal.timeout(3_000),
+    });
+  } catch (err) {
+    console.error("[Dapr] stateDel error:", err);
+  }
+}
+
+/**
+ * Health check: returns true if Dapr sidecar is reachable.
+ */
+export async function daprHealthCheck(): Promise<{ ok: boolean; latencyMs: number }> {
+  const start = Date.now();
+  if (!DAPR_ENABLED) return { ok: false, latencyMs: 0 };
+  try {
+    const resp = await fetch(`${DAPR_BASE}/v1.0/healthz`, { signal: AbortSignal.timeout(3_000) });
+    return { ok: resp.ok, latencyMs: Date.now() - start };
+  } catch {
+    return { ok: false, latencyMs: Date.now() - start };
+  }
+}
+
+export async function publishInsiderThreatEvent(data: {
+  eventType: "anomaly_detected" | "alert_raised" | "ueba_score_updated" | "access_review_triggered" | "session_flagged";
+  userId?: number;
+  userEmail?: string;
+  deviationScore?: number;
+  riskTier?: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+  triggeredBy?: string;
+  tenantId?: number;
+  timestamp?: string;
+}): Promise<void> {
+  return daprPublish({
+    topic: TOPICS.insider,
+    data: { ...data, timestamp: data.timestamp ?? new Date().toISOString() },
+  });
+}
 
 export function isDaprEnabled(): boolean {
   return DAPR_ENABLED;

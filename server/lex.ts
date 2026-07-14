@@ -11,6 +11,9 @@ import { invokeLLM } from "./_core/llm";
 import { getDb } from "./db";
 import { protectedProcedure, publicProcedure, router, writeProcedure } from "./_core/trpc";
 import { ENV } from "./_core/env";
+import { permifyWriteRelationship } from "./permify";
+import { publishLexEvent } from "./dapr";
+import { fluvioPublishLexEvent } from "./fluvio";
 
 // SECURITY: HTML escape function to prevent XSS in PDF template generation
 function escHtml(str: string | null | undefined): string {
@@ -110,6 +113,11 @@ export const lexRouter = router({
         registeredBy: ctx.user.id,
       }).returning();
       try { const { auditLog } = await import("../drizzle/schema"); await db.insert(auditLog).values({ userId: ctx.user.id, category: "system" as any, action: `Registered LEX agency ${agencyCode}`, targetRef: String(agency.id), result: "success" }); } catch(e) { console.warn("[LEX Audit]", e); }
+      // Permify: write agency ownership relationship
+      void permifyWriteRelationship([{ entity: { type: "lex_agency", id: String(agency.id) }, relation: "owner", subject: { type: "user", id: String(ctx.user.id) } }]).catch(e => console.warn("[LEX Permify]", e));
+      // Dapr + Fluvio: publish agency_registered event
+      void publishLexEvent({ eventType: "agency_registered", agencyCode, status: "active", tenantId: ctx.user.tenantId ?? undefined }).catch(() => {});
+      void fluvioPublishLexEvent({ eventType: "submitted", agencyCode, publishedAt: new Date().toISOString() }).catch(() => {});
       return agency;
     }),
 
@@ -322,6 +330,12 @@ export const lexRouter = router({
         lastSubmissionAt: new Date(),
       }).where(eq(lexSubmitters.id, submitter.id));
 
+      // Permify: write submission read relationship for agency owner
+      void permifyWriteRelationship([{ entity: { type: "lex_submission", id: String(submission.id) }, relation: "reader", subject: { type: "lex_agency", id: String(agency.id) } }]).catch(e => console.warn("[LEX Permify]", e));
+      // Dapr + Fluvio: publish submitted event
+      void publishLexEvent({ eventType: "submitted", submissionRef: submission.submissionRef, agencyCode: agency.agencyCode, status: "pending" }).catch(() => {});
+      void fluvioPublishLexEvent({ eventType: "submitted", submissionRef: submission.submissionRef, agencyCode: agency.agencyCode, publishedAt: new Date().toISOString() }).catch(() => {});
+
       return { submissionRef: submission.submissionRef, validationScore };
     }),
 
@@ -357,6 +371,10 @@ export const lexRouter = router({
         }
       }
       try { const { auditLog } = await import("../drizzle/schema"); await db.insert(auditLog).values({ userId: ctx.user.id, category: "system" as any, action: `Submission ${input.action}d`, targetRef: String(input.id), result: "success" }); } catch(e) { console.warn("[LEX Audit]", e); }
+      // Dapr + Fluvio: publish review event
+      const reviewEventType = input.action === "validate" ? "reviewed" : input.action === "escalate" ? "escalated" : "closed";
+      void publishLexEvent({ eventType: reviewEventType, status: input.action }).catch(() => {});
+      void fluvioPublishLexEvent({ eventType: reviewEventType, publishedAt: new Date().toISOString() }).catch(() => {});
       return { success: true };
     }),
 

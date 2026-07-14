@@ -246,3 +246,148 @@ export async function getPaymentWorkflowStatus(txRef: string): Promise<{
 
   return resp.json() as Promise<{ status: string; result?: unknown }>;
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ADDITIONAL WORKFLOW TYPES — Added during integration audit (2026-07)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ── AML Workflow ──────────────────────────────────────────────────────────────
+export interface AmlWorkflowInput {
+  investigationRef: string;
+  subjectName: string;
+  subjectType: "individual" | "corporate";
+  nin?: string;
+  bvn?: string;
+  riskScore?: number;
+  triggerReason: string;
+  tenantId?: number;
+}
+
+export interface AmlWorkflowResult {
+  workflowId: string;
+  runId?: string;
+  status: "started" | "dev_mode";
+}
+
+export async function startAmlWorkflow(input: AmlWorkflowInput): Promise<AmlWorkflowResult> {
+  const workflowId = `aml-${input.investigationRef}-${Date.now()}`;
+  if (!TEMPORAL_HOST) {
+    console.info("[Temporal] AML workflow (dev mode):", workflowId);
+    return { workflowId, status: "dev_mode" };
+  }
+  const resp = await fetch(`${ENV.gatewayUrl}/v1/workflow/start`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-BIS-Key": ENV.bisGatewayKey },
+    body: JSON.stringify({
+      workflow_type: "AMLWorkflow",
+      workflow_id: workflowId,
+      task_queue: "bis-aml",
+      input,
+    }),
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!resp.ok) {
+    const text = await resp.text();
+    throw new Error(`[Temporal] AML workflow start failed: ${resp.status} ${text}`);
+  }
+  const data = await resp.json() as { run_id?: string };
+  return { workflowId, runId: data.run_id, status: "started" };
+}
+
+// ── KYC Expiry Workflow ───────────────────────────────────────────────────────
+export interface KycExpiryWorkflowInput {
+  kycRecordId: number;
+  subjectRef: string;
+  expiresAt: string;  // ISO date string
+  tenantId?: number;
+}
+
+export async function startKycExpiryWorkflow(input: KycExpiryWorkflowInput): Promise<{ workflowId: string; status: string }> {
+  const workflowId = `kyc-expiry-${input.kycRecordId}-${Date.now()}`;
+  if (!TEMPORAL_HOST) {
+    console.info("[Temporal] KYC expiry workflow (dev mode):", workflowId);
+    return { workflowId, status: "dev_mode" };
+  }
+  const resp = await fetch(`${ENV.gatewayUrl}/v1/workflow/start`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-BIS-Key": ENV.bisGatewayKey },
+    body: JSON.stringify({
+      workflow_type: "KYCExpiryWorkflow",
+      workflow_id: workflowId,
+      task_queue: "bis-kyc",
+      input,
+    }),
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!resp.ok) {
+    const text = await resp.text();
+    throw new Error(`[Temporal] KYC expiry workflow start failed: ${resp.status} ${text}`);
+  }
+  return { workflowId, status: "started" };
+}
+
+// ── Case Escalation Workflow ──────────────────────────────────────────────────
+export interface CaseEscalationWorkflowInput {
+  caseRef: string;
+  caseId: number;
+  priority: string;
+  escalationReason: string;
+  escalatedBy: number;
+  tenantId?: number;
+}
+
+export async function startCaseEscalationWorkflow(input: CaseEscalationWorkflowInput): Promise<{ workflowId: string; status: string }> {
+  const workflowId = `case-escalation-${input.caseRef}-${Date.now()}`;
+  if (!TEMPORAL_HOST) {
+    console.info("[Temporal] Case escalation workflow (dev mode):", workflowId);
+    return { workflowId, status: "dev_mode" };
+  }
+  const resp = await fetch(`${ENV.gatewayUrl}/v1/workflow/start`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-BIS-Key": ENV.bisGatewayKey },
+    body: JSON.stringify({
+      workflow_type: "CaseEscalationWorkflow",
+      workflow_id: workflowId,
+      task_queue: "bis-cases",
+      input,
+    }),
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!resp.ok) {
+    const text = await resp.text();
+    throw new Error(`[Temporal] Case escalation workflow start failed: ${resp.status} ${text}`);
+  }
+  return { workflowId, status: "started" };
+}
+
+// ── Screening Workflow ────────────────────────────────────────────────────────
+export interface ScreeningWorkflowInput {
+  orderId: number;
+  candidateProfileId: number;
+  packageId: number;
+  tenantId?: number;
+}
+
+export async function startScreeningWorkflow(input: ScreeningWorkflowInput): Promise<{ workflowId: string; status: string }> {
+  const workflowId = `screening-${input.orderId}-${Date.now()}`;
+  if (!TEMPORAL_HOST) {
+    console.info("[Temporal] Screening workflow (dev mode):", workflowId);
+    return { workflowId, status: "dev_mode" };
+  }
+  const resp = await fetch(`${ENV.gatewayUrl}/v1/workflow/start`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-BIS-Key": ENV.bisGatewayKey },
+    body: JSON.stringify({
+      workflow_type: "ScreeningWorkflow",
+      workflow_id: workflowId,
+      task_queue: "bis-screening",
+      input,
+    }),
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!resp.ok) {
+    const text = await resp.text();
+    throw new Error(`[Temporal] Screening workflow start failed: ${resp.status} ${text}`);
+  }
+  return { workflowId, status: "started" };
+}

@@ -2882,3 +2882,199 @@ export const criminalRecordAudit = pgTable("criminal_record_audit", {
 }));
 export type CriminalRecordAuditEntry       = typeof criminalRecordAudit.$inferSelect;
 export type InsertCriminalRecordAuditEntry = typeof criminalRecordAudit.$inferInsert;
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// INFRASTRUCTURE TABLES — Added during schema audit (2026-07)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ── tigerbeetle_accounts ──────────────────────────────────────────────────────
+export const tigerbeetleAccounts = pgTable("tigerbeetle_accounts", {
+  id:              serial("id").primaryKey(),
+  accountId:       varchar("accountId", { length: 64 }).notNull().unique(),
+  tenantId:        integer("tenantId").references(() => tenants.id, { onDelete: "cascade" }),
+  ledger:          integer("ledger").notNull().default(1),
+  code:            integer("code").notNull().default(700),
+  creditsPending:  bigint("creditsPending", { mode: "number" }).default(0),
+  creditsPosted:   bigint("creditsPosted", { mode: "number" }).default(0),
+  debitsPending:   bigint("debitsPending", { mode: "number" }).default(0),
+  debitsPosted:    bigint("debitsPosted", { mode: "number" }).default(0),
+  flags:           integer("flags").default(0),
+  lastReconciledAt: timestamp("lastReconciledAt"),
+  createdAt:       timestamp("createdAt").defaultNow().notNull(),
+  updatedAt:       timestamp("updatedAt").defaultNow().notNull(),
+}, (t) => ({
+  tb_tenant_idx: index("tb_tenant_idx").on(t.tenantId),
+  tb_account_idx: index("tb_account_idx").on(t.accountId),
+}));
+export type TigerBeetleAccount = typeof tigerbeetleAccounts.$inferSelect;
+export type InsertTigerBeetleAccount = typeof tigerbeetleAccounts.$inferInsert;
+
+// ── tigerbeetle_transfers ─────────────────────────────────────────────────────
+export const tigerbeetleTransfers = pgTable("tigerbeetle_transfers", {
+  id:              serial("id").primaryKey(),
+  transferId:      varchar("transferId", { length: 64 }).notNull().unique(),
+  debitAccountId:  varchar("debitAccountId", { length: 64 }).notNull(),
+  creditAccountId: varchar("creditAccountId", { length: 64 }).notNull(),
+  amount:          bigint("amount", { mode: "number" }).notNull(),
+  ledger:          integer("ledger").notNull().default(1),
+  code:            integer("code").notNull().default(1),
+  flags:           integer("flags").default(0),
+  userData:        json("userData"),
+  tenantId:        integer("tenantId").references(() => tenants.id, { onDelete: "set null" }),
+  txRef:           varchar("txRef", { length: 128 }),
+  reconciledAt:    timestamp("reconciledAt"),
+  createdAt:       timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  tbt_debit_idx:  index("tbt_debit_idx").on(t.debitAccountId),
+  tbt_credit_idx: index("tbt_credit_idx").on(t.creditAccountId),
+  tbt_tenant_idx: index("tbt_tenant_idx").on(t.tenantId),
+  tbt_txref_idx:  index("tbt_txref_idx").on(t.txRef),
+}));
+export type TigerBeetleTransfer = typeof tigerbeetleTransfers.$inferSelect;
+export type InsertTigerBeetleTransfer = typeof tigerbeetleTransfers.$inferInsert;
+
+// ── temporal_workflow_state ───────────────────────────────────────────────────
+export const temporalWorkflowState = pgTable("temporal_workflow_state", {
+  id:             serial("id").primaryKey(),
+  workflowId:     varchar("workflowId", { length: 256 }).notNull().unique(),
+  runId:          varchar("runId", { length: 256 }),
+  workflowType:   varchar("workflowType", { length: 128 }).notNull(),
+  namespace:      varchar("namespace", { length: 128 }).notNull().default("bis"),
+  status:         varchar("status", { length: 32 }).notNull().default("running"),
+  input:          json("input"),
+  result:         json("result"),
+  errorMessage:   text("errorMessage"),
+  tenantId:       integer("tenantId").references(() => tenants.id, { onDelete: "set null" }),
+  initiatedBy:    integer("initiatedBy").references(() => users.id, { onDelete: "set null" }),
+  entityRef:      varchar("entityRef", { length: 128 }),
+  entityType:     varchar("entityType", { length: 64 }),
+  startedAt:      timestamp("startedAt").defaultNow().notNull(),
+  completedAt:    timestamp("completedAt"),
+  updatedAt:      timestamp("updatedAt").defaultNow().notNull(),
+}, (t) => ({
+  tws_entity_idx:  index("tws_entity_idx").on(t.entityRef, t.entityType),
+  tws_status_idx:  index("tws_status_idx").on(t.status),
+  tws_tenant_idx:  index("tws_tenant_idx").on(t.tenantId),
+  tws_type_idx:    index("tws_type_idx").on(t.workflowType),
+}));
+export type TemporalWorkflowState = typeof temporalWorkflowState.$inferSelect;
+export type InsertTemporalWorkflowState = typeof temporalWorkflowState.$inferInsert;
+
+// ── dapr_event_log ────────────────────────────────────────────────────────────
+export const daprEventLog = pgTable("dapr_event_log", {
+  id:          serial("id").primaryKey(),
+  topic:       varchar("topic", { length: 128 }).notNull(),
+  pubsubName:  varchar("pubsubName", { length: 64 }).notNull().default("bis-pubsub"),
+  payload:     json("payload").notNull(),
+  status:      varchar("status", { length: 32 }).notNull().default("published"),
+  tenantId:    integer("tenantId").references(() => tenants.id, { onDelete: "set null" }),
+  entityRef:   varchar("entityRef", { length: 128 }),
+  publishedAt: timestamp("publishedAt").defaultNow().notNull(),
+  failReason:  text("failReason"),
+}, (t) => ({
+  del_topic_idx:  index("del_topic_idx").on(t.topic),
+  del_entity_idx: index("del_entity_idx").on(t.entityRef),
+  del_tenant_idx: index("del_tenant_idx").on(t.tenantId),
+  del_ts_idx:     index("del_ts_idx").on(t.publishedAt),
+}));
+export type DaprEventLog = typeof daprEventLog.$inferSelect;
+export type InsertDaprEventLog = typeof daprEventLog.$inferInsert;
+
+// ── apisix_audit_log ─────────────────────────────────────────────────────────
+export const apisixAuditLog = pgTable("apisix_audit_log", {
+  id:           serial("id").primaryKey(),
+  requestId:    varchar("requestId", { length: 64 }),
+  routeId:      varchar("routeId", { length: 64 }),
+  clientIp:     varchar("clientIp", { length: 45 }),
+  method:       varchar("method", { length: 10 }),
+  uri:          text("uri"),
+  statusCode:   integer("statusCode"),
+  latencyMs:    integer("latencyMs"),
+  wafStatus:    varchar("wafStatus", { length: 32 }),
+  wafAttackType: varchar("wafAttackType", { length: 64 }),
+  tenantId:     integer("tenantId").references(() => tenants.id, { onDelete: "set null" }),
+  userId:       integer("userId").references(() => users.id, { onDelete: "set null" }),
+  rawLog:       json("rawLog"),
+  loggedAt:     timestamp("loggedAt").defaultNow().notNull(),
+}, (t) => ({
+  aal_ip_idx:     index("aal_ip_idx").on(t.clientIp),
+  aal_route_idx:  index("aal_route_idx").on(t.routeId),
+  aal_status_idx: index("aal_status_idx").on(t.statusCode),
+  aal_ts_idx:     index("aal_ts_idx").on(t.loggedAt),
+  aal_tenant_idx: index("aal_tenant_idx").on(t.tenantId),
+}));
+export type ApisixAuditLog = typeof apisixAuditLog.$inferSelect;
+export type InsertApisixAuditLog = typeof apisixAuditLog.$inferInsert;
+
+// ── permify_relationship_log ──────────────────────────────────────────────────
+export const permifyRelationshipLog = pgTable("permify_relationship_log", {
+  id:         serial("id").primaryKey(),
+  entity:     varchar("entity", { length: 64 }).notNull(),
+  entityId:   varchar("entityId", { length: 128 }).notNull(),
+  relation:   varchar("relation", { length: 64 }).notNull(),
+  subject:    varchar("subject", { length: 64 }).notNull(),
+  subjectId:  varchar("subjectId", { length: 128 }).notNull(),
+  operation:  varchar("operation", { length: 16 }).notNull().default("write"),
+  tenantId:   integer("tenantId").references(() => tenants.id, { onDelete: "set null" }),
+  actorId:    integer("actorId").references(() => users.id, { onDelete: "set null" }),
+  createdAt:  timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  prl_entity_idx:  index("prl_entity_idx").on(t.entity, t.entityId),
+  prl_subject_idx: index("prl_subject_idx").on(t.subject, t.subjectId),
+  prl_tenant_idx:  index("prl_tenant_idx").on(t.tenantId),
+}));
+export type PermifyRelationshipLog = typeof permifyRelationshipLog.$inferSelect;
+export type InsertPermifyRelationshipLog = typeof permifyRelationshipLog.$inferInsert;
+
+// ── service_health_history ────────────────────────────────────────────────────
+export const serviceHealthHistory = pgTable("service_health_history", {
+  id:        serial("id").primaryKey(),
+  service:   varchar("service", { length: 64 }).notNull(),
+  status:    varchar("status", { length: 16 }).notNull(),
+  latencyMs: integer("latencyMs"),
+  detail:    json("detail"),
+  checkedAt: timestamp("checkedAt").defaultNow().notNull(),
+}, (t) => ({
+  shh_service_idx: index("shh_service_idx").on(t.service),
+  shh_ts_idx:      index("shh_ts_idx").on(t.checkedAt),
+  shh_status_idx:  index("shh_status_idx").on(t.status),
+}));
+export type ServiceHealthHistory = typeof serviceHealthHistory.$inferSelect;
+export type InsertServiceHealthHistory = typeof serviceHealthHistory.$inferInsert;
+
+// ── fluvio_topic_registry ─────────────────────────────────────────────────────
+export const fluvioTopicRegistry = pgTable("fluvio_topic_registry", {
+  id:           serial("id").primaryKey(),
+  topicName:    varchar("topicName", { length: 128 }).notNull().unique(),
+  description:  text("description"),
+  partitions:   integer("partitions").default(1),
+  replication:  integer("replication").default(1),
+  retentionMs:  bigint("retentionMs", { mode: "number" }).default(604800000),
+  isActive:     boolean("isActive").default(true),
+  lastMessageAt: timestamp("lastMessageAt"),
+  messageCount: bigint("messageCount", { mode: "number" }).default(0),
+  createdAt:    timestamp("createdAt").defaultNow().notNull(),
+  updatedAt:    timestamp("updatedAt").defaultNow().notNull(),
+}, (t) => ({
+  ftr_topic_idx: index("ftr_topic_idx").on(t.topicName),
+}));
+export type FluvioTopicRegistry = typeof fluvioTopicRegistry.$inferSelect;
+export type InsertFluvioTopicRegistry = typeof fluvioTopicRegistry.$inferInsert;
+
+// ── keycloak_sync_log ─────────────────────────────────────────────────────────
+export const keycloakSyncLog = pgTable("keycloak_sync_log", {
+  id:          serial("id").primaryKey(),
+  keycloakId:  varchar("keycloakId", { length: 128 }),
+  bisUserId:   integer("bisUserId").references(() => users.id, { onDelete: "set null" }),
+  operation:   varchar("operation", { length: 32 }).notNull(),
+  status:      varchar("status", { length: 16 }).notNull(),
+  detail:      json("detail"),
+  errorMessage: text("errorMessage"),
+  syncedAt:    timestamp("syncedAt").defaultNow().notNull(),
+}, (t) => ({
+  ksl_keycloak_idx: index("ksl_keycloak_idx").on(t.keycloakId),
+  ksl_user_idx:     index("ksl_user_idx").on(t.bisUserId),
+  ksl_op_idx:       index("ksl_op_idx").on(t.operation),
+}));
+export type KeycloakSyncLog = typeof keycloakSyncLog.$inferSelect;
+export type InsertKeycloakSyncLog = typeof keycloakSyncLog.$inferInsert;

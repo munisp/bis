@@ -178,6 +178,26 @@ export const billingRouter = router({
           },
         ]);
 
+        // Reconciliation: write transfer to PostgreSQL for reporting
+        try {
+          const { getDb } = await import("./db");
+          const { tigerbeetleTransfers } = await import("../drizzle/schema");
+          const db = await getDb();
+          if (db) {
+            await db.insert(tigerbeetleTransfers).values({
+              transferId,
+              debitAccountId: ACCOUNT_TENANT_PREFIX + input.tenantId,
+              creditAccountId: ACCOUNT_REVENUE,
+              amount,
+              ledger: LEDGER_NGN,
+              code: 1,
+              userData: { investigationId: input.investigationId, tier: input.tier },
+              txRef: input.investigationId,
+            }).onConflictDoNothing();
+          }
+        } catch (reconcileErr) {
+          console.warn("[TigerBeetle] Reconciliation write failed (non-fatal):", reconcileErr);
+        }
         return {
           transferId,
           tenantId: input.tenantId,

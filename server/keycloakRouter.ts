@@ -15,6 +15,7 @@ import {
   exchangeCode,
   extractRoles,
   mapRole,
+  logKeycloakSync,
 } from "./keycloak";
 
 const KEYCLOAK_URL = ENV.keycloakUrl;
@@ -106,7 +107,11 @@ export const keycloakRouter = router({
     .input(z.object({ code: z.string(), redirectUri: z.string().url() }))
     .mutation(async ({ input }) => {
       const tokens = await exchangeCode(input.code, input.redirectUri);
-      if (!tokens) throw new TRPCError({ code: "UNAUTHORIZED", message: "Code exchange failed" });
+      if (!tokens) {
+        void logKeycloakSync({ operation: "token_exchange", status: "failed", errorMessage: "Code exchange returned null" });
+        throw new TRPCError({ code: "UNAUTHORIZED", message: "Code exchange failed" });
+      }
+      void logKeycloakSync({ operation: "token_exchange", status: "success", detail: { redirectUri: input.redirectUri } });
       return tokens;
     }),
 

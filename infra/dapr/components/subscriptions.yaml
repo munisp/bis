@@ -1,0 +1,101 @@
+# BIS Dapr Subscriptions
+# This file defines the pub/sub subscriptions for the BIS BFF.
+# The extended subscriptions are in subscriptions_extended.yaml
+apiVersion: dapr.io/v1alpha1
+kind: Subscription
+metadata:
+  name: bis-investigation-sub
+spec:
+  pubsubname: bis-pubsub
+  topic: bis.investigation.events
+  route: /api/dapr/investigation-events
+---
+apiVersion: dapr.io/v1alpha1
+kind: Subscription
+metadata:
+  name: bis-kyc-sub
+spec:
+  pubsubname: bis-pubsub
+  topic: bis.kyc.events
+  route: /api/dapr/kyc-events
+---
+apiVersion: dapr.io/v1alpha1
+kind: Subscription
+metadata:
+  name: bis-case-sub
+spec:
+  pubsubname: bis-pubsub
+  topic: bis.case.events
+  route: /api/dapr/case-events
+---
+apiVersion: dapr.io/v1alpha1
+kind: Subscription
+metadata:
+  name: bis-lex-sub
+spec:
+  pubsubname: bis-pubsub
+  topic: bis.lex.events
+  route: /api/dapr/lex-events
+---
+apiVersion: dapr.io/v1alpha1
+kind: Subscription
+metadata:
+  name: bis-billing-sub
+spec:
+  pubsubname: bis-pubsub
+  topic: bis.billing.events
+  route: /api/dapr/billing-events
+---
+apiVersion: dapr.io/v1alpha1
+kind: Subscription
+metadata:
+  name: bis-screening-sub
+spec:
+  pubsubname: bis-pubsub
+  topic: bis.screening.events
+  route: /api/dapr/screening-events
+---
+apiVersion: dapr.io/v1alpha1
+kind: Subscription
+metadata:
+  name: bis-criminal-records-sub
+spec:
+  pubsubname: bis-pubsub
+  topic: bis.criminal_records.events
+  route: /api/dapr/criminal-records-events
+---
+apiVersion: dapr.io/v1alpha1
+kind: Subscription
+metadata:
+  name: bis-field-visit-sub
+spec:
+  pubsubname: bis-pubsub
+  topic: bis.field_visit.events
+  route: /api/dapr/field-visit-events
+---
+apiVersion: dapr.io/v1alpha1
+kind: Subscription
+metadata:
+  name: bis-stablecoin-sub
+spec:
+  pubsubname: bis-pubsub
+  topic: bis.stablecoin.events
+  route: /api/dapr/stablecoin-events
+---
+apiVersion: dapr.io/v1alpha1
+kind: Subscription
+metadata:
+  name: bis-mojaloop-sub
+spec:
+  pubsubname: bis-pubsub
+  topic: bis.mojaloop.events
+  route: /api/dapr/mojaloop-events
+---
+apiVersion: dapr.io/v1alpha1
+kind: Subscription
+metadata:
+  name: bis-insider-threat-sub
+spec:
+  pubsubname: bis-pubsub
+  topic: bis.insider_threat.events
+  route: /api/dapr/insider-threat-events

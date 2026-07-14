@@ -158,4 +158,15 @@ export const TTL = {
   KYC_LIST:            20,  // 20s — KYC list
   SANCTIONS_STATUS:    300, // 5 min — sanctions gateway health check
   BROADCAST_HISTORY:   30,  // 30s — broadcast history list
+  // Additional hot-path caches added during integration audit
+  CASES_LIST:           15,  // 15s — case management list
+  CRIMINAL_RECORDS:     30,  // 30s — criminal record queries
+  SCREENING_LIST:       20,  // 20s — screening order list
+  FIELD_VISITS:         30,  // 30s — field visit reports
+  LEX_SUBMISSIONS:      15,  // 15s — LEX submission list
+  TEMPORAL_WORKFLOWS:   10,  // 10s — workflow status list
+  HEALTH_CHECK:         5,   // 5s — service health
+  APISIX_AUDIT:         60,  // 1 min — APISIX audit log
+  INSIDER_EVENTS:       20,  // 20s — insider threat events
+  BILLING_TOPUPS:       30,  // 30s — billing topup history
 } as const;

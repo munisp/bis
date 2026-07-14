@@ -38,7 +38,18 @@ import { ngScreeningRouter } from "./ngScreening";
 import { ngScreeningExtRouter } from "./ngScreeningWebhooks";
 import { searchRouter, indexDocument } from "./search";
 import { sendPushToUser, broadcastPush } from "./pushNotify";
-import { publishInvestigationEvent, publishKycEvent } from "./dapr";
+import {
+  publishInvestigationEvent,
+  publishKycEvent,
+  publishCaseEvent,
+  publishBillingEvent,
+  publishStablecoinEvent,
+  publishCriminalRecordEvent,
+  publishDaprScreeningEvent,
+  publishFieldVisitEvent,
+  publishMojaloopEvent,
+  publishCorporateCheckEvent,
+} from "./dapr";
 import { getDb } from "./db";
 import { evaluateAlertRules } from "./alertRules";
 import {
@@ -4701,6 +4712,8 @@ const casesRouter = router({
     .query(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
+      const cacheKey = `cases:list:${ctx.user?.tenantId ?? 0}:${JSON.stringify(input ?? {})}`;
+      return withCache(cacheKey, TTL.CASES_LIST, async () => {
       const filters: any[] = [];
       if (input?.status) filters.push(eq(cases.status, input.status as any));
       if (input?.type) filters.push(eq(cases.type, input.type as any));
@@ -4727,6 +4740,7 @@ const casesRouter = router({
       const [{ total }] = await db.select({ total: count() }).from(cases)
         .where(filters.length ? and(...filters) : undefined);
       return { cases: rows, total, page, pageSize };
+      });
     }),
 
   get: protectedProcedure
@@ -4785,6 +4799,10 @@ const casesRouter = router({
         actorName: ctx.user?.name,
         actorRole: ctx.user?.role,
       });
+      // Permify: write case ownership relationship
+      void permifyWriteRelationship([{ entity: { type: 'case', id: ref }, relation: 'owner', subject: { type: 'user', id: String(ctx.user?.id) } }]).catch(e => console.warn('[Cases Permify]', e));
+      // Dapr: publish case created event
+      void publishCaseEvent({ eventType: 'created', ref, caseId: c.id, status: 'draft', priority: c.priority ?? 'medium' }).catch(() => {});
       return c;
     }),
 
@@ -4827,6 +4845,9 @@ const casesRouter = router({
           actorName: ctx.user?.name,
         });
       }
+      // Dapr: publish case updated/closed event
+      const caseEventType = updates.status === 'closed' || updates.status === 'archived' ? 'closed' : 'updated';
+      void publishCaseEvent({ eventType: caseEventType, ref, caseId: c.id, status: updates.status ?? c.status, priority: updates.priority ?? c.priority ?? 'medium' }).catch(() => {});
       return { success: true };
     }),
 

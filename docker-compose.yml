@@ -1135,3 +1135,30 @@ services:
     entrypoint: ["/bin/sh", "/init-ilm.sh"]
     networks: [bis-net]
 
+
+  # ─── Dapr Sidecar (BFF) ───────────────────────────────────────────────────
+  dapr:
+    image: daprio/daprd:1.14.4
+    container_name: bis-dapr-sidecar
+    restart: unless-stopped
+    command:
+      - "./daprd"
+      - "--app-id"
+      - "bis-bff"
+      - "--app-port"
+      - "3000"
+      - "--dapr-http-port"
+      - "3500"
+      - "--dapr-grpc-port"
+      - "50001"
+      - "--components-path"
+      - "/components"
+      - "--log-level"
+      - "info"
+    depends_on:
+      - redis
+      - kafka
+    volumes:
+      - ./infra/dapr/components:/components:ro
+    network_mode: "service:bff"
+    profiles: ["dapr"]

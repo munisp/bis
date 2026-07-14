@@ -197,3 +197,35 @@ export const lakehouseRouter = router({
       }
     }),
 });
+
+// ── Generic write helper (used by billing reconciliation and smoke tests) ─────
+/**
+ * Write a single event/row to the lakehouse Delta table.
+ * When LAKEHOUSE_URL is not set or the service is unavailable, logs and
+ * returns without throwing.
+ */
+export async function writeLakehouseEvent(opts: {
+  table: string;
+  data: Record<string, unknown>;
+}): Promise<{ written: boolean }> {
+  if (!LAKEHOUSE_URL) {
+    console.info(`[Lakehouse] (dev) write → ${opts.table}:`, JSON.stringify(opts.data).slice(0, 120));
+    return { written: false };
+  }
+  try {
+    const res = await fetch(`${LAKEHOUSE_URL}/v1/write`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ table: opts.table, row: opts.data }),
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (!res.ok) {
+      console.warn(`[Lakehouse] write failed: HTTP ${res.status}`);
+      return { written: false };
+    }
+    return { written: true };
+  } catch (err) {
+    console.warn("[Lakehouse] write error (non-fatal):", err);
+    return { written: false };
+  }
+}

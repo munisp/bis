@@ -38,17 +38,23 @@ init();
 
 /**
  * Verify a Keycloak Bearer token.
- * Returns claims on success, null if Keycloak is not configured, throws on invalid token.
+ * Returns claims on success, null if Keycloak is not configured or token is invalid.
+ * Never throws — all errors are caught and logged.
  */
 export async function verifyKeycloakToken(token: string): Promise<KeycloakClaims | null> {
   if (!jwks || !issuer) return null; // Keycloak not configured — skip
-
-  const clientId = ENV.keycloakClientId;
-  const { payload } = await jwtVerify(token, jwks, {
-    issuer,
-    audience: clientId,
-  });
-  return payload as KeycloakClaims;
+  try {
+    const clientId = ENV.keycloakClientId;
+    const { payload } = await jwtVerify(token, jwks, {
+      issuer,
+      audience: clientId,
+    });
+    return payload as KeycloakClaims;
+  } catch (err) {
+    // Invalid token, JWKS fetch failure, or signature mismatch — return null (fail-closed)
+    console.warn("[Keycloak] Token verification failed:", (err as Error)?.message ?? err);
+    return null;
+  }
 }
 
 /**
@@ -124,4 +130,32 @@ export async function exchangeCode(
     return null;
   }
   return resp.json() as Promise<{ access_token: string; id_token: string; refresh_token: string }>;
+}
+
+// ── Keycloak Sync Logging ─────────────────────────────────────────────────────
+// Writes Keycloak sync operations to the keycloak_sync_log table for audit.
+export async function logKeycloakSync(opts: {
+  keycloakId?: string;
+  bisUserId?: number;
+  operation: "provision" | "update_roles" | "deactivate" | "login" | "token_exchange";
+  status: "success" | "failed";
+  detail?: Record<string, unknown>;
+  errorMessage?: string;
+}): Promise<void> {
+  try {
+    const { getDb } = await import("./db");
+    const { keycloakSyncLog } = await import("../drizzle/schema");
+    const db = await getDb();
+    if (!db) return;
+    await db.insert(keycloakSyncLog).values({
+      keycloakId: opts.keycloakId ?? null,
+      bisUserId: opts.bisUserId ?? null,
+      operation: opts.operation,
+      status: opts.status,
+      detail: opts.detail ?? null,
+      errorMessage: opts.errorMessage ?? null,
+    });
+  } catch (e) {
+    console.warn("[Keycloak] Failed to write sync log:", e);
+  }
 }

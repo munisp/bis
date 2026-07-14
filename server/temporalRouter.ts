@@ -11,7 +11,15 @@ import { ENV } from "./_core/env";
 import {
   startInvestigationWorkflow,
   getWorkflowStatus,
+  startAmlWorkflow,
+  startKycExpiryWorkflow,
+  startCaseEscalationWorkflow,
+  startScreeningWorkflow,
   type InvestigationWorkflowInput,
+  type AmlWorkflowInput,
+  type KycExpiryWorkflowInput,
+  type CaseEscalationWorkflowInput,
+  type ScreeningWorkflowInput,
 } from "./temporal";
 
 const TEMPORAL_HOST = ENV.temporalHost ?? "";
@@ -171,5 +179,59 @@ export const temporalRouter = router({
       } catch {
         return { events: [], configured: true, error: "Failed to fetch history" };
       }
+    }),
+
+  /** Start an AML investigation workflow */
+  startAml: protectedProcedure
+    .input(z.object({
+      investigationRef: z.string(),
+      subjectName: z.string(),
+      subjectType: z.enum(["individual", "corporate"]),
+      nin: z.string().optional(),
+      bvn: z.string().optional(),
+      riskScore: z.number().optional(),
+      triggerReason: z.string().default("manual"),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const wfInput: AmlWorkflowInput = { ...input, tenantId: ctx.user?.tenantId ?? undefined };
+      return startAmlWorkflow(wfInput);
+    }),
+
+  /** Start a KYC expiry monitoring workflow */
+  startKycExpiry: protectedProcedure
+    .input(z.object({
+      kycRecordId: z.number().int(),
+      subjectRef: z.string(),
+      expiresAt: z.string(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const wfInput: KycExpiryWorkflowInput = { ...input, tenantId: ctx.user?.tenantId ?? undefined };
+      return startKycExpiryWorkflow(wfInput);
+    }),
+
+  /** Start a case escalation workflow */
+  startCaseEscalation: protectedProcedure
+    .input(z.object({
+      caseRef: z.string(),
+      caseId: z.number().int(),
+      priority: z.enum(["low","medium","high","critical"]),
+      escalationReason: z.string(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      if (!ctx.user?.id) throw new TRPCError({ code: "UNAUTHORIZED" });
+      const wfInput: CaseEscalationWorkflowInput = { ...input, escalatedBy: ctx.user.id, tenantId: ctx.user?.tenantId ?? undefined };
+      return startCaseEscalationWorkflow(wfInput);
+    }),
+
+  /** Start a background screening workflow */
+  startScreening: protectedProcedure
+    .input(z.object({
+      orderId: z.number().int(),
+      candidateProfileId: z.number().int(),
+      packageId: z.number().int(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const wfInput: ScreeningWorkflowInput = { ...input, tenantId: ctx.user?.tenantId ?? undefined };
+      return startScreeningWorkflow(wfInput);
     }),
 });

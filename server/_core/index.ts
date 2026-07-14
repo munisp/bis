@@ -210,6 +210,22 @@ async function startServer() {
         reqId: (req as Request & { id?: string }).id,
       });
     }
+    // Persist WAF events to apisixAuditLog for compliance auditing
+    if (appsecStatus && (appsecStatus === "detect" || appsecStatus === "block")) {
+      getDb().then(db => {
+        if (!db) return;
+        const { apisixAuditLog } = require("../../drizzle/schema");
+        db.insert(apisixAuditLog).values({
+          requestId: (req as Request & { id?: string }).id ?? null,
+          clientIp: req.ip ?? null,
+          method: req.method,
+          uri: req.path,
+          wafStatus: appsecStatus,
+          wafAttackType: appsecAttackType ?? null,
+          rawLog: { appsecMode, headers: { 'x-appsec-status': appsecStatus, 'x-appsec-attack-type': appsecAttackType } },
+        }).catch(e => log("warn", "[WAF] Failed to persist WAF event", { error: String(e) }));
+      }).catch(() => {});
+    }
     next();
   });
 
@@ -573,6 +589,76 @@ async function startServer() {
       checks.fluvio = { status: fluvioResult.ok ? "ok" : "degraded", latencyMs: Date.now() - fluvioStart };
     } catch {
       checks.fluvio = { status: "degraded", latencyMs: Date.now() - fluvioStart };
+    }
+
+    // Keycloak OIDC check
+    const keycloakStart = Date.now();
+    try {
+      const keycloakUrl = ENV.keycloakUrl;
+      const keycloakRealm = ENV.keycloakRealm;
+      if (keycloakUrl && keycloakRealm) {
+        const r = await fetch(
+          `${keycloakUrl}/realms/${keycloakRealm}/.well-known/openid-configuration`,
+          { signal: AbortSignal.timeout(3000) }
+        );
+        checks.keycloak = { status: r.ok ? "ok" : "degraded", latencyMs: Date.now() - keycloakStart };
+      } else {
+        checks.keycloak = { status: "degraded" }; // Not configured
+      }
+    } catch {
+      checks.keycloak = { status: "degraded", latencyMs: Date.now() - keycloakStart };
+    }
+
+    // Permify authorization engine check
+    const permifyStart = Date.now();
+    try {
+      const permifyUrl = ENV.permifyUrl;
+      if (permifyUrl) {
+        const r = await fetch(`${permifyUrl}/healthz`, { signal: AbortSignal.timeout(3000) });
+        checks.permify = { status: r.ok ? "ok" : "degraded", latencyMs: Date.now() - permifyStart };
+      } else {
+        checks.permify = { status: "degraded" }; // Not configured
+      }
+    } catch {
+      checks.permify = { status: "degraded", latencyMs: Date.now() - permifyStart };
+    }
+
+    // Dapr sidecar check
+    const daprStart = Date.now();
+    try {
+      const { daprHealthCheck } = await import("../dapr");
+      const daprResult = await daprHealthCheck();
+      checks.dapr = { status: daprResult.ok ? "ok" : "degraded", latencyMs: Date.now() - daprStart };
+    } catch {
+      checks.dapr = { status: "degraded", latencyMs: Date.now() - daprStart };
+    }
+
+    // TigerBeetle HTTP proxy check
+    const tbStart = Date.now();
+    try {
+      const tbUrl = ENV.tigerBeetleUrl;
+      if (tbUrl) {
+        const r = await fetch(`${tbUrl}/health`, { signal: AbortSignal.timeout(3000) });
+        checks.tigerbeetle = { status: r.ok ? "ok" : "degraded", latencyMs: Date.now() - tbStart };
+      } else {
+        checks.tigerbeetle = { status: "degraded" }; // Not configured
+      }
+    } catch {
+      checks.tigerbeetle = { status: "degraded", latencyMs: Date.now() - tbStart };
+    }
+
+    // Lakehouse writer check
+    const lakehouseStart = Date.now();
+    try {
+      const lakehouseUrl = ENV.lakehouseUrl;
+      if (lakehouseUrl) {
+        const r = await fetch(`${lakehouseUrl}/health`, { signal: AbortSignal.timeout(3000) });
+        checks.lakehouse = { status: r.ok ? "ok" : "degraded", latencyMs: Date.now() - lakehouseStart };
+      } else {
+        checks.lakehouse = { status: "degraded" }; // Not configured
+      }
+    } catch {
+      checks.lakehouse = { status: "degraded", latencyMs: Date.now() - lakehouseStart };
     }
 
     const allOk = Object.values(checks).every(c => c.status === "ok");
