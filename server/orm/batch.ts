@@ -37,7 +37,7 @@ export async function batchInsert<T extends Record<string, unknown>>(
     const chunk = records.slice(i, i + chunkSize);
     const inserted = await (db as unknown as { insert: Function })
       .insert(table)
-      .values(chunk)
+      .values(chunk as any[])
       .returning() as T[];
     results.push(...inserted);
   }
@@ -72,7 +72,7 @@ export async function batchUpsert<T extends Record<string, unknown>>(
 
     await (db as unknown as { insert: Function })
       .insert(table)
-      .values(chunk)
+      .values(chunk as any[])
       .onConflictDoUpdate({
         target: conflictColumns.map((c) => (table as Record<string, unknown>)[c]),
         set: updateSet,
@@ -130,7 +130,7 @@ export async function bulkAuditLog(
 ): Promise<void> {
   if (entries.length === 0) return;
 
-  await db.insert(schema.auditLog).values(
+  await (db as unknown as { insert: Function }).insert(schema.auditLog).values(
     entries.map((e) => ({
       userId: e.userId,
       userEmail: e.userEmail,

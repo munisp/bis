@@ -115,13 +115,7 @@ async function maybeEscalate(eventId: number, severity: string, subjectId: strin
     .returning();
   if (!review) return;
   // Fire-and-forget Temporal workflow
-  startAccessReviewWorkflow({
-    reviewId: review.id,
-    subjectId,
-    reviewType: "auto_escalation",
-    triggeredBy: "insider_threat_engine",
-    dueAt,
-  }).catch((e) => console.error("[InsiderThreat] Temporal escalation failed:", e));
+  startAccessReviewWorkflow({ reviewId: review.id, reviewRef: `AR-${review.id}-${Date.now()}`, userId: 0, subjectId, reviewType: "auto_escalation", triggeredBy: "insider_threat_engine", dueAt }).catch((e) => console.error("[InsiderThreat] Temporal escalation failed:", e));
   // Notify platform owner
   notifyOwner({
     title: `🚨 Insider Threat — ${severity.toUpperCase()} event for ${subjectId}`,
@@ -149,7 +143,7 @@ export const insiderThreatRouter = router({
         sourceIp: z.string().optional(),
         userAgent: z.string().optional(),
         resourcePath: z.string().optional(),
-        payloadBytes: z.number().int().nonnegative().optional(),
+        // payloadBytes: z.number().int().nonnegative().optional(),
         ruleId: z.string().optional(),
         evidence: z.record(z.string(), z.unknown()).optional(),
       })
@@ -169,7 +163,7 @@ export const insiderThreatRouter = router({
           sourceIp: input.sourceIp,
           userAgent: input.userAgent,
           resourcePath: input.resourcePath,
-          payloadBytes: input.payloadBytes,
+          // payloadBytes: input.payloadBytes,
           ruleId: input.ruleId,
           evidence: input.evidence ?? {},
         })
@@ -184,18 +178,19 @@ export const insiderThreatRouter = router({
 
       // Publish to Dapr pub/sub (fire-and-forget) — consumed by Rust EP and Go gateway
       publishInsiderThreatEvent({
+        eventType: "anomaly_detected",
         eventId: event.id,
         subjectId: input.subjectId,
-        tenantId: input.tenantId,
+        tenantId: input.tenantId ? Number(input.tenantId) : undefined,
         category: input.category,
         severity: input.severity,
         anomalyScore: input.anomalyScore,
         driftScore: input.driftScore,
         sourceIp: input.sourceIp,
         resourcePath: input.resourcePath,
-        payloadBytes: input.payloadBytes,
+        // payloadBytes: input.payloadBytes,
         ruleId: input.ruleId,
-        triggeredAt: new Date().toISOString(),
+        timestamp: new Date().toISOString(),
       }).catch((e) => console.error("[InsiderThreat] Dapr publish failed:", e));
 
       // Publish to Fluvio bis.alerts stream — consumed by PWA real-time feed and Go gateway FCM push
@@ -596,14 +591,8 @@ export const insiderThreatRouter = router({
       if (!review) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 
       // Start Temporal workflow
-      startAccessReviewWorkflow({
-        reviewId: review.id,
-        subjectId: input.subjectId,
-        tenantId: input.tenantId,
-        reviewType: input.reviewType,
-        triggeredBy: `user:${ctx.user.id}`,
-        dueAt: input.dueAt,
-      }).catch((e) => console.error("[InsiderThreat] Access review workflow failed:", e));
+      startAccessReviewWorkflow({ reviewId: review.id, reviewRef: `AR-${String(review.id)}-${Date.now()}`, userId: 0, subjectId: input.subjectId, tenantId: (input.tenantId ? Number(input.tenantId) : undefined) ? Number(input.tenantId ? Number(input.tenantId) : undefined) : undefined, reviewType: input.reviewType, triggeredBy: `user:${ctx.user.id}`, dueAt: input.dueAt,
+       }).catch((e) => console.error("[InsiderThreat] Access review workflow failed:", e));
 
       return review;
     }),
@@ -684,13 +673,14 @@ export const insiderThreatRouter = router({
 
       // Publish access-review completion to Dapr (fire-and-forget)
       publishAccessReviewEvent({
-        reviewId: input.id,
-        subjectId: existing.subjectId,
-        tenantId: existing.tenantId ?? undefined,
-        reviewType: existing.reviewType,
-        action: input.decision,
-        reviewerId: ctx.user.id,
-        triggeredAt: new Date().toISOString(),
+        eventType: "access_review_triggered",
+        eventId: input.id,
+        subjectId: existing.subjectId ?? undefined,
+        tenantId: existing.tenantId ? Number(existing.tenantId) : undefined,
+        triggeredBy: `reviewer:${ctx.user.id}`,
+        category: existing.reviewType ?? "access_review",
+        severity: "medium",
+        timestamp: new Date().toISOString(),
       }).catch((e) => console.error("[InsiderThreat] Dapr access-review publish failed:", e));
 
       // Push notification to the reviewer
@@ -724,12 +714,14 @@ export const insiderThreatRouter = router({
 
       // Publish escalation event to Dapr (fire-and-forget)
       publishAccessReviewEvent({
-        reviewId: input.id,
-        subjectId: updated.subjectId,
-        tenantId: updated.tenantId ?? undefined,
-        reviewType: updated.reviewType,
-        action: "escalated",
-        triggeredAt: new Date().toISOString(),
+        eventType: "access_review_triggered",
+        eventId: input.id,
+        subjectId: updated.subjectId ?? undefined,
+        tenantId: updated.tenantId ? Number(updated.tenantId) : undefined,
+        triggeredBy: "escalation",
+        category: updated.reviewType ?? "access_review",
+        severity: "high",
+        timestamp: new Date().toISOString(),
       }).catch((e) => console.error("[InsiderThreat] Dapr escalation publish failed:", e));
 
       return updated;

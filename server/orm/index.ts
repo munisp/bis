@@ -349,7 +349,7 @@ export abstract class Repository<
     const [{ total }] = await (this.db as unknown as NodePgDatabase)
       .select({ total: count() })
       .from(this.table as never)
-      .where(where) as [{ total: number }];
+      .where(where) as unknown as [{ total: number }];
     return total;
   }
 
@@ -358,7 +358,7 @@ export abstract class Repository<
       .select({ total: count() })
       .from(this.table as never)
       .where(where)
-      .limit(1) as [{ total: number }];
+      .limit(1) as unknown as [{ total: number }];
     return total > 0;
   }
 }
@@ -367,7 +367,7 @@ export abstract class Repository<
 
 export class InvestigationRepository extends Repository<schema.Investigation, schema.InsertInvestigation> {
   constructor(db: BisDb) {
-    super(db, schema.investigations);
+    super(db, schema.investigations as never);
   }
 
   async findByRef(ref: string): Promise<schema.Investigation | undefined> {
@@ -428,7 +428,7 @@ export class InvestigationRepository extends Repository<schema.Investigation, sc
 
 export class CaseRepository extends Repository<schema.Case, schema.InsertCase> {
   constructor(db: BisDb) {
-    super(db, schema.cases);
+    super(db, schema.cases as never);
   }
 
   async findByRef(ref: string): Promise<schema.Case | undefined> {
@@ -488,7 +488,7 @@ export class CaseRepository extends Repository<schema.Case, schema.InsertCase> {
 
 export class KycRepository extends Repository<schema.KycRecord, schema.InsertKycRecord> {
   constructor(db: BisDb) {
-    super(db, schema.kycRecords);
+    super(db, schema.kycRecords as never);
   }
 
   async findWithDocuments(id: number) {
@@ -534,7 +534,7 @@ export class KycRepository extends Repository<schema.KycRecord, schema.InsertKyc
 
 export class AlertRepository extends Repository<schema.Alert, schema.InsertAlert> {
   constructor(db: BisDb) {
-    super(db, schema.alerts);
+    super(db, schema.alerts as never);
   }
 
   async findUnacknowledged(tenantId: number, limit = 50): Promise<schema.Alert[]> {
@@ -603,7 +603,7 @@ export class InvestigationRelationalRepository {
 
 export class ScreeningRepository extends Repository<schema.ScreeningOrder, schema.InsertScreeningOrder> {
   constructor(db: BisDb) {
-    super(db, schema.screeningOrders);
+    super(db, schema.screeningOrders as never);
   }
 
   async findWithResults(orderId: number) {

@@ -18,8 +18,8 @@ import {
   candidateProfiles, screeningPackages, screeningOrders, screeningResults,
   adverseActions, adverseItems, candidateConsents, screeningAssessments,
   fieldVisitReports, criminalRecordRequests, criminalRecords,
-  criminalRecordAttachments, criminalRecordAudit, temporalWorkflowState,
-  daprEventLog, keycloakSyncLog,
+  criminalRecordAttachments, criminalRecordAudit, temporalWorkflowStates,
+  daprSubscriptionStates, keycloakSyncLog,
 } from "./schema";
 
 // ─── Tenants ──────────────────────────────────────────────────────────────────
@@ -74,7 +74,7 @@ export const investigationsRelations = relations(investigations, ({ one, many })
   sarFilings: many(sarFilings),
   fieldVisitReports: many(fieldVisitReports),
   criminalRecordRequests: many(criminalRecordRequests),
-  temporalWorkflows: many(temporalWorkflowState),
+  temporalWorkflows: many(temporalWorkflowStates),
 }));
 
 // ─── Alerts ───────────────────────────────────────────────────────────────────
@@ -98,7 +98,7 @@ export const kycDocumentsRelations = relations(kycDocuments, ({ one }) => ({
   kycRecord: one(kycRecords, { fields: [kycDocuments.kycRecordId], references: [kycRecords.id] }),
 }));
 export const kycOcrHistoryRelations = relations(kycOcrHistory, ({ one }) => ({
-  kycRecord: one(kycRecords, { fields: [kycOcrHistory.kycRecordId], references: [kycRecords.id] }),
+  kycRecord: one(kycRecords, { fields: [kycOcrHistory.documentId], references: [kycRecords.id] }),
 }));
 export const kycScheduledRerunsRelations = relations(kycScheduledReruns, ({ one }) => ({
   kycRecord: one(kycRecords, { fields: [kycScheduledReruns.kycRecordId], references: [kycRecords.id] }),
@@ -132,7 +132,7 @@ export const fieldAgentsRelations = relations(fieldAgents, ({ many }) => ({
 export const casesRelations = relations(cases, ({ one, many }) => ({
   tenant: one(tenants, { fields: [cases.tenantId], references: [tenants.id] }),
   creator: one(users, { fields: [cases.createdBy], references: [users.id], relationName: "caseCreator" }),
-  assignee: one(users, { fields: [cases.assignedTo], references: [users.id], relationName: "caseAssignee" }),
+  assignee: one(users, { fields: [cases.leadAnalystId], references: [users.id], relationName: "caseAssignee" }),
   parties: many(caseParties),
   documents: many(caseDocuments),
   timeline: many(caseTimeline),
@@ -201,7 +201,7 @@ export const candidateProfilesRelations = relations(candidateProfiles, ({ one, m
 }));
 export const screeningOrdersRelations = relations(screeningOrders, ({ one, many }) => ({
   tenant: one(tenants, { fields: [screeningOrders.tenantId], references: [tenants.id] }),
-  candidate: one(candidateProfiles, { fields: [screeningOrders.candidateProfileId], references: [candidateProfiles.id] }),
+  candidate: one(candidateProfiles, { fields: [screeningOrders.candidateId], references: [candidateProfiles.id] }),
   package: one(screeningPackages, { fields: [screeningOrders.packageId], references: [screeningPackages.id] }),
   results: many(screeningResults),
   adverseActions: many(adverseActions),
@@ -212,31 +212,31 @@ export const screeningResultsRelations = relations(screeningResults, ({ one }) =
 }));
 export const adverseActionsRelations = relations(adverseActions, ({ one, many }) => ({
   order: one(screeningOrders, { fields: [adverseActions.orderId], references: [screeningOrders.id] }),
-  candidate: one(candidateProfiles, { fields: [adverseActions.candidateProfileId], references: [candidateProfiles.id] }),
+  candidate: one(candidateProfiles, { fields: [adverseActions.candidateId], references: [candidateProfiles.id] }),
   items: many(adverseItems),
 }));
 export const adverseItemsRelations = relations(adverseItems, ({ one }) => ({
   adverseAction: one(adverseActions, { fields: [adverseItems.adverseActionId], references: [adverseActions.id] }),
 }));
 export const candidateConsentsRelations = relations(candidateConsents, ({ one }) => ({
-  candidate: one(candidateProfiles, { fields: [candidateConsents.candidateProfileId], references: [candidateProfiles.id] }),
+  candidate: one(candidateProfiles, { fields: [candidateConsents.candidateId], references: [candidateProfiles.id] }),
 }));
 
 // ─── Criminal Records ─────────────────────────────────────────────────────────
 export const criminalRecordRequestsRelations = relations(criminalRecordRequests, ({ one, many }) => ({
-  investigation: one(investigations, { fields: [criminalRecordRequests.investigationId], references: [investigations.id] }),
+  investigation: one(investigations, { fields: [criminalRecordRequests.investigationRef], references: [investigations.id] }),
   records: many(criminalRecords),
 }));
 export const criminalRecordsRelations = relations(criminalRecords, ({ one, many }) => ({
-  request: one(criminalRecordRequests, { fields: [criminalRecords.requestId], references: [criminalRecordRequests.id] }),
+  request: one(criminalRecordRequests, { fields: [criminalRecords.requestRef], references: [criminalRecordRequests.id] }),
   attachments: many(criminalRecordAttachments),
   auditTrail: many(criminalRecordAudit),
 }));
 export const criminalRecordAttachmentsRelations = relations(criminalRecordAttachments, ({ one }) => ({
-  record: one(criminalRecords, { fields: [criminalRecordAttachments.criminalRecordId], references: [criminalRecords.id] }),
+  record: one(criminalRecords, { fields: [criminalRecordAttachments.recordRef], references: [criminalRecords.id] }),
 }));
 export const criminalRecordAuditRelations = relations(criminalRecordAudit, ({ one }) => ({
-  record: one(criminalRecords, { fields: [criminalRecordAudit.criminalRecordId], references: [criminalRecords.id] }),
+  record: one(criminalRecords, { fields: [criminalRecordAudit.recordRef], references: [criminalRecords.id] }),
 }));
 
 // ─── Field Visit Reports ──────────────────────────────────────────────────────
@@ -252,7 +252,7 @@ export const notificationsRelations = relations(notifications, ({ one }) => ({
 
 // ─── API Tokens ───────────────────────────────────────────────────────────────
 export const apiTokensRelations = relations(apiTokens, ({ one, many }) => ({
-  user: one(users, { fields: [apiTokens.userId], references: [users.id] }),
+  user: one(users, { fields: [apiTokens.tenantId], references: [users.id] }),
   usageLogs: many(tokenUsageLog),
 }));
 export const tokenUsageLogRelations = relations(tokenUsageLog, ({ one }) => ({
@@ -279,20 +279,20 @@ export const billingTopupsRelations = relations(billingTopups, ({ one }) => ({
 
 // ─── Insider Threat / UEBA ────────────────────────────────────────────────────
 export const insiderEventsRelations = relations(insiderEvents, ({ one }) => ({
-  user: one(users, { fields: [insiderEvents.userId], references: [users.id] }),
+  user: one(users, { fields: [insiderEvents.subjectId], references: [users.id] }),
   tenant: one(tenants, { fields: [insiderEvents.tenantId], references: [tenants.id] }),
 }));
 export const uebaProfilesRelations = relations(uebaProfiles, ({ one }) => ({
-  user: one(users, { fields: [uebaProfiles.userId], references: [users.id] }),
+  user: one(users, { fields: [uebaProfiles.subjectId], references: [users.id] }),
   tenant: one(tenants, { fields: [uebaProfiles.tenantId], references: [tenants.id] }),
 }));
 
 // ─── Infrastructure ───────────────────────────────────────────────────────────
-export const temporalWorkflowStateRelations = relations(temporalWorkflowState, ({ one }) => ({
-  tenant: one(tenants, { fields: [temporalWorkflowState.tenantId], references: [tenants.id] }),
+export const temporalWorkflowStateRelations = relations(temporalWorkflowStates, ({ one }) => ({
+  tenant: one(tenants, { fields: [temporalWorkflowStates.tenantId], references: [tenants.id] }),
 }));
-export const daprEventLogRelations = relations(daprEventLog, ({ one }) => ({
-  tenant: one(tenants, { fields: [daprEventLog.tenantId], references: [tenants.id] }),
+export const daprEventLogRelations = relations(daprSubscriptionStates, ({ one }) => ({
+  tenant: one(tenants, { fields: [daprSubscriptionStates.tenantId], references: [tenants.id] }),
 }));
 export const keycloakSyncLogRelations = relations(keycloakSyncLog, ({ one }) => ({
   user: one(users, { fields: [keycloakSyncLog.bisUserId], references: [users.id] }),

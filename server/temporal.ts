@@ -261,6 +261,10 @@ export interface AmlWorkflowInput {
   riskScore?: number;
   triggerReason: string;
   tenantId?: number;
+  alertRef?: string;
+  alertId?: number;
+  transactionRef?: string;
+  subjectRef?: string;
 }
 
 export interface AmlWorkflowResult {
@@ -500,3 +504,56 @@ export async function startRiskProfileWorkflow(input: RiskProfileWorkflowInput):
   }
   return { workflowId, status: "started" };
 }
+
+export interface AccessReviewWorkflowInput {
+  reviewId: number;
+  reviewRef: string;
+  userId: number;
+  reviewType: string;
+  tenantId?: number;
+  subjectId?: string;
+  subjectRef?: string;
+  triggeredBy?: string;
+  dueAt?: Date;
+}
+export async function getTemporalClientSafe() {
+  try {
+    if (!TEMPORAL_HOST) {
+      return null; // dev mode — Temporal not running
+    }
+    // Delegate to the Go gateway which proxies to Temporal gRPC
+    return { workflow: { start: async (type: string, opts: Record<string, unknown>) => {
+      const resp = await fetch(`${ENV.gatewayUrl}/v1/workflow/start`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-BIS-Key": ENV.bisGatewayKey },
+        body: JSON.stringify({ workflow_type: type, ...opts }),
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!resp.ok) throw new Error(`[Temporal] ${resp.status}`);
+      return resp.json() as Promise<{ workflowId: string }>;
+    }}};
+  } catch {
+    return null;
+  }
+}
+export async function startAccessReviewWorkflow(input: AccessReviewWorkflowInput): Promise<{ workflowId: string; status: "started" | "dev_mode" }> {
+  const workflowId = `access-review-${input.reviewRef}-${Date.now()}`;
+  if (!TEMPORAL_HOST) {
+    console.info("[Temporal] AccessReview workflow (dev mode):", workflowId);
+    return { workflowId, status: "dev_mode" };
+  }
+  try {
+    const client = await getTemporalClientSafe();
+    if (!client) return { workflowId, status: "dev_mode" as const };
+    const handle = await client.workflow.start("AccessReviewWorkflow", {
+      taskQueue: "COMPLIANCE_TASK_QUEUE",
+      workflowId,
+      args: [input],
+    });
+    return { workflowId: handle.workflowId, status: "started" };
+  } catch (err) {
+    console.error("[Temporal] startAccessReviewWorkflow error:", err);
+    return { workflowId, status: "dev_mode" };
+  }
+}
+

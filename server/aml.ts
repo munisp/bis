@@ -59,7 +59,6 @@ async function deliverWithRetry(
  */
 async function dispatchAmlWebhook(payload: {
   event: string;
-  alertRef: string;
   riskLevel: string;
   title: string;
   transactionId: number;
@@ -109,10 +108,10 @@ async function dispatchAmlWebhook(payload: {
  */
 async function autoEscalateToCase(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, alert: {
   id: number;
-  alertRef: string;
   riskLevel: string;
   title: string;
   description: string;
+  alertRef?: string | null;
   transactionId?: number | null;
   investigationId?: number | null;
 }, createdBy: number): Promise<void> {
@@ -125,7 +124,7 @@ async function autoEscalateToCase(db: NonNullable<Awaited<ReturnType<typeof getD
       type: "aml",
       status: "open",
       priority: priority as any,
-      summary: `Automatically escalated from AML alert ${alert.alertRef}. ${alert.description}`,
+      summary: `Automatically escalated from AML alert ${alert.alertRef ?? `ALT-\${String(alert.id).padStart(6, "0")}`}. ${alert.description}`,
       legalBasis: "MLPA 2011 s.6 — Suspicious Transaction Reporting",
       regulatoryFramework: "NFIU/CBN AML/CFT Framework 2022",
       riskScore: alert.riskLevel === "critical" ? 90 : alert.riskLevel === "high" ? 70 : 50,
@@ -281,8 +280,7 @@ export const amlRouter = router({
           valueDate: input.valueDate ? new Date(input.valueDate) : new Date(),
         }).returning();
         if (score >= 50 && flags.length > 0) {
-          const [newAlert] = await db.insert(amlAlerts).values({
-            alertRef: amlAlertRef(), transactionId: tx.id, status: "open",
+          const [newAlert] = await db.insert(amlAlerts).values({ alertRef: amlAlertRef(), transactionId: tx.id, status: "open",
             riskLevel: riskLevel as any,
             title: `${riskLevel.toUpperCase()} Risk: ${input.originatorName} → ${input.beneficiaryName}`,
             description: `Transaction ${tx.txRef} triggered: ${flags.join(", ")}. Amount: ${input.currency} ${input.amount.toLocaleString()}`,
@@ -296,9 +294,8 @@ export const amlRouter = router({
             if (autoEscRules.length > 0) {
               await autoEscalateToCase(db, {
                 id: newAlert.id,
-                alertRef: newAlert.alertRef,
                 riskLevel: riskLevel,
-                title: newAlert.title ?? `AML Alert ${newAlert.alertRef}`,
+                title: newAlert.title ?? `AML Alert ${newAlert.alertRef ?? `ALT-\${String(newAlert.id).padStart(6, "0")}`}`,
                 description: newAlert.description ?? ``,
                 transactionId: tx.id,
                 investigationId: input.investigationId,
@@ -306,8 +303,7 @@ export const amlRouter = router({
             }
           }
           // Dapr pub/sub: publish AML alert event (non-blocking)
-          publishAmlAlert({
-            alertId: newAlert.id,
+          publishAmlAlert({alertId: 0, 
             alertType: riskLevel,
             riskScore: score,
             transactionRef: tx.txRef,
@@ -324,29 +320,21 @@ export const amlRouter = router({
           }).catch(() => {});
           // Temporal: start AML workflow for critical/high alerts (non-blocking)
           if (score >= 70) {
-            startAmlWorkflow({
-              alertRef: newAlert.alertRef,
-              alertId: newAlert.id,
-              riskScore: score,
-              transactionRef: tx.txRef,
-              subjectName: input.originatorName,
-            }).catch(e => console.warn("[AML Temporal]", e));
+            startAmlWorkflow({ investigationRef: `AML-${Date.now()}`, subjectName: input.originatorName, subjectType: "individual", triggerReason: "auto_escalation", riskScore: score, transactionRef: tx.txRef }).catch(e => console.warn("[AML Temporal]", e));
           }
           // Lakehouse: write AML alert event for analytics (non-blocking)
-          writeLakehouseEvent("aml_alert", {
-            alertRef: newAlert.alertRef, alertId: newAlert.id, riskScore: score,
+          writeLakehouseEvent({ table: "aml_alert", data: { alertId: newAlert.id, riskScore: score,
             riskLevel, transactionRef: tx.txRef, amount: input.amount,
             currency: input.currency, originatorName: input.originatorName,
             beneficiaryName: input.beneficiaryName,
-          }).catch(() => {});
+          }}).catch(() => {});
           // Permify: write AML alert relationship for access control
           void permifyWriteRelationship([{ entity: { type: "aml_alert", id: String(newAlert.id) }, relation: "owner", subject: { type: "user", id: String(ctx.user.id) } }]).catch(e => console.warn("[AML Permify]", e));
           // Webhook fan-out: notify all subscribed tenants (non-blocking)
           dispatchAmlWebhook({
             event: "aml.alert",
-            alertRef: newAlert.alertRef,
             riskLevel,
-            title: newAlert.title ?? `AML Alert ${newAlert.alertRef}`,
+            title: newAlert.title ?? `AML Alert ${newAlert.alertRef ?? `ALT-\${String(newAlert.id).padStart(6, "0")}`}`,
             transactionId: tx.id,
             amount: input.amount,
             currency: input.currency,
@@ -367,8 +355,7 @@ export const amlRouter = router({
         const [tx] = await db.update(transactions)
           .set({ status: "flagged", flaggedAt: new Date(), flaggedBy: ctx.user.id, updatedAt: new Date() })
           .where(eq(transactions.id, input.id)).returning();
-        await db.insert(amlAlerts).values({
-          alertRef: amlAlertRef(), transactionId: tx.id, status: "open", riskLevel: "high",
+        await db.insert(amlAlerts).values({ alertRef: amlAlertRef(), transactionId: tx.id, status: "open", riskLevel: "high",
           title: `Manually Flagged: ${tx.originatorName} → ${tx.beneficiaryName}`,
           description: input.reason, triggeredValue: tx.amount,
         });
@@ -499,7 +486,7 @@ export const amlRouter = router({
         void publishAmlAlert({ alertId: alert.id, alertType: alert.riskLevel ?? "medium", riskScore: 0, autoEscalated: false }).catch(() => {});
         // Temporal: start AML escalation workflow if escalated
         if (input.status === "escalated") {
-          startAmlWorkflow({ alertRef: alert.alertRef, alertId: alert.id, riskScore: 0, subjectName: "" }).catch(e => console.warn("[AML Temporal escalate]", e));
+          startAmlWorkflow({ investigationRef: alert.alertRef ?? `ALT-${String(alert.id).padStart(6, "0")}`, subjectName: "Unknown", subjectType: "individual", triggerReason: "manual_escalation", alertRef: alert.alertRef ?? undefined, alertId: alert.id, riskScore: 0 }).catch(e => console.warn("[AML Temporal escalate]", e));
         }
         // Invalidate cached alert lists
         void invalidateCache(`aml:alerts:tenant:${ctx.tenantId ?? "global"}`).catch(() => {});
@@ -721,8 +708,7 @@ export const amlRouter = router({
         if (!db) throw new Error("Database unavailable");
         const [record] = await db.update(travelRuleRecords).set({ status: "sent", sentAt: new Date() }).where(eq(travelRuleRecords.id, input.id)).returning();
         // Publish Travel Rule sent event to Dapr pub/sub for compliance engine (non-blocking)
-        publishAmlAlert({
-          alertId: record?.id ?? 0,
+        publishAmlAlert({alertId: 0, 
           alertType: "travel_rule_sent",
           riskScore: 50,
           subjectRef: record?.originatorName ?? undefined,
@@ -739,8 +725,7 @@ export const amlRouter = router({
         if (!db) throw new Error("Database unavailable");
         const [record] = await db.update(travelRuleRecords).set({ status: "acknowledged", acknowledgedAt: new Date() }).where(eq(travelRuleRecords.id, input.id)).returning();
         // Publish Travel Rule acknowledged event to Dapr pub/sub for compliance engine (non-blocking)
-        publishAmlAlert({
-          alertId: record?.id ?? 0,
+        publishAmlAlert({alertId: 0, 
           alertType: "travel_rule_acknowledged",
           riskScore: 0,
           subjectRef: record?.originatorName ?? undefined,

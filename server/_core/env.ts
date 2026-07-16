@@ -18,6 +18,7 @@ export const ENV = {
   // AML / risk engine sidecar URLs
   bisAmlEngineUrl: process.env.BIS_AML_ENGINE_URL ?? "http://localhost:8095",
   riskEngineUrl: process.env.RISK_ENGINE_URL ?? "http://localhost:8082",
+  mlEnrichmentUrl: process.env.ML_ENRICHMENT_URL ?? "http://localhost:8083",
   // Lakehouse writer (Python Delta Lake + DuckDB)
   lakehouseUrl: process.env.LAKEHOUSE_URL ?? "http://localhost:8085",
   // Ollama local LLM (optional — used by OpenClaw skill engine)

@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { getDb } from '../db';
 
 // BIS platform requires PostgreSQL. Override the platform-injected MySQL/TiDB URL
 // with the local PostgreSQL instance.

@@ -81,13 +81,17 @@ function emitInsiderEvent(
   severity: string,
   metadata: Record<string, unknown>,
 ): void {
+  const { sourceIp, resourcePath, ruleId } = metadata as { sourceIp?: string; resourcePath?: string; ruleId?: string };
   void publishInsiderThreatEvent({
-    eventId:     Date.now(),
-    subjectId:   userId,
+    eventType:     "anomaly_detected",
+    eventId:       Date.now(),
+    subjectId:     String(userId),
     category,
     severity,
-    triggeredAt: new Date().toISOString(),
-    ...metadata as { sourceIp?: string; resourcePath?: string; payloadBytes?: number; ruleId?: string },
+    sourceIp,
+    resourcePath,
+    ruleId,
+    timestamp:     new Date().toISOString(),
   }).catch((err: unknown) => {
     console.warn("[InsiderThreat] Failed to emit event:", err);
   });

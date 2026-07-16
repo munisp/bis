@@ -268,6 +268,10 @@ export async function publishStablecoinEvent(data: {
   currency?: string;
   fromAddress?: string;
   toAddress?: string;
+  network?: string;
+  amountUnits?: string;
+  status?: string;
+  actorId?: number;
   tenantId?: number;
   timestamp?: string;
 }): Promise<void> {
@@ -422,10 +426,19 @@ export async function daprHealthCheck(): Promise<{ ok: boolean; latencyMs: numbe
 export async function publishInsiderThreatEvent(data: {
   eventType: "anomaly_detected" | "alert_raised" | "ueba_score_updated" | "access_review_triggered" | "session_flagged";
   userId?: number;
+  subjectId?: string;
   userEmail?: string;
+  category?: string;
+  severity?: string;
+  anomalyScore?: number;
+  driftScore?: number;
+  sourceIp?: string;
+  resourcePath?: string;
   deviationScore?: number;
   riskTier?: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
   triggeredBy?: string;
+  eventId?: number;
+  ruleId?: string;
   tenantId?: number;
   timestamp?: string;
 }): Promise<void> {
@@ -452,6 +465,7 @@ export async function publishSarEvent(data: {
   filedWith?: string;
   tenantId?: number;
   createdBy?: number;
+  actorId?: number;
   timestamp?: string;
 }): Promise<void> {
   return daprPublish({
@@ -469,6 +483,7 @@ export async function publishGoamlEvent(data: {
   subjectName?: string;
   tenantId?: number;
   createdBy?: number;
+  actorId?: number;
   timestamp?: string;
 }): Promise<void> {
   return daprPublish({
@@ -526,3 +541,8 @@ export async function publishOpenAppsecEvent(data: {
     data: { ...data, timestamp: data.timestamp ?? new Date().toISOString() },
   });
 }
+
+// Alias exports for backward compatibility with insiderThreat.ts imports
+export const publishUebaAlert = publishInsiderThreatEvent;
+export const publishAccessReviewEvent = publishInsiderThreatEvent;
+

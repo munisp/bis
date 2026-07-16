@@ -102,7 +102,7 @@ export const sarRouter = router({
         createdBy: ctx.user.id,
       }).returning();
       // Publish SAR created event to Dapr pub/sub
-      publishSarEvent({ sarId: sar.id, sarRef: sar.sarRef, status: "draft", category: sar.category, tenantId: sar.tenantId ?? undefined, actorId: ctx.user.id }).catch(e => console.warn("[SAR] Dapr publish failed:", e));
+      publishSarEvent({eventType: "created",  sarId: sar.id, sarRef: sar.sarRef, status: "draft", category: sar.category, tenantId: sar.tenantId ?? undefined, actorId: ctx.user.id }).catch(e => console.warn("[SAR] Dapr publish failed:", e));
       return sar;
     }),
 
@@ -139,7 +139,7 @@ export const sarRouter = router({
         .where(and(eq(sarFilings.id, input.id), eq(sarFilings.status, "draft")))
         .returning();
       if (!sar) throw new Error("SAR not found or not in draft status");
-      publishSarEvent({ sarId: sar.id, sarRef: sar.sarRef, status: "under_review", category: sar.category, tenantId: sar.tenantId ?? undefined, actorId: 0 }).catch(() => {});
+      publishSarEvent({eventType: "created",  sarId: sar.id, sarRef: sar.sarRef, status: "under_review", category: sar.category, tenantId: sar.tenantId ?? undefined, actorId: 0 }).catch(() => {});
       return sar;
     }),
 
@@ -162,7 +162,7 @@ export const sarRouter = router({
           sarType: sar.category,
           filingOfficer: ctx.user.id,
         }).catch(e => console.warn("[SAR] Temporal workflow start failed:", e));
-        publishSarEvent({ sarId: sar.id, sarRef: sar.sarRef, status: "approved", category: sar.category, tenantId: sar.tenantId ?? undefined, actorId: ctx.user.id }).catch(() => {});
+        publishSarEvent({eventType: "approved",  sarId: sar.id, sarRef: sar.sarRef, status: "approved", category: sar.category, tenantId: sar.tenantId ?? undefined, actorId: ctx.user.id }).catch(() => {});
       }
       return sar;
     }),
@@ -194,7 +194,7 @@ export const sarRouter = router({
         .where(and(eq(sarFilings.id, input.id), eq(sarFilings.status, "approved")))
         .returning();
       if (!sar) throw new Error("SAR not found or not approved");
-      publishSarEvent({ sarId: sar.id, sarRef: sar.sarRef, status: "filed", category: sar.category, tenantId: sar.tenantId ?? undefined, actorId: 0 }).catch(() => {});
+      publishSarEvent({eventType: "filed",  sarId: sar.id, sarRef: sar.sarRef, status: "filed", category: sar.category, tenantId: sar.tenantId ?? undefined, actorId: 0 }).catch(() => {});
       return sar;
     }),
 

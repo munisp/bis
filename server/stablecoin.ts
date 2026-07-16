@@ -123,15 +123,8 @@ export const stablecoinRouter = router({
         initiatedAt: new Date().toISOString(),
       };
       // Publish stablecoin transfer event to Dapr pub/sub for AML monitoring
-      publishStablecoinEvent({
-        txRef: result.txRef,
-        network: result.network,
-        currency: result.currency,
-        amountUnits: input.amountUnits,
-        status: result.status,
-        actorId: ctx.user.id,
-        tenantId: ctx.tenantId ?? undefined,
-      }).catch(e => console.warn("[Stablecoin] Dapr publish failed:", e));
+      publishStablecoinEvent({ eventType: "transfer_initiated", txRef: result.txRef, network: result.network, currency: result.currency, amountUnits: input.amountUnits, status: result.status, actorId: ctx.user.id, tenantId: ctx.tenantId ?? undefined,
+       }).catch(e => console.warn("[Stablecoin] Dapr publish failed:", e));
       return transferResult;
     }),
 

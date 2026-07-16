@@ -141,7 +141,6 @@ export default function AuditLogPage() {
         category: "bulk_download",
         severity: "medium",
         anomalyScore: 0.5,
-        payloadBytes: filtered.length * 512, // rough estimate
         resourcePath: "/audit-log/export",
         ruleId: "dlp:bulk-export-confirmed",
       });
