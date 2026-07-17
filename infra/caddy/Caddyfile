@@ -1,0 +1,469 @@
+# ─── BIS Platform Edge Gateway — Caddyfile ───────────────────────────────────
+# Traffic flow:
+#   Internet → Caddy (443/80) → OpenAppSec WAF (nginx:8080) → APISIX (9080) → Services
+#
+# Caddy responsibilities:
+#   1. Automatic TLS (Let's Encrypt / internal PKI for dev)
+#   2. HTTP/3 + QUIC
+#   3. Keycloak OIDC forward-auth (edge JWT validation)
+#   4. Distributed rate limiting (Redis-backed)
+#   5. mTLS internal PKI CA
+#   6. OpenTelemetry trace injection
+#   7. WAF bypass detection (signed X-BIS-Edge-Token)
+#   8. Security headers
+#   9. Structured access logs → Kafka
+#  10. Admin API (internal only)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Global Options ────────────────────────────────────────────────────────────
+{
+	# Admin API — internal only, never exposed to the internet
+	admin 0.0.0.0:2019 {
+		origins localhost 127.0.0.1 caddy caddy:2019
+	}
+
+	# Email for ACME certificate registration
+	email {$CADDY_ACME_EMAIL:ops@bis.internal}
+
+	# Use Let's Encrypt staging in dev/test, production in prod
+	acme_ca {$CADDY_ACME_CA:https://acme-staging-v02.api.letsencrypt.org/directory}
+
+	# Internal PKI for service-to-service mTLS
+	pki {
+		ca bis-internal {
+			name "BIS Internal CA"
+			root_cn "BIS Root CA"
+			intermediate_cn "BIS Intermediate CA"
+		}
+	}
+
+	# Enable HTTP/3 (QUIC) globally
+	servers {
+		protocols h1 h2 h3
+		trusted_proxies static private_ranges
+	}
+
+	# OpenTelemetry tracing — export to Tempo/Jaeger
+	tracing {
+		span bis-edge
+	}
+
+	# Structured JSON logs
+	log default {
+		output stdout
+		format json {
+			time_format iso8601
+		}
+		level INFO
+	}
+}
+
+# ── Snippet: Security Headers ─────────────────────────────────────────────────
+(security_headers) {
+	header {
+		# Prevent clickjacking
+		X-Frame-Options "SAMEORIGIN"
+		# Prevent MIME sniffing
+		X-Content-Type-Options "nosniff"
+		# XSS protection
+		X-XSS-Protection "1; mode=block"
+		# HSTS — 1 year, include subdomains, preload
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		# Referrer policy
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# Permissions policy — restrict dangerous APIs
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
+		# Content Security Policy
+		Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' wss: https:; frame-ancestors 'none'"
+		# Remove server fingerprinting headers
+		-Server
+		-X-Powered-By
+		# BIS edge identifier (for downstream WAF/APISIX verification)
+		X-BIS-Edge "caddy"
+	}
+}
+
+# ── Snippet: WAF Bypass Prevention ────────────────────────────────────────────
+# Adds a signed token that OpenAppSec and APISIX verify to ensure all traffic
+# passed through Caddy → OpenAppSec → APISIX (no bypass possible).
+(waf_edge_token) {
+	header X-BIS-Edge-Token {$BIS_EDGE_TOKEN_SECRET:bis-edge-dev-secret-change-in-prod}
+	header X-BIS-WAF-Required "true"
+}
+
+# ── Snippet: Keycloak OIDC Forward Auth ───────────────────────────────────────
+# Validates JWT with Keycloak before forwarding to OpenAppSec/APISIX.
+# Public endpoints (health, auth callbacks) bypass this check.
+(keycloak_auth) {
+	forward_auth keycloak:8080 {
+		uri /realms/{$KEYCLOAK_REALM:bis}/protocol/openid-connect/userinfo
+		copy_headers X-BIS-User-ID X-BIS-User-Email X-BIS-User-Roles X-BIS-Tenant-ID
+		header_up Authorization {header.Authorization}
+		header_up X-Forwarded-Host {host}
+		header_up X-Forwarded-URI {uri}
+		header_up X-Forwarded-Method {method}
+	}
+}
+
+# ── Snippet: Distributed Rate Limiting ────────────────────────────────────────
+# Uses Redis-backed distributed rate limiting across all Caddy replicas.
+(rate_limit_api) {
+	rate_limit {
+		zone api_global {
+			key    {remote_host}
+			events 1000
+			window 1m
+		}
+		zone api_auth {
+			key    {header.Authorization}
+			events 200
+			window 1m
+		}
+		distributed {
+			write_interval 5s
+			purge_age      1h
+		}
+	}
+}
+
+(rate_limit_auth) {
+	rate_limit {
+		zone auth_attempts {
+			key    {remote_host}
+			events 10
+			window 5m
+		}
+		distributed {
+			write_interval 5s
+			purge_age      1h
+		}
+	}
+}
+
+# ── Snippet: OpenTelemetry Trace Injection ────────────────────────────────────
+(otel_tracing) {
+	tracing {
+		span {host}
+	}
+	header X-BIS-Trace-ID {http.vars.trace_id}
+	header X-BIS-Request-ID {http.request.uuid}
+}
+
+# ── Snippet: mTLS Client Certificate Verification ────────────────────────────
+# Used for internal service-to-service communication
+(mtls_internal) {
+	tls {
+		client_auth {
+			mode                 require_and_verify
+			trusted_ca_cert_file /etc/caddy/pki/bis-internal-ca.pem
+		}
+	}
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SITE BLOCKS
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── 1. Main BIS API — Public HTTPS Edge ───────────────────────────────────────
+# Handles all external API traffic: validates JWT, rate-limits, injects trace
+# headers, then forwards to OpenAppSec WAF → APISIX → Services
+{$BIS_DOMAIN:bis.localhost}:443, {$BIS_DOMAIN:bis.localhost}:80 {
+	import security_headers
+	import otel_tracing
+	import waf_edge_token
+
+	# ── ACME / TLS ──────────────────────────────────────────────────────────
+	tls {
+		protocols tls1.2 tls1.3
+		ciphers TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384 TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384 TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256
+		curves x25519 secp384r1
+	}
+
+	# ── Health check — no auth required ─────────────────────────────────────
+	handle /health {
+		respond `{"status":"ok","service":"caddy-edge"}` 200 {
+			close
+		}
+	}
+
+	# ── Caddy admin status — internal only ──────────────────────────────────
+	handle /caddy/health {
+		respond `{"status":"ok","layer":"caddy-edge","version":"2"}` 200 {
+			close
+		}
+	}
+
+	# ── Auth endpoints — rate-limited but no JWT check (user is logging in) ─
+	handle /api/auth/* {
+		import rate_limit_auth
+		reverse_proxy open-appsec:8080 {
+			header_up Host {upstream_hostport}
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+			header_up X-Forwarded-Host {host}
+			lb_policy round_robin
+			health_uri /health
+			health_interval 10s
+			health_timeout 3s
+			health_status 2xx
+		}
+	}
+
+	# ── Keycloak OIDC callback — no JWT check ───────────────────────────────
+	handle /auth/callback* {
+		import rate_limit_auth
+		reverse_proxy open-appsec:8080 {
+			header_up Host {upstream_hostport}
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+		}
+	}
+
+	# ── Webhook endpoints — HMAC-verified, no JWT ───────────────────────────
+	handle /api/webhooks/* {
+		import rate_limit_api
+		reverse_proxy open-appsec:8080 {
+			header_up Host {upstream_hostport}
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+			header_up X-Forwarded-Host {host}
+		}
+	}
+
+	# ── All other API traffic — JWT required ────────────────────────────────
+	handle /api/* {
+		import rate_limit_api
+		import keycloak_auth
+
+		reverse_proxy open-appsec:8080 {
+			header_up Host {upstream_hostport}
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+			header_up X-Forwarded-Host {host}
+			# Forward Keycloak-resolved identity headers
+			header_up X-BIS-User-ID {header.X-BIS-User-ID}
+			header_up X-BIS-User-Email {header.X-BIS-User-Email}
+			header_up X-BIS-User-Roles {header.X-BIS-User-Roles}
+			header_up X-BIS-Tenant-ID {header.X-BIS-Tenant-ID}
+			# Load balancing and health
+			lb_policy round_robin
+			health_uri /health
+			health_interval 10s
+			health_timeout 3s
+			health_status 2xx
+			# Circuit breaker
+			max_fails 3
+			fail_duration 30s
+			# Timeouts
+			transport http {
+				dial_timeout        5s
+				response_header_timeout 30s
+				read_timeout        60s
+				write_timeout       60s
+				keepalive           30s
+				keepalive_idle_conns 100
+			}
+		}
+	}
+
+	# ── WebSocket / tRPC subscriptions ──────────────────────────────────────
+	handle /trpc/* {
+		import rate_limit_api
+		reverse_proxy open-appsec:8080 {
+			header_up Host {upstream_hostport}
+			header_up Upgrade {header.Upgrade}
+			header_up Connection {header.Connection}
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+			transport http {
+				dial_timeout     5s
+				read_timeout     0  # WebSocket — no read timeout
+				write_timeout    0
+			}
+		}
+	}
+
+	# ── Static assets / SPA ─────────────────────────────────────────────────
+	handle {
+		import rate_limit_api
+		reverse_proxy open-appsec:8080 {
+			header_up Host {upstream_hostport}
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+		}
+	}
+
+	# ── Structured access log ────────────────────────────────────────────────
+	log {
+		output file /var/log/caddy/access.log {
+			roll_size     100mb
+			roll_keep     10
+			roll_keep_for 720h
+		}
+		format json {
+			time_format iso8601
+		}
+	}
+}
+
+# ── 2. Keycloak Admin Console — Separate subdomain ────────────────────────────
+{$KEYCLOAK_DOMAIN:auth.bis.localhost} {
+	import security_headers
+	import rate_limit_auth
+
+	tls {
+		protocols tls1.2 tls1.3
+	}
+
+	reverse_proxy keycloak:8080 {
+		header_up Host {upstream_hostport}
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Forwarded-Host {host}
+		transport http {
+			dial_timeout            5s
+			response_header_timeout 30s
+		}
+	}
+
+	log {
+		output file /var/log/caddy/keycloak-access.log {
+			roll_size 50mb
+			roll_keep 5
+		}
+		format json
+	}
+}
+
+# ── 3. Grafana / Observability Dashboard ─────────────────────────────────────
+{$GRAFANA_DOMAIN:grafana.bis.localhost} {
+	import security_headers
+
+	# Require Keycloak auth for Grafana access
+	import keycloak_auth
+
+	tls {
+		protocols tls1.2 tls1.3
+	}
+
+	reverse_proxy grafana:3000 {
+		header_up Host {upstream_hostport}
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+		# Pass Keycloak user info for Grafana SSO
+		header_up X-WEBAUTH-USER {header.X-BIS-User-Email}
+		header_up X-WEBAUTH-ROLE {header.X-BIS-User-Roles}
+	}
+}
+
+# ── 4. Temporal Web UI ────────────────────────────────────────────────────────
+{$TEMPORAL_UI_DOMAIN:temporal.bis.localhost} {
+	import security_headers
+
+	# Require Keycloak auth for Temporal UI
+	import keycloak_auth
+
+	tls {
+		protocols tls1.2 tls1.3
+	}
+
+	reverse_proxy temporal-ui:8080 {
+		header_up Host {upstream_hostport}
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+	}
+}
+
+# ── 5. Internal mTLS Service Mesh ─────────────────────────────────────────────
+# All internal service-to-service communication goes through this block.
+# Services must present a valid certificate signed by the BIS Internal CA.
+{$BIS_INTERNAL_DOMAIN:internal.bis.localhost}:8443 {
+	import mtls_internal
+	import otel_tracing
+
+	tls internal {
+		issuer internal {
+			ca bis-internal
+		}
+	}
+
+	# Route to services based on path prefix
+	handle /bff/* {
+		uri strip_prefix /bff
+		reverse_proxy bff:3001 {
+			header_up X-BIS-Internal "true"
+			header_up X-BIS-Trace-ID {header.X-BIS-Trace-ID}
+		}
+	}
+
+	handle /gateway/* {
+		uri strip_prefix /gateway
+		reverse_proxy gateway:8081 {
+			header_up X-BIS-Internal "true"
+			header_up X-BIS-Trace-ID {header.X-BIS-Trace-ID}
+		}
+	}
+
+	handle /risk-engine/* {
+		uri strip_prefix /risk-engine
+		reverse_proxy risk-engine:8082 {
+			header_up X-BIS-Internal "true"
+			header_up X-BIS-Trace-ID {header.X-BIS-Trace-ID}
+		}
+	}
+
+	handle /aml-engine/* {
+		uri strip_prefix /aml-engine
+		reverse_proxy aml-engine:8095 {
+			header_up X-BIS-Internal "true"
+			header_up X-BIS-Trace-ID {header.X-BIS-Trace-ID}
+		}
+	}
+
+	handle /biometric-engine/* {
+		uri strip_prefix /biometric-engine
+		reverse_proxy biometric-engine:8084 {
+			header_up X-BIS-Internal "true"
+			header_up X-BIS-Trace-ID {header.X-BIS-Trace-ID}
+		}
+	}
+
+	handle /compliance-reporter/* {
+		uri strip_prefix /compliance-reporter
+		reverse_proxy compliance-reporter:8094 {
+			header_up X-BIS-Internal "true"
+			header_up X-BIS-Trace-ID {header.X-BIS-Trace-ID}
+		}
+	}
+
+	handle /tigerbeetle-ledger/* {
+		uri strip_prefix /tigerbeetle-ledger
+		reverse_proxy tigerbeetle-ledger:8097 {
+			header_up X-BIS-Internal "true"
+			header_up X-BIS-Trace-ID {header.X-BIS-Trace-ID}
+		}
+	}
+
+	handle /openappsec-reporter/* {
+		uri strip_prefix /openappsec-reporter
+		reverse_proxy openappsec-reporter:8099 {
+			header_up X-BIS-Internal "true"
+			header_up X-BIS-Trace-ID {header.X-BIS-Trace-ID}
+		}
+	}
+}
+
+# ── 6. HTTP → HTTPS Redirect ─────────────────────────────────────────────────
+# Caddy handles this automatically, but explicit redirect for non-standard ports
+http:// {
+	redir https://{host}{uri} 301
+}

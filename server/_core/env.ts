@@ -44,6 +44,13 @@ export const ENV = {
   complianceWorkerUrl: process.env.COMPLIANCE_WORKER_URL ?? "http://localhost:8096",
   // WAF shared key for OpenAppSec reporter auth
   bisWafKey: process.env.BIS_WAF_KEY ?? "dev-waf-key-change-in-prod",
+  // Caddy edge gateway admin API URL (internal only — never expose publicly)
+  caddyAdminUrl: process.env.CADDY_ADMIN_URL ?? "http://caddy:2019",
+  // Caddy edge token secret — shared with OpenAppSec and APISIX for WAF bypass detection
+  bisEdgeTokenSecret: process.env.BIS_EDGE_TOKEN_SECRET ?? "bis-edge-dev-secret-change-in-prod",
+  // Caddy domain (used for redirect URIs and CORS)
+  bisDomain: process.env.BIS_DOMAIN ?? "bis.localhost",
+  keycloakDomain: process.env.KEYCLOAK_DOMAIN ?? "auth.bis.localhost",
   // Paystack payment gateway
   paystackSecretKey: process.env.PAYSTACK_SECRET_KEY ?? "",
   // CORS allowed origins (comma-separated)
@@ -187,6 +194,8 @@ export function validateEnv(): void {
     ["OPENAPPSEC_REPORTER_URL", ENV.openappsecReporterUrl, "OpenAppSec reporter defaults to localhost:8095 — WAF incident management unavailable"],
     ["COMPLIANCE_WORKER_URL", ENV.complianceWorkerUrl, "Compliance worker defaults to localhost:8096 — SAR/KYC Temporal workflows unavailable"],
     ["BIS_WAF_KEY", ENV.bisWafKey, "WAF key uses insecure dev default — change before production"],
+    ["CADDY_ADMIN_URL", ENV.caddyAdminUrl, "Caddy admin API defaults to caddy:2019 — dynamic config updates unavailable"],
+    ["BIS_EDGE_TOKEN_SECRET", ENV.bisEdgeTokenSecret, "Caddy edge token uses insecure dev default — change before production"],
   ];
 
   const missing = required.filter(([, v]) => !v).map(([k]) => k);

@@ -662,6 +662,22 @@ async function startServer() {
       checks.lakehouse = { status: "degraded", latencyMs: Date.now() - lakehouseStart };
     }
 
+    // Caddy edge gateway check
+    const caddyStart = Date.now();
+    try {
+      const { checkCaddyHealth } = await import("../caddy");
+      const caddyResult = await checkCaddyHealth();
+      checks.caddy = {
+        status: caddyResult.status,
+        latencyMs: caddyResult.latencyMs ?? (Date.now() - caddyStart),
+        ...(caddyResult.activeConnections !== undefined && { activeConnections: caddyResult.activeConnections }),
+        ...(caddyResult.tlsCertsManaged !== undefined && { tlsCertsManaged: caddyResult.tlsCertsManaged }),
+        ...(caddyResult.error && { error: caddyResult.error }),
+      };
+    } catch {
+      checks.caddy = { status: "degraded", latencyMs: Date.now() - caddyStart };
+    }
+
     const allOk = Object.values(checks).every(c => c.status === "ok");
     const anyDown = Object.values(checks).some(c => c.status === "down");
     const overall = allOk ? "ok" : anyDown ? "degraded" : "degraded";

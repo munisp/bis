@@ -121,6 +121,7 @@ import { eq, desc, asc, and, ilike, gte, lte, lt, sql, count, inArray, isNotNull
 import { z } from "zod";
 import { ENV } from "./_core/env";
 import { analyticsRouter } from "./orm/analyticsRouter"; // analytics.getDashboardStats is separate from db.getDashboardStats
+import { caddyRouter } from "./caddy";
 
 // ─── Service URLs ─────────────────────────────────────────────────────────────
 
@@ -6867,6 +6868,7 @@ export const appRouter = router({
   ngScreeningExt: ngScreeningExtRouter,
   criminalRecords: criminalRecordsRouter,
   analytics: analyticsRouter,
+  caddy: caddyRouter,
 });
 export type AppRouter = typeof appRouter;
 

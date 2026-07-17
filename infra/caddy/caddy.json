@@ -1,0 +1,265 @@
+{
+  "$schema": "https://json.schemastore.org/caddy-v2.json",
+  "_comment": "BIS Platform Caddy JSON Config — used by Admin API for dynamic updates",
+  "admin": {
+    "listen": "0.0.0.0:2019",
+    "origins": ["localhost", "127.0.0.1", "caddy", "caddy:2019"],
+    "config": {
+      "persist": true
+    }
+  },
+  "logging": {
+    "logs": {
+      "default": {
+        "writer": {
+          "output": "stdout"
+        },
+        "encoder": {
+          "format": "json",
+          "time_format": "iso8601"
+        },
+        "level": "INFO"
+      },
+      "access": {
+        "writer": {
+          "output": "file",
+          "filename": "/var/log/caddy/access.log",
+          "roll_size_mb": 100,
+          "roll_keep": 10,
+          "roll_keep_for": "720h"
+        },
+        "encoder": {
+          "format": "json",
+          "time_format": "iso8601"
+        },
+        "include": ["http.log.access"]
+      }
+    }
+  },
+  "storage": {
+    "module": "redis",
+    "host": "redis",
+    "port": "6379",
+    "password": "{$REDIS_PASSWORD}",
+    "db": 1,
+    "key_prefix": "caddy:",
+    "timeout": 5,
+    "tls_enabled": false
+  },
+  "apps": {
+    "pki": {
+      "certificate_authorities": {
+        "bis-internal": {
+          "name": "BIS Internal CA",
+          "root": {
+            "common_name": "BIS Root CA"
+          },
+          "intermediate": {
+            "common_name": "BIS Intermediate CA"
+          },
+          "install_trust": false
+        }
+      }
+    },
+    "tls": {
+      "automation": {
+        "policies": [
+          {
+            "subjects": ["{$BIS_DOMAIN}", "{$KEYCLOAK_DOMAIN}", "{$GRAFANA_DOMAIN}", "{$TEMPORAL_UI_DOMAIN}"],
+            "issuers": [
+              {
+                "module": "acme",
+                "ca": "{$CADDY_ACME_CA}",
+                "email": "{$CADDY_ACME_EMAIL}"
+              }
+            ],
+            "key_type": "p256",
+            "on_demand": false
+          },
+          {
+            "subjects": ["{$BIS_INTERNAL_DOMAIN}"],
+            "issuers": [
+              {
+                "module": "internal",
+                "ca": "bis-internal"
+              }
+            ],
+            "key_type": "p256"
+          }
+        ]
+      }
+    },
+    "http": {
+      "http_port": 80,
+      "https_port": 443,
+      "servers": {
+        "public": {
+          "listen": [":443", ":80"],
+          "protocols": ["h1", "h2", "h3"],
+          "trusted_proxies": {
+            "source": "private_ranges"
+          },
+          "logs": {
+            "default_logger_name": "access"
+          },
+          "routes": [
+            {
+              "match": [{"path": ["/health", "/caddy/health"]}],
+              "handle": [
+                {
+                  "handler": "static_response",
+                  "status_code": 200,
+                  "body": "{\"status\":\"ok\",\"service\":\"caddy-edge\",\"version\":\"2\"}",
+                  "headers": {
+                    "Content-Type": ["application/json"]
+                  }
+                }
+              ]
+            },
+            {
+              "match": [{"path": ["/api/auth/*", "/auth/callback*"]}],
+              "handle": [
+                {
+                  "handler": "rate_limit",
+                  "rate_limits": {
+                    "auth_attempts": {
+                      "match": [{"remote_ip": {"ranges": ["0.0.0.0/0"]}}],
+                      "key": "{remote_host}",
+                      "window": "5m",
+                      "max_events": 10
+                    }
+                  },
+                  "distributed": {
+                    "write_interval": "5s",
+                    "purge_age": "1h"
+                  }
+                },
+                {
+                  "handler": "reverse_proxy",
+                  "upstreams": [{"dial": "open-appsec:8080"}],
+                  "headers": {
+                    "request": {
+                      "set": {
+                        "X-Real-IP": ["{remote_host}"],
+                        "X-Forwarded-For": ["{remote_host}"],
+                        "X-Forwarded-Proto": ["{scheme}"],
+                        "X-BIS-Edge-Token": ["{$BIS_EDGE_TOKEN_SECRET}"]
+                      }
+                    }
+                  },
+                  "health_checks": {
+                    "active": {
+                      "uri": "/health",
+                      "interval": "10s",
+                      "timeout": "3s"
+                    }
+                  },
+                  "transport": {
+                    "protocol": "http",
+                    "dial_timeout": "5s",
+                    "response_header_timeout": "30s"
+                  }
+                }
+              ]
+            },
+            {
+              "match": [{"path": ["/api/*", "/trpc/*"]}],
+              "handle": [
+                {
+                  "handler": "rate_limit",
+                  "rate_limits": {
+                    "api_global": {
+                      "key": "{remote_host}",
+                      "window": "1m",
+                      "max_events": 1000
+                    },
+                    "api_auth": {
+                      "key": "{http.request.header.Authorization}",
+                      "window": "1m",
+                      "max_events": 200
+                    }
+                  },
+                  "distributed": {
+                    "write_interval": "5s",
+                    "purge_age": "1h"
+                  }
+                },
+                {
+                  "handler": "forward_auth",
+                  "uri": "http://keycloak:8080/realms/{$KEYCLOAK_REALM}/protocol/openid-connect/userinfo",
+                  "copy_headers": [
+                    "X-BIS-User-ID",
+                    "X-BIS-User-Email",
+                    "X-BIS-User-Roles",
+                    "X-BIS-Tenant-ID"
+                  ],
+                  "headers_prefix": ""
+                },
+                {
+                  "handler": "headers",
+                  "request": {
+                    "set": {
+                      "X-BIS-Edge-Token": ["{$BIS_EDGE_TOKEN_SECRET}"],
+                      "X-BIS-WAF-Required": ["true"]
+                    }
+                  }
+                },
+                {
+                  "handler": "reverse_proxy",
+                  "upstreams": [{"dial": "open-appsec:8080"}],
+                  "headers": {
+                    "request": {
+                      "set": {
+                        "X-Real-IP": ["{remote_host}"],
+                        "X-Forwarded-For": ["{remote_host}"],
+                        "X-Forwarded-Proto": ["{scheme}"]
+                      }
+                    }
+                  },
+                  "health_checks": {
+                    "active": {
+                      "uri": "/health",
+                      "interval": "10s",
+                      "timeout": "3s"
+                    }
+                  },
+                  "load_balancing": {
+                    "selection_policy": {
+                      "policy": "round_robin"
+                    }
+                  },
+                  "circuit_breaker": {
+                    "threshold": 0.5,
+                    "duration": "30s",
+                    "max_failures": 3
+                  },
+                  "transport": {
+                    "protocol": "http",
+                    "dial_timeout": "5s",
+                    "response_header_timeout": "30s",
+                    "read_timeout": "60s",
+                    "write_timeout": "60s",
+                    "keepalive": "30s",
+                    "keepalive_idle_conns": 100
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "internal": {
+          "listen": [":8443"],
+          "protocols": ["h1", "h2"],
+          "tls_connection_policies": [
+            {
+              "client_authentication": {
+                "mode": "require_and_verify",
+                "trusted_ca_certs_pem_files": ["/etc/caddy/pki/bis-internal-ca.pem"]
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

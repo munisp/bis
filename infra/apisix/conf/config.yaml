@@ -1,9 +1,25 @@
 # ─── APISix Configuration for BIS Platform ───────────────────────────────────
-# Single ingress point in front of all 4 BIS application services.
-# Plugins: jwt-auth, rate-limit, request-id, prometheus, cors, response-rewrite
+# Updated traffic flow (with Caddy edge layer):
+#   Internet → Caddy (443) → OpenAppSec (8080) → APISIX (9080) → BIS Services
+#
+# Caddy responsibilities (handled before APISIX):
+#   - TLS termination (Let's Encrypt / internal PKI)
+#   - Keycloak OIDC forward-auth (JWT validation at edge)
+#   - Distributed rate limiting (Redis-backed)
+#   - HTTP/3 + QUIC
+#   - WAF bypass prevention (X-BIS-Edge-Token)
+#
+# APISIX responsibilities:
+#   - Route matching and upstream load balancing
+#   - Secondary JWT validation (defence-in-depth)
+#   - Caddy edge token verification
+#   - Permify authorization checks
+#   - Prometheus metrics
+#   - Kafka audit logging
+#   - Request ID propagation
 
 apisix:
-  node_listen: 9080          # HTTP ingress port
+  node_listen: 9080          # HTTP ingress port (internal — behind OpenAppSec)
   enable_admin: true
   admin_listen:
     ip: 0.0.0.0
@@ -22,7 +38,9 @@ deployment:
   admin:
     allow_admin:
       - 127.0.0.0/24
-      - 0.0.0.0/0   # restrict in production
+      - 10.0.0.0/8
+      - 172.16.0.0/12
+      - 192.168.0.0/16
     admin_key:
       - name: "admin"
         key: "${APISIX_ADMIN_KEY}"
@@ -33,37 +51,92 @@ deployment:
     admin_key_required: true
 
 plugin_attr:
-  # ─── open-appsec WAF Header Validation (Defense-in-Depth) ───────────────────
-  # Validates that all requests passed through the open-appsec WAF nginx proxy.
-  # The X-BIS-WAF-Protected: open-appsec header is injected by nginx.conf.
-  # In OPEN_APPSEC_MODE=prevent, requests that bypass the WAF are logged.
+  # ─── Caddy Edge Token + WAF Bypass Detection ─────────────────────────────────
+  # Defence-in-depth: APISIX verifies that all requests passed through:
+  #   1. Caddy (X-BIS-Edge-Token header)
+  #   2. OpenAppSec WAF (X-BIS-WAF-Protected header)
+  # This prevents attackers from bypassing the edge security layers.
   serverless-pre-function:
     phase: rewrite
     functions:
       - |
+        -- Caddy edge token verification
+        local edge_token_secret = os.getenv("BIS_EDGE_TOKEN_SECRET") or ""
+        local edge_token = ngx.req.get_headers()["x-bis-edge-token"]
+        local waf_protected = ngx.req.get_headers()["x-bis-waf-protected"]
         local env_mode = os.getenv("OPEN_APPSEC_MODE") or "detect"
-        if env_mode == "prevent" then
-          local waf_hdr = ngx.req.get_headers()["x-bis-waf-protected"]
-          if not waf_hdr then
-            ngx.log(ngx.WARN, "[BIS-WAF] Request bypassed open-appsec WAF: ",
-              ngx.var.remote_addr, " ", ngx.var.request_uri)
+
+        -- Log missing Caddy edge token
+        if edge_token_secret ~= "" and edge_token ~= edge_token_secret then
+          ngx.log(ngx.WARN, "[BIS-CADDY] Request missing/invalid Caddy edge token: ",
+            ngx.var.remote_addr, " ", ngx.var.request_uri,
+            " token=", tostring(edge_token))
+          if env_mode == "prevent" then
+            ngx.status = 403
+            ngx.header["Content-Type"] = "application/json"
+            ngx.say('{"error":"forbidden","reason":"invalid_edge_token"}')
+            ngx.exit(403)
           end
         end
+
+        -- Log missing WAF protection header
+        if not waf_protected then
+          ngx.log(ngx.WARN, "[BIS-WAF] Request bypassed open-appsec WAF: ",
+            ngx.var.remote_addr, " ", ngx.var.request_uri)
+          if env_mode == "prevent" then
+            ngx.status = 403
+            ngx.header["Content-Type"] = "application/json"
+            ngx.say('{"error":"forbidden","reason":"waf_bypass_detected"}')
+            ngx.exit(403)
+          end
+        end
+
+        -- Propagate Caddy-resolved identity headers to upstream services
+        -- These were set by Caddy's forward_auth (Keycloak OIDC validation)
+        local user_id = ngx.req.get_headers()["x-bis-user-id"]
+        local user_email = ngx.req.get_headers()["x-bis-user-email"]
+        local user_roles = ngx.req.get_headers()["x-bis-user-roles"]
+        local tenant_id = ngx.req.get_headers()["x-bis-tenant-id"]
+        local trace_id = ngx.req.get_headers()["x-bis-trace-id"]
+        local request_id = ngx.req.get_headers()["x-bis-request-id"]
+
+        -- Set upstream context headers
+        if user_id then ngx.req.set_header("X-BIS-User-ID", user_id) end
+        if user_email then ngx.req.set_header("X-BIS-User-Email", user_email) end
+        if user_roles then ngx.req.set_header("X-BIS-User-Roles", user_roles) end
+        if tenant_id then ngx.req.set_header("X-BIS-Tenant-ID", tenant_id) end
+        if trace_id then ngx.req.set_header("X-BIS-Trace-ID", trace_id) end
+        if request_id then ngx.req.set_header("X-BIS-Request-ID", request_id) end
+
+        -- Tag request as having passed through full security stack
+        ngx.req.set_header("X-BIS-Security-Stack", "caddy,open-appsec,apisix")
 
   prometheus:
     export_uri: /apisix/prometheus/metrics
     export_addr:
       ip: 0.0.0.0
       port: 9091
-    # Expose all upstream metrics for Grafana scraping
     enable_export_server: true
     metric_prefix: apisix_
+    # Additional labels for Caddy integration metrics
+    extra_labels:
+      - name: edge_layer
+        value: caddy
+      - name: waf_layer
+        value: open-appsec
+
   request-id:
     header_name: X-BIS-Request-ID
     include_in_response: true
     algorithm: uuid
+
+  real-ip:
+    # Trust Caddy as the upstream proxy for real IP resolution
+    source: http_x_forwarded_for
+    trusted: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+    recursive: true
+
   kafka-logger:
-    # Global Kafka logger defaults — overridden per-route as needed
     timeout: 3
     broker_list:
       "kafka:9092": 1
@@ -76,13 +149,36 @@ plugin_attr:
     retry_delay: 1
     include_req_body: false
     include_resp_body: false
+    # Include Caddy trace and identity headers in audit logs
+    include_req_headers:
+      - X-BIS-User-ID
+      - X-BIS-User-Email
+      - X-BIS-Tenant-ID
+      - X-BIS-Trace-ID
+      - X-BIS-Request-ID
+      - X-BIS-Security-Stack
+
+  opentelemetry:
+    # Export traces to Tempo (via Caddy's OTLP pipeline)
+    resource:
+      service.name: apisix
+      service.version: "3"
+      bis.layer: api-gateway
+    collector:
+      address: "tempo:4317"
+      request_timeout: 3
+    batch_span_processor:
+      drop_on_queue_full: false
+      max_queue_size: 1024
+      batch_timeout: 2
+      max_export_batch_size: 16
 
 plugins:
   - real-ip
   - client-control
   - proxy-control
   - request-id
-  - zipkin
+  - opentelemetry
   - ext-plugin-pre-req
   - fault-injection
   - mocking

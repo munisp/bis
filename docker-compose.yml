@@ -10,13 +10,18 @@ version: "3.9"
 #   cp .env.example .env && docker compose up -d
 #   docker compose logs -f gateway risk-engine event-processor bff
 #
-# Service count: 18 containers total
-# Ports:
+# Service count: 20 containers total
+# Ports (public):
+#   80    Caddy HTTP (redirects to HTTPS)
+#   443   Caddy HTTPS + HTTP/3 (edge TLS, Keycloak OIDC, rate limiting)
+#   2019  Caddy Admin API (internal only)
+# Ports (internal):
+#   8080  open-appsec WAF (behind Caddy)
+#   9080  APISix HTTP ingress (behind open-appsec)
 #   3001  BFF (Node.js tRPC)
 #   8081  Go Gateway
 #   8082  Python Risk Engine
 #   8083  Rust Event Processor
-#   9080  APISix HTTP ingress
 #   9091  APISix Prometheus metrics
 #   9090  Prometheus
 #   3000  Grafana
@@ -35,6 +40,9 @@ volumes:
   apisix_data:
   open_appsec_data:   # open-appsec ML models and attack signatures
   open_appsec_logs:   # open-appsec nginx access/error logs
+  caddy_data:         # Caddy TLS certificates and ACME state
+  caddy_config:       # Caddy runtime configuration
+  caddy_logs:         # Caddy access and error logs
   prometheus_data:
   grafana_data:
   influxdb_data:
@@ -211,20 +219,74 @@ services:
       timeout: 5s
       retries: 5
 
+  # ─── Caddy — Edge Gateway (TLS, OIDC, HTTP/3, Rate Limiting) ────────────────────────
+  # Caddy is the outermost edge layer handling:
+  #   - Automatic TLS (Let's Encrypt / internal PKI via ACME)
+  #   - HTTP/3 + QUIC for low-latency client connections
+  #   - Keycloak OIDC forward-auth (JWT validation at edge before WAF)
+  #   - Distributed rate limiting (Redis-backed, cross-replica)
+  #   - mTLS internal PKI CA for service-to-service authentication
+  #   - OpenTelemetry trace ID injection (propagated through full stack)
+  #   - WAF bypass prevention (X-BIS-Edge-Token signed header)
+  # Traffic flow: Internet → Caddy (443) → OpenAppSec (8080) → APISIX (9080) → Services
+  caddy:
+    build:
+      context: ./infra/caddy
+      dockerfile: Dockerfile
+    container_name: bis-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"       # HTTP (redirects to HTTPS)
+      - "443:443"     # HTTPS + HTTP/3 (public edge)
+      - "8443:8443"   # Internal mTLS service mesh
+      - "2019:2019"   # Admin API (internal only — do NOT expose publicly in prod)
+    volumes:
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./infra/caddy/caddy.json:/etc/caddy/caddy.json:ro
+      - ./infra/caddy/waf-rules:/etc/caddy/waf-rules:ro
+      - caddy_data:/data
+      - caddy_config:/config
+      - caddy_logs:/var/log/caddy
+    environment:
+      BIS_DOMAIN: ${BIS_DOMAIN:-bis.localhost}
+      KEYCLOAK_DOMAIN: ${KEYCLOAK_DOMAIN:-auth.bis.localhost}
+      GRAFANA_DOMAIN: ${GRAFANA_DOMAIN:-grafana.bis.localhost}
+      TEMPORAL_UI_DOMAIN: ${TEMPORAL_UI_DOMAIN:-temporal.bis.localhost}
+      BIS_INTERNAL_DOMAIN: ${BIS_INTERNAL_DOMAIN:-internal.bis.localhost}
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-bis}
+      CADDY_ACME_EMAIL: ${CADDY_ACME_EMAIL:-ops@bis.internal}
+      CADDY_ACME_CA: ${CADDY_ACME_CA:-https://acme-staging-v02.api.letsencrypt.org/directory}
+      BIS_EDGE_TOKEN_SECRET: ${BIS_EDGE_TOKEN_SECRET:-bis-edge-dev-secret-change-in-prod}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-bis_redis_dev}
+    networks: [bis-net]
+    depends_on:
+      open-appsec:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      keycloak:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:2019/config/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    profiles: [caddy, waf]   # Start with: docker compose --profile caddy --profile waf up -d
+
   # ─── open-appsec WAF — ML-based WAF in front of APISIX ──────────────────────────
   # open-appsec is an open-source ML-based WAF from Check Point.
   # It provides OWASP Top 10 protection, zero-day detection, and API schema validation.
-  # Traffic flow: Internet → open-appsec:80 → APISIX:9080 → BIS Services
-  # To enable: docker compose -f docker-compose.yml -f infra/open-appsec/docker-compose.override.yml up -d
+  # Updated traffic flow: Internet → Caddy (443) → open-appsec (8080) → APISIX (9080) → Services
+  # Caddy handles TLS, OIDC, rate limiting, and HTTP/3. open-appsec handles deep WAF inspection.
   # Docs: https://docs.openappsec.io
   open-appsec:
     image: openappsec/open-appsec-nginx:latest
     container_name: bis-open-appsec
     restart: unless-stopped
     ports:
-      - "80:80"         # HTTP ingress (public WAF endpoint)
-      - "443:443"       # HTTPS ingress (when TLS is configured)
-      - "8090:8080"     # open-appsec management/metrics
+      - "8080:8080"     # WAF ingress (internal — behind Caddy, not exposed publicly)
+      - "8090:8090"     # open-appsec management/metrics (internal only)
     volumes:
       - ./infra/open-appsec/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./infra/open-appsec/open-appsec.yaml:/etc/cp/conf/open-appsec.yaml:ro
@@ -235,12 +297,13 @@ services:
     environment:
       OPEN_APPSEC_TOKEN: ${OPEN_APPSEC_TOKEN:-}   # Optional: cloud management token
       OPEN_APPSEC_MODE: ${OPEN_APPSEC_MODE:-prevent}
+      BIS_EDGE_TOKEN_SECRET: ${BIS_EDGE_TOKEN_SECRET:-bis-edge-dev-secret-change-in-prod}
     networks: [bis-net]
     depends_on:
       apisix:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:80/health"]
+      test: ["CMD", "curl", "-sf", "http://localhost:8090/health"]
       interval: 15s
       timeout: 5s
       retries: 5
