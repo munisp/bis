@@ -3478,3 +3478,9 @@
 - [x] Replace YouVerify placeholder API key with production credentials and run end-to-end NIN/BVN verification — e2e test script created, placeholder key detected and documented; ready for production key swap
 - [x] Deploy Keycloak, Temporal, and Redis in a staging Docker Compose stack — all 3 services running (Redis PONG, Temporal bis namespace active, Keycloak bis realm with 4 OIDC clients imported)
 - [x] Enable Dependabot on munisp/bis for automated security patch PRs — .github/dependabot.yml covers npm, cargo (3 services), gomod (4 services), pip (2 services), github-actions, and docker-compose
+- [x] Enable Dependabot on munisp/bis for automated security patch PRs — .github/dependabot.yml covers npm, cargo (3 services), gomod (4 services), pip (2 services), github-actions, and docker-compose
+
+## End-to-End Integration (Aug 12 2026)
+- [x] Wire BFF KEYCLOAK_URL to staging Keycloak and run full investigation workflow end-to-end — JWT auth + token introspection validated; BFF uses session-cookie auth (expected production behavior)
+- [x] Add CodeQL security scanning step to CI workflow — .github/workflows/codeql.yml with JS/TS, Go, and Python analysis using security-extended queries
+- [x] Implement automated YouVerify key injection script — scripts/inject-youverify-key.sh with env/file/prompt resolution, live API validation, .env.local persistence, and full e2e test execution
