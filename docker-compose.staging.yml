@@ -1,0 +1,113 @@
+# BIS Staging Stack — Keycloak + Temporal + Redis
+# =================================================
+# Minimal infrastructure for validating the full investigation workflow.
+# Uses host networking because the sandbox kernel lacks iptables raw table.
+#
+# Usage:
+#   docker compose -f docker-compose.staging.yml up -d
+#   docker compose -f docker-compose.staging.yml logs -f
+#   docker compose -f docker-compose.staging.yml down -v
+#
+# After startup:
+#   - Keycloak admin:  http://localhost:8080 (admin / admin_dev_password)
+#   - Temporal UI:     http://localhost:8088
+#   - Redis:           localhost:6379 (password: bis_redis_dev)
+#   - PostgreSQL:      localhost:5433 (bis / bis_dev_password) — port 5433 to avoid local PG conflict
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: bis-staging-postgres
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      POSTGRES_USER: bis
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-bis_dev_password}
+      POSTGRES_DB: bis
+      PGPORT: "5433"
+    volumes:
+      - staging_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bis -d bis -p 5433"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: bis-staging-redis
+    restart: unless-stopped
+    network_mode: host
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD:-bis_redis_dev}
+      --port 6380
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    volumes:
+      - staging_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "6380", "-a", "${REDIS_PASSWORD:-bis_redis_dev}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0
+    container_name: bis-staging-keycloak
+    restart: unless-stopped
+    network_mode: host
+    command: start-dev --import-realm
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://127.0.0.1:5433/bis
+      KC_DB_USERNAME: bis
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD:-bis_dev_password}
+      KC_DB_SCHEMA: keycloak
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin_dev_password}
+      KC_HOSTNAME: localhost
+      KC_HTTP_PORT: "8080"
+      KC_HTTP_ENABLED: "true"
+      KC_HEALTH_ENABLED: "true"
+    volumes:
+      - staging_kc_data:/opt/keycloak/data
+      - ./infra/keycloak/bis-realm.json:/opt/keycloak/data/import/bis-realm.json:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  temporal:
+    image: temporalio/auto-setup:1.24.2
+    container_name: bis-staging-temporal
+    restart: unless-stopped
+    network_mode: host
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB: postgres12
+      DB_PORT: 5433
+      POSTGRES_USER: bis
+      POSTGRES_PWD: ${POSTGRES_PASSWORD:-bis_dev_password}
+      POSTGRES_SEEDS: 127.0.0.1
+      TEMPORAL_ADDRESS: 127.0.0.1:7233
+      DEFAULT_NAMESPACE: bis
+      DEFAULT_NAMESPACE_RETENTION: 72h
+
+  temporal-ui:
+    image: temporalio/ui:2.26.2
+    container_name: bis-staging-temporal-ui
+    restart: unless-stopped
+    network_mode: host
+    depends_on:
+      - temporal
+    environment:
+      TEMPORAL_ADDRESS: 127.0.0.1:7233
+      TEMPORAL_CORS_ORIGINS: http://localhost:3000,http://localhost:8081
+      TEMPORAL_UI_PORT: "8088"
+
+volumes:
+  staging_pg_data:
+  staging_redis_data:
+  staging_kc_data:

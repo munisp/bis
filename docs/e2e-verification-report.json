@@ -1,0 +1,32 @@
+{
+  "timestamp": "2026-08-12T18:02:51.757Z",
+  "results": [
+    {
+      "name": "NIN Verification (test identity)",
+      "type": "NIN",
+      "endpoint": "https://api.youverify.co/v2/identity/ng/nin",
+      "timestamp": "2026-08-12T18:02:51.748Z",
+      "success": false,
+      "httpStatus": null,
+      "response": null,
+      "error": "YOUVERIFY_API_KEY is a placeholder — replace with production key from https://os.youverify.co/settings/api-keys",
+      "authoritative": false
+    },
+    {
+      "name": "BVN Verification (test identity)",
+      "type": "BVN",
+      "endpoint": "https://api.youverify.co/v2/identity/ng/bvn",
+      "timestamp": "2026-08-12T18:02:51.755Z",
+      "success": false,
+      "httpStatus": null,
+      "response": null,
+      "error": "YOUVERIFY_API_KEY is a placeholder — replace with production key from https://os.youverify.co/settings/api-keys",
+      "authoritative": false
+    }
+  ],
+  "summary": {
+    "passed": 0,
+    "failed": 0,
+    "skipped": 2
+  }
+}

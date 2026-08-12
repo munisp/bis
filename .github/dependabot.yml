@@ -1,0 +1,231 @@
+# Dependabot Configuration — BIS Platform
+# =========================================
+# Automatically creates PRs for security patches and version updates
+# across all dependency ecosystems in the repository.
+
+version: 2
+updates:
+  # ─── Node.js (pnpm) — Root BFF + Frontend ─────────────────────────────────────
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Africa/Lagos"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "munisp"
+    labels:
+      - "dependencies"
+      - "npm"
+    commit-message:
+      prefix: "deps(npm):"
+    groups:
+      production-deps:
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "@types/*"
+          - "vitest"
+          - "typescript"
+        update-types:
+          - "patch"
+          - "minor"
+      dev-deps:
+        patterns:
+          - "@types/*"
+          - "vitest"
+          - "typescript"
+          - "esbuild"
+          - "prettier"
+        update-types:
+          - "patch"
+          - "minor"
+
+  # ─── Rust — Event Processor ────────────────────────────────────────────────────
+  - package-ecosystem: "cargo"
+    directory: "/services/event-processor"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+      time: "06:00"
+      timezone: "Africa/Lagos"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "munisp"
+    labels:
+      - "dependencies"
+      - "rust"
+    commit-message:
+      prefix: "deps(rust/event-processor):"
+
+  # ─── Rust — Screening Engine ───────────────────────────────────────────────────
+  - package-ecosystem: "cargo"
+    directory: "/services/screening-engine"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+      time: "06:00"
+      timezone: "Africa/Lagos"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "munisp"
+    labels:
+      - "dependencies"
+      - "rust"
+    commit-message:
+      prefix: "deps(rust/screening-engine):"
+
+  # ─── Rust — AML Engine ─────────────────────────────────────────────────────────
+  - package-ecosystem: "cargo"
+    directory: "/services/aml-engine"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+      time: "06:00"
+      timezone: "Africa/Lagos"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "munisp"
+    labels:
+      - "dependencies"
+      - "rust"
+    commit-message:
+      prefix: "deps(rust/aml-engine):"
+
+  # ─── Go — Gateway ─────────────────────────────────────────────────────────────
+  - package-ecosystem: "gomod"
+    directory: "/services/gateway"
+    schedule:
+      interval: "weekly"
+      day: "wednesday"
+      time: "06:00"
+      timezone: "Africa/Lagos"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "munisp"
+    labels:
+      - "dependencies"
+      - "go"
+    commit-message:
+      prefix: "deps(go/gateway):"
+
+  # ─── Go — Case Manager ────────────────────────────────────────────────────────
+  - package-ecosystem: "gomod"
+    directory: "/services/case-manager"
+    schedule:
+      interval: "weekly"
+      day: "wednesday"
+      time: "06:00"
+      timezone: "Africa/Lagos"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "munisp"
+    labels:
+      - "dependencies"
+      - "go"
+    commit-message:
+      prefix: "deps(go/case-manager):"
+
+  # ─── Go — Lex Intake ──────────────────────────────────────────────────────────
+  - package-ecosystem: "gomod"
+    directory: "/services/lex-intake"
+    schedule:
+      interval: "weekly"
+      day: "wednesday"
+      time: "06:00"
+      timezone: "Africa/Lagos"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "munisp"
+    labels:
+      - "dependencies"
+      - "go"
+    commit-message:
+      prefix: "deps(go/lex-intake):"
+
+  # ─── Go — Verifier ────────────────────────────────────────────────────────────
+  - package-ecosystem: "gomod"
+    directory: "/services/verifier"
+    schedule:
+      interval: "weekly"
+      day: "wednesday"
+      time: "06:00"
+      timezone: "Africa/Lagos"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "munisp"
+    labels:
+      - "dependencies"
+      - "go"
+    commit-message:
+      prefix: "deps(go/verifier):"
+
+  # ─── Python — Risk Engine ─────────────────────────────────────────────────────
+  - package-ecosystem: "pip"
+    directory: "/services/risk-engine"
+    schedule:
+      interval: "weekly"
+      day: "thursday"
+      time: "06:00"
+      timezone: "Africa/Lagos"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "munisp"
+    labels:
+      - "dependencies"
+      - "python"
+    commit-message:
+      prefix: "deps(python/risk-engine):"
+
+  # ─── Python — Biometric Engine ────────────────────────────────────────────────
+  - package-ecosystem: "pip"
+    directory: "/services/biometric-engine"
+    schedule:
+      interval: "weekly"
+      day: "thursday"
+      time: "06:00"
+      timezone: "Africa/Lagos"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "munisp"
+    labels:
+      - "dependencies"
+      - "python"
+    commit-message:
+      prefix: "deps(python/biometric-engine):"
+
+  # ─── GitHub Actions ───────────────────────────────────────────────────────────
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "friday"
+      time: "06:00"
+      timezone: "Africa/Lagos"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "munisp"
+    labels:
+      - "dependencies"
+      - "ci"
+    commit-message:
+      prefix: "deps(actions):"
+
+  # ─── Docker — Staging Compose ─────────────────────────────────────────────────
+  - package-ecosystem: "docker-compose"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "friday"
+      time: "06:00"
+      timezone: "Africa/Lagos"
+    open-pull-requests-limit: 3
+    reviewers:
+      - "munisp"
+    labels:
+      - "dependencies"
+      - "docker"
+    commit-message:
+      prefix: "deps(docker):"

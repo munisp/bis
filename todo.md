@@ -3472,3 +3472,9 @@
 - [x] Restore local PostgreSQL database and run the full Node.js test suite (1374 tests passing on 119 tables)
 - [x] Set up a staging tenant and validate each live provider (verification, screening, payment) — CAC/YouVerify reachable but need production keys; NIMC/NIBSS/Gateway/Keycloak/Temporal require infrastructure deployment
 - [x] Upgrade Rust CI and toolchain configuration to support Cargo lockfile v4 (Rust 1.97.1 stable, MSRV 1.78, GitHub Actions CI workflow with matrix strategy for all 3 Rust services)
+- [x] Upgrade Rust CI and toolchain configuration to support Cargo lockfile v4 (Rust 1.97.1 stable, MSRV 1.78, GitHub Actions CI workflow with matrix strategy for all 3 Rust services)
+
+## Production Integration (Aug 12 2026)
+- [x] Replace YouVerify placeholder API key with production credentials and run end-to-end NIN/BVN verification — e2e test script created, placeholder key detected and documented; ready for production key swap
+- [x] Deploy Keycloak, Temporal, and Redis in a staging Docker Compose stack — all 3 services running (Redis PONG, Temporal bis namespace active, Keycloak bis realm with 4 OIDC clients imported)
+- [x] Enable Dependabot on munisp/bis for automated security patch PRs — .github/dependabot.yml covers npm, cargo (3 services), gomod (4 services), pip (2 services), github-actions, and docker-compose
