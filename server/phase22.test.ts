@@ -23,6 +23,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 // ─── Mock external dependencies so tests run without a live DB ─────────────────
 vi.mock("./db");
+vi.mock("./permify", () => ({
+  permifyCheck: vi.fn().mockResolvedValue(true),
+  permifyWriteRelationship: vi.fn().mockResolvedValue(undefined),
+  permifyDeleteRelationship: vi.fn().mockResolvedValue(undefined),
+}));
 vi.mock("./cache", () => ({
   withCache: vi.fn(async (_key: string, _ttl: number, fn: () => Promise<unknown>) => fn()),
   invalidateCache: vi.fn(async () => {}),

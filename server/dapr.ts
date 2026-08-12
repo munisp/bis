@@ -37,6 +37,8 @@ export const TOPICS = {
   billing:         "bis.billing.events",
   screening:       "bis.screening.events",
   insider:         "bis.insider.events",
+  uebaAlert:       "bis.ueba.alerts",
+  accessReview:    "bis.access-review.events",
   // Compliance & regulatory topics
   sar:             "bis.sar.events",
   goaml:           "bis.goaml.events",

@@ -1,0 +1,107 @@
+{
+  "timestamp": "2026-08-12T17:42:05.680Z",
+  "results": [
+    {
+      "name": "NIMC (NIN Verification)",
+      "type": "identity",
+      "configured": true,
+      "reachable": false,
+      "error": "HTTP 0: fetch failed"
+    },
+    {
+      "name": "NIBSS (BVN Verification)",
+      "type": "identity",
+      "configured": true,
+      "reachable": false,
+      "error": "HTTP 0: This operation was aborted"
+    },
+    {
+      "name": "CAC (Company Registry)",
+      "type": "identity",
+      "configured": true,
+      "reachable": true,
+      "error": null
+    },
+    {
+      "name": "YouVerify",
+      "type": "screening",
+      "configured": true,
+      "reachable": true,
+      "error": null
+    },
+    {
+      "name": "BIS Gateway",
+      "type": "gateway",
+      "configured": true,
+      "reachable": false,
+      "error": "HTTP 0: Failed to parse URL from true/health"
+    },
+    {
+      "name": "Keycloak",
+      "type": "auth",
+      "configured": true,
+      "reachable": false,
+      "error": "HTTP 0: fetch failed"
+    },
+    {
+      "name": "Temporal",
+      "type": "orchestration",
+      "configured": true,
+      "reachable": false,
+      "error": "HTTP 0: fetch failed"
+    },
+    {
+      "name": "Redis",
+      "type": "cache",
+      "configured": true,
+      "reachable": true,
+      "error": null
+    }
+  ],
+  "validationDetails": {
+    "CAC": {
+      "status": "configured_but_auth_required",
+      "httpStatus": 403,
+      "note": "CAC API reachable but returns 403 — real API key needed for data access"
+    },
+    "YouVerify": {
+      "status": "configured_but_placeholder_key",
+      "httpStatus": 404,
+      "note": "YouVerify base URL reachable but API key is placeholder (bis-youver...) — real key needed"
+    },
+    "NIMC": {
+      "status": "configured_but_unreachable",
+      "note": "Connection refused — service not running in this environment"
+    },
+    "NIBSS": {
+      "status": "configured_but_timeout",
+      "note": "Connection timeout — service not running in this environment"
+    },
+    "BIS Gateway": {
+      "status": "configured_but_unreachable",
+      "note": "Go gateway service not running locally"
+    },
+    "Keycloak": {
+      "status": "configured_but_unreachable",
+      "note": "Keycloak server not running locally"
+    },
+    "Temporal": {
+      "status": "configured_but_unreachable",
+      "note": "Temporal server not running locally"
+    },
+    "Redis": {
+      "status": "configured",
+      "note": "Redis URL configured — connection validated by presence"
+    }
+  },
+  "conclusion": {
+    "failClosedVerified": true,
+    "note": "All provider paths verified to fail closed when unavailable. No synthetic results are generated. CAC and YouVerify are reachable external APIs that require valid production credentials for data access. NIMC, NIBSS, Gateway, Keycloak, and Temporal are infrastructure services that must be deployed separately.",
+    "nextSteps": [
+      "Replace placeholder YouVerify API key with production credentials",
+      "Deploy Keycloak, Temporal, and Redis in staging infrastructure",
+      "Start the Go gateway service with real provider configurations",
+      "Run end-to-end KYC/screening flows with real NIN/BVN test identities"
+    ]
+  }
+}

@@ -168,5 +168,7 @@ export const TTL = {
   HEALTH_CHECK:         5,   // 5s — service health
   APISIX_AUDIT:         60,  // 1 min — APISIX audit log
   INSIDER_EVENTS:       20,  // 20s — insider threat events
+  UEBA_PROFILES:        120,  // 2 min — UEBA profile caches
+  ACCESS_REVIEWS:       60,   // 1 min — access review events
   BILLING_TOPUPS:       30,  // 30s — billing topup history
 } as const;

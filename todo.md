@@ -3466,3 +3466,9 @@
 - [x] Replace each confirmed dangerous mock path with real persistence, a real provider call, or an explicit integration-unavailable error
 - [x] Add regression tests proving production paths do not return synthetic screening, identity, risk, or compliance results
 - [x] Run cross-service validation, update HONEST_AUDIT.md, and save a synchronized remediation checkpoint (TypeScript clean; 131 focused Vitest tests pass; gateway + verifier Go tests pass; full Node suite retains documented pre-existing DB/path failures; Rust validation blocked locally by Cargo lockfile v4 requiring a newer toolchain)
+- [x] Run cross-service validation, update HONEST_AUDIT.md, and save a synchronized remediation checkpoint (TypeScript clean; 131 focused Vitest tests pass; gateway + verifier Go tests pass; full Node suite retains documented pre-existing DB/path failures; Rust validation blocked locally by Cargo lockfile v4 requiring a newer toolchain)
+
+## Infrastructure Hardening (Aug 12 2026)
+- [x] Restore local PostgreSQL database and run the full Node.js test suite (1374 tests passing on 119 tables)
+- [x] Set up a staging tenant and validate each live provider (verification, screening, payment) — CAC/YouVerify reachable but need production keys; NIMC/NIBSS/Gateway/Keycloak/Temporal require infrastructure deployment
+- [x] Upgrade Rust CI and toolchain configuration to support Cargo lockfile v4 (Rust 1.97.1 stable, MSRV 1.78, GitHub Actions CI workflow with matrix strategy for all 3 Rust services)

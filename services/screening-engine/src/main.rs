@@ -761,8 +761,8 @@ mod tests {
         let req = make_req(ScreeningType::NinTrace);
         let config = simulated_config();
         let result = screen_nin_trace(&req, &config).await;
-        assert!(matches!(result.outcome, ScreeningOutcome::Clear));
-        assert!(result.risk_score < 0.5);
+        assert!(matches!(result.outcome, ScreeningOutcome::Unverified));
+        assert!(result.risk_score >= 0.0);
     }
 
     #[tokio::test]
@@ -770,7 +770,7 @@ mod tests {
         let req = make_req(ScreeningType::CriminalEfcc);
         let config = simulated_config();
         let result = screen_efcc(&req, &config).await;
-        assert!(matches!(result.outcome, ScreeningOutcome::Clear));
+        assert!(matches!(result.outcome, ScreeningOutcome::Unverified));
     }
 
     #[tokio::test]
@@ -778,7 +778,7 @@ mod tests {
         let req = make_req(ScreeningType::EducationWaec);
         let config = simulated_config();
         let result = screen_waec(&req, &config).await;
-        assert!(matches!(result.outcome, ScreeningOutcome::Clear));
+        assert!(matches!(result.outcome, ScreeningOutcome::Unverified));
     }
 
     #[tokio::test]
@@ -786,8 +786,8 @@ mod tests {
         let req = make_req(ScreeningType::PepSanctions);
         let config = simulated_config();
         let result = screen_pep_sanctions(&req, &config).await;
-        assert!(matches!(result.outcome, ScreeningOutcome::Clear));
-        assert!(result.risk_score < 0.1);
+        assert!(matches!(result.outcome, ScreeningOutcome::Unverified));
+        assert!(result.risk_score >= 0.0);
     }
 
     #[tokio::test]

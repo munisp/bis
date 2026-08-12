@@ -134,21 +134,13 @@ describe("biometricRouter", () => {
   // ── Flow 2: checkLiveness ─────────────────────────────────────────────────
 
   describe("checkLiveness", () => {
-    it("returns sandbox result when gateway is unavailable", async () => {
+    it("throws when biometric engine is unavailable", async () => {
       const caller = makeCaller();
-      const result = await caller.checkLiveness({
-        imageBase64: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+      await expect(caller.checkLiveness({
+        imageBase64: "iVBORw0KGgoAAAANSUhEUg==",
         challenge: "blink",
         subjectRef: "TEST-001",
-      });
-
-      expect(result).toHaveProperty("passed");
-      expect(result).toHaveProperty("score");
-      expect(result).toHaveProperty("sandbox");
-      expect(result.sandbox).toBe(true);
-      expect(typeof result.score).toBe("number");
-      expect(result.score).toBeGreaterThan(0);
-      expect(result.score).toBeLessThanOrEqual(1);
+      })).rejects.toThrow();
     });
 
     it("passes liveness when gateway returns success", async () => {
@@ -172,6 +164,7 @@ describe("biometricRouter", () => {
       const challenges = ["blink", "turn_left", "turn_right", "smile", "nod"] as const;
 
       for (const challenge of challenges) {
+        mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ passed: true, score: 0.88, live: true, sandbox: false }) });
         const result = await caller.checkLiveness({
           imageBase64: "base64data",
           challenge,
@@ -185,18 +178,12 @@ describe("biometricRouter", () => {
   // ── Flow 3: enroll ────────────────────────────────────────────────────────
 
   describe("enroll", () => {
-    it("returns sandbox enrollment when gateway is unavailable", async () => {
+    it("throws when biometric engine is unavailable (enroll)", async () => {
       const caller = makeCaller();
-      const result = await caller.enroll({
+      await expect(caller.enroll({
         imageBase64: "base64faceimage",
         subjectRef: "NIN-12345678901",
-      });
-
-      expect(result).toHaveProperty("enrolled");
-      expect(result).toHaveProperty("faceId");
-      expect(result.enrolled).toBe(true);
-      expect(typeof result.faceId).toBe("string");
-      expect(result.faceId!.length).toBeGreaterThan(0);
+      })).rejects.toThrow();
     });
 
     it("returns faceId from gateway when available", async () => {
@@ -222,8 +209,8 @@ describe("biometricRouter", () => {
     });
 
     it("does not throw when kycRecordId is provided but DB is unavailable", async () => {
+      mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ enrolled: true, face_id: "face:NIN-12345678901", subject_ref: "NIN-12345678901" }) });
       const caller = makeCaller();
-      // Should not throw — just logs warning
       await expect(
         caller.enroll({
           imageBase64: "base64faceimage",
@@ -237,19 +224,13 @@ describe("biometricRouter", () => {
   // ── Flow 4: ocrDocument ───────────────────────────────────────────────────
 
   describe("ocrDocument", () => {
-    it("falls back to LLM OCR when gateway is unavailable", async () => {
+    it("throws when OCR engine is unavailable", async () => {
       const caller = makeCaller();
-      const result = await caller.ocrDocument({
+      await expect(caller.ocrDocument({
         imageBase64: "base64documentimage",
         documentType: "NIN_SLIP",
         subjectRef: "TEST-002",
-      });
-
-      expect(result).toHaveProperty("documentType");
-      expect(result).toHaveProperty("confidence");
-      // LLM fallback returns these fields
-      expect(result.documentType).toBe("NIN_SLIP");
-      expect(result.confidence).toBeGreaterThan(0);
+      })).rejects.toThrow();
     });
 
     it("returns OCR data from gateway when available", async () => {
@@ -274,7 +255,8 @@ describe("biometricRouter", () => {
       expect(result.nin).toBe("98765432101");
     });
 
-    it("handles PASSPORT document type", async () => {
+    it("handles PASSPORT document type with engine available", async () => {
+      mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ documentType: "PASSPORT", firstName: "Test", confidence: 0.9 }) });
       const caller = makeCaller();
       const result = await caller.ocrDocument({
         imageBase64: "base64passportimage",
@@ -287,7 +269,9 @@ describe("biometricRouter", () => {
   // ── Flow 5: fullEnrollment ────────────────────────────────────────────────
 
   describe("fullEnrollment", () => {
-    it("chains liveness + enroll and returns success with sandbox fallback", async () => {
+    it("chains liveness + enroll and returns success when engine is available", async () => {
+      mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ passed: true, score: 0.92, live: true }) });
+      mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ enrolled: true, face_id: "face:test", subject_ref: "test" }) });
       const caller = makeCaller();
       const result = await caller.fullEnrollment({
         livenessImageBase64: "base64liveness",
@@ -305,6 +289,9 @@ describe("biometricRouter", () => {
     });
 
     it("includes OCR data when document image is provided", async () => {
+      mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ passed: true, score: 0.92, live: true }) });
+      mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ enrolled: true, face_id: "face:test", subject_ref: "test" }) });
+      mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ documentType: "NIN_SLIP", firstName: "Test", confidence: 0.9 }) });
       const caller = makeCaller();
       const result = await caller.fullEnrollment({
         livenessImageBase64: "base64liveness",
@@ -320,6 +307,8 @@ describe("biometricRouter", () => {
     });
 
     it("returns faceId from enrollment step", async () => {
+      mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ passed: true, score: 0.92, live: true }) });
+      mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ enrolled: true, face_id: "face:test", subject_ref: "test" }) });
       const caller = makeCaller();
       const result = await caller.fullEnrollment({
         livenessImageBase64: "base64liveness",
@@ -328,20 +317,18 @@ describe("biometricRouter", () => {
         subjectRef: "PHONE-08012345678",
       });
 
-      expect(result.faceId).toBeDefined();
-      expect(typeof result.faceId).toBe("string");
+      expect(result.enrollment).toBeDefined();
+      expect(result.enrollment.enrolled).toBe(true);
     });
 
     it("marks sandbox flag when running in fallback mode", async () => {
       const caller = makeCaller();
-      const result = await caller.fullEnrollment({
+      await expect(caller.fullEnrollment({
         livenessImageBase64: "base64liveness",
         enrollImageBase64: "base64enroll",
         challenge: "blink",
-        subjectRef: "TEST-SANDBOX",
-      });
-
-      expect(result.sandbox).toBe(true);
+        subjectRef: "TEST-SANDBOX-001",
+      })).rejects.toThrow();
     });
   });
 
@@ -432,17 +419,10 @@ describe("biometricRouter", () => {
 describe("checkActiveLiveness", () => {
   beforeEach(() => mockFetch.mockReset());
 
-  it("returns sandbox response when engine unavailable", async () => {
+  it("throws when active-liveness engine is unavailable", async () => {
     mockFetch.mockRejectedValueOnce(new Error("ECONNREFUSED"));
     const caller = biometricRouter.createCaller(makeCtx());
-    const result = await caller.checkActiveLiveness({
-      frames: ["frame1", "frame2", "frame3"],
-      challenge: "blink",
-      subjectRef: "TEST-001",
-    });
-    expect(result.live).toBe(true);
-    expect(result.score).toBeGreaterThan(0.9);
-    expect(result.sandbox).toBe(true);
+      await expect(caller.checkActiveLiveness({ frames: ["f1","f2","f3"], challenge: "blink", subjectRef: "TEST" })).rejects.toThrow();
   });
 
   it("returns engine response when available", async () => {
@@ -490,13 +470,7 @@ describe("checkActiveLiveness", () => {
     // getDb returns null (mocked) → replay protection skipped → sandbox response
     mockFetch.mockRejectedValueOnce(new Error("ECONNREFUSED"));
     const caller = biometricRouter.createCaller(makeCtx());
-    const result = await caller.checkActiveLiveness({
-      frames: ["unique-frame-A", "unique-frame-B", "unique-frame-C"],
-      challenge: "smile",
-      subjectRef: "REPLAY-TEST-001",
-    });
-    expect(result.live).toBe(true);
-    expect(result.sandbox).toBe(true);
+      await expect(caller.checkActiveLiveness({ frames: ["f1","f2","f3"], challenge: "blink", subjectRef: "TEST" })).rejects.toThrow();
   });
 
   it("replay protection: rejects duplicate frame hash when DB is available", async () => {
@@ -541,7 +515,7 @@ describe("checkActiveLiveness", () => {
       insert: vi.fn().mockReturnValue({ values: insertValues }),
     };
     (mockGetDb as ReturnType<typeof vi.fn>).mockResolvedValueOnce(mockDbInstance);
-    mockFetch.mockRejectedValueOnce(new Error("ECONNREFUSED"));
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ score: 0.95, live: true, challenge: "nod", challenge_completed: true, frames_analysed: 3 }) });
 
     const caller = biometricRouter.createCaller(makeCtx());
     const result = await caller.checkActiveLiveness({
@@ -558,16 +532,10 @@ describe("checkActiveLiveness", () => {
 describe("checkAntispoofing", () => {
   beforeEach(() => mockFetch.mockReset());
 
-  it("returns sandbox genuine response when engine unavailable", async () => {
+  it("throws when anti-spoofing engine is unavailable", async () => {
     mockFetch.mockRejectedValueOnce(new Error("ECONNREFUSED"));
     const caller = biometricRouter.createCaller(makeCtx());
-    const result = await caller.checkAntispoofing({
-      imageBase64: "data:image/jpeg;base64,/9j/test",
-      subjectRef: "TEST-003",
-    });
-    expect(result.genuine).toBe(true);
-    expect(result.score).toBeGreaterThan(0.9);
-    expect(result.sandbox).toBe(true);
+      await expect(caller.checkAntispoofing({ imageBase64: "data", subjectRef: "TEST" })).rejects.toThrow();
   });
 
   it("returns spoof type classification from engine", async () => {
@@ -617,17 +585,10 @@ describe("checkAntispoofing", () => {
 describe("matchFaces", () => {
   beforeEach(() => mockFetch.mockReset());
 
-  it("returns sandbox match when engine unavailable", async () => {
+  it("throws when face-matching engine is unavailable", async () => {
     mockFetch.mockRejectedValueOnce(new Error("ECONNREFUSED"));
     const caller = biometricRouter.createCaller(makeCtx());
-    const result = await caller.matchFaces({
-      probeImageBase64: "probe-data",
-      referenceImageBase64: "ref-data",
-      subjectRef: "TEST-005",
-    });
-    expect(result.match).toBe(true);
-    expect(result.score).toBeGreaterThan(0.9);
-    expect(result.sandbox).toBe(true);
+      await expect(caller.matchFaces({ probeImageBase64: "p", referenceImageBase64: "r" })).rejects.toThrow();
   });
 
   it("returns match result from engine", async () => {
@@ -676,13 +637,10 @@ describe("matchFaces", () => {
 describe("detectFace", () => {
   beforeEach(() => mockFetch.mockReset());
 
-  it("returns sandbox detection when engine unavailable", async () => {
+  it("throws when face-detection engine is unavailable", async () => {
     mockFetch.mockRejectedValueOnce(new Error("ECONNREFUSED"));
     const caller = biometricRouter.createCaller(makeCtx());
-    const result = await caller.detectFace({ imageBase64: "data" });
-    expect(result.face_detected).toBe(true);
-    expect(result.face_count).toBeGreaterThan(0);
-    expect(result.sandbox).toBe(true);
+      await expect(caller.detectFace({ imageBase64: "data" })).rejects.toThrow();
   });
 
   it("returns engine detection with bounding box", async () => {
@@ -722,14 +680,10 @@ describe("detectFace", () => {
 describe("detectLandmarks", () => {
   beforeEach(() => mockFetch.mockReset());
 
-  it("returns 68 sandbox landmarks when engine unavailable", async () => {
+  it("throws when landmark-detection engine is unavailable", async () => {
     mockFetch.mockRejectedValueOnce(new Error("ECONNREFUSED"));
     const caller = biometricRouter.createCaller(makeCtx());
-    const result = await caller.detectLandmarks({ imageBase64: "data" });
-    expect(result.landmarks_found).toBe(true);
-    expect(result.landmark_count).toBe(68);
-    expect(result.landmarks).toHaveLength(68);
-    expect(result.sandbox).toBe(true);
+      await expect(caller.detectLandmarks({ imageBase64: "data" })).rejects.toThrow();
   });
 
   it("returns engine 68-point landmarks", async () => {
@@ -771,13 +725,10 @@ describe("detectLandmarks", () => {
 describe("extractFeatures", () => {
   beforeEach(() => mockFetch.mockReset());
 
-  it("returns sandbox feature metadata when engine unavailable", async () => {
+  it("throws when feature-extraction engine is unavailable", async () => {
     mockFetch.mockRejectedValueOnce(new Error("ECONNREFUSED"));
     const caller = biometricRouter.createCaller(makeCtx());
-    const result = await caller.extractFeatures({ imageBase64: "data" });
-    expect(result.face_detected).toBe(true);
-    expect(result.embedding_dimension).toBe(512);
-    expect(result.sandbox).toBe(true);
+      await expect(caller.extractFeatures({ imageBase64: "data" })).rejects.toThrow();
   });
 
   it("returns ArcFace 512-d embedding metadata from engine", async () => {
@@ -817,17 +768,11 @@ describe("extractFeatures", () => {
 describe("fullVerify", () => {
   beforeEach(() => mockFetch.mockReset());
 
-  it("returns sandbox verified response when engine unavailable", async () => {
+  it("throws when full-verify engine is unavailable", async () => {
     // fullVerify calls biometricFetch which calls fetch; mock it to reject
     mockFetch.mockRejectedValueOnce(new Error("ECONNREFUSED"));
     const caller = biometricRouter.createCaller(makeCtx());
-    const result = await caller.fullVerify({
-      selfieBase64: "selfie-data",
-      subjectRef: "TEST-006",
-    });
-    expect(result.verified).toBe(true);
-    expect(result.overall_score).toBeGreaterThan(0.9);
-    expect(result.sandbox).toBe(true);
+      await expect(caller.fullVerify({ selfieBase64: "s", referenceBase64: "r", subjectRef: "T" })).rejects.toThrow();
   });
 
   it("returns composite verification from engine", async () => {

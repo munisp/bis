@@ -3489,7 +3489,7 @@ export const paymentRailsLog = pgTable("payment_rails_log", {
   createdAt:    timestamp("createdAt").defaultNow().notNull(),
 }, (t) => ({
   prl_txref_idx:  index("prl_txref_idx").on(t.txRef),
-  prl_tenant_idx: index("prl_tenant_idx").on(t.tenantId),
+  prl_log_tenant_idx: index("prl_log_tenant_idx").on(t.tenantId),
   prl_rail_idx:   index("prl_rail_idx").on(t.rail),
   prl_time_idx:   index("prl_time_idx").on(t.createdAt),
 }));
