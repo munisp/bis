@@ -1,15 +1,17 @@
 /**
- * ReconciliationDashboard — Admin view for failed TigerBeetle transactions
- * =========================================================================
+ * ReconciliationDashboard v3 — Admin view for failed TigerBeetle transactions
+ * =============================================================================
  * Features:
- *   - Summary stats (unreconciled count, total outstanding, oldest age)
+ *   - 7-day failure rate time-series chart (recharts AreaChart)
+ *   - Tab navigation: Pending | Dead Letter
  *   - Row-level checkboxes for selective bulk retry with progress bar
+ *   - Keyboard shortcuts: Ctrl+A (select all), Ctrl+Shift+R (retry selected)
  *   - Date filtering and column sorting
  *   - CSV export of filtered transactions
  *   - Detail modal with full JSON payload and error logs
- *   - Individual retry per row
+ *   - Dead Letter tab with manual resolution notes
  */
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import { trpc } from "@/lib/trpc";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -17,11 +19,14 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Loader2, AlertTriangle, CheckCircle2, RefreshCw, Database,
   DollarSign, ArrowUpDown, Eye, PlayCircle, X, Copy, Download,
+  Keyboard, SkullIcon, StickyNote,
 } from "lucide-react";
 import { toast } from "sonner";
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface RetryQueueItem {
@@ -40,6 +45,7 @@ interface RetryQueueItem {
 
 type SortField = "date" | "amount" | "attempts" | "tenant";
 type SortDir = "asc" | "desc";
+type TabView = "pending" | "dead_letter";
 
 // ── CSV Export ────────────────────────────────────────────────────────────────
 function escapeCSV(val: string): string {
@@ -52,12 +58,8 @@ function escapeCSV(val: string): string {
 function exportToCSV(items: RetryQueueItem[]) {
   const headers = ["Reference", "Tenant", "Amount (NGN)", "Attempts", "Status", "Last Error", "Created", "Next Retry"];
   const rows = items.map((item) => [
-    item.reference,
-    item.tenantId,
-    String(item.amountKobo / 100),
-    String(item.attempts),
-    item.status,
-    item.lastError || "",
+    item.reference, item.tenantId, String(item.amountKobo / 100),
+    String(item.attempts), item.status, item.lastError || "",
     item.createdAt ? new Date(item.createdAt).toISOString() : "",
     item.nextRetryAt ? new Date(item.nextRetryAt).toISOString() : "",
   ]);
@@ -75,12 +77,10 @@ function exportToCSV(items: RetryQueueItem[]) {
 // ── Detail Modal ──────────────────────────────────────────────────────────────
 function DetailModal({ item, onClose }: { item: RetryQueueItem; onClose: () => void }) {
   const jsonPayload = JSON.stringify(item, null, 2);
-
   const copyToClipboard = () => {
     navigator.clipboard.writeText(jsonPayload);
     toast.success("Copied to clipboard");
   };
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
       <div className="bg-background border rounded-xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col">
@@ -89,43 +89,21 @@ function DetailModal({ item, onClose }: { item: RetryQueueItem; onClose: () => v
             <h3 className="font-semibold text-lg">Transaction Detail</h3>
             <p className="text-xs text-muted-foreground font-mono">{item.reference}</p>
           </div>
-          <Button variant="ghost" size="sm" onClick={onClose}>
-            <X className="h-4 w-4" />
-          </Button>
+          <Button variant="ghost" size="sm" onClick={onClose}><X className="h-4 w-4" /></Button>
         </div>
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           <div className="grid grid-cols-2 gap-3 text-sm">
-            <div>
-              <span className="text-muted-foreground">Tenant</span>
-              <p className="font-medium">{item.tenantId}</p>
-            </div>
-            <div>
-              <span className="text-muted-foreground">Amount</span>
-              <p className="font-medium">₦{(item.amountKobo / 100).toLocaleString()}</p>
-            </div>
-            <div>
-              <span className="text-muted-foreground">Attempts</span>
-              <p className="font-medium">{item.attempts} / 7</p>
-            </div>
-            <div>
-              <span className="text-muted-foreground">Status</span>
-              <Badge variant={item.status === "dead_letter" ? "destructive" : "outline"}>
-                {item.status}
-              </Badge>
-            </div>
-            <div>
-              <span className="text-muted-foreground">Created</span>
-              <p className="font-medium">{new Date(item.createdAt).toLocaleString()}</p>
-            </div>
-            <div>
-              <span className="text-muted-foreground">Next Retry</span>
-              <p className="font-medium">{new Date(item.nextRetryAt).toLocaleString()}</p>
-            </div>
+            <div><span className="text-muted-foreground">Tenant</span><p className="font-medium">{item.tenantId}</p></div>
+            <div><span className="text-muted-foreground">Amount</span><p className="font-medium">₦{(item.amountKobo / 100).toLocaleString()}</p></div>
+            <div><span className="text-muted-foreground">Attempts</span><p className="font-medium">{item.attempts} / 7</p></div>
+            <div><span className="text-muted-foreground">Status</span><Badge variant={item.status === "dead_letter" ? "destructive" : "outline"}>{item.status}</Badge></div>
+            <div><span className="text-muted-foreground">Created</span><p className="font-medium">{new Date(item.createdAt).toLocaleString()}</p></div>
+            <div><span className="text-muted-foreground">Next Retry</span><p className="font-medium">{new Date(item.nextRetryAt).toLocaleString()}</p></div>
           </div>
           {item.lastError && (
             <div>
-              <Label className="text-xs text-muted-foreground">Last Error</Label>
-              <div className="mt-1 p-3 rounded-md bg-red-50 border border-red-200 text-sm text-red-800 font-mono">
+              <Label className="text-xs text-muted-foreground">Error Log / Notes</Label>
+              <div className="mt-1 p-3 rounded-md bg-red-50 border border-red-200 text-sm text-red-800 font-mono whitespace-pre-wrap max-h-[150px] overflow-y-auto">
                 {item.lastError}
               </div>
             </div>
@@ -133,17 +111,46 @@ function DetailModal({ item, onClose }: { item: RetryQueueItem; onClose: () => v
           <div>
             <div className="flex items-center justify-between mb-1">
               <Label className="text-xs text-muted-foreground">Full JSON Payload</Label>
-              <Button variant="ghost" size="sm" onClick={copyToClipboard} className="h-6 text-xs">
-                <Copy className="h-3 w-3 mr-1" /> Copy
-              </Button>
+              <Button variant="ghost" size="sm" onClick={copyToClipboard} className="h-6 text-xs"><Copy className="h-3 w-3 mr-1" /> Copy</Button>
             </div>
-            <pre className="p-3 rounded-md bg-muted text-xs font-mono overflow-x-auto max-h-[200px] overflow-y-auto">
-              {jsonPayload}
-            </pre>
+            <pre className="p-3 rounded-md bg-muted text-xs font-mono overflow-x-auto max-h-[200px] overflow-y-auto">{jsonPayload}</pre>
           </div>
         </div>
-        <div className="p-4 border-t flex justify-end">
-          <Button variant="outline" onClick={onClose}>Close</Button>
+        <div className="p-4 border-t flex justify-end"><Button variant="outline" onClick={onClose}>Close</Button></div>
+      </div>
+    </div>
+  );
+}
+
+// ── Resolution Note Dialog ────────────────────────────────────────────────────
+function ResolutionDialog({ item, onClose, onSubmit }: { item: RetryQueueItem; onClose: () => void; onSubmit: (note: string) => void }) {
+  const [note, setNote] = useState("");
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+      <div className="bg-background border rounded-xl shadow-2xl w-full max-w-md flex flex-col">
+        <div className="flex items-center justify-between p-4 border-b">
+          <div>
+            <h3 className="font-semibold">Add Resolution Note</h3>
+            <p className="text-xs text-muted-foreground font-mono">{item.reference.slice(0, 30)}...</p>
+          </div>
+          <Button variant="ghost" size="sm" onClick={onClose}><X className="h-4 w-4" /></Button>
+        </div>
+        <div className="p-4 space-y-3">
+          <div className="text-sm text-muted-foreground">
+            Amount: <strong>₦{(item.amountKobo / 100).toLocaleString()}</strong> · Tenant: <strong>{item.tenantId}</strong>
+          </div>
+          <Textarea
+            placeholder="Describe the manual resolution (e.g., credited manually via bank transfer, refunded to customer, duplicate detected)..."
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            rows={4}
+          />
+        </div>
+        <div className="p-4 border-t flex justify-end gap-2">
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button disabled={!note.trim()} onClick={() => onSubmit(note.trim())}>
+            <StickyNote className="h-4 w-4 mr-1" /> Save Note
+          </Button>
         </div>
       </div>
     </div>
@@ -156,14 +163,10 @@ function ProgressBar({ current, total }: { current: number; total: number }) {
   return (
     <div className="space-y-1">
       <div className="flex justify-between text-xs text-muted-foreground">
-        <span>Retrying {current} of {total}</span>
-        <span>{pct}%</span>
+        <span>Retrying {current} of {total}</span><span>{pct}%</span>
       </div>
       <div className="h-2 rounded-full bg-muted overflow-hidden">
-        <div
-          className="h-full bg-blue-600 rounded-full transition-all duration-300"
-          style={{ width: `${pct}%` }}
-        />
+        <div className="h-full bg-blue-600 rounded-full transition-all duration-300" style={{ width: `${pct}%` }} />
       </div>
     </div>
   );
@@ -174,96 +177,30 @@ export default function ReconciliationDashboard() {
   const [retrying, setRetrying] = useState<string | null>(null);
   const [bulkProgress, setBulkProgress] = useState<{ current: number; total: number } | null>(null);
   const [selectedItem, setSelectedItem] = useState<RetryQueueItem | null>(null);
+  const [resolvingItem, setResolvingItem] = useState<RetryQueueItem | null>(null);
   const [sortField, setSortField] = useState<SortField>("date");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [selectedRefs, setSelectedRefs] = useState<Set<string>>(new Set());
+  const [activeTab, setActiveTab] = useState<TabView>("pending");
 
+  // ── Queries ─────────────────────────────────────────────────────────────────
   const { data, isLoading, refetch } = trpc.admin.reconciliation.listUnreconciled.useQuery(
-    { limit: 200 },
-    { refetchInterval: 30_000 }
+    { limit: 200 }, { refetchInterval: 30_000 }
   );
-
-  const retryMutation = trpc.admin.reconciliation.retryCredit.useMutation({
-    onSuccess: (result) => {
-      if (result.recorded) {
-        toast.success(`Transfer ${result.transferId} reconciled`);
-      } else {
-        toast.error("Retry failed — TigerBeetle still unavailable");
-      }
-      refetch();
-      setRetrying(null);
-    },
-    onError: (err) => {
-      toast.error(err.message || "Retry failed");
-      setRetrying(null);
-    },
+  const { data: deadLetterData, refetch: refetchDead } = trpc.admin.reconciliation.listDeadLetters.useQuery(
+    { limit: 200 }, { refetchInterval: 60_000 }
+  );
+  const { data: chartData } = trpc.admin.reconciliation.failureRateChart.useQuery(undefined, {
+    refetchInterval: 60_000, staleTime: 30_000,
   });
-
-  const handleRetry = (reference: string, tenantId: string, amountKobo: number) => {
-    setRetrying(reference);
-    retryMutation.mutate({ reference, tenantId, amountKobo });
-  };
-
-  // ── Selective Bulk Retry ───────────────────────────────────────────────────
-  const handleRetrySelected = async () => {
-    const items = filteredAndSorted.filter((i) => selectedRefs.has(i.reference));
-    if (items.length === 0) {
-      toast.error("No items selected");
-      return;
-    }
-    setBulkProgress({ current: 0, total: items.length });
-
-    for (let i = 0; i < items.length; i++) {
-      const item = items[i];
-      setBulkProgress({ current: i + 1, total: items.length });
-      try {
-        await retryMutation.mutateAsync({
-          reference: item.reference,
-          tenantId: item.tenantId,
-          amountKobo: item.amountKobo,
-        });
-      } catch {
-        // Continue processing remaining items
-      }
-    }
-
-    setBulkProgress(null);
-    setSelectedRefs(new Set());
-    refetch();
-    toast.success(`Bulk retry complete — processed ${items.length} items`);
-  };
-
-  // ── Select All / None ─────────────────────────────────────────────────────
-  const toggleSelectAll = () => {
-    if (selectedRefs.size === filteredAndSorted.length) {
-      setSelectedRefs(new Set());
-    } else {
-      setSelectedRefs(new Set(filteredAndSorted.map((i) => i.reference)));
-    }
-  };
-
-  const toggleSelect = (ref: string) => {
-    setSelectedRefs((prev) => {
-      const next = new Set(prev);
-      if (next.has(ref)) next.delete(ref);
-      else next.add(ref);
-      return next;
-    });
-  };
 
   // ── Filtering & Sorting ───────────────────────────────────────────────────
   const filteredAndSorted = useMemo(() => {
     let items: RetryQueueItem[] = (data?.items ?? []) as any[];
-    if (dateFrom) {
-      const from = new Date(dateFrom).getTime();
-      items = items.filter((i) => new Date(i.verifiedAt || i.createdAt).getTime() >= from);
-    }
-    if (dateTo) {
-      const to = new Date(dateTo).getTime() + 86_400_000;
-      items = items.filter((i) => new Date(i.verifiedAt || i.createdAt).getTime() <= to);
-    }
+    if (dateFrom) { const from = new Date(dateFrom).getTime(); items = items.filter((i) => new Date(i.verifiedAt || i.createdAt).getTime() >= from); }
+    if (dateTo) { const to = new Date(dateTo).getTime() + 86_400_000; items = items.filter((i) => new Date(i.verifiedAt || i.createdAt).getTime() <= to); }
     items = [...items].sort((a, b) => {
       let cmp = 0;
       switch (sortField) {
@@ -277,221 +214,271 @@ export default function ReconciliationDashboard() {
     return items;
   }, [data?.items, dateFrom, dateTo, sortField, sortDir]);
 
+  // ── Mutations ───────────────────────────────────────────────────────────────
+  const retryMutation = trpc.admin.reconciliation.retryCredit.useMutation({
+    onSuccess: (result) => {
+      if (result.recorded) toast.success(`Transfer ${result.transferId} reconciled`);
+      else toast.error("Retry failed — TigerBeetle still unavailable");
+      refetch(); setRetrying(null);
+    },
+    onError: (err) => { toast.error(err.message || "Retry failed"); setRetrying(null); },
+  });
+
+  const resolveMutation = trpc.admin.reconciliation.addResolutionNote.useMutation({
+    onSuccess: () => {
+      toast.success("Resolution note saved");
+      refetchDead();
+      setResolvingItem(null);
+    },
+    onError: (err) => toast.error(err.message || "Failed to save note"),
+  });
+
+  const handleRetry = (reference: string, tenantId: string, amountKobo: number) => {
+    setRetrying(reference);
+    retryMutation.mutate({ reference, tenantId, amountKobo });
+  };
+
+  // ── Selective Bulk Retry ───────────────────────────────────────────────────
+  const handleRetrySelected = useCallback(async () => {
+    const items = filteredAndSorted.filter((i) => selectedRefs.has(i.reference));
+    if (items.length === 0) { toast.error("No items selected"); return; }
+    setBulkProgress({ current: 0, total: items.length });
+    for (let i = 0; i < items.length; i++) {
+      setBulkProgress({ current: i + 1, total: items.length });
+      try {
+        await retryMutation.mutateAsync({ reference: items[i].reference, tenantId: items[i].tenantId, amountKobo: items[i].amountKobo });
+      } catch { /* continue */ }
+    }
+    setBulkProgress(null); setSelectedRefs(new Set()); refetch();
+    toast.success(`Bulk retry complete — processed ${items.length} items`);
+  }, [selectedRefs]);
+
+  // ── Keyboard Shortcuts ──────────────────────────────────────────────────────
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      // Ctrl+A — select all visible rows (prevent browser select-all)
+      if (e.ctrlKey && !e.shiftKey && e.key === "a" && activeTab === "pending") {
+        e.preventDefault();
+        setSelectedRefs(new Set(filteredAndSorted.map((i) => i.reference)));
+        toast.info(`Selected ${filteredAndSorted.length} items (Ctrl+A)`);
+      }
+      // Ctrl+Shift+R — retry selected
+      if (e.ctrlKey && e.shiftKey && e.key === "R" && activeTab === "pending") {
+        e.preventDefault();
+        if (selectedRefs.size > 0) handleRetrySelected();
+        else toast.error("No items selected (Ctrl+Shift+R)");
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [activeTab, filteredAndSorted, selectedRefs, handleRetrySelected]);
+
+
+
   const toggleSort = (field: SortField) => {
     if (sortField === field) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     else { setSortField(field); setSortDir("desc"); }
   };
 
+  const toggleSelectAll = () => {
+    if (selectedRefs.size === filteredAndSorted.length) setSelectedRefs(new Set());
+    else setSelectedRefs(new Set(filteredAndSorted.map((i) => i.reference)));
+  };
+
+  const toggleSelect = (ref: string) => {
+    setSelectedRefs((prev) => { const next = new Set(prev); if (next.has(ref)) next.delete(ref); else next.add(ref); return next; });
+  };
+
   if (isLoading) {
-    return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-      </div>
-    );
+    return <div className="flex items-center justify-center min-h-[400px]"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /></div>;
   }
 
   const stats = data?.stats ?? { total: 0, totalAmountNGN: 0, oldestAge: "—" };
+  const deadLetters: RetryQueueItem[] = (deadLetterData?.items ?? []) as any[];
   const allSelected = filteredAndSorted.length > 0 && selectedRefs.size === filteredAndSorted.length;
 
   return (
     <div className="container max-w-6xl py-8 space-y-6">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Database className="h-6 w-6" />
-            Payment Reconciliation
-          </h1>
-          <p className="text-muted-foreground mt-1">
-            Transactions where TigerBeetle recording failed — verified by Paystack but not credited.
+          <h1 className="text-2xl font-bold flex items-center gap-2"><Database className="h-6 w-6" /> Payment Reconciliation</h1>
+          <p className="text-muted-foreground mt-1 flex items-center gap-2">
+            Failed TigerBeetle credits — verified by Paystack but not ledgered.
+            <span className="text-xs border rounded px-1.5 py-0.5 flex items-center gap-1"><Keyboard className="h-3 w-3" /> Ctrl+A / Ctrl+Shift+R</span>
           </p>
         </div>
         <div className="flex gap-2">
-          <Button
-            variant="outline"
-            onClick={() => exportToCSV(filteredAndSorted)}
-            disabled={filteredAndSorted.length === 0}
-          >
-            <Download className="h-4 w-4 mr-1" />
-            CSV
+          <Button variant="outline" onClick={() => exportToCSV(activeTab === "pending" ? filteredAndSorted : deadLetters)} disabled={(activeTab === "pending" ? filteredAndSorted : deadLetters).length === 0}>
+            <Download className="h-4 w-4 mr-1" /> CSV
           </Button>
-          <Button
-            onClick={handleRetrySelected}
-            disabled={selectedRefs.size === 0 || bulkProgress !== null}
-            className="gap-2"
-          >
-            {bulkProgress ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <PlayCircle className="h-4 w-4" />
-            )}
-            Retry Selected ({selectedRefs.size})
-          </Button>
+          {activeTab === "pending" && (
+            <Button onClick={handleRetrySelected} disabled={selectedRefs.size === 0 || bulkProgress !== null} className="gap-2">
+              {bulkProgress ? <Loader2 className="h-4 w-4 animate-spin" /> : <PlayCircle className="h-4 w-4" />}
+              Retry Selected ({selectedRefs.size})
+            </Button>
+          )}
         </div>
       </div>
 
-      {/* Bulk Progress Bar */}
-      {bulkProgress && (
-        <Card className="border-blue-200 bg-blue-50/50">
-          <CardContent className="pt-4">
-            <ProgressBar current={bulkProgress.current} total={bulkProgress.total} />
+      {/* 7-Day Failure Rate Chart */}
+      {chartData?.days && chartData.days.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">7-Day Failure Rate</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={160}>
+              <AreaChart data={chartData.days} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+                <XAxis dataKey="day" tick={{ fontSize: 10 }} tickFormatter={(v) => v.slice(5)} />
+                <YAxis tick={{ fontSize: 10 }} allowDecimals={false} />
+                <Tooltip contentStyle={{ fontSize: 12 }} />
+                <Legend wrapperStyle={{ fontSize: 11 }} />
+                <Area type="monotone" dataKey="total" stackId="1" stroke="#6366f1" fill="#6366f1" fillOpacity={0.15} name="Total" />
+                <Area type="monotone" dataKey="succeeded" stackId="2" stroke="#22c55e" fill="#22c55e" fillOpacity={0.3} name="Succeeded" />
+                <Area type="monotone" dataKey="deadLettered" stackId="3" stroke="#ef4444" fill="#ef4444" fillOpacity={0.3} name="Dead Letter" />
+                <Area type="monotone" dataKey="pending" stackId="4" stroke="#f59e0b" fill="#f59e0b" fillOpacity={0.2} name="Pending" />
+              </AreaChart>
+            </ResponsiveContainer>
           </CardContent>
         </Card>
       )}
 
+      {/* Bulk Progress Bar */}
+      {bulkProgress && (
+        <Card className="border-blue-200 bg-blue-50/50"><CardContent className="pt-4"><ProgressBar current={bulkProgress.current} total={bulkProgress.total} /></CardContent></Card>
+      )}
+
       {/* Summary Stats */}
       <div className="grid grid-cols-3 gap-4">
-        <Card>
-          <CardContent className="pt-4">
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="h-4 w-4 text-amber-600" />
-              <span className="text-sm text-muted-foreground">Unreconciled</span>
-            </div>
-            <p className="text-2xl font-bold mt-1">{stats.total}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-4">
-            <div className="flex items-center gap-2">
-              <DollarSign className="h-4 w-4 text-red-600" />
-              <span className="text-sm text-muted-foreground">Total Outstanding</span>
-            </div>
-            <p className="text-2xl font-bold mt-1">₦{stats.totalAmountNGN.toLocaleString()}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-4">
-            <div className="flex items-center gap-2">
-              <RefreshCw className="h-4 w-4 text-blue-600" />
-              <span className="text-sm text-muted-foreground">Oldest</span>
-            </div>
-            <p className="text-2xl font-bold mt-1">{stats.oldestAge}</p>
-          </CardContent>
-        </Card>
+        <Card><CardContent className="pt-4"><div className="flex items-center gap-2"><AlertTriangle className="h-4 w-4 text-amber-600" /><span className="text-sm text-muted-foreground">Pending</span></div><p className="text-2xl font-bold mt-1">{stats.total}</p></CardContent></Card>
+        <Card><CardContent className="pt-4"><div className="flex items-center gap-2"><DollarSign className="h-4 w-4 text-red-600" /><span className="text-sm text-muted-foreground">Outstanding</span></div><p className="text-2xl font-bold mt-1">₦{stats.totalAmountNGN.toLocaleString()}</p></CardContent></Card>
+        <Card><CardContent className="pt-4"><div className="flex items-center gap-2"><SkullIcon className="h-4 w-4 text-red-800" /><span className="text-sm text-muted-foreground">Dead Letters</span></div><p className="text-2xl font-bold mt-1">{deadLetters.length}</p></CardContent></Card>
       </div>
 
-      {/* Filters */}
-      <Card>
-        <CardContent className="pt-4">
-          <div className="flex items-end gap-4 flex-wrap">
-            <div className="space-y-1">
-              <Label className="text-xs">From Date</Label>
-              <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="w-40" />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">To Date</Label>
-              <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-40" />
-            </div>
-            {(dateFrom || dateTo) && (
-              <Button variant="ghost" size="sm" onClick={() => { setDateFrom(""); setDateTo(""); }}>
-                Clear Filters
-              </Button>
-            )}
+      {/* Tab Navigation */}
+      <div className="flex gap-1 border-b">
+        <button
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === "pending" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+          onClick={() => setActiveTab("pending")}
+        >
+          Pending ({stats.total})
+        </button>
+        <button
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === "dead_letter" ? "border-red-600 text-red-600" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+          onClick={() => setActiveTab("dead_letter")}
+        >
+          Dead Letter ({deadLetters.length})
+        </button>
+      </div>
+
+      {/* ═══ PENDING TAB ═══ */}
+      {activeTab === "pending" && (
+        <>
+          {/* Filters */}
+          <Card><CardContent className="pt-4"><div className="flex items-end gap-4 flex-wrap">
+            <div className="space-y-1"><Label className="text-xs">From Date</Label><Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="w-40" /></div>
+            <div className="space-y-1"><Label className="text-xs">To Date</Label><Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-40" /></div>
+            {(dateFrom || dateTo) && <Button variant="ghost" size="sm" onClick={() => { setDateFrom(""); setDateTo(""); }}>Clear</Button>}
             <div className="ml-auto text-xs text-muted-foreground">
-              Showing {filteredAndSorted.length} of {data?.items?.length ?? 0} items
-              {selectedRefs.size > 0 && ` · ${selectedRefs.size} selected`}
+              {filteredAndSorted.length} items{selectedRefs.size > 0 && ` · ${selectedRefs.size} selected`}
             </div>
-          </div>
-        </CardContent>
-      </Card>
+          </div></CardContent></Card>
 
-      {/* Transaction List */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Failed Ledger Credits</CardTitle>
-          <CardDescription>
-            Use checkboxes to select items for bulk retry. Click column headers to sort.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {filteredAndSorted.length === 0 ? (
-            <div className="text-center py-8">
-              <CheckCircle2 className="h-12 w-12 text-green-500 mx-auto mb-3" />
-              <p className="font-medium text-green-800">All Reconciled</p>
-              <p className="text-sm text-muted-foreground mt-1">
-                No outstanding unreconciled transactions{(dateFrom || dateTo) ? " in this date range" : ""}.
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-1">
-              {/* Header Row */}
-              <div className="grid grid-cols-[32px_1fr_1fr_80px_60px_80px_70px_70px] gap-2 text-xs font-medium text-muted-foreground border-b pb-2 items-center">
-                <Checkbox
-                  checked={allSelected}
-                  onCheckedChange={toggleSelectAll}
-                  aria-label="Select all"
-                />
-                <span>Reference</span>
-                <button className="flex items-center gap-1 hover:text-foreground" onClick={() => toggleSort("tenant")}>
-                  Tenant <ArrowUpDown className="h-3 w-3" />
-                </button>
-                <button className="flex items-center gap-1 hover:text-foreground" onClick={() => toggleSort("amount")}>
-                  Amount <ArrowUpDown className="h-3 w-3" />
-                </button>
-                <button className="flex items-center gap-1 hover:text-foreground" onClick={() => toggleSort("attempts")}>
-                  Tries <ArrowUpDown className="h-3 w-3" />
-                </button>
-                <button className="flex items-center gap-1 hover:text-foreground" onClick={() => toggleSort("date")}>
-                  Date <ArrowUpDown className="h-3 w-3" />
-                </button>
-                <span>Status</span>
-                <span>Actions</span>
-              </div>
-
-              {/* Data Rows */}
-              {filteredAndSorted.map((item: any) => (
-                <div
-                  key={item.reference}
-                  className={`grid grid-cols-[32px_1fr_1fr_80px_60px_80px_70px_70px] gap-2 items-center text-sm py-2 border-b border-dashed hover:bg-muted/30 transition-colors ${
-                    selectedRefs.has(item.reference) ? "bg-blue-50/50" : ""
-                  }`}
-                >
-                  <Checkbox
-                    checked={selectedRefs.has(item.reference)}
-                    onCheckedChange={() => toggleSelect(item.reference)}
-                    aria-label={`Select ${item.reference}`}
-                  />
-                  <span className="font-mono text-xs truncate" title={item.reference}>
-                    {item.reference.slice(0, 18)}...
-                  </span>
-                  <span className="truncate text-xs">{item.tenantId}</span>
-                  <span className="font-medium text-xs">₦{(item.amountKobo / 100).toLocaleString()}</span>
-                  <span className="text-xs">{item.attempts ?? 0}/7</span>
-                  <span className="text-xs text-muted-foreground">
-                    {new Date(item.verifiedAt || item.createdAt).toLocaleDateString()}
-                  </span>
-                  <Badge
-                    variant={item.status === "dead_letter" ? "destructive" : "outline"}
-                    className="w-fit text-[10px]"
-                  >
-                    {item.status === "dead_letter" ? "dead" : item.status || "pending"}
-                  </Badge>
-                  <div className="flex gap-1">
-                    <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setSelectedItem(item)} title="View details">
-                      <Eye className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button
-                      variant="ghost" size="sm" className="h-7 w-7 p-0"
-                      disabled={retrying === item.reference || bulkProgress !== null}
-                      onClick={() => handleRetry(item.reference, item.tenantId, item.amountKobo)}
-                      title="Retry credit"
-                    >
-                      {retrying === item.reference ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <RefreshCw className="h-3.5 w-3.5" />
-                      )}
-                    </Button>
+          {/* Transaction List */}
+          <Card>
+            <CardHeader><CardTitle>Failed Ledger Credits</CardTitle><CardDescription>Checkboxes + Ctrl+A to select, Ctrl+Shift+R to retry.</CardDescription></CardHeader>
+            <CardContent>
+              {filteredAndSorted.length === 0 ? (
+                <div className="text-center py-8"><CheckCircle2 className="h-12 w-12 text-green-500 mx-auto mb-3" /><p className="font-medium text-green-800">All Reconciled</p></div>
+              ) : (
+                <div className="space-y-1">
+                  <div className="grid grid-cols-[32px_1fr_1fr_80px_60px_80px_70px_70px] gap-2 text-xs font-medium text-muted-foreground border-b pb-2 items-center">
+                    <Checkbox checked={allSelected} onCheckedChange={toggleSelectAll} aria-label="Select all" />
+                    <span>Reference</span>
+                    <button className="flex items-center gap-1 hover:text-foreground" onClick={() => toggleSort("tenant")}>Tenant <ArrowUpDown className="h-3 w-3" /></button>
+                    <button className="flex items-center gap-1 hover:text-foreground" onClick={() => toggleSort("amount")}>Amount <ArrowUpDown className="h-3 w-3" /></button>
+                    <button className="flex items-center gap-1 hover:text-foreground" onClick={() => toggleSort("attempts")}>Tries <ArrowUpDown className="h-3 w-3" /></button>
+                    <button className="flex items-center gap-1 hover:text-foreground" onClick={() => toggleSort("date")}>Date <ArrowUpDown className="h-3 w-3" /></button>
+                    <span>Status</span>
+                    <span>Actions</span>
                   </div>
+                  {filteredAndSorted.map((item: any) => (
+                    <div key={item.reference} className={`grid grid-cols-[32px_1fr_1fr_80px_60px_80px_70px_70px] gap-2 items-center text-sm py-2 border-b border-dashed hover:bg-muted/30 transition-colors ${selectedRefs.has(item.reference) ? "bg-blue-50/50" : ""}`}>
+                      <Checkbox checked={selectedRefs.has(item.reference)} onCheckedChange={() => toggleSelect(item.reference)} />
+                      <span className="font-mono text-xs truncate" title={item.reference}>{item.reference.slice(0, 18)}...</span>
+                      <span className="truncate text-xs">{item.tenantId}</span>
+                      <span className="font-medium text-xs">₦{(item.amountKobo / 100).toLocaleString()}</span>
+                      <span className="text-xs">{item.attempts ?? 0}/7</span>
+                      <span className="text-xs text-muted-foreground">{new Date(item.verifiedAt || item.createdAt).toLocaleDateString()}</span>
+                      <Badge variant="outline" className="w-fit text-[10px]">pending</Badge>
+                      <div className="flex gap-1">
+                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setSelectedItem(item)} title="View details"><Eye className="h-3.5 w-3.5" /></Button>
+                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0" disabled={retrying === item.reference || bulkProgress !== null} onClick={() => handleRetry(item.reference, item.tenantId, item.amountKobo)} title="Retry">
+                          {retrying === item.reference ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+              )}
+            </CardContent>
+          </Card>
+        </>
+      )}
 
-      {/* Detail Modal */}
-      {selectedItem && (
-        <DetailModal item={selectedItem} onClose={() => setSelectedItem(null)} />
+      {/* ═══ DEAD LETTER TAB ═══ */}
+      {activeTab === "dead_letter" && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2"><SkullIcon className="h-5 w-5 text-red-600" /> Dead Letter Queue</CardTitle>
+            <CardDescription>Items that exceeded 7 retry attempts. Add resolution notes to mark them as manually handled.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {deadLetters.length === 0 ? (
+              <div className="text-center py-8"><CheckCircle2 className="h-12 w-12 text-green-500 mx-auto mb-3" /><p className="font-medium text-green-800">No Dead Letters</p></div>
+            ) : (
+              <div className="space-y-3">
+                {deadLetters.map((item: any) => (
+                  <div key={item.reference} className="border rounded-lg p-3 space-y-2 hover:border-red-200 transition-colors">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <Badge variant="destructive" className="text-[10px]">DEAD</Badge>
+                        <span className="font-mono text-xs">{item.reference.slice(0, 30)}...</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium">₦{(item.amountKobo / 100).toLocaleString()}</span>
+                        <Button variant="outline" size="sm" onClick={() => setSelectedItem(item)}><Eye className="h-3 w-3 mr-1" /> Detail</Button>
+                        <Button variant="outline" size="sm" onClick={() => setResolvingItem(item)}><StickyNote className="h-3 w-3 mr-1" /> Resolve</Button>
+                      </div>
+                    </div>
+                    <div className="flex gap-4 text-xs text-muted-foreground">
+                      <span>Tenant: {item.tenantId}</span>
+                      <span>Attempts: {item.attempts}</span>
+                      <span>Created: {new Date(item.createdAt).toLocaleDateString()}</span>
+                    </div>
+                    {item.lastError && (
+                      <div className="text-xs font-mono text-red-700 bg-red-50 rounded p-2 max-h-[60px] overflow-y-auto whitespace-pre-wrap">
+                        {item.lastError}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Modals */}
+      {selectedItem && <DetailModal item={selectedItem} onClose={() => setSelectedItem(null)} />}
+      {resolvingItem && (
+        <ResolutionDialog
+          item={resolvingItem}
+          onClose={() => setResolvingItem(null)}
+          onSubmit={(note) => resolveMutation.mutate({ reference: resolvingItem.reference, note })}
+        />
       )}
     </div>
   );

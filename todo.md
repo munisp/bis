@@ -3525,3 +3525,9 @@
 - [x] Real-time counter badge on sidebar navigation showing unreconciled count (30s refresh, destructive variant)
 - [x] CSV export button for currently filtered failed transactions (proper escaping, timestamped filename)
 - [x] Push all code to GitHub main
+
+## Reconciliation Dashboard v3 (Aug 12 2026 — Session 6)
+- [x] Keyboard shortcuts: Ctrl+A select all, Ctrl+Shift+R retry selected
+- [x] Dead Letter tab with resolution notes (isolate max-retry items, add manual notes)
+- [x] 7-day failure rate time-series chart at top of dashboard (recharts AreaChart)
+- [x] Push all code to GitHub main

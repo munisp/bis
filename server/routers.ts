@@ -6928,6 +6928,69 @@ export const appRouter = router({
           }
           return result;
         }),
+      /**
+       * List dead-lettered items (exceeded max retries).
+       */
+      listDeadLetters: protectedProcedure
+        .input(z.object({ limit: z.number().min(1).max(200).default(50) }))
+        .query(async ({ input }) => {
+          const db = await getDb();
+          if (!db) return { items: [] };
+          const rows = await db.execute(sql`
+            SELECT * FROM webhook_retry_queue
+            WHERE "status" = 'dead_letter'
+            ORDER BY "createdAt" DESC
+            LIMIT ${input.limit}
+          `);
+          return { items: (rows as any).rows ?? rows ?? [] };
+        }),
+      /**
+       * Add a manual resolution note to a dead-lettered item.
+       */
+      addResolutionNote: protectedProcedure
+        .input(z.object({
+          reference: z.string().min(1),
+          note: z.string().min(1).max(1000),
+        }))
+        .mutation(async ({ input, ctx }) => {
+          const db = await getDb();
+          if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+          const noteEntry = `[${new Date().toISOString()}] ${ctx.user?.name ?? "admin"}: ${input.note}`;
+          await db.execute(sql`
+            UPDATE webhook_retry_queue
+            SET "lastError" = COALESCE("lastError", '') || ${'\n' + noteEntry},
+                "status" = 'resolved'
+            WHERE "reference" = ${input.reference}
+          `);
+          return { success: true };
+        }),
+      /**
+       * Get failure rate data for the past 7 days (daily buckets).
+       */
+      failureRateChart: protectedProcedure.query(async () => {
+        const db = await getDb();
+        if (!db) return { days: [] };
+        const rows = await db.execute(sql`
+          SELECT
+            DATE("createdAt") as day,
+            COUNT(*) as total,
+            COUNT(*) FILTER (WHERE "status" = 'completed') as succeeded,
+            COUNT(*) FILTER (WHERE "status" = 'dead_letter') as dead_lettered,
+            COUNT(*) FILTER (WHERE "status" = 'pending') as pending
+          FROM webhook_retry_queue
+          WHERE "createdAt" >= NOW() - INTERVAL '7 days'
+          GROUP BY DATE("createdAt")
+          ORDER BY day ASC
+        `);
+        const days = ((rows as any).rows ?? rows ?? []).map((r: any) => ({
+          day: r.day ? new Date(r.day).toISOString().slice(0, 10) : "",
+          total: Number(r.total ?? 0),
+          succeeded: Number(r.succeeded ?? 0),
+          deadLettered: Number(r.dead_lettered ?? 0),
+          pending: Number(r.pending ?? 0),
+        }));
+        return { days };
+      }),
     }),
   }),
   auth: router({
