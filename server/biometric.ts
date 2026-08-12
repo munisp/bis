@@ -7,7 +7,7 @@
  *   - Document OCR with face extraction
  *
  * Routes all calls through the Go gateway → Python biometric engine.
- * Falls back to a deterministic sandbox response when the engine is unavailable.
+ * Verification procedures fail closed when the engine is unavailable.
  */
 
 import { z } from "zod";
@@ -18,7 +18,6 @@ import { getDb, insertBiometricSessionLog, getBiometricSessionLogs, markBiometri
 import { kycRecords, biometricSessionLogs, platformSettings, biometricLivenessNonces } from "../drizzle/schema";
 import { and, eq, gte, desc, lt, sql, gt } from "drizzle-orm";
 import { storagePut } from "./storage";
-import { invokeLLM } from "./_core/llm";
 import { notifyOwner } from "./_core/notification";
 import { auditLog } from "../drizzle/schema";
 import * as crypto from "crypto";
@@ -75,63 +74,19 @@ async function biometricFetch(path: string, body: unknown, contentType = "applic
       body: contentType === "application/json" ? JSON.stringify(body) : (body as BodyInit),
     });
     if (!res.ok) throw new Error(`Biometric gateway error ${res.status}`);
-    return await res.json();
+    const result = await res.json();
+    if (!result || typeof result !== "object") {
+      throw new Error("Biometric gateway returned an invalid verification response");
+    }
+    return result;
   } catch (e) {
-    // Return sandbox response when engine unavailable
-    return null;
+    console.error(`[Biometric] Gateway request failed for ${path}:`, e);
+    throw new TRPCError({
+      code: "SERVICE_UNAVAILABLE",
+      message: "Biometric verification is temporarily unavailable. No verification decision was recorded.",
+      cause: e,
+    });
   }
-}
-
-function sandboxLiveness(challenge: string) {
-  return {
-    liveness: true,
-    score: 0.97,
-    challenge,
-    passed: true,
-    antiSpoofScore: 0.98,
-    faceDetected: true,
-    faceCount: 1,
-    quality: 0.94,
-    sandbox: true,
-  };
-}
-
-function sandboxEnroll(subjectRef: string) {
-  return {
-    enrolled: true,
-    faceId: `face-${subjectRef}-${Date.now()}`,
-    quality: 0.94,
-    embedding: null, // not exposed to client
-    sandbox: true,
-  };
-}
-
-function sandboxVerify(faceId: string) {
-  return {
-    match: true,
-    similarity: 0.96,
-    threshold: 0.80,
-    faceId,
-    sandbox: true,
-  };
-}
-
-function sandboxOCR() {
-  return {
-    documentType: "NIN_SLIP",
-    nin: "12345678901",
-    firstName: "ADAEZE",
-    lastName: "OKONKWO",
-    middleName: "CHIOMA",
-    dob: "1990-05-15",
-    gender: "F",
-    address: "12 Adeola Odeku Street, Victoria Island, Lagos",
-    issueDate: "2018-03-20",
-    faceExtracted: true,
-    faceImageUrl: null,
-    confidence: 0.91,
-    sandbox: true,
-  };
 }
 
 // ─── Router ───────────────────────────────────────────────────────────────────
@@ -172,7 +127,7 @@ export const biometricRouter = router({
         challenge: input.challenge,
         subject_ref: input.subjectRef,
       });
-      return result ?? sandboxLiveness(input.challenge);
+      return result;
     }),
 
   /**
@@ -229,7 +184,7 @@ export const biometricRouter = router({
         image: input.imageBase64,
         subject_ref: input.subjectRef,
       });
-      const enrollResult = result ?? sandboxEnroll(input.subjectRef);
+      const enrollResult = result;
 
       // If a KYC record ID is provided, update the biometric status
       if (input.kycRecordId && enrollResult.enrolled) {
@@ -284,7 +239,7 @@ export const biometricRouter = router({
         face_id: input.faceId,
         subject_ref: input.subjectRef,
       });
-      return result ?? sandboxVerify(input.faceId);
+      return result;
     }),
 
   /**
@@ -306,69 +261,7 @@ export const biometricRouter = router({
         document_type: input.documentType,
         subject_ref: input.subjectRef,
       });
-      if (result) return result;
-
-      // LLM-based OCR fallback when biometric engine is unavailable
-      try {
-        const llmResult = await invokeLLM({
-          messages: [
-            {
-              role: "system",
-              content: `You are a Nigerian identity document OCR engine. Extract structured data from the provided base64-encoded document image. Return JSON only.`,
-            },
-            {
-              role: "user",
-              content: [
-                {
-                  type: "text",
-                  text: `Extract all visible fields from this ${input.documentType} document. Return JSON with fields: documentType, nin (if NIN), firstName, lastName, middleName, dob (YYYY-MM-DD), gender (M/F), address, issueDate (YYYY-MM-DD), faceExtracted (boolean), confidence (0-1).`,
-                },
-                {
-                  type: "image_url",
-                  image_url: {
-                    url: `data:image/jpeg;base64,${input.imageBase64}`,
-                    detail: "high",
-                  },
-                },
-              ],
-            },
-          ],
-          response_format: {
-            type: "json_schema",
-            json_schema: {
-              name: "ocr_result",
-              strict: true,
-              schema: {
-                type: "object",
-                properties: {
-                  documentType: { type: "string" },
-                  nin: { type: "string" },
-                  firstName: { type: "string" },
-                  lastName: { type: "string" },
-                  middleName: { type: "string" },
-                  dob: { type: "string" },
-                  gender: { type: "string" },
-                  address: { type: "string" },
-                  issueDate: { type: "string" },
-                  faceExtracted: { type: "boolean" },
-                  confidence: { type: "number" },
-                },
-                required: ["documentType", "firstName", "lastName", "faceExtracted", "confidence"],
-                additionalProperties: false,
-              },
-            },
-          },
-        });
-        const content = llmResult?.choices?.[0]?.message?.content;
-        if (content) {
-          const parsed = typeof content === "string" ? JSON.parse(content) : content;
-          return { ...parsed, sandbox: false, llmFallback: true };
-        }
-      } catch (e) {
-        console.warn("[Biometric OCR] LLM fallback failed:", e);
-      }
-
-      return sandboxOCR();
+      return result;
     }),
 
   /**
@@ -397,7 +290,7 @@ export const biometricRouter = router({
         image: input.livenessImageBase64,
         challenge: input.challenge,
         subject_ref: input.subjectRef,
-      }) ?? sandboxLiveness(input.challenge);
+      });
 
       if (!livenessResult.passed) {
         throw new TRPCError({
@@ -410,7 +303,7 @@ export const biometricRouter = router({
       const enrollResult = await biometricFetch("/enroll", {
         image: input.enrollImageBase64,
         subject_ref: input.subjectRef,
-      }) ?? sandboxEnroll(input.subjectRef);
+      });
 
       // Step 3: Document OCR (optional)
       let ocrResult = null;
@@ -419,7 +312,7 @@ export const biometricRouter = router({
           image: input.documentImageBase64,
           document_type: input.documentType,
           subject_ref: input.subjectRef,
-        }) ?? sandboxOCR();
+        });
       }
 
       // Step 4: Update KYC record
@@ -586,19 +479,16 @@ export const biometricRouter = router({
         frames: input.frames,
         challenge: input.challenge,
         subject_ref: input.subjectRef,
-      }) ?? {
-        score: 0.97, live: true, challenge: input.challenge,
-        challenge_completed: true, frames_analysed: input.frames.length, sandbox: true,
-      };
+      });
 
       // Persist session log
       const sessionId = await insertBiometricSessionLog({
         sessionId: `bio-${Date.now()}-${crypto.randomUUID().replace(/-/g,'').slice(0,8)}`,
         subjectRef: input.subjectRef ?? "unknown",
         activeLivenessScore: result.score ?? null,
-        activeLivenessLive: result.live ?? result.challenge_completed ?? true,
+        activeLivenessLive: result.live === true || result.challenge_completed === true,
         activeLivenessChallenge: input.challenge,
-        activeLivenessChallengeCompleted: result.challenge_completed ?? true,
+        activeLivenessChallengeCompleted: result.challenge_completed === true,
         activeLivenessFramesAnalysed: result.frames_analysed ?? input.frames.length,
         createdAt: new Date(),
       });
@@ -642,19 +532,14 @@ export const biometricRouter = router({
       const result = await biometricFetch(endpoint, {
         image: input.imageBase64,
         subject_ref: input.subjectRef,
-      }) ?? {
-        score: 0.98, genuine: true, reason: "passed",
-        spoof_type: "genuine", model: "texture_analysis_fallback", sandbox: true,
-        confidence_scores: { genuine: 0.98 },
-        features: { sharpness: 0.95, colour_depth: 0.92, hf_score: 0.88, freq_anomaly_score: 0.12, reflection_score: 0.34, depth_score: 0.71 },
-      };
+      });
 
       // Persist session log
       const sessionId = await insertBiometricSessionLog({
         sessionId: `bio-${Date.now()}-${crypto.randomUUID().replace(/-/g,'').slice(0,8)}`,
         subjectRef: input.subjectRef ?? "unknown",
         antiSpoofScore: result.score ?? null,
-        antiSpoofGenuine: result.genuine ?? true,
+        antiSpoofGenuine: result.genuine === true,
         antiSpoofType: (result.spoof_type ?? "unknown") as any,
         antiSpoofModel: result.model ?? null,
         antiSpoofSharpness: result.features?.sharpness ?? null,
@@ -696,10 +581,7 @@ export const biometricRouter = router({
         probe: input.probeImageBase64,
         reference: input.referenceImageBase64,
         subject_ref: input.subjectRef,
-      }) ?? {
-        score: 0.96, cosine_similarity: 0.92, match: true,
-        threshold: 0.40, reason: "match", using_arcface: false, sandbox: true,
-      };
+      });
 
       // Persist session log
       const sessionId = await insertBiometricSessionLog({
@@ -707,7 +589,7 @@ export const biometricRouter = router({
         subjectRef: input.subjectRef ?? "unknown",
         matchScore: result.score ?? null,
         matchCosineSimilarity: result.cosine_similarity ?? null,
-        matchDecision: result.match ?? true,
+        matchDecision: result.match === true,
         matchThreshold: result.threshold ?? null,
         createdAt: new Date(),
       });
@@ -740,10 +622,7 @@ export const biometricRouter = router({
       const result = await biometricFetch("/detect", {
         image: input.imageBase64,
         subject_ref: input.subjectRef,
-      }) ?? {
-        face_detected: true, face_count: 1, quality_score: 0.94,
-        bbox: { x: 0.2, y: 0.1, w: 0.6, h: 0.8 }, sandbox: true,
-      };
+      });
       return result;
     }),
 
@@ -764,11 +643,7 @@ export const biometricRouter = router({
       const result = await biometricFetch("/landmarks", {
         image: input.imageBase64,
         subject_ref: input.subjectRef,
-      }) ?? {
-        landmarks_found: true, landmark_count: 68, sandbox: true,
-        landmarks: Array.from({ length: 68 }, (_, i) => ({ x: 0.3 + i * 0.001, y: 0.4 + i * 0.001, z: 0.0, x_norm: 0.3, y_norm: 0.4 })),
-        landmark_variance: 0.00123,
-      };
+      });
       return result;
     }),
 
@@ -789,11 +664,7 @@ export const biometricRouter = router({
       const result = await biometricFetch("/features", {
         image: input.imageBase64,
         subject_ref: input.subjectRef,
-      }) ?? {
-        face_detected: true, embedding_dimension: 512,
-        embedding_model: "arcface_fallback", quality_score: 0.94,
-        embedding_norm: 0.98, sandbox: true,
-      };
+      });
       return result;
     }),
 
@@ -821,12 +692,7 @@ export const biometricRouter = router({
         subject_ref: input.subjectRef,
         run_antispoofing: input.runAntispoofing,
         run_match: input.runMatch,
-      }) ?? {
-        verified: true, overall_score: 0.96, sandbox: true,
-        liveness: { live: true, score: 0.97 },
-        antispoofing: { genuine: true, score: 0.98 },
-        face_match: null, failure_reasons: [],
-      };
+      });
 
       // Persist session log
       const sessionId = await insertBiometricSessionLog({
@@ -834,13 +700,13 @@ export const biometricRouter = router({
         subjectRef: input.subjectRef ?? "unknown",
         kycRecordId: input.kycRecordId ?? null,
         livenessScore: result.liveness?.score ?? null,
-        livenessLive: result.liveness?.live ?? true,
+        livenessLive: result.liveness?.live === true,
         antiSpoofScore: result.antispoofing?.score ?? null,
-        antiSpoofGenuine: result.antispoofing?.genuine ?? true,
+        antiSpoofGenuine: result.antispoofing?.genuine === true,
         matchScore: result.face_match?.score ?? null,
         matchDecision: result.face_match?.match ?? null,
         overallScore: result.overall_score ?? null,
-        overallVerified: result.verified ?? true,
+        overallVerified: result.verified === true,
         failureReasons: Array.isArray(result.failure_reasons) ? result.failure_reasons.join(",") : null,
         createdAt: new Date(),
       });

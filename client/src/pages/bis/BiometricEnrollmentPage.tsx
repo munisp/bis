@@ -12,7 +12,7 @@
  *   6. Review & Submit
  *
  * All biometric calls go through:
- *   tRPC → Node BFF → Go Gateway → Python Biometric Engine (or sandbox fallback)
+ *   tRPC → Node BFF → Go Gateway → Python Biometric Engine
  */
 
 import { useState, useRef, useCallback, useEffect } from 'react';
@@ -233,6 +233,7 @@ interface CameraStepProps {
 }
 
 function CameraStep({ title, description, challenge, challengeLabel, onCapture, onLivenessResult, t, isLiveness }: CameraStepProps) {
+  const livenessCheck = trpc.biometric.checkLiveness.useMutation();
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [cameraActive, setCameraActive] = useState(false);
@@ -282,7 +283,7 @@ function CameraStep({ title, description, challenge, challengeLabel, onCapture, 
           setTimeout(() => {
             setPhase('done');
             setProgress(100);
-            setInstruction('✓ Liveness verified!');
+            setInstruction('Challenge complete — capture a frame for server verification');
           }, delay);
         }
       }
@@ -316,11 +317,35 @@ function CameraStep({ title, description, challenge, challengeLabel, onCapture, 
 
   const handleConfirm = useCallback(() => {
     if (!captured) return;
-    onCapture(captured);
-    if (onLivenessResult) {
-      onLivenessResult({ passed: true, score: 0.97 });
+    if (!isLiveness) {
+      onCapture(captured);
+      return;
     }
-  }, [captured, onCapture, onLivenessResult]);
+
+    setError('');
+    livenessCheck.mutate(
+      { imageBase64: captured, challenge: challenge ?? 'blink' },
+      {
+        onSuccess: (rawResult) => {
+          const result = rawResult as { passed?: boolean; live?: boolean; score?: number; sandbox?: boolean };
+          const passed = result.passed === true || result.live === true;
+          if (result.sandbox || !passed) {
+            setError(
+              result.sandbox
+                ? 'The biometric service returned a non-authoritative result. Please retry when service is available.'
+                : 'Liveness verification failed. Please retake the challenge capture.'
+            );
+            return;
+          }
+          onCapture(captured);
+          onLivenessResult?.({ passed: true, score: result.score ?? 0 });
+        },
+        onError: (mutationError) => {
+          setError(`Liveness verification is unavailable: ${mutationError.message}`);
+        },
+      }
+    );
+  }, [captured, isLiveness, challenge, livenessCheck, onCapture, onLivenessResult]);
 
   const handleRetake = useCallback(() => {
     setCaptured(null);
@@ -363,8 +388,8 @@ function CameraStep({ title, description, challenge, challengeLabel, onCapture, 
             <Button variant="outline" onClick={handleRetake} className="flex-1">
               ↺ Retake
             </Button>
-            <Button onClick={handleConfirm} className="flex-1 bg-green-600 hover:bg-green-700">
-              ✓ Use This Image
+            <Button onClick={handleConfirm} className="flex-1 bg-green-600 hover:bg-green-700" disabled={livenessCheck.isPending}>
+              {livenessCheck.isPending ? 'Verifying…' : isLiveness ? 'Verify Liveness' : '✓ Use This Image'}
             </Button>
           </div>
         </div>

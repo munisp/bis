@@ -447,7 +447,7 @@ export const billingRouter = router({
   /**
    * Initiate a Paystack payment to top up the tenant's NGN balance.
    * Creates a Paystack transaction and returns the authorization URL for redirect.
-   * Falls back to a simulated response when PAYSTACK_SECRET_KEY is not configured.
+   * Fails closed when Paystack is not configured.
    */
   initiateTopUp: writeProcedure
     .input(
@@ -463,14 +463,10 @@ export const billingRouter = router({
       const PAYSTACK_KEY = ENV.paystackSecretKey;
 
       if (!PAYSTACK_KEY) {
-        // Simulated response for development / demo environments
-        const ref = `BIS-SIM-${Date.now()}-${crypto.randomUUID().replace(/-/g,'').slice(0,8).toUpperCase()}`;
-        return {
-          authorizationUrl: `https://checkout.paystack.com/demo?reference=${ref}`,
-          accessCode: `demo_${ref}`,
-          reference: ref,
-          simulated: true,
-        };
+        throw new TRPCError({
+          code: "SERVICE_UNAVAILABLE",
+          message: "Paystack is not configured. A top-up session cannot be created.",
+        });
       }
 
       try {
@@ -552,12 +548,19 @@ export const billingRouter = router({
       let status: string;
       let channel: string;
 
-      if (!PAYSTACK_KEY || input.reference.startsWith("BIS-SIM-")) {
-        // Simulated verification — treat as success
-        amountKobo = 500_000; // ₦5,000 demo credit
-        status = "success";
-        channel = "demo";
-      } else {
+      if (!PAYSTACK_KEY) {
+        throw new TRPCError({
+          code: "SERVICE_UNAVAILABLE",
+          message: "Paystack is not configured. A payment cannot be verified or credited.",
+        });
+      }
+      if (input.reference.startsWith("BIS-SIM-")) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Simulated payment references are not valid for tenant crediting.",
+        });
+      }
+      {
         try {
           const res = await fetch(
             `https://api.paystack.co/transaction/verify/${encodeURIComponent(input.reference)}`,

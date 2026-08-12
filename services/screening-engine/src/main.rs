@@ -263,7 +263,7 @@ pub async fn run_screening(
 
 async fn screen_nin_trace(req: &ScreeningRequest, config: &EngineConfig) -> ScreeningResult {
     if config.simulate {
-        return simulate_result(req, ScreeningOutcome::Clear, "NIN trace: identity verified", 0.05);
+        return unavailable_result(req, "NIMC", "NIN verification is disabled because simulated screening is prohibited");
     }
     // Real NIMC API call
     let client = reqwest::Client::new();
@@ -290,7 +290,7 @@ async fn screen_nin_trace(req: &ScreeningRequest, config: &EngineConfig) -> Scre
 
 async fn screen_bvn(req: &ScreeningRequest, config: &EngineConfig) -> ScreeningResult {
     if config.simulate {
-        return simulate_result(req, ScreeningOutcome::Clear, "BVN verified via NIBSS", 0.03);
+        return unavailable_result(req, "NIBSS", "BVN verification is disabled because simulated screening is prohibited");
     }
     let client = reqwest::Client::new();
     let bvn = req.subject.bvn.as_deref().unwrap_or("");
@@ -313,7 +313,7 @@ async fn screen_bvn(req: &ScreeningRequest, config: &EngineConfig) -> ScreeningR
 
 async fn screen_efcc(req: &ScreeningRequest, config: &EngineConfig) -> ScreeningResult {
     if config.simulate {
-        return simulate_result(req, ScreeningOutcome::Clear, "No EFCC records found", 0.02);
+        return unavailable_result(req, "EFCC", "EFCC verification is disabled because simulated screening is prohibited");
     }
     let client = reqwest::Client::new();
     match client.post(format!("{}/v1/search", config.efcc_url))
@@ -335,7 +335,7 @@ async fn screen_efcc(req: &ScreeningRequest, config: &EngineConfig) -> Screening
 
 async fn screen_icpc(req: &ScreeningRequest, config: &EngineConfig) -> ScreeningResult {
     if config.simulate {
-        return simulate_result(req, ScreeningOutcome::Clear, "No ICPC records found", 0.02);
+        return unavailable_result(req, "ICPC", "ICPC verification is disabled because simulated screening is prohibited");
     }
     let client = reqwest::Client::new();
     match client.post(format!("{}/v1/search", config.icpc_url))
@@ -357,19 +357,14 @@ async fn screen_icpc(req: &ScreeningRequest, config: &EngineConfig) -> Screening
 
 async fn screen_court_records(req: &ScreeningRequest, config: &EngineConfig) -> ScreeningResult {
     if config.simulate {
-        return simulate_result(req, ScreeningOutcome::Clear, "No court records found in searched states", 0.03);
+        return unavailable_result(req, "State Judiciary", "Court-record verification is disabled because simulated screening is prohibited");
     }
-    // Court records are aggregated from state judiciary APIs
-    let state = req.subject.state.as_deref().unwrap_or("Lagos");
-    make_result(req, ScreeningOutcome::Clear,
-        &format!("Court records search completed for {state} State"),
-        serde_json::json!({ "state": state, "recordsSearched": 1, "hits": 0 }),
-        0.05, vec!["State Judiciary".into()])
+    unavailable_result(req, "State Judiciary", "No live court-record provider is configured")
 }
 
 async fn screen_cac(req: &ScreeningRequest, config: &EngineConfig) -> ScreeningResult {
     if config.simulate {
-        return simulate_result(req, ScreeningOutcome::Clear, "No adverse CAC directorship found", 0.04);
+        return unavailable_result(req, "CAC", "CAC verification is disabled because simulated screening is prohibited");
     }
     let client = reqwest::Client::new();
     match client.get(format!("{}/api/v1/search/director?name={}", config.cac_url, urlencoding::encode(&req.subject.full_name)))
@@ -391,7 +386,7 @@ async fn screen_cac(req: &ScreeningRequest, config: &EngineConfig) -> ScreeningR
 
 async fn screen_waec(req: &ScreeningRequest, config: &EngineConfig) -> ScreeningResult {
     if config.simulate {
-        return simulate_result(req, ScreeningOutcome::Clear, "WAEC certificate verified", 0.05);
+        return unavailable_result(req, "WAEC", "WAEC verification is disabled because simulated screening is prohibited");
     }
     let client = reqwest::Client::new();
     let waec_num = req.subject.waec_number.as_deref().unwrap_or("");
@@ -413,80 +408,89 @@ async fn screen_waec(req: &ScreeningRequest, config: &EngineConfig) -> Screening
 }
 
 async fn screen_neco(req: &ScreeningRequest, _config: &EngineConfig) -> ScreeningResult {
-    simulate_result(req, ScreeningOutcome::Clear, "NECO certificate verified", 0.05)
+    unavailable_result(req, "NECO", "No live NECO verification provider is configured")
 }
 
 async fn screen_university(req: &ScreeningRequest, _config: &EngineConfig) -> ScreeningResult {
-    simulate_result(req, ScreeningOutcome::Clear, "University degree verified via NYSC database", 0.05)
+    unavailable_result(req, "University", "No live university verification provider is configured")
 }
 
 async fn screen_nysc(req: &ScreeningRequest, _config: &EngineConfig) -> ScreeningResult {
-    let nysc_num = req.subject.nysc_number.as_deref().unwrap_or("unknown");
-    simulate_result(req, ScreeningOutcome::Clear, &format!("NYSC discharge certificate {nysc_num} verified"), 0.04)
+    unavailable_result(req, "NYSC", "No live NYSC verification provider is configured")
 }
 
 async fn screen_employment(req: &ScreeningRequest, _config: &EngineConfig) -> ScreeningResult {
-    simulate_result(req, ScreeningOutcome::Clear, "Employment history verified with previous employers", 0.06)
+    unavailable_result(req, "Employment", "No live employment-verification provider is configured")
 }
 
 async fn screen_professional_licence(req: &ScreeningRequest, _config: &EngineConfig, council: &str) -> ScreeningResult {
-    let licence = req.subject.licence_number.as_deref().unwrap_or("unknown");
-    simulate_result(req, ScreeningOutcome::Clear, &format!("{council} licence {licence} is active and in good standing"), 0.04)
+    unavailable_result(req, council, "No live professional-licence provider is configured")
 }
 
 async fn screen_adverse_media(req: &ScreeningRequest, _config: &EngineConfig) -> ScreeningResult {
-    simulate_result(req, ScreeningOutcome::Clear, "No adverse media found in Nigerian news sources", 0.08)
+    unavailable_result(req, "Adverse Media", "No live adverse-media provider is configured")
 }
 
 async fn screen_pep_sanctions(req: &ScreeningRequest, _config: &EngineConfig) -> ScreeningResult {
-    simulate_result(req, ScreeningOutcome::Clear, "Not found on PEP/sanctions lists (UN, OFAC, EU, CBN)", 0.02)
+    unavailable_result(req, "PEP/Sanctions", "No live PEP and sanctions provider is configured")
 }
 
 async fn screen_watchlist(req: &ScreeningRequest, _config: &EngineConfig) -> ScreeningResult {
-    simulate_result(req, ScreeningOutcome::Clear, "Not found on any active watchlists", 0.02)
+    unavailable_result(req, "Watchlist", "No live watchlist provider is configured")
 }
 
 async fn screen_terrorism(req: &ScreeningRequest, _config: &EngineConfig) -> ScreeningResult {
-    simulate_result(req, ScreeningOutcome::Clear, "Not found on terrorism watchlists", 0.01)
+    unavailable_result(req, "Terrorism Watchlist", "No live terrorism-watchlist provider is configured")
 }
 
 async fn screen_interpol(req: &ScreeningRequest, _config: &EngineConfig) -> ScreeningResult {
-    simulate_result(req, ScreeningOutcome::Clear, "No Interpol notices found", 0.01)
+    unavailable_result(req, "INTERPOL", "No live INTERPOL provider is configured")
 }
 
 async fn screen_sex_offender(req: &ScreeningRequest, _config: &EngineConfig) -> ScreeningResult {
-    simulate_result(req, ScreeningOutcome::Clear, "Not found on sex offender registry", 0.01)
+    unavailable_result(req, "Sex Offender Registry", "No live sex-offender registry provider is configured")
 }
 
 async fn screen_address(req: &ScreeningRequest, _config: &EngineConfig) -> ScreeningResult {
-    let addr = req.subject.address.as_deref().unwrap_or("unknown");
-    simulate_result(req, ScreeningOutcome::Clear, &format!("Address verified: {addr}"), 0.07)
+    unavailable_result(req, "Address Verification", "No live address-verification provider is configured")
 }
 
 async fn screen_work_permit(req: &ScreeningRequest, _config: &EngineConfig) -> ScreeningResult {
-    simulate_result(req, ScreeningOutcome::Clear, "Work permit valid and current (NIS)", 0.05)
+    unavailable_result(req, "NIS", "No live work-permit provider is configured")
 }
 
 async fn screen_credit(req: &ScreeningRequest, _config: &EngineConfig) -> ScreeningResult {
-    simulate_result(req, ScreeningOutcome::Clear, "Credit report: no adverse entries (CRC/FirstCentral)", 0.1)
+    unavailable_result(req, "Credit Bureau", "No live credit-bureau provider is configured")
 }
 
 async fn screen_drug_test(req: &ScreeningRequest, _config: &EngineConfig) -> ScreeningResult {
-    simulate_result(req, ScreeningOutcome::Clear, "Drug test result: negative (NAFDAC-certified lab)", 0.03)
+    unavailable_result(req, "Drug Test", "No live laboratory result provider is configured")
 }
 
 async fn screen_social_media(req: &ScreeningRequest, _config: &EngineConfig) -> ScreeningResult {
-    simulate_result(req, ScreeningOutcome::Clear, "Social media scan: no adverse content found", 0.12)
+    unavailable_result(req, "Social Media", "No live social-media screening provider is configured")
 }
 
 async fn screen_continuous(req: &ScreeningRequest, _config: &EngineConfig) -> ScreeningResult {
-    simulate_result(req, ScreeningOutcome::Clear, "Continuous monitoring subscription activated", 0.0)
+    unavailable_result(req, "Continuous Monitoring", "No live continuous-monitoring provider is configured")
 }
 
 // ─── Result Helpers ───────────────────────────────────────────────────────────
 
-fn simulate_result(req: &ScreeningRequest, outcome: ScreeningOutcome, summary: &str, risk: f64) -> ScreeningResult {
-    make_result(req, outcome, summary, serde_json::json!({ "simulated": true }), risk, vec!["Simulated".into()])
+fn unavailable_result(req: &ScreeningRequest, source: &str, reason: &str) -> ScreeningResult {
+    ScreeningResult {
+        request_id: req.request_id.clone(),
+        order_ref: req.order_ref.clone(),
+        result_id: req.result_id,
+        screening_type: req.screening_type.clone(),
+        outcome: ScreeningOutcome::Unverified,
+        summary: format!("Screening unavailable: {reason}"),
+        details: serde_json::json!({ "provider": source, "provider_available": false }),
+        risk_score: 1.0,
+        sources: vec![source.to_string()],
+        completed_at: Utc::now(),
+        error: Some(reason.to_string()),
+    }
 }
 
 fn make_result(
@@ -675,7 +679,9 @@ async fn main() -> anyhow::Result<()> {
         cac_key:   std::env::var("CAC_API_KEY").unwrap_or_default(),
         waec_url:  std::env::var("WAEC_URL").unwrap_or_else(|_| "https://api.waecnigeria.org".into()),
         waec_key:  std::env::var("WAEC_API_KEY").unwrap_or_default(),
-        simulate:  std::env::var("SCREENING_SIMULATE").map(|v| v == "true").unwrap_or(true),
+        // Simulation never produces screening decisions; it only causes an
+        // explicit unverified result. Default false to prevent accidental use.
+        simulate:  std::env::var("SCREENING_SIMULATE").map(|v| v == "true").unwrap_or(false),
     });
 
     let metrics = Arc::new(Metrics::new());

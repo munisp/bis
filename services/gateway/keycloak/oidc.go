@@ -31,7 +31,7 @@ var (
 )
 
 // Init initialises the Keycloak OIDC provider. Call once at startup.
-// Falls back gracefully if KEYCLOAK_URL is not set (dev mode).
+// Requests are denied until a verifier is configured successfully.
 func Init() {
 	keycloakURL := os.Getenv("KEYCLOAK_URL")
 	realm := os.Getenv("KEYCLOAK_REALM")
@@ -39,7 +39,7 @@ func Init() {
 	clientSecret := os.Getenv("KEYCLOAK_CLIENT_SECRET")
 
 	if keycloakURL == "" || realm == "" {
-		log.Println("[Keycloak] KEYCLOAK_URL or KEYCLOAK_REALM not set — OIDC middleware disabled (dev mode)")
+		log.Println("[Keycloak] KEYCLOAK_URL or KEYCLOAK_REALM not set — authenticated requests will be denied")
 		return
 	}
 
@@ -50,7 +50,7 @@ func Init() {
 	var err error
 	provider, err = oidc.NewProvider(ctx, issuerURL)
 	if err != nil {
-		log.Printf("[Keycloak] Failed to discover OIDC provider at %s: %v — continuing without OIDC", issuerURL, err)
+		log.Printf("[Keycloak] Failed to discover OIDC provider at %s: %v — authenticated requests will be denied", issuerURL, err)
 		provider = nil
 		return
 	}
@@ -69,10 +69,6 @@ func Init() {
 // Returns (claims, nil) on success, or (nil, error) on failure.
 func VerifyToken(ctx context.Context, rawToken string) (*Claims, error) {
 	if verifier == nil {
-		// Dev mode: accept any token prefixed "dev-" and return mock claims
-		if strings.HasPrefix(rawToken, "dev-") {
-			return &Claims{Sub: "dev-user", Email: "dev@bis.ng", Name: "Dev User", Roles: []string{"analyst"}}, nil
-		}
 		return nil, fmt.Errorf("OIDC verifier not initialised")
 	}
 	idToken, err := verifier.Verify(ctx, rawToken)
@@ -96,8 +92,9 @@ func Middleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		// Internal service key bypass (for service-to-service calls)
-		if r.Header.Get("X-BIS-Key") == os.Getenv("BIS_GATEWAY_KEY") {
+		// Internal service key bypass is allowed only when an explicit key is configured.
+		serviceKey := os.Getenv("BIS_GATEWAY_KEY")
+		if serviceKey != "" && r.Header.Get("X-BIS-Key") == serviceKey {
 			next.ServeHTTP(w, r)
 			return
 		}

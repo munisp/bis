@@ -149,7 +149,6 @@ export const ENV = {
   vapidSubject: process.env.VAPID_SUBJECT ?? "mailto:admin@bis-platform.com",
   // Sanctions webhook shared secret (HMAC-SHA256)
   sanctionsWebhookSecret: process.env.SANCTIONS_WEBHOOK_SECRET ?? "bis-sanctions-webhook-dev",
-
   // Notifications
   slackWebhookUrl: process.env.SLACK_WEBHOOK_URL ?? "",
   smtpHost: process.env.SMTP_HOST ?? "smtp.sendgrid.net",

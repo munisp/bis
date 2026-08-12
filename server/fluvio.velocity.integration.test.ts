@@ -199,7 +199,7 @@ describe("Fluvio velocity processor — integration tests", () => {
     expect(result.service_available).toBe(true);
   });
 
-  it("fails open when the sidecar is unreachable (ECONNREFUSED)", async () => {
+  it("fails closed when the sidecar is unreachable (ECONNREFUSED)", async () => {
     // Simulate ECONNREFUSED by making globalThis.fetch throw a network error
     const originalFetch = globalThis.fetch;
     const networkError = Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNREFUSED" } });
@@ -207,7 +207,7 @@ describe("Fluvio velocity processor — integration tests", () => {
     try {
       const { fluvioCheckVelocity } = await import("./fluvio");
       const result = await (fluvioCheckVelocity as (i: FluvioVelocityCheckInput) => Promise<FluvioVelocityDecision>)(BASE_INPUT);
-      expect(result.decision).toBe("allow");
+      expect(result.decision).toBe("block");
       expect(result.service_available).toBe(false);
     } finally {
       vi.spyOn(globalThis, "fetch").mockRestore();
@@ -215,19 +215,19 @@ describe("Fluvio velocity processor — integration tests", () => {
     }
   });
 
-  it("fails open when the sidecar returns HTTP 500", async () => {
+  it("fails closed when the sidecar returns HTTP 500", async () => {
     state.returnError = true;
     const result = await checkVelocity(BASE_INPUT);
-    expect(result.decision).toBe("allow");
-    expect(result.service_available).toBe(true);
+    expect(result.decision).toBe("block");
+    expect(result.service_available).toBe(false);
   });
 
-  it("fails open when the sidecar exceeds the 500 ms hard timeout", async () => {
+  it("fails closed when the sidecar exceeds the 500 ms hard timeout", async () => {
     state.returnTimeout = true;
     const start = Date.now();
     const result = await checkVelocity(BASE_INPUT);
     const elapsed = Date.now() - start;
-    expect(result.decision).toBe("allow");
+    expect(result.decision).toBe("block");
     expect(result.service_available).toBe(false);
     // Should resolve well under 2 s (the mock delay) — hard timeout is 500 ms
     expect(elapsed).toBeLessThan(1_500);

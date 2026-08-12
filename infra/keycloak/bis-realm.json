@@ -1,6 +1,6 @@
 {
   "realm": "bis",
-  "displayName": "BIS — Background Intelligence System",
+  "displayName": "BIS \u2014 Background Intelligence System",
   "enabled": true,
   "sslRequired": "external",
   "registrationAllowed": false,
@@ -22,11 +22,26 @@
   "ssoSessionMaxLifespan": 36000,
   "roles": {
     "realm": [
-      { "name": "bis-admin", "description": "BIS Platform Administrator" },
-      { "name": "bis-supervisor", "description": "BIS Investigation Supervisor" },
-      { "name": "bis-analyst", "description": "BIS Intelligence Analyst" },
-      { "name": "bis-viewer", "description": "BIS Read-only Viewer" },
-      { "name": "bis-api", "description": "BIS API-only Access" }
+      {
+        "name": "bis-admin",
+        "description": "BIS Platform Administrator"
+      },
+      {
+        "name": "bis-supervisor",
+        "description": "BIS Investigation Supervisor"
+      },
+      {
+        "name": "bis-analyst",
+        "description": "BIS Intelligence Analyst"
+      },
+      {
+        "name": "bis-viewer",
+        "description": "BIS Read-only Viewer"
+      },
+      {
+        "name": "bis-api",
+        "description": "BIS API-only Access"
+      }
     ]
   },
   "clients": [
@@ -39,10 +54,21 @@
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": true,
       "authorizationServicesEnabled": false,
-      "redirectUris": ["http://localhost:3000/*", "https://*.manus.space/*"],
-      "webOrigins": ["http://localhost:3000", "https://*.manus.space"],
+      "redirectUris": [
+        "http://localhost:3000/*",
+        "https://*.manus.space/*"
+      ],
+      "webOrigins": [
+        "http://localhost:3000",
+        "https://*.manus.space"
+      ],
       "protocol": "openid-connect",
-      "defaultClientScopes": ["openid", "profile", "email", "roles"]
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "email",
+        "roles"
+      ]
     },
     {
       "clientId": "bis-gateway",
@@ -53,6 +79,90 @@
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": true,
       "protocol": "openid-connect"
+    },
+    {
+      "clientId": "bis-mobile",
+      "name": "BIS Mobile Application",
+      "description": "Native mobile client for BIS field officers and investigators (iOS/Android). Uses PKCE flow \u2014 no client secret required.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "authorizationServicesEnabled": false,
+      "bearerOnly": false,
+      "consentRequired": false,
+      "fullScopeAllowed": false,
+      "redirectUris": [
+        "bis://callback",
+        "bis://auth/callback",
+        "com.bis.mobile://callback",
+        "http://localhost:8081/*"
+      ],
+      "webOrigins": [],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "bis://logout##com.bis.mobile://logout",
+        "access.token.lifespan": "900",
+        "client.session.idle.timeout": "3600",
+        "client.session.max.lifespan": "86400"
+      },
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "email",
+        "roles"
+      ],
+      "optionalClientScopes": [
+        "offline_access",
+        "phone"
+      ],
+      "protocolMappers": [
+        {
+          "name": "bis-roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "multivalued": "true",
+            "userinfo.token.claim": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "roles",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "bis-tenant-id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "tenantId",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "tenantId",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "bis-officer-id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "officerId",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "officerId",
+            "jsonType.label": "String"
+          }
+        }
+      ]
     }
   ],
   "users": [
@@ -70,7 +180,9 @@
           "temporary": true
         }
       ],
-      "realmRoles": ["bis-admin"]
+      "realmRoles": [
+        "bis-admin"
+      ]
     }
   ],
   "passwordPolicy": "length(12) and upperCase(1) and lowerCase(1) and digits(1) and specialChars(1) and notUsername(undefined)"

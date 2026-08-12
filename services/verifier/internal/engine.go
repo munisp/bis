@@ -1,5 +1,5 @@
 // Package internal provides the verification engine for the BIS Verifier service.
-// It implements a priority chain: BIS own engine → Youverify fallback → Sandbox mock.
+// It implements a priority chain: BIS own engine → Youverify fallback → explicit provider error.
 package internal
 
 import (
@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math/rand"
 	"net/http"
 	"os"
 	"strings"
@@ -160,7 +159,7 @@ func (e *Engine) post(ctx context.Context, url, apiKey string, body, result any)
 
 func (e *Engine) LookupNIN(ctx context.Context, nin string) (*NINResult, error) {
 	if e.cfg.SandboxMode || e.cfg.NIMCUrl == "" {
-		return e.sandboxNIN(nin), nil
+		return nil, fmt.Errorf("NIMC verification provider is not configured; synthetic verification is disabled")
 	}
 	// Try BIS own engine first
 	var raw map[string]any
@@ -178,9 +177,9 @@ func (e *Engine) LookupNIN(ctx context.Context, nin string) (*NINResult, error) 
 		if err2 == nil {
 			return mapToNINResult(yvResp, "youverify"), nil
 		}
-		log.Printf("[verifier] Youverify NIN failed: %v — using sandbox", err2)
+		log.Printf("[verifier] Youverify NIN failed: %v", err2)
 	}
-	return e.sandboxNIN(nin), nil
+	return nil, fmt.Errorf("no NIN provider returned an authoritative result")
 }
 
 func mapToNINResult(raw map[string]any, source string) *NINResult {
@@ -204,30 +203,11 @@ func mapToNINResult(raw map[string]any, source string) *NINResult {
 	}
 }
 
-func (e *Engine) sandboxNIN(nin string) *NINResult {
-	firstNames := []string{"Adebayo", "Chukwuemeka", "Fatima", "Ngozi", "Olumide", "Aisha", "Emeka", "Yewande"}
-	lastNames := []string{"Okafor", "Adeyemi", "Ibrahim", "Nwosu", "Adeleke", "Bello", "Okonkwo", "Abubakar"}
-	states := []string{"Lagos", "Abuja", "Kano", "Rivers", "Ogun", "Oyo", "Enugu", "Kaduna"}
-	r := rand.New(rand.NewSource(int64(len(nin))))
-	return &NINResult{
-		NIN:       nin,
-		FirstName: firstNames[r.Intn(len(firstNames))],
-		LastName:  lastNames[r.Intn(len(lastNames))],
-		DOB:       fmt.Sprintf("19%02d-%02d-%02d", 70+r.Intn(30), 1+r.Intn(12), 1+r.Intn(28)),
-		Gender:    []string{"Male", "Female"}[r.Intn(2)],
-		Phone:     fmt.Sprintf("0%d%08d", 7+r.Intn(3), r.Intn(100000000)),
-		Address:   fmt.Sprintf("%d %s Street, %s", 1+r.Intn(200), lastNames[r.Intn(len(lastNames))], states[r.Intn(len(states))]),
-		State:     states[r.Intn(len(states))],
-		Source:    "sandbox",
-		Sandbox:   true,
-	}
-}
-
 // ─── BVN Lookup ───────────────────────────────────────────────────────────────
 
 func (e *Engine) LookupBVN(ctx context.Context, bvn string) (*BVNResult, error) {
 	if e.cfg.SandboxMode || e.cfg.NIBSSUrl == "" {
-		return e.sandboxBVN(bvn), nil
+		return nil, fmt.Errorf("NIBSS verification provider is not configured; synthetic verification is disabled")
 	}
 	var raw map[string]any
 	err := e.post(ctx, e.cfg.NIBSSUrl+"/verify", e.cfg.NIBSSKey, map[string]string{"bvn": bvn}, &raw)
@@ -243,9 +223,9 @@ func (e *Engine) LookupBVN(ctx context.Context, bvn string) (*BVNResult, error) 
 		if err2 == nil {
 			return mapToBVNResult(yvResp, "youverify"), nil
 		}
-		log.Printf("[verifier] Youverify BVN failed: %v — using sandbox", err2)
+		log.Printf("[verifier] Youverify BVN failed: %v", err2)
 	}
-	return e.sandboxBVN(bvn), nil
+	return nil, fmt.Errorf("no BVN provider returned an authoritative result")
 }
 
 func mapToBVNResult(raw map[string]any, source string) *BVNResult {
@@ -267,29 +247,11 @@ func mapToBVNResult(raw map[string]any, source string) *BVNResult {
 	}
 }
 
-func (e *Engine) sandboxBVN(bvn string) *BVNResult {
-	firstNames := []string{"Adebayo", "Chukwuemeka", "Fatima", "Ngozi", "Olumide"}
-	lastNames := []string{"Okafor", "Adeyemi", "Ibrahim", "Nwosu", "Adeleke"}
-	banks := []string{"Access Bank", "GTBank", "Zenith Bank", "First Bank", "UBA"}
-	r := rand.New(rand.NewSource(int64(len(bvn))))
-	return &BVNResult{
-		BVN:       bvn,
-		FirstName: firstNames[r.Intn(len(firstNames))],
-		LastName:  lastNames[r.Intn(len(lastNames))],
-		DOB:       fmt.Sprintf("19%02d-%02d-%02d", 70+r.Intn(30), 1+r.Intn(12), 1+r.Intn(28)),
-		Phone:     fmt.Sprintf("0%d%08d", 7+r.Intn(3), r.Intn(100000000)),
-		Gender:    []string{"Male", "Female"}[r.Intn(2)],
-		Banks:     []string{banks[r.Intn(len(banks))], banks[r.Intn(len(banks))]},
-		Source:    "sandbox",
-		Sandbox:   true,
-	}
-}
-
 // ─── CAC Lookup ───────────────────────────────────────────────────────────────
 
 func (e *Engine) LookupCAC(ctx context.Context, rc string) (*CACResult, error) {
 	if e.cfg.SandboxMode || e.cfg.CACUrl == "" {
-		return e.sandboxCAC(rc), nil
+		return nil, fmt.Errorf("CAC verification provider is not configured; synthetic verification is disabled")
 	}
 	var raw map[string]any
 	err := e.post(ctx, e.cfg.CACUrl+"/company", e.cfg.CACKey, map[string]string{"rc": rc}, &raw)
@@ -305,9 +267,9 @@ func (e *Engine) LookupCAC(ctx context.Context, rc string) (*CACResult, error) {
 		if err2 == nil {
 			return mapToCACResult(yvResp, "youverify"), nil
 		}
-		log.Printf("[verifier] Youverify CAC failed: %v — using sandbox", err2)
+		log.Printf("[verifier] Youverify CAC failed: %v", err2)
 	}
-	return e.sandboxCAC(rc), nil
+	return nil, fmt.Errorf("no CAC provider returned an authoritative result")
 }
 
 func mapToCACResult(raw map[string]any, source string) *CACResult {
@@ -330,30 +292,11 @@ func mapToCACResult(raw map[string]any, source string) *CACResult {
 	}
 }
 
-func (e *Engine) sandboxCAC(rc string) *CACResult {
-	companies := []string{"Okafor & Sons Ltd", "Adeyemi Ventures", "Ibrahim Holdings", "Nwosu Enterprises", "Adeleke Group"}
-	states := []string{"Lagos", "Abuja", "Kano", "Rivers", "Ogun"}
-	types := []string{"Private Limited Company", "Public Limited Company", "Business Name", "Incorporated Trustee"}
-	r := rand.New(rand.NewSource(int64(len(rc))))
-	return &CACResult{
-		RC:          rc,
-		CompanyName: companies[r.Intn(len(companies))],
-		Status:      "Active",
-		Type:        types[r.Intn(len(types))],
-		Address:     fmt.Sprintf("%d Victoria Island, %s", 1+r.Intn(200), states[r.Intn(len(states))]),
-		State:       states[r.Intn(len(states))],
-		DateReg:     fmt.Sprintf("20%02d-%02d-%02d", r.Intn(24), 1+r.Intn(12), 1+r.Intn(28)),
-		Directors:   []string{"Director A", "Director B"},
-		Source:      "sandbox",
-		Sandbox:     true,
-	}
-}
-
 // ─── Sanctions Check ──────────────────────────────────────────────────────────
 
 func (e *Engine) CheckSanctions(ctx context.Context, name, dob, nationality string) (*SanctionsResult, error) {
 	if e.cfg.SandboxMode || e.cfg.OFACUrl == "" {
-		return e.sandboxSanctions(name), nil
+		return nil, fmt.Errorf("sanctions provider is not configured; synthetic screening is disabled")
 	}
 	var raw map[string]any
 	err := e.post(ctx, e.cfg.OFACUrl+"/search", e.cfg.OFACKey, map[string]string{
@@ -362,8 +305,8 @@ func (e *Engine) CheckSanctions(ctx context.Context, name, dob, nationality stri
 	if err == nil {
 		return mapToSanctionsResult(raw, name, "ofac-direct"), nil
 	}
-	log.Printf("[verifier] OFAC direct failed: %v — using sandbox", err)
-	return e.sandboxSanctions(name), nil
+	log.Printf("[verifier] OFAC direct failed: %v", err)
+	return nil, fmt.Errorf("no sanctions provider returned an authoritative result")
 }
 
 func mapToSanctionsResult(raw map[string]any, name, source string) *SanctionsResult {
@@ -384,31 +327,4 @@ func mapToSanctionsResult(raw map[string]any, name, source string) *SanctionsRes
 	}
 	result.Clear = len(result.Hits) == 0
 	return result
-}
-
-func (e *Engine) sandboxSanctions(name string) *SanctionsResult {
-	// Deterministic: names containing "SANCTIONED" trigger a hit for demo purposes
-	if strings.Contains(strings.ToUpper(name), "SANCTIONED") {
-		return &SanctionsResult{
-			Name: name,
-			Hits: []SanctionsHit{
-				{
-					ListName:   "OFAC SDN",
-					EntityName: name,
-					Score:      0.95,
-					Reason:     "Terrorism financing (sandbox demo)",
-				},
-			},
-			Clear:   false,
-			Source:  "sandbox",
-			Sandbox: true,
-		}
-	}
-	return &SanctionsResult{
-		Name:    name,
-		Hits:    []SanctionsHit{},
-		Clear:   true,
-		Source:  "sandbox",
-		Sandbox: true,
-	}
 }

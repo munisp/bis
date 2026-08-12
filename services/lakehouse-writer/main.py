@@ -118,6 +118,57 @@ KYC_SCHEMA = pa.schema([
     pa.field("day", pa.int32()),
 ])
 
+# ─── Nigerian Screening Schemas ──────────────────────────────────────────────
+SCREENING_ORDER_SCHEMA = pa.schema([
+    pa.field("order_ref", pa.string()),
+    pa.field("candidate_ref", pa.string()),
+    pa.field("tenant_id", pa.string()),
+    pa.field("package_id", pa.int64()),
+    pa.field("screening_types", pa.string()),  # JSON array
+    pa.field("overall_outcome", pa.string()),
+    pa.field("composite_score", pa.float64()),
+    pa.field("requires_adverse", pa.bool_()),
+    pa.field("status", pa.string()),
+    pa.field("created_at", pa.timestamp("ms")),
+    pa.field("completed_at", pa.timestamp("ms"), nullable=True),
+    pa.field("year", pa.int32()),
+    pa.field("month", pa.int32()),
+    pa.field("day", pa.int32()),
+])
+
+SCREENING_RESULT_SCHEMA = pa.schema([
+    pa.field("result_id", pa.string()),
+    pa.field("order_ref", pa.string()),
+    pa.field("candidate_ref", pa.string()),
+    pa.field("tenant_id", pa.string()),
+    pa.field("screening_type", pa.string()),
+    pa.field("outcome", pa.string()),
+    pa.field("risk_score", pa.float64()),
+    pa.field("composite_risk_score", pa.float64()),
+    pa.field("risk_band", pa.string()),
+    pa.field("summary", pa.string()),
+    pa.field("sources", pa.string()),  # JSON array
+    pa.field("completed_at", pa.timestamp("ms")),
+    pa.field("year", pa.int32()),
+    pa.field("month", pa.int32()),
+    pa.field("day", pa.int32()),
+])
+
+SCREENING_ADVERSE_SCHEMA = pa.schema([
+    pa.field("adverse_ref", pa.string()),
+    pa.field("order_ref", pa.string()),
+    pa.field("candidate_ref", pa.string()),
+    pa.field("tenant_id", pa.string()),
+    pa.field("action_type", pa.string()),
+    pa.field("adverse_items", pa.string()),  # JSON array
+    pa.field("dispute_reason", pa.string(), nullable=True),
+    pa.field("status", pa.string()),
+    pa.field("created_at", pa.timestamp("ms")),
+    pa.field("year", pa.int32()),
+    pa.field("month", pa.int32()),
+    pa.field("day", pa.int32()),
+])
+
 TABLE_REGISTRY: dict[str, dict] = {
     "investigations": {
         "path": LAKEHOUSE_BASE / "investigations",
@@ -132,6 +183,22 @@ TABLE_REGISTRY: dict[str, dict] = {
     "kyc": {
         "path": LAKEHOUSE_BASE / "kyc",
         "schema": KYC_SCHEMA,
+        "partition_by": ["year", "month", "day"],
+    },
+    # ─── Nigerian Screening Tables ─────────────────────────────────────────
+    "screening_orders": {
+        "path": LAKEHOUSE_BASE / "screening_orders",
+        "schema": SCREENING_ORDER_SCHEMA,
+        "partition_by": ["year", "month", "day"],
+    },
+    "screening_results": {
+        "path": LAKEHOUSE_BASE / "screening_results",
+        "schema": SCREENING_RESULT_SCHEMA,
+        "partition_by": ["year", "month", "day"],
+    },
+    "screening_adverse": {
+        "path": LAKEHOUSE_BASE / "screening_adverse",
+        "schema": SCREENING_ADVERSE_SCHEMA,
         "partition_by": ["year", "month", "day"],
     },
 }
@@ -437,10 +504,139 @@ async def kafka_consumer_loop():
                     await ingest_alert(AlertRow(**value))
                 elif "kyc" in topic:
                     await ingest_kyc(KycRow(**value))
+                elif "screening.orders" in topic or "screening.completed" in topic:
+                    await ingest_screening_order(ScreeningOrderRow(**value))
+                elif "screening.results" in topic:
+                    await ingest_screening_result(ScreeningResultRow(**value))
+                elif "screening.adverse" in topic:
+                    await ingest_screening_adverse(ScreeningAdverseRow(**value))
             except Exception as e:
                 logger.error(f"[lakehouse] Failed to process Kafka message from {topic}: {e}")
     finally:
         await consumer.stop()
+
+
+# ─── Nigerian Screening Pydantic models ──────────────────────────────────────
+class ScreeningOrderRow(BaseModel):
+    order_ref: str
+    candidate_ref: str
+    tenant_id: str
+    package_id: int = 0
+    screening_types: str = "[]"
+    overall_outcome: str = "pending"
+    composite_score: float = 0.0
+    requires_adverse: bool = False
+    status: str = "pending"
+    created_at: Optional[str] = None
+    completed_at: Optional[str] = None
+
+
+class ScreeningResultRow(BaseModel):
+    result_id: str
+    order_ref: str
+    candidate_ref: str
+    tenant_id: str
+    screening_type: str
+    outcome: str = "pending"
+    risk_score: float = 0.0
+    composite_risk_score: float = 0.0
+    risk_band: str = "low"
+    summary: str = ""
+    sources: str = "[]"
+    completed_at: Optional[str] = None
+
+
+class ScreeningAdverseRow(BaseModel):
+    adverse_ref: str
+    order_ref: str
+    candidate_ref: str
+    tenant_id: str
+    action_type: str = "pre_adverse"
+    adverse_items: str = "[]"
+    dispute_reason: Optional[str] = None
+    status: str = "pending"
+    created_at: Optional[str] = None
+
+
+@app.post("/ingest/screening-order")
+async def ingest_screening_order(row: ScreeningOrderRow):
+    """Write one screening order row to the Delta Lake."""
+    now = datetime.now(timezone.utc)
+    created_at = datetime.fromisoformat(row.created_at.replace("Z", "+00:00")) if row.created_at else now
+    completed_at = datetime.fromisoformat(row.completed_at.replace("Z", "+00:00")) if row.completed_at else None
+    data = {
+        "order_ref": row.order_ref,
+        "candidate_ref": row.candidate_ref,
+        "tenant_id": row.tenant_id,
+        "package_id": row.package_id,
+        "screening_types": row.screening_types,
+        "overall_outcome": row.overall_outcome,
+        "composite_score": row.composite_score,
+        "requires_adverse": row.requires_adverse,
+        "status": row.status,
+        "created_at": pd.Timestamp(created_at),
+        "completed_at": pd.Timestamp(completed_at) if completed_at else None,
+        **_partition_cols(created_at),
+    }
+    try:
+        write_row("screening_orders", data)
+        return {"ok": True, "table": "screening_orders", "order_ref": row.order_ref}
+    except Exception as e:
+        logger.error(f"Failed to write screening order {row.order_ref}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/ingest/screening-result")
+async def ingest_screening_result(row: ScreeningResultRow):
+    """Write one screening result row to the Delta Lake."""
+    now = datetime.now(timezone.utc)
+    completed_at = datetime.fromisoformat(row.completed_at.replace("Z", "+00:00")) if row.completed_at else now
+    data = {
+        "result_id": row.result_id,
+        "order_ref": row.order_ref,
+        "candidate_ref": row.candidate_ref,
+        "tenant_id": row.tenant_id,
+        "screening_type": row.screening_type,
+        "outcome": row.outcome,
+        "risk_score": row.risk_score,
+        "composite_risk_score": row.composite_risk_score,
+        "risk_band": row.risk_band,
+        "summary": row.summary,
+        "sources": row.sources,
+        "completed_at": pd.Timestamp(completed_at),
+        **_partition_cols(completed_at),
+    }
+    try:
+        write_row("screening_results", data)
+        return {"ok": True, "table": "screening_results", "result_id": row.result_id}
+    except Exception as e:
+        logger.error(f"Failed to write screening result {row.result_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/ingest/screening-adverse")
+async def ingest_screening_adverse(row: ScreeningAdverseRow):
+    """Write one screening adverse action row to the Delta Lake."""
+    now = datetime.now(timezone.utc)
+    created_at = datetime.fromisoformat(row.created_at.replace("Z", "+00:00")) if row.created_at else now
+    data = {
+        "adverse_ref": row.adverse_ref,
+        "order_ref": row.order_ref,
+        "candidate_ref": row.candidate_ref,
+        "tenant_id": row.tenant_id,
+        "action_type": row.action_type,
+        "adverse_items": row.adverse_items,
+        "dispute_reason": row.dispute_reason,
+        "status": row.status,
+        "created_at": pd.Timestamp(created_at),
+        **_partition_cols(created_at),
+    }
+    try:
+        write_row("screening_adverse", data)
+        return {"ok": True, "table": "screening_adverse", "adverse_ref": row.adverse_ref}
+    except Exception as e:
+        logger.error(f"Failed to write screening adverse {row.adverse_ref}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ── Batch Ingest ─────────────────────────────────────────────────────────────

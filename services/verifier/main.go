@@ -25,7 +25,6 @@
 //   BIS_VERIFY_CAC_KEY      — CAC API key
 //   YOUVERIFY_BASE_URL      — Youverify fallback base URL
 //   YOUVERIFY_API_KEY       — Youverify API key
-//   GATEWAY_SANDBOX         — "true" to force sandbox mode (default: false)
 package main
 
 import (
@@ -42,8 +41,7 @@ import (
 
 var (
 	port         = envOr("VERIFIER_PORT", "8086")
-	verifierKey  = envOr("BIS_VERIFIER_KEY", "dev-verifier-key-change-in-prod")
-	sandboxMode  = os.Getenv("GATEWAY_SANDBOX") == "true"
+	verifierKey  = os.Getenv("BIS_VERIFIER_KEY")
 )
 
 func envOr(key, fallback string) string {
@@ -64,7 +62,7 @@ func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 				key = key[7:]
 			}
 		}
-		if key != verifierKey {
+		if verifierKey == "" || key != verifierKey {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 			return
 		}
@@ -112,7 +110,7 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":  "ok",
 		"service": "bis-verifier",
-		"sandbox": sandboxMode,
+		"sandbox": false,
 		"ts":      time.Now().UTC().Format(time.RFC3339),
 	})
 }
@@ -195,7 +193,8 @@ func sanctionsHandler(eng *internal.Engine) http.HandlerFunc {
 
 func main() {
 	cfg := internal.ConfigFromEnv()
-	cfg.SandboxMode = sandboxMode
+	// Sandbox responses are prohibited; absent providers return explicit errors.
+	cfg.SandboxMode = false
 	eng := internal.NewEngine(cfg)
 
 	mux := http.NewServeMux()
@@ -207,7 +206,7 @@ func main() {
 
 	handler := loggingMiddleware(corsMiddleware(mux))
 
-	log.Printf("[verifier] Starting on :%s (sandbox=%v)", port, sandboxMode)
+	log.Printf("[verifier] Starting on :%s (synthetic responses disabled)", port)
 	if err := http.ListenAndServe(":"+port, handler); err != nil {
 		log.Fatalf("[verifier] Fatal: %v", err)
 	}

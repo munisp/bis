@@ -1331,8 +1331,9 @@ function KYCRunPipelineForm({ prefill, onPrefillConsumed }: { prefill?: { subjec
     }
   }, [prefill]);
   const [result, setResult] = useState<null | {
-    status: string; riskScore: number;
+    status: string; riskScore: number | null;
     nin: unknown; bvn: unknown; sanctions: unknown; pep: unknown; credit: unknown;
+    error?: string;
   }>(null);
 
   const runMutation = trpc.kyc.run.useMutation({
@@ -1409,29 +1410,35 @@ function KYCRunPipelineForm({ prefill, onPrefillConsumed }: { prefill?: { subjec
           </div>
 
           {/* Risk Score Bar */}
-          <div className="space-y-1">
-            <div className="flex justify-between text-xs text-muted-foreground">
-              <span>Composite Risk Score</span>
-              <span className={`font-bold ${result.riskScore >= 70 ? 'text-green-600' : result.riskScore >= 40 ? 'text-yellow-600' : 'text-red-600'}`}>
-                {result.riskScore}/100
-              </span>
+          {result.riskScore === null ? (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+              Composite risk score unavailable. {result.error ?? 'No decision was issued because one or more authoritative providers did not respond.'}
             </div>
-            <div className="w-full bg-muted rounded-full h-2">
-              <div
-                className={`h-2 rounded-full transition-all ${result.riskScore >= 70 ? 'bg-green-500' : result.riskScore >= 40 ? 'bg-yellow-500' : 'bg-red-500'}`}
-                style={{ width: `${result.riskScore}%` }}
-              />
+          ) : (
+            <div className="space-y-1">
+              <div className="flex justify-between text-xs text-muted-foreground">
+                <span>Composite Risk Score</span>
+                <span className={`font-bold ${result.riskScore >= 70 ? 'text-green-600' : result.riskScore >= 40 ? 'text-yellow-600' : 'text-red-600'}`}>
+                  {result.riskScore}/100
+                </span>
+              </div>
+              <div className="w-full bg-muted rounded-full h-2">
+                <div
+                  className={`h-2 rounded-full transition-all ${result.riskScore >= 70 ? 'bg-green-500' : result.riskScore >= 40 ? 'bg-yellow-500' : 'bg-red-500'}`}
+                  style={{ width: `${result.riskScore}%` }}
+                />
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Check Results Grid */}
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
             {[
-              { label: 'NIN', ok: !!(result.nin as any)?.status, detail: (result.nin as any)?.matchScore ? `${(result.nin as any).matchScore}% match` : undefined },
-              { label: 'BVN', ok: !!(result.bvn as any)?.bvn, detail: (result.bvn as any)?.matchScore ? `${(result.bvn as any).matchScore}% match` : undefined },
-              { label: 'Sanctions', ok: !!(result.sanctions as any)?.clear, detail: (result.sanctions as any)?.clear ? 'Clear' : 'HIT' },
-              { label: 'PEP', ok: !(result.pep as any)?.isPEP, detail: (result.pep as any)?.isPEP ? 'PEP Detected' : 'Not PEP' },
-              { label: 'Credit', ok: ((result.credit as any)?.score ?? 700) >= 600, detail: (result.credit as any)?.score ? `Score: ${(result.credit as any).score}` : 'N/A' },
+              { label: 'NIN', available: result.nin !== null, ok: !!(result.nin as any)?.status, detail: result.nin === null ? 'Unavailable' : (result.nin as any)?.matchScore ? `${(result.nin as any).matchScore}% match` : 'Unverified' },
+              { label: 'BVN', available: result.bvn !== null, ok: !!(result.bvn as any)?.bvn, detail: result.bvn === null ? 'Unavailable' : (result.bvn as any)?.matchScore ? `${(result.bvn as any).matchScore}% match` : 'Unverified' },
+              { label: 'Sanctions', available: result.sanctions !== null, ok: (result.sanctions as any)?.clear === true, detail: result.sanctions === null ? 'Unavailable' : (result.sanctions as any)?.clear ? 'Clear' : 'HIT or unresolved' },
+              { label: 'PEP', available: result.pep !== null, ok: (result.pep as any)?.isPEP === false, detail: result.pep === null ? 'Unavailable' : (result.pep as any)?.isPEP ? 'PEP Detected' : 'Not PEP' },
+              { label: 'Credit', available: result.credit !== null, ok: typeof (result.credit as any)?.score === 'number' && (result.credit as any).score >= 600, detail: result.credit === null ? 'Unavailable' : typeof (result.credit as any)?.score === 'number' ? `Score: ${(result.credit as any).score}` : 'Unverified' },
             ].map(check => (
               <div key={check.label} className={`flex items-center gap-2 p-2.5 rounded-lg border text-xs ${
                 check.ok ? 'bg-green-50 border-green-200 dark:bg-green-900/20 dark:border-green-800' : 'bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800'

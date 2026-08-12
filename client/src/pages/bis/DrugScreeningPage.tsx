@@ -108,14 +108,23 @@ const COUNTRY_DRUG_CONFIG: Record<string, {
 
 const DEFAULT_DRUG_CONFIG = COUNTRY_DRUG_CONFIG.NG;
 
-// Mock collection sites for Nigeria
-const NIGERIA_COLLECTION_SITES: CollectionSite[] = [
-  { siteId: "lag-01", name: "Synlab Nigeria — Victoria Island", address: "Plot 1649, Adeola Hopewell Street", city: "Lagos", country: "NG", phone: "+234 1 280 4444", hours: "Mon–Fri 7am–6pm, Sat 8am–2pm", distanceKm: 2.1, accredited: true },
-  { siteId: "lag-02", name: "PathCare Nigeria — Ikeja", address: "15 Allen Avenue, Ikeja", city: "Lagos", country: "NG", phone: "+234 1 453 2000", hours: "Mon–Fri 7am–5pm, Sat 8am–1pm", distanceKm: 5.4, accredited: true },
-  { siteId: "abj-01", name: "Clina-Lancet Laboratories — Abuja", address: "Plot 1109, Cadastral Zone, Wuse 2", city: "Abuja", country: "NG", phone: "+234 9 291 5000", hours: "Mon–Fri 7:30am–5:30pm", distanceKm: 3.2, accredited: true },
-  { siteId: "ph-01", name: "Reddington Hospital Lab — Port Harcourt", address: "4 Stadium Road, GRA Phase 1", city: "Port Harcourt", country: "NG", phone: "+234 84 462 000", hours: "Mon–Fri 8am–5pm", distanceKm: 8.7, accredited: true },
-  { siteId: "kn-01", name: "AKTH Laboratory — Kano", address: "Aminu Kano Teaching Hospital, Zaria Road", city: "Kano", country: "NG", phone: "+234 64 666 000", hours: "Mon–Fri 8am–4pm", distanceKm: 12.0, accredited: false },
-];
+// Collection sites are loaded from the database via tRPC (trpc.collectionSites.list)
+// The DB row shape is mapped to the UI CollectionSite shape below.
+function dbSiteToUi(s: {
+  id: number; name: string; address: string; city: string; state: string;
+  phone?: string | null; turnaround?: string | null; status: string;
+}): CollectionSite {
+  return {
+    siteId: String(s.id),
+    name: s.name,
+    address: s.address,
+    city: s.city,
+    country: "NG",
+    phone: s.phone ?? "",
+    hours: s.turnaround ?? "",
+    accredited: s.status === "active",
+  };
+}
 
 const RESULT_CONFIG: Record<string, { label: string; color: string; bg: string; icon: string }> = {
   negative:          { label: "Negative",         color: "text-emerald-700", bg: "bg-emerald-100", icon: "✓" },
@@ -164,6 +173,13 @@ function DrugScreeningPageInner() {
     "hair_follicle": "hair", "oral_fluid": "oral_fluid",
   };
 
+  // Load collection sites from the database
+  const { data: sitesData, isLoading: sitesLoading } = trpc.collectionSites.list.useQuery({
+    status: "active",
+    limit: 200,
+  });
+  const collectionSites = (sitesData?.sites ?? []).map(dbSiteToUi);
+
   const createScreening = trpc.screening.create.useMutation({
     onSuccess: (record) => {
       const mockOrder: DrugTestOrder = {
@@ -172,7 +188,7 @@ function DrugScreeningPageInner() {
         panel: form.panel,
         specimenType: specimenTypeForPanel[form.panel],
         status: "ordered",
-        collectionSite: NIGERIA_COLLECTION_SITES.find(s => s.siteId === form.collectionSiteId),
+        collectionSite: collectionSites.find(s => s.siteId === form.collectionSiteId),
         orderedAt: record.createdAt.toISOString(),
         collectionDeadline: new Date(record.createdAt.getTime() + 72 * 3600 * 1000).toISOString(),
         labName: "Synlab Nigeria",
@@ -424,7 +440,11 @@ function DrugScreeningPageInner() {
           <div className="space-y-6">
             <SectionCard title={`Collection Sites — ${form.city || form.country}`} icon="🏥">
               <div className="space-y-3">
-                {NIGERIA_COLLECTION_SITES.map(site => (
+                {sitesLoading && <div className="text-sm text-muted-foreground py-4 text-center">Loading collection sites…</div>}
+                {!sitesLoading && collectionSites.length === 0 && (
+                  <div className="text-sm text-muted-foreground py-4 text-center">No active collection sites found. Contact your administrator to add sites.</div>
+                )}
+                {collectionSites.map(site => (
                   <button
                     key={site.siteId}
                     onClick={() => setForm(f => ({ ...f, collectionSiteId: site.siteId }))}

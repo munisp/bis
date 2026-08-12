@@ -242,9 +242,8 @@ export interface FluvioVelocityDecision {
  * Query the Fluvio velocity processor for a pre-flight velocity decision.
  *
  * This is a **blocking** call — the result gates whether the transfer proceeds.
- * If the velocity processor is unavailable (ECONNREFUSED / timeout), the call
- * returns `{ decision: "allow", service_available: false }` so that a sidecar
- * outage does not block all payments (fail-open for availability).
+ * If the velocity processor is unavailable or rejects the request, the decision
+ * is `block`; an unavailable control must never silently authorize payment.
  *
  * In production, configure the velocity processor to return "block" when:
  *   - The account has submitted >10 transfers in the last 60 seconds
@@ -303,27 +302,26 @@ export async function fluvioCheckVelocity(
       };
     }
 
-    // Non-2xx from velocity processor: log and fail-open
+    // Non-2xx from velocity processor: fail closed.
     const text = await res.text().catch(() => "");
     console.warn(
-      `[Fluvio] velocity check returned HTTP ${res.status}: ${text.slice(0, 200)} — failing open`
+      `[Fluvio] velocity check returned HTTP ${res.status}: ${text.slice(0, 200)} — blocking transfer`
     );
-    return { decision: "allow", service_available: true };
+    return { decision: "block", reason: "Velocity-control service rejected the pre-flight request", service_available: false };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    // ECONNREFUSED / timeout = velocity sidecar not running (expected in dev/test)
+    // ECONNREFUSED / timeout = velocity sidecar not running.
     if (
       msg.includes("ECONNREFUSED") ||
       msg.includes("fetch failed") ||
       msg.includes("AbortError") ||
       (err as Error)?.name === "AbortError"
     ) {
-      console.debug("[Fluvio] velocity processor unavailable — failing open:", msg);
+      console.debug("[Fluvio] velocity processor unavailable — blocking transfer:", msg);
     } else {
-      console.warn("[Fluvio] unexpected error in velocity check — failing open:", msg);
+      console.warn("[Fluvio] unexpected error in velocity check — blocking transfer:", msg);
     }
-    // Fail-open: do not block payments when the sidecar is down
-    return { decision: "allow", service_available: false };
+    return { decision: "block", reason: "Velocity-control service is unavailable", service_available: false };
   }
 }
 

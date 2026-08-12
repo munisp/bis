@@ -619,8 +619,7 @@ func callExternalJSONWithKey(ctx context.Context, method, url, apiKey string, bo
 
 // ─── Stablecoin Quote ─────────────────────────────────────────────────────────
 
-// handleStablecoinQuote returns a real-time NGN/USDC exchange rate quote.
-// Falls back to a reference rate when the bridge is not configured.
+// handleStablecoinQuote returns an authoritative real-time NGN/USDC exchange rate quote.
 func handleStablecoinQuote(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "GET required")
@@ -641,14 +640,8 @@ func handleStablecoinQuote(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Reference rate fallback (sandbox / no bridge configured)
-	const referenceRateNGN = 1650.0
 	if stablecoinBridge == "" {
-		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"rate":    referenceRateNGN,
-			"source":  "reference-rate-fallback",
-			"sandbox": true,
-		})
+		writeError(w, http.StatusServiceUnavailable, "STABLECOIN_QUOTE_UNAVAILABLE", "No live stablecoin price oracle is configured")
 		return
 	}
 
@@ -656,13 +649,8 @@ func handleStablecoinQuote(w http.ResponseWriter, r *http.Request) {
 	url := fmt.Sprintf("%s/v1/quote?amount=%s&target=%s", stablecoinBridge, amountStr, target)
 	respBody, err := callExternalJSONWithKey(r.Context(), http.MethodGet, url, stablecoinKey, nil)
 	if err != nil {
-		// Graceful fallback
-		log.Printf("[Stablecoin] Quote oracle error: %v — using reference rate", err)
-		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"rate":    referenceRateNGN,
-			"source":  "reference-rate-fallback",
-			"sandbox": true,
-		})
+		log.Printf("[Stablecoin] Quote oracle error: %v", err)
+		writeError(w, http.StatusServiceUnavailable, "STABLECOIN_QUOTE_UNAVAILABLE", "Live stablecoin price oracle did not return a quote")
 		return
 	}
 
@@ -705,11 +693,7 @@ func handleStablecoinHistory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if stablecoinBridge == "" {
-		// Sandbox: return empty history
-		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"transactions": []interface{}{},
-			"sandbox":      true,
-		})
+		writeError(w, http.StatusServiceUnavailable, "STABLECOIN_HISTORY_UNAVAILABLE", "No live stablecoin history provider is configured")
 		return
 	}
 
@@ -717,12 +701,8 @@ func handleStablecoinHistory(w http.ResponseWriter, r *http.Request) {
 		stablecoinBridge, address, currency, network, limit)
 	respBody, err := callExternalJSONWithKey(r.Context(), http.MethodGet, url, stablecoinKey, nil)
 	if err != nil {
-		// Graceful fallback
 		log.Printf("[Stablecoin] History error for %s: %v", address, err)
-		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"transactions": []interface{}{},
-			"sandbox":      true,
-		})
+		writeError(w, http.StatusServiceUnavailable, "STABLECOIN_HISTORY_UNAVAILABLE", "Live stablecoin history provider did not return a result")
 		return
 	}
 

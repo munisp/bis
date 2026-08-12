@@ -1204,9 +1204,8 @@ export const paymentRailsRouter = router({
 
   /**
    * NIP Name Enquiry — resolve a 10-digit NUBAN account number to account holder name.
-   * Checks our own transactions table first, then falls back to a deterministic mock
-   * that simulates the NIBSS NIP name-enquiry API response.
-   * In production: POST to GATEWAY_SANDBOX/nip/name-enquiry with bankCode + accountNumber.
+   * Checks our own transactions table first, then calls the authoritative NIBSS NIP
+   * name-enquiry route. If neither source can verify the recipient, it returns NOT_FOUND.
    */
   lookupAccount: protectedProcedure
     .input(z.object({
@@ -1255,7 +1254,7 @@ export const paymentRailsRouter = router({
             }
           }
         } catch {
-          // Gateway unavailable — fall through to deterministic mock
+          // Gateway unavailable — return the explicit unverified outcome below.
         }
       }
 

@@ -200,9 +200,12 @@ func erc20Transfer(ctx context.Context, network, contractAddr, toAddr, amountUni
 	// Load private key from env
 	privKeyHex := os.Getenv("BIS_WALLET_KEY_" + strings.ToUpper(network))
 	if privKeyHex == "" {
-		// Sandbox mode: return a deterministic fake hash
-		return fmt.Sprintf("0xsandbox_%s_%d", network, time.Now().UnixNano()), nil
+		return "", fmt.Errorf("direct %s settlement is not configured", network)
 	}
+	// This repository does not include a production-grade secp256k1 signer or
+	// canonical EVM transaction encoder. Refuse settlement rather than emitting
+	// a hash for a structurally invalid transaction.
+	return "", fmt.Errorf("direct %s settlement is unavailable until a production EVM signer is configured", network)
 
 	privKeyBytes, err := hex.DecodeString(privKeyHex)
 	if err != nil {
@@ -267,9 +270,11 @@ func erc20Transfer(ctx context.Context, network, contractAddr, toAddr, amountUni
 func stellarUSDCTransfer(ctx context.Context, toAddr, amountUnits string) (string, error) {
 	secretKey := os.Getenv("BIS_WALLET_KEY_STELLAR")
 	if secretKey == "" {
-		// Sandbox mode
-		return fmt.Sprintf("stellar_sandbox_%d", time.Now().UnixNano()), nil
+		return "", fmt.Errorf("direct Stellar settlement is not configured")
 	}
+	// A canonical signed XDR builder is required before this route can settle
+	// funds. Never substitute a fabricated Stellar hash for an unbuilt transfer.
+	return "", fmt.Errorf("direct Stellar settlement is unavailable until a production XDR signer is configured")
 
 	// Convert amountUnits (6 decimal places) to Stellar amount (7 decimal places)
 	amount := new(big.Int)
@@ -323,7 +328,7 @@ func QueryOnChainBalance(ctx context.Context, network, currency, address string)
 		accountURL := fmt.Sprintf("%s/accounts/%s", stellarHorizonURL, address)
 		respBody, err := httpGet(ctx, accountURL)
 		if err != nil {
-			return "0", true, nil // sandbox fallback
+			return "", false, fmt.Errorf("query Stellar balance: %w", err)
 		}
 		var account struct {
 			Balances []struct {
@@ -333,7 +338,7 @@ func QueryOnChainBalance(ctx context.Context, network, currency, address string)
 			} `json:"balances"`
 		}
 		if err := json.Unmarshal(respBody, &account); err != nil {
-			return "0", true, nil
+			return "", false, fmt.Errorf("parse Stellar balance: %w", err)
 		}
 		for _, b := range account.Balances {
 			if b.AssetCode == "USDC" && b.AssetIssuer == stellarUSDCIssuer {
@@ -347,17 +352,16 @@ func QueryOnChainBalance(ctx context.Context, network, currency, address string)
 	// EVM networks
 	net, ok := evmNetworks[network]
 	if !ok {
-		return "0", true, fmt.Errorf("unsupported network: %s", network)
+		return "", false, fmt.Errorf("unsupported network: %s", network)
 	}
 	contractAddr, ok := net.Contracts[currency]
 	if !ok {
-		return "0", true, fmt.Errorf("unsupported currency %s on %s", currency, network)
+		return "", false, fmt.Errorf("unsupported currency %s on %s", currency, network)
 	}
 
 	balance, err := erc20BalanceOf(ctx, network, contractAddr, address)
 	if err != nil {
-		log.Printf("[Blockchain] Balance query failed (network=%s currency=%s): %v — returning sandbox", network, currency, err)
-		return "0", true, nil // sandbox fallback on RPC error
+		return "", false, fmt.Errorf("query %s %s balance: %w", network, currency, err)
 	}
 	return balance, false, nil
 }
@@ -365,15 +369,15 @@ func QueryOnChainBalance(ctx context.Context, network, currency, address string)
 // ─── On-chain Transfer (public entry point) ───────────────────────────────────
 
 // ExecuteOnChainTransfer signs and broadcasts a stablecoin transfer.
-// Returns (txHash, isSandbox, error).
+// Returns (txHash, isSandbox, error). isSandbox is retained for response
+// compatibility and is always false because sandbox transfers are prohibited.
 func ExecuteOnChainTransfer(ctx context.Context, network, currency, toAddr, amountUnits string) (string, bool, error) {
 	if network == "stellar" {
 		txHash, err := stellarUSDCTransfer(ctx, toAddr, amountUnits)
 		if err != nil {
 			return "", false, err
 		}
-		isSandbox := strings.HasPrefix(txHash, "stellar_sandbox_")
-		return txHash, isSandbox, nil
+		return txHash, false, nil
 	}
 
 	net, ok := evmNetworks[network]
@@ -389,8 +393,7 @@ func ExecuteOnChainTransfer(ctx context.Context, network, currency, toAddr, amou
 	if err != nil {
 		return "", false, err
 	}
-	isSandbox := strings.HasPrefix(txHash, "0xsandbox_")
-	return txHash, isSandbox, nil
+	return txHash, false, nil
 }
 
 // ─── EVM Transaction Helpers ──────────────────────────────────────────────────

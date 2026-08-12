@@ -12,19 +12,17 @@ describe("permify helper", () => {
     vi.resetModules();
   });
 
-  it("returns true (fail-open) when PERMIFY_URL is not set", async () => {
+  it("rejects when PERMIFY_URL is not set", async () => {
     delete process.env.PERMIFY_URL;
     const { permifyCheck } = await import("./permify");
-    const result = await permifyCheck("investigation", "inv-001", "read", "user-1");
-    expect(result).toBe(true);
+    await expect(permifyCheck("investigation", "inv-001", "read", "user-1")).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
-  it("returns true when fetch throws (fail-open)", async () => {
+  it("rejects when fetch throws", async () => {
     process.env.PERMIFY_URL = "http://localhost:3476";
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("connection refused")));
     const { permifyCheck } = await import("./permify");
-    const result = await permifyCheck("investigation", "inv-001", "read", "user-1");
-    expect(result).toBe(true);
+    await expect(permifyCheck("investigation", "inv-001", "read", "user-1")).rejects.toMatchObject({ code: "FORBIDDEN" });
     vi.unstubAllGlobals();
     delete process.env.PERMIFY_URL;
   });

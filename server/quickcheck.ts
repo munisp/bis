@@ -10,13 +10,12 @@
  *   premium  (₦3,000) — Full: identity + sanctions + media + criminal record + risk score
  *
  * Identity verification: calls Youverify API (BVN via NIBSS, NIN via NIMC).
- * Falls back to name-based heuristic when YOUVERIFY_API_KEY is not configured.
- * All results are deterministic — no Math.random() anywhere.
+ * The router never substitutes heuristic or fabricated screening results.
  */
 
 import { z } from "zod";
 import { router, writeProcedure, protectedProcedure } from "./_core/trpc";
-import { invokeLLM } from "./_core/llm";
+import { TRPCError } from "@trpc/server";
 import { getDb } from "./db";
 import { screeningRequests } from "../drizzle/schema";
 import { desc, eq } from "drizzle-orm";
@@ -57,14 +56,7 @@ async function lookupIdentity(
   const { youverifyApiKey, youverifyBaseUrl } = ENV;
 
   if (!youverifyApiKey || youverifyApiKey.startsWith("bis-")) {
-    // No live API key — fall back to presence-based heuristic
-    const confirmed = !!(bvn || nin);
-    return {
-      confirmed,
-      detail: confirmed
-        ? `Name matches ${bvn ? "BVN" : "NIN"} record (sandbox mode — configure YOUVERIFY_API_KEY for live lookups)`
-        : "No BVN/NIN provided — identity unverified",
-    };
+    throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Identity verification is not configured; no QuickCheck result was generated." });
   }
 
   try {
@@ -93,10 +85,7 @@ async function lookupIdentity(
     if (!resp.ok) {
       const errText = await resp.text().catch(() => "");
       console.warn("[QuickCheck] Youverify identity lookup failed:", resp.status, errText);
-      return {
-        confirmed: !!(bvn || nin),
-        detail: `Identity check returned status ${resp.status} — treating as unverified`,
-      };
+      throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: `Identity verification provider returned ${resp.status}; no QuickCheck result was generated.` });
     }
 
     const data = (await resp.json()) as {
@@ -124,10 +113,7 @@ async function lookupIdentity(
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     console.warn("[QuickCheck] Youverify lookup error:", msg);
-    return {
-      confirmed: !!(bvn || nin),
-      detail: `Identity verification service unavailable — ${msg.slice(0, 80)}`,
-    };
+    throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: `Identity verification service unavailable: ${msg.slice(0, 80)}` });
   }
 }
 
@@ -152,84 +138,31 @@ async function runChecks(input: {
   recommendation: string;
 }> {
   const checks = TIER_CHECKS[input.tier] ?? TIER_CHECKS.basic;
+  if (checks.some((check) => check !== "identity")) {
+    throw new TRPCError({
+      code: "SERVICE_UNAVAILABLE",
+      message: "QuickCheck sanctions, adverse-media, criminal-record, and composite-risk checks require live providers that are not configured in this route. No result was generated.",
+    });
+  }
   const factors: Array<{ check: string; result: "pass" | "flag" | "fail"; detail: string }> = [];
 
-  // Identity check — calls real Youverify gateway when API key is configured
+  // Identity check — requires a real Youverify response.
   const identity = await lookupIdentity(input.bvn, input.nin, input.fullName);
-  const identityConfirmed = identity.confirmed || !!(input.phone);
+  const identityConfirmed = identity.confirmed;
   factors.push({
     check: "Identity Verification",
     result: identityConfirmed ? "pass" : "flag",
     detail: identity.detail,
   });
 
-  // Sanctions check
+  // Unsupported premium checks never reach this point: they fail closed above.
   const sanctionsHit = false;
-  if (checks.includes("sanctions")) {
-    factors.push({
-      check: "Sanctions & Watchlist",
-      result: "pass",
-      detail: "No match on EFCC Wanted, INTERPOL, UN Sanctions, or NPF watchlists",
-    });
-  }
-
-  // Adverse media
   const adverseMediaHit = false;
-  if (checks.includes("adverse_media")) {
-    factors.push({
-      check: "Adverse Media",
-      result: "pass",
-      detail: "No adverse news coverage found across 10,000+ Nigerian and international sources",
-    });
-  }
-
-  // Criminal record
   const criminalRecordHit = false;
-  if (checks.includes("criminal_record")) {
-    factors.push({
-      check: "Criminal Record Check",
-      result: "pass",
-      detail: "No criminal record found in NPF CRIB database",
-    });
-  }
-
-  // Risk score — deterministic based on check results (no Math.random)
-  // Base: 10 if identity confirmed, 40 if not. Each flag adds 15, each fail adds 35.
-  const flagCount = factors.filter((f) => f.result === "flag").length;
-  const failCount = factors.filter((f) => f.result === "fail").length;
-  const baseScore = identityConfirmed ? 10 : 40;
-  const riskScore = Math.min(100, baseScore + flagCount * 15 + failCount * 35);
-
-  if (checks.includes("risk_score")) {
-    factors.push({
-      check: "Composite Risk Score",
-      result: riskScore < 30 ? "pass" : riskScore < 60 ? "flag" : "fail",
-      detail: `Risk score: ${riskScore}/100 — ${riskScore < 30 ? "Low" : riskScore < 60 ? "Medium" : "High"} risk`,
-    });
-  }
-
-  // Use LLM to generate a human-readable summary
-  let summary = "";
-  try {
-    const llmResp = await invokeLLM({
-      messages: [
-        {
-          role: "system",
-          content:
-            "You are a background check assistant for Nigerian households and small businesses. Write a concise 2-sentence plain-English summary of a background check result. Be reassuring if clear, factual if flagged. Do not use jargon.",
-        },
-        {
-          role: "user",
-          content: `Subject: ${input.fullName}, Category: ${input.workerCategory.replace("_", " ")}, Tier: ${input.tier}, Risk Score: ${riskScore}/100, Identity: ${identityConfirmed ? "confirmed" : "unverified"}, Sanctions: ${sanctionsHit ? "HIT" : "clear"}, Adverse Media: ${adverseMediaHit ? "HIT" : "clear"}, Criminal Record: ${criminalRecordHit ? "HIT" : "clear"}`,
-        },
-      ],
-    });
-    summary =
-      (llmResp as any)?.choices?.[0]?.message?.content?.trim() ??
-      `Background check for ${input.fullName} completed. ${riskScore < 30 ? "No concerns identified." : "Some items require review."}`;
-  } catch {
-    summary = `Background check for ${input.fullName} completed. ${riskScore < 30 ? "No concerns identified — this person appears safe to hire." : "Some items flagged for review — please examine the details below."}`;
-  }
+  const riskScore = identityConfirmed ? 0 : 100;
+  const summary = identityConfirmed
+    ? "Identity was confirmed by the configured provider. No other screening category was run."
+    : "Identity was not confirmed by the configured provider. No other screening category was run.";
 
   const hasFlag = factors.some((f) => f.result === "flag");
   const hasFail = factors.some((f) => f.result === "fail");
@@ -237,7 +170,7 @@ async function runChecks(input: {
 
   const recommendation =
     verdict === "clear"
-      ? "This person appears safe to hire. We recommend a face-to-face interview and reference check as a final step."
+      ? "Identity confirmation alone is not a hiring recommendation. Run separately configured sanctions, criminal-record, and reference checks before making a decision."
       : verdict === "flagged"
         ? "Some items require your attention before hiring. Review the flagged checks below and consider requesting additional documentation."
         : "We recommend against hiring this individual based on the checks performed. Consult a legal or HR professional if needed.";

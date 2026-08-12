@@ -1,8 +1,8 @@
 /**
  * BIS — Temporal workflow client (Node.js)
  *
- * Triggers investigation workflows on the Temporal server.
- * Falls back to direct service calls when TEMPORAL_HOST is not set.
+ * Triggers durable workflows on the Temporal server.
+ * Workflows fail closed when Temporal is unavailable rather than reporting a mock run.
  */
 import { ENV } from "./_core/env";
 
@@ -30,19 +30,13 @@ const TEMPORAL_TASK_QUEUE = "bis-investigation";
 
 /**
  * Start an investigation workflow.
- * Uses Temporal when TEMPORAL_HOST is configured, otherwise returns a mock run ID.
+ * Requires Temporal to be configured before reporting a workflow start.
  */
 export async function startInvestigationWorkflow(
   input: InvestigationWorkflowInput
 ): Promise<WorkflowStartResult> {
   if (!TEMPORAL_HOST) {
-    // Dev mode: return a deterministic mock workflow ID
-    console.log(`[Temporal] Dev mode — workflow ${input.ref} would run on Temporal`);
-    return {
-      workflowId: `investigation-${input.ref}`,
-      runId: `dev-run-${Date.now()}`,
-      mode: "direct",
-    };
+    throw new Error("Temporal is not configured; investigation workflow was not started.");
   }
 
   // Production: call the Temporal HTTP API (Temporal Cloud / self-hosted)
@@ -84,7 +78,7 @@ export async function getWorkflowStatus(workflowId: string): Promise<{
   result?: unknown;
 }> {
   if (!TEMPORAL_HOST) {
-    return { status: "completed", result: null };
+    throw new Error("Temporal is not configured; investigation workflow status is unavailable.");
   }
 
   const gatewayUrl = ENV.gatewayUrl;
@@ -140,21 +134,13 @@ export interface PaymentTransferWorkflowResult {
  *   4. Compensation: if the rail returns a hard failure after the DB row is written,
  *      the workflow issues a reversal and marks the transaction as reversed
  *
- * Falls back to a deterministic dev-mode ID when TEMPORAL_HOST is not set.
+ * Requires Temporal to be configured before reporting a payment workflow start.
  */
 export async function startPaymentTransferWorkflow(
   input: PaymentTransferWorkflowInput
 ): Promise<PaymentTransferWorkflowResult> {
   if (!TEMPORAL_HOST) {
-    // Dev mode: log and return a deterministic ID — no actual workflow runs
-    console.log(
-      `[Temporal] Dev mode — PaymentTransferWorkflow ${input.txRef} would run on Temporal`
-    );
-    return {
-      workflowId: `payment-${input.txRef}`,
-      runId: `dev-run-${Date.now()}`,
-      mode: "direct",
-    };
+    throw new Error("Temporal is not configured; payment workflow was not started.");
   }
 
   const gatewayUrl = ENV.gatewayUrl;
@@ -229,7 +215,7 @@ export async function getPaymentWorkflowStatus(txRef: string): Promise<{
   result?: unknown;
 }> {
   if (!TEMPORAL_HOST) {
-    return { status: "completed", result: null };
+    throw new Error("Temporal is not configured; payment workflow status is unavailable.");
   }
 
   const gatewayUrl = ENV.gatewayUrl;
@@ -556,4 +542,3 @@ export async function startAccessReviewWorkflow(input: AccessReviewWorkflowInput
     return { workflowId, status: "dev_mode" };
   }
 }
-

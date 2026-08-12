@@ -79,7 +79,7 @@ _redis: Optional[aioredis.Redis] = None
 
 
 async def load_models():
-    """Load all ML models at startup. Gracefully degrade if a model is unavailable."""
+    """Load all ML models at startup. Verification routes fail closed if a required model is unavailable."""
     global _models
 
     # 1. MediaPipe Face Mesh (liveness landmarks)
@@ -95,7 +95,7 @@ async def load_models():
         _models["mp_drawing"] = mp.solutions.drawing_utils
         log.info("MediaPipe FaceMesh loaded")
     except Exception as e:
-        log.warning(f"MediaPipe not available: {e} — liveness will use fallback")
+        log.warning(f"MediaPipe not available: {e} — liveness verification will be unavailable")
         _models["face_mesh"] = None
 
     # 2. InsightFace ArcFace (facial matching)
@@ -107,7 +107,7 @@ async def load_models():
         _models["insightface"] = app
         log.info("InsightFace ArcFace (buffalo_l) loaded")
     except Exception as e:
-        log.warning(f"InsightFace not available: {e} — face match will use fallback")
+        log.warning(f"InsightFace not available: {e} — face matching will be unavailable")
         _models["insightface"] = None
 
     # 3. Silent-Face-Anti-Spoofing (2.7MB binary classifier)
@@ -116,7 +116,7 @@ async def load_models():
         _models["antispoofing"] = AntiSpoofPredictor()
         log.info("Anti-spoofing model loaded")
     except Exception as e:
-        log.warning(f"Anti-spoofing model not available: {e} — will use texture analysis fallback")
+        log.warning(f"Anti-spoofing model not available: {e} — anti-spoofing verification will be unavailable")
         _models["antispoofing"] = None
 
     # 4. PaddleOCR (document text extraction)
@@ -125,18 +125,10 @@ async def load_models():
         _models["ocr"] = PaddleOCR(use_angle_cls=True, lang="en", show_log=False)
         log.info("PaddleOCR loaded")
     except Exception as e:
-        log.warning(f"PaddleOCR not available: {e} — OCR will use Tesseract fallback")
+        log.warning(f"PaddleOCR not available: {e} — document OCR will be unavailable")
         _models["ocr"] = None
 
-    # 5. Tesseract fallback
-    try:
-        import pytesseract
-        pytesseract.get_tesseract_version()
-        _models["tesseract"] = pytesseract
-        log.info("Tesseract OCR available as fallback")
-    except Exception as e:
-        log.warning(f"Tesseract not available: {e}")
-        _models["tesseract"] = None
+    _models["tesseract"] = None
 
 
 @asynccontextmanager
@@ -300,7 +292,7 @@ def _mediapipe_liveness(img_bgr: np.ndarray) -> dict:
       - Texture gradient analysis (printed photos have lower gradient energy)
     """
     if _models.get("face_mesh") is None:
-        return _fallback_liveness(img_bgr)
+        return {"score": 0.0, "live": False, "reason": "liveness_model_unavailable", "landmarks_found": False, "error": "MediaPipe FaceMesh is unavailable"}
 
     import mediapipe as mp
     h, w = img_bgr.shape[:2]
@@ -414,14 +406,14 @@ def _active_liveness(frames_bgr: list[np.ndarray], challenge: str) -> dict:
     Challenges: blink | nod | turn_left | turn_right
     """
     if _models.get("face_mesh") is None:
-        # Fallback: assume passed if we have enough frames with faces
         return {
-            "score": 0.85,
-            "live": True,
+            "score": 0.0,
+            "live": False,
             "challenge": challenge,
-            "challenge_completed": True,
-            "reason": "fallback_accepted",
+            "challenge_completed": False,
+            "reason": "liveness_model_unavailable",
             "frames_analysed": len(frames_bgr),
+            "error": "MediaPipe FaceMesh is unavailable",
         }
 
     import mediapipe as mp
@@ -510,7 +502,7 @@ def _active_liveness(frames_bgr: list[np.ndarray], challenge: str) -> dict:
 def _get_embedding(img_bgr: np.ndarray) -> Optional[np.ndarray]:
     """Extract 512-d ArcFace embedding using InsightFace."""
     if _models.get("insightface") is None:
-        return _fallback_embedding(img_bgr)
+        return None
 
     faces = _models["insightface"].get(img_bgr)
     if not faces:
@@ -599,7 +591,26 @@ def _antispoofing(img_bgr: np.ndarray) -> dict:
         except Exception as e:
             log.warning(f"Anti-spoofing model error: {e}")
 
-    # Fallback: multi-scale texture analysis
+    # No heuristic fallback is permitted for an identity decision.
+    if _models.get("antispoofing") is None:
+        return {
+            "score": 0.0,
+            "genuine": False,
+            "reason": "antispoofing_model_unavailable",
+            "model": None,
+            "error": "Anti-spoofing model is unavailable",
+        }
+
+    # A model error is also unavailable, not a texture-based pass/fail decision.
+    return {
+        "score": 0.0,
+        "genuine": False,
+        "reason": "antispoofing_model_error",
+        "model": "silent_face_anti_spoofing",
+        "error": "Anti-spoofing model failed to produce a result",
+    }
+
+    # Historical texture analysis retained below for reference only and unreachable.
     gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
 
     # Laplacian variance (sharpness)
@@ -658,18 +669,8 @@ def _ocr_document(img_bgr: np.ndarray, doc_type: str = "auto") -> dict:
         except Exception as e:
             log.warning(f"PaddleOCR error: {e}")
 
-    # Fallback to Tesseract
-    if not raw_text and _models.get("tesseract") is not None:
-        try:
-            raw_text = _models["tesseract"].image_to_string(
-                enhanced,
-                config="--psm 6 --oem 3 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789/:- "
-            )
-        except Exception as e:
-            log.warning(f"Tesseract error: {e}")
-
     if not raw_text:
-        return {"success": False, "reason": "ocr_engines_unavailable", "raw_text": "", "fields": {}}
+        return {"success": False, "reason": "ocr_model_unavailable", "raw_text": "", "fields": {}, "error": "PaddleOCR did not produce a document result"}
 
     # Parse structured fields based on document type
     fields = _parse_document_fields(raw_text, doc_type)
@@ -679,7 +680,7 @@ def _ocr_document(img_bgr: np.ndarray, doc_type: str = "auto") -> dict:
         "doc_type": doc_type,
         "raw_text": raw_text,
         "fields": fields,
-        "confidence": 0.85 if _models.get("ocr") else 0.65,
+        "confidence": 0.85,
     }
 
 

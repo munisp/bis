@@ -2,9 +2,10 @@
 // Design: Forensic Intelligence theme, semantic CSS variables
 
 import { useState, useRef, useCallback } from 'react';
-import { X, Upload, FileText, CheckCircle2, AlertTriangle, Loader2, Download, RefreshCw } from 'lucide-react';
+import { X, Upload, FileText, CheckCircle2, AlertTriangle, Loader2, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { trpc } from '@/lib/trpc';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -21,7 +22,7 @@ interface BatchRow {
   message?: string;
 }
 
-// ─── Mock CSV parse ───────────────────────────────────────────────────────────
+// ─── CSV parse ────────────────────────────────────────────────────────────────
 
 function parseCSV(text: string): BatchRow[] {
   const lines = text.trim().split('\n').filter(Boolean);
@@ -30,21 +31,14 @@ function parseCSV(text: string): BatchRow[] {
     const cols = line.split(',').map(c => c.trim().replace(/^"|"$/g, ''));
     return {
       id: `row-${i}`,
-      nin: cols[0] || `NIN${String(i + 1).padStart(11, '0')}`,
-      name: cols[1] || `Subject ${i + 1}`,
-      dob: cols[2] || '1990-01-01',
-      phone: cols[3] || '+234800000000' + i,
+      nin: cols[0] || '',
+      name: cols[1] || '',
+      dob: cols[2] || '',
+      phone: cols[3] || '',
       status: 'queued',
     };
   });
 }
-
-const SAMPLE_CSV = `NIN,Full Name,Date of Birth,Phone
-12345678901,Emeka Okafor,1985-03-12,+2348012345678
-98765432100,Ngozi Adeyemi,1992-07-24,+2347098765432
-11223344556,Musa Aliyu,1978-11-05,+2348033221100
-99887766554,Chidinma Eze,1995-02-18,+2348055443322
-44332211009,Fatima Bello,1988-09-30,+2348023456789`;
 
 // ─── Status config ────────────────────────────────────────────────────────────
 
@@ -69,7 +63,7 @@ export default function KYCBatchUploadModal({ open, onClose }: KYCBatchUploadMod
   const [done, setDone] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const runKyc = trpc.kyc.run.useMutation();
 
   const loadFile = useCallback((file: File) => {
     const reader = new FileReader();
@@ -93,59 +87,52 @@ export default function KYCBatchUploadModal({ open, onClose }: KYCBatchUploadMod
     if (file) loadFile(file);
   };
 
-  const loadSample = () => {
-    setRows(parseCSV(SAMPLE_CSV));
-    setDone(false);
-  };
-
-  const startProcessing = () => {
+  const startProcessing = async () => {
     if (rows.length === 0) return;
     setRunning(true);
     setDone(false);
+    const batchRows = rows.map(row => ({ ...row, status: 'queued' as const, riskScore: undefined, message: undefined }));
+    setRows(batchRows);
 
-    // Set all to queued
-    setRows(prev => prev.map(r => ({ ...r, status: 'queued' })));
-
-    let idx = 0;
-    intervalRef.current = setInterval(() => {
-      if (idx >= rows.length) {
-        clearInterval(intervalRef.current!);
-        setRunning(false);
-        setDone(true);
-        return;
+    for (const row of batchRows) {
+      setRows(prev => prev.map(candidate => candidate.id === row.id ? { ...candidate, status: 'processing' } : candidate));
+      if (!/^\d{11}$/.test(row.nin) || row.name.trim().length < 2) {
+        setRows(prev => prev.map(candidate => candidate.id === row.id
+          ? { ...candidate, status: 'failed', message: 'Invalid row: NIN must be 11 digits and full name is required.' }
+          : candidate
+        ));
+        continue;
       }
 
-      const rowId = rows[idx].id;
-
-      // Mark current as processing
-      setRows(prev => prev.map(r => r.id === rowId ? { ...r, status: 'processing' } : r));
-
-      // After 600ms, mark result
-      setTimeout(() => {
-        const rand = Math.random();
-        const status: RowStatus = rand > 0.75 ? 'passed' : rand > 0.55 ? 'review' : rand > 0.4 ? 'failed' : 'passed';
-        const riskScore = status === 'passed' ? Math.floor(Math.random() * 35) + 5
-          : status === 'review' ? Math.floor(Math.random() * 30) + 45
-          : Math.floor(Math.random() * 25) + 70;
-        const messages: Record<RowStatus, string> = {
-          passed:  'All checks passed',
-          review:  'Manual review required',
-          failed:  'NIN mismatch detected',
-          queued:  '',
-          processing: '',
-        };
-        setRows(prev => prev.map(r => r.id === rowId
-          ? { ...r, status, riskScore, message: messages[status] }
-          : r
+      try {
+        const result = await runKyc.mutateAsync({
+          subjectName: row.name,
+          nin: row.nin,
+          dob: row.dob || undefined,
+          phone: row.phone || undefined,
+        });
+        const status: RowStatus = result.status === 'passed' || result.status === 'failed' || result.status === 'review'
+          ? result.status
+          : 'review';
+        const message = 'error' in result && typeof result.error === 'string'
+          ? result.error
+          : status === 'passed' ? 'Authoritative KYC checks completed.' : 'Authoritative KYC result requires review.';
+        setRows(prev => prev.map(candidate => candidate.id === row.id
+          ? { ...candidate, status, riskScore: typeof result.riskScore === 'number' ? result.riskScore : undefined, message }
+          : candidate
         ));
-      }, 600);
-
-      idx++;
-    }, 800);
+      } catch (error) {
+        setRows(prev => prev.map(candidate => candidate.id === row.id
+          ? { ...candidate, status: 'review', message: `KYC unavailable: ${error instanceof Error ? error.message : 'verification service error'}` }
+          : candidate
+        ));
+      }
+    }
+    setRunning(false);
+    setDone(true);
   };
 
   const reset = () => {
-    if (intervalRef.current) clearInterval(intervalRef.current);
     setRows([]);
     setRunning(false);
     setDone(false);
@@ -197,23 +184,6 @@ export default function KYCBatchUploadModal({ open, onClose }: KYCBatchUploadMod
               </p>
               <input ref={fileRef} type="file" accept=".csv,.txt" className="hidden" onChange={handleFileChange} />
             </div>
-          )}
-
-          {rows.length === 0 && (
-            <div className="flex items-center gap-3">
-              <div className="flex-1 h-px bg-border" />
-              <span className="text-[10px] font-mono text-muted-foreground">OR</span>
-              <div className="flex-1 h-px bg-border" />
-            </div>
-          )}
-
-          {rows.length === 0 && (
-            <button
-              onClick={loadSample}
-              className="w-full flex items-center justify-center gap-2 text-xs font-mono text-primary border border-primary/30 rounded-lg py-2.5 hover:bg-primary/5 transition-colors"
-            >
-              <Download size={12} /> Load sample data (5 subjects)
-            </button>
           )}
 
           {/* Progress bar */}

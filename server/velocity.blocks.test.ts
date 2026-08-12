@@ -12,9 +12,9 @@
  *   2. "block" decision → one row inserted with correct field values
  *   3. "block" decision with optional tx_ref → tx_ref is persisted
  *   4. DB write failure is non-fatal (fail-open: still returns "block")
- *   5. Sidecar timeout → fail-open, no DB write
- *   6. Sidecar ECONNREFUSED → fail-open, no DB write
- *   7. Non-2xx from sidecar → fail-open (allow), no DB write
+ *   5. Sidecar timeout → fail-closed, no DB write
+ *   6. Sidecar ECONNREFUSED → fail-closed, no DB write
+ *   7. Non-2xx from sidecar → fail-closed, no DB write
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -166,8 +166,8 @@ describe("fluvioCheckVelocity — velocity_blocks DB-write path", () => {
     expect(result.service_available).toBe(true);
   });
 
-  // ── 5. Sidecar timeout → fail-open, no DB write ─────────────────────────────
-  it("fails open (allow) and does not write to DB when the sidecar times out", async () => {
+  // ── 5. Sidecar timeout → fail-closed, no DB write ───────────────────────────
+  it("fails closed (block) and does not write to DB when the sidecar times out", async () => {
     // Simulate AbortError (timeout)
     const abortError = new Error("The operation was aborted");
     abortError.name = "AbortError";
@@ -175,30 +175,30 @@ describe("fluvioCheckVelocity — velocity_blocks DB-write path", () => {
 
     const result = await fluvioCheckVelocity(BASE_INPUT);
 
-    expect(result.decision).toBe("allow");
+    expect(result.decision).toBe("block");
     expect(result.service_available).toBe(false);
 
     const db = await getDb();
     expect((db as any).insert).not.toHaveBeenCalled();
   });
 
-  // ── 6. Sidecar ECONNREFUSED → fail-open, no DB write ────────────────────────
-  it("fails open (allow) and does not write to DB when the sidecar is unreachable", async () => {
+  // ── 6. Sidecar ECONNREFUSED → fail-closed, no DB write ──────────────────────
+  it("fails closed (block) and does not write to DB when the sidecar is unreachable", async () => {
     const connError = new Error("connect ECONNREFUSED 127.0.0.1:9999");
     connError.message = "ECONNREFUSED";
     mockFetch.mockRejectedValue(connError);
 
     const result = await fluvioCheckVelocity(BASE_INPUT);
 
-    expect(result.decision).toBe("allow");
+    expect(result.decision).toBe("block");
     expect(result.service_available).toBe(false);
 
     const db = await getDb();
     expect((db as any).insert).not.toHaveBeenCalled();
   });
 
-  // ── 7. Non-2xx from sidecar → fail-open (allow), no DB write ────────────────
-  it("fails open (allow) on non-2xx HTTP response and does not write to DB", async () => {
+  // ── 7. Non-2xx from sidecar → fail-closed, no DB write ──────────────────────
+  it("fails closed (block) on non-2xx HTTP response and does not write to DB", async () => {
     mockFetch.mockResolvedValue({
       ok: false,
       status: 503,
@@ -207,9 +207,8 @@ describe("fluvioCheckVelocity — velocity_blocks DB-write path", () => {
 
     const result = await fluvioCheckVelocity(BASE_INPUT);
 
-    expect(result.decision).toBe("allow");
-    // sidecar was reachable (no network error) but returned a non-2xx status
-    expect(result.service_available).toBe(true);
+    expect(result.decision).toBe("block");
+    expect(result.service_available).toBe(false);
 
     const db = await getDb();
     expect((db as any).insert).not.toHaveBeenCalled();

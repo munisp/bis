@@ -18,3 +18,4 @@ sentence-transformers==3.3.1
 pytest==8.3.4
 pytest-asyncio==0.24.0
 httpx[asyncio]==0.28.1
+river>=0.21.0

@@ -16,11 +16,10 @@ export type TrpcContext = {
    * Non-null for tenant-scoped users — all data queries MUST filter by this value.
    */
   tenantId: number | null;
-  /** True when the request is being served under the demo fallback user.
-   *  Mutation procedures should reject with a friendly read-only error. */
+  /** Retained for response compatibility; real contexts never inject a demo user. */
   isDemo: boolean;
-  /** Auth method used for this request: manus | keycloak | demo */
-  authMethod: "manus" | "keycloak" | "demo";
+  /** Auth method used for this request: manus | keycloak */
+  authMethod: "manus" | "keycloak";
 };
 
 /**
@@ -75,22 +74,6 @@ async function authenticateKeycloakBearer(req: CreateExpressContextOptions["req"
   return user ?? null;
 }
 
-// Demo admin user injected when no Manus session is present.
-// This allows the live demo to be explored without requiring a Manus account.
-const DEMO_USER: User = {
-  id: 0,
-  tenantId: null, // Demo admin has no tenant scope
-  openId: "demo-admin",
-  name: "Demo Admin",
-  email: "demo@bis-platform.dev",
-  loginMethod: "demo",
-  role: "admin",
-  createdAt: new Date("2026-01-01T00:00:00Z"),
-  updatedAt: new Date("2026-01-01T00:00:00Z"),
-  lastSignedIn: new Date(),
-  pushToken: null,
-};
-
 export async function createContext(
   opts: CreateExpressContextOptions
 ): Promise<TrpcContext> {
@@ -114,16 +97,6 @@ export async function createContext(
     } catch {
       user = null;
     }
-  }
-
-  // 3. Fall back to demo admin so the platform is fully explorable without login.
-  // SECURITY: Demo mode is disabled in production (NODE_ENV=production) to prevent
-  // unauthenticated access. In production, unauthenticated requests will have user=null
-  // and protectedProcedure will return UNAUTHORIZED.
-  if (!user && process.env.NODE_ENV !== 'production') {
-    user = DEMO_USER;
-    isDemo = true;
-    authMethod = "demo";
   }
 
   // Expose tenantId at context level for convenient use in all procedures.

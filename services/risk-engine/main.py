@@ -19,9 +19,9 @@ External data integrations:
   - GDELT: free global news events API (no key required)
   - Google News RSS: free fallback for adverse media
 
-When external APIs are not configured, the engine uses deterministic
-keyword analysis on any text_corpus provided, or returns a conservative
-medium-risk estimate clearly flagged as "sandbox: true".
+When an authoritative external source is unavailable, adverse-media
+screening returns an explicit unavailable-provider error; it never emits
+a synthetic adverse-media score or a plausible-looking clearance.
 """
 
 import os
@@ -657,31 +657,24 @@ async def analyse_adverse_media(req: AdverseMediaRequest, background_tasks: Back
             all_text_parts.extend(gdelt_articles)
             sources_checked.append("GDELT")
 
-    sandbox = False
     if not all_text_parts:
-        # Deterministic sandbox response — no external data available
-        seed = int(hashlib.md5(req.subject_name.encode()).hexdigest(), 16) % 1000
-        rng = np.random.default_rng(seed)
-        fraud_count = int(rng.integers(0, 3))
-        corruption_count = int(rng.integers(0, 2))
-        criminal_count = int(rng.integers(0, 2))
-        sentiment = float(rng.uniform(0.4, 0.95))
-        sources_checked.append("sandbox")
-        sandbox = True
-        flagged = []
-    else:
-        all_text = " ".join(all_text_parts)
-        fraud_count = analyse_text(all_text, FRAUD_KEYWORDS)
-        corruption_count = analyse_text(all_text, CORRUPTION_KEYWORDS)
-        criminal_count = analyse_text(all_text, CRIMINAL_KEYWORDS)
-        total_words = len(all_text.split())
-        neg_words = fraud_count + corruption_count + criminal_count
-        sentiment = max(0.0, 1.0 - (neg_words / max(total_words, 1)) * 10)
-        flagged = [
-            snippet[:200]
-            for snippet in all_text_parts
-            if any(kw in snippet.lower() for kw in FRAUD_KEYWORDS + CORRUPTION_KEYWORDS + CRIMINAL_KEYWORDS)
-        ][:5]
+        raise HTTPException(
+            status_code=503,
+            detail="No authoritative adverse-media corpus or live source was available; no risk assessment was generated.",
+        )
+
+    all_text = " ".join(all_text_parts)
+    fraud_count = analyse_text(all_text, FRAUD_KEYWORDS)
+    corruption_count = analyse_text(all_text, CORRUPTION_KEYWORDS)
+    criminal_count = analyse_text(all_text, CRIMINAL_KEYWORDS)
+    total_words = len(all_text.split())
+    neg_words = fraud_count + corruption_count + criminal_count
+    sentiment = max(0.0, 1.0 - (neg_words / max(total_words, 1)) * 10)
+    flagged = [
+        snippet[:200]
+        for snippet in all_text_parts
+        if any(kw in snippet.lower() for kw in FRAUD_KEYWORDS + CORRUPTION_KEYWORDS + CRIMINAL_KEYWORDS)
+    ][:5]
 
     result = AdverseMediaResponse(
         subject_name=req.subject_name,
@@ -693,7 +686,7 @@ async def analyse_adverse_media(req: AdverseMediaRequest, background_tasks: Back
         flagged_snippets=flagged,
         sources_checked=sources_checked,
         analysed_at=datetime.now(timezone.utc).isoformat(),
-        sandbox=sandbox,
+        sandbox=False,
     )
 
     cache_set(cache_key, result.model_dump(), ttl_seconds=3600 * 6)
@@ -975,3 +968,166 @@ if _V2_AVAILABLE:
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=PORT, reload=False, log_level="info")
+
+# ─── UEBA (User and Entity Behaviour Analytics) ──────────────────────────────
+#
+# These endpoints are called by the BIS BFF (insiderThreat.refreshUebaProfile)
+# and by the Go gateway Dapr subscription handler.
+# Redis caches per-subject UEBA profiles with a 5-minute TTL.
+# Kafka publishes anomaly alerts when anomaly_score > 0.75.
+
+class UebaScoreRequest(BaseModel):
+    subject_id: str
+    tenant_id: Optional[str] = None
+    # Optionally pass pre-computed signals; otherwise the engine reads from Redis
+    recent_events: list[dict] = []
+
+class UebaScoreResponse(BaseModel):
+    subject_id: str
+    tenant_id: Optional[str] = None
+    anomaly_score: float        # 0.0 – 1.0
+    drift_score: float          # 0.0 – 1.0  (deviation from baseline)
+    risk_level: str             # info | low | medium | high | critical
+    baseline_ready: bool
+    hour_histogram: list[float] # 24-element activity histogram
+    day_histogram: list[float]  # 7-element day-of-week histogram
+    unique_ip_count: int
+    off_hours_ratio: float      # fraction of events outside 08:00-18:00
+    priv_change_count: int
+    failed_auth_count: int
+    event_count: int
+    scored_at: str
+    cache_hit: bool = False
+
+class UebaBatchRequest(BaseModel):
+    subject_ids: list[str]
+    tenant_id: Optional[str] = None
+
+class UebaBatchResponse(BaseModel):
+    profiles: list[UebaScoreResponse]
+    scored_at: str
+
+def _compute_ueba_profile(subject_id: str, tenant_id, events: list) -> dict:
+    """Compute UEBA signals from a list of raw insider-threat events."""
+    n = len(events)
+    if n == 0:
+        return {
+            "subject_id": subject_id, "tenant_id": tenant_id,
+            "anomaly_score": 0.0, "drift_score": 0.0, "risk_level": "info",
+            "baseline_ready": False, "hour_histogram": [0.0] * 24,
+            "day_histogram": [0.0] * 7, "unique_ip_count": 0,
+            "off_hours_ratio": 0.0, "priv_change_count": 0,
+            "failed_auth_count": 0, "event_count": 0,
+        }
+    hour_hist = [0.0] * 24
+    day_hist  = [0.0] * 7
+    ips: set = set()
+    off_hours = 0
+    priv_changes = 0
+    failed_auths = 0
+    raw_anomaly: list = []
+    raw_drift: list = []
+    for ev in events:
+        ts_str = ev.get("triggered_at") or ev.get("created_at") or ""
+        try:
+            ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+            hour_hist[ts.hour] += 1
+            day_hist[ts.weekday()] += 1
+            if ts.hour < 8 or ts.hour >= 18:
+                off_hours += 1
+        except Exception:
+            pass
+        ip = ev.get("source_ip") or ev.get("sourceIp")
+        if ip:
+            ips.add(ip)
+        cat = ev.get("category", "")
+        if cat == "privilege_abuse":
+            priv_changes += 1
+        if cat == "failed_auth_spike":
+            failed_auths += 1
+        a = ev.get("anomaly_score") or ev.get("anomalyScore")
+        if a is not None:
+            raw_anomaly.append(float(a))
+        d = ev.get("drift_score") or ev.get("driftScore")
+        if d is not None:
+            raw_drift.append(float(d))
+    total_h = sum(hour_hist) or 1
+    hour_hist = [round(v / total_h, 4) for v in hour_hist]
+    total_d = sum(day_hist) or 1
+    day_hist = [round(v / total_d, 4) for v in day_hist]
+    anomaly_score = float(np.mean(raw_anomaly)) if raw_anomaly else 0.0
+    drift_score   = float(np.mean(raw_drift))   if raw_drift   else 0.0
+    off_hours_ratio = round(off_hours / n, 4)
+    if anomaly_score >= 0.85 or drift_score >= 0.80:
+        risk_level = "critical"
+    elif anomaly_score >= 0.65 or drift_score >= 0.60:
+        risk_level = "high"
+    elif anomaly_score >= 0.45 or drift_score >= 0.40:
+        risk_level = "medium"
+    elif anomaly_score >= 0.20:
+        risk_level = "low"
+    else:
+        risk_level = "info"
+    return {
+        "subject_id": subject_id, "tenant_id": tenant_id,
+        "anomaly_score": round(anomaly_score, 4), "drift_score": round(drift_score, 4),
+        "risk_level": risk_level, "baseline_ready": n >= 10,
+        "hour_histogram": hour_hist, "day_histogram": day_hist,
+        "unique_ip_count": len(ips), "off_hours_ratio": off_hours_ratio,
+        "priv_change_count": priv_changes, "failed_auth_count": failed_auths,
+        "event_count": n,
+    }
+
+
+@app.post("/v1/ueba/score", response_model=UebaScoreResponse, dependencies=[Depends(verify_key)])
+def ueba_score(req: UebaScoreRequest, background_tasks: BackgroundTasks):
+    """Score a single subject's UEBA profile (Redis-cached, 5 min TTL)."""
+    cache_key = f"ueba:score:{req.subject_id}" + (f":{req.tenant_id}" if req.tenant_id else "")
+    cached = cache_get(cache_key)
+    if cached and not req.recent_events:
+        result = json.loads(cached)
+        result["cache_hit"] = True
+        return result
+    profile = _compute_ueba_profile(req.subject_id, req.tenant_id, req.recent_events)
+    scored_at = datetime.now(timezone.utc).isoformat()
+    profile["scored_at"] = scored_at
+    profile["cache_hit"] = False
+    cache_set(cache_key, profile, ttl_seconds=300)
+    if profile["anomaly_score"] > 0.75:
+        background_tasks.add_task(publish_event, "bis.ueba.alerts", {
+            "subject_id": req.subject_id, "tenant_id": req.tenant_id,
+            "anomaly_score": profile["anomaly_score"], "drift_score": profile["drift_score"],
+            "risk_level": profile["risk_level"], "triggered_at": scored_at, "source": "bis-risk-engine",
+        })
+    return profile
+
+
+@app.post("/v1/ueba/batch", response_model=UebaBatchResponse, dependencies=[Depends(verify_key)])
+def ueba_batch(req: UebaBatchRequest):
+    """Score multiple subjects in one call (Redis-cached per subject)."""
+    profiles = []
+    for subject_id in req.subject_ids:
+        cache_key = f"ueba:score:{subject_id}" + (f":{req.tenant_id}" if req.tenant_id else "")
+        cached = cache_get(cache_key)
+        if cached:
+            p = json.loads(cached)
+            p["cache_hit"] = True
+        else:
+            p = _compute_ueba_profile(subject_id, req.tenant_id, [])
+            p["scored_at"] = datetime.now(timezone.utc).isoformat()
+            p["cache_hit"] = False
+            cache_set(cache_key, p, ttl_seconds=300)
+        profiles.append(p)
+    return {"profiles": profiles, "scored_at": datetime.now(timezone.utc).isoformat()}
+
+
+@app.delete("/v1/ueba/cache/{subject_id}", dependencies=[Depends(verify_key)])
+def ueba_invalidate_cache(subject_id: str, tenant_id: Optional[str] = None):
+    """Invalidate the Redis UEBA cache for a specific subject."""
+    cache_key = f"ueba:score:{subject_id}" + (f":{tenant_id}" if tenant_id else "")
+    if redis_client is not None:
+        try:
+            redis_client.delete(cache_key)
+        except Exception as e:
+            logger.warning(f"Redis DELETE failed for {cache_key}: {e}")
+    return {"invalidated": cache_key}

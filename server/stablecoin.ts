@@ -175,8 +175,7 @@ export const stablecoinRouter = router({
       })
     )
     .query(async ({ input }) => {
-      // Fetch live rate from the gateway (which proxies a price oracle)
-      // Falls back to a hardcoded reference rate in sandbox mode
+      // Fetch a live rate from the gateway price oracle.
       try {
         const result = await gatewayGet<{
           rate: number;
@@ -194,17 +193,7 @@ export const stablecoinRouter = router({
           quotedAt: new Date().toISOString(),
         };
       } catch {
-        // Fallback: use a reference rate (sandbox only)
-        const REFERENCE_RATE_NGN_PER_USDC = 1_650; // approximate NGN/USD as of 2025
-        return {
-          amountUsdc: input.amountUsdc,
-          targetCurrency: input.targetCurrency,
-          rate: REFERENCE_RATE_NGN_PER_USDC,
-          targetAmount: input.amountUsdc * REFERENCE_RATE_NGN_PER_USDC,
-          source: "reference-rate-fallback",
-          sandbox: true,
-          quotedAt: new Date().toISOString(),
-        };
+        throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Live stablecoin quote is unavailable; no reference rate was substituted." });
       }
     }),
 
@@ -249,13 +238,7 @@ export const stablecoinRouter = router({
           fetchedAt: new Date().toISOString(),
         };
       } catch {
-        // Sandbox fallback: return empty history
-        return {
-          address: input.address,
-          transactions: [],
-          sandbox: true,
-          fetchedAt: new Date().toISOString(),
-        };
+        throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "On-chain transaction history is unavailable; an empty history was not substituted." });
       }
     }),
 });

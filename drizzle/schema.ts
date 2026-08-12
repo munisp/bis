@@ -3495,3 +3495,72 @@ export const paymentRailsLog = pgTable("payment_rails_log", {
 }));
 export type PaymentRailsLog = typeof paymentRailsLog.$inferSelect;
 export type InsertPaymentRailsLog = typeof paymentRailsLog.$inferInsert;
+
+// ── collection_sites ───────────────────────────────────────────────────────────
+// Authoritative drug-testing collection-site directory. The migration is 0055.
+export const collectionSiteStatusEnum = pgEnum("collection_site_status", ["active", "inactive", "suspended"]);
+export const biometricModalityEnum = pgEnum("biometric_modality", ["fingerprint", "face", "iris", "voice"]);
+
+export const collectionSites = pgTable("collection_sites", {
+  id:          serial("id").primaryKey(),
+  tenantId:    integer("tenantId").references(() => tenants.id, { onDelete: "set null" }),
+  name:        varchar("name", { length: 256 }).notNull(),
+  address:     text("address").notNull(),
+  city:        varchar("city", { length: 128 }).notNull(),
+  state:       varchar("state", { length: 64 }).notNull(),
+  phone:       varchar("phone", { length: 32 }),
+  email:       varchar("email", { length: 320 }),
+  lat:         real("lat"),
+  lng:         real("lng"),
+  labPartner:  varchar("labPartner", { length: 128 }),
+  panelTypes:  json("panelTypes").$type<string[]>().notNull().default([]),
+  turnaround:  varchar("turnaround", { length: 64 }),
+  status:      collectionSiteStatusEnum("status").notNull().default("active"),
+  createdAt:   timestamp("createdAt").defaultNow().notNull(),
+  updatedAt:   timestamp("updatedAt").defaultNow().notNull(),
+}, (t) => ({
+  collection_site_state_idx:  index("site_state_idx").on(t.state),
+  collection_site_status_idx: index("site_status_idx").on(t.status),
+}));
+export type CollectionSite = typeof collectionSites.$inferSelect;
+export type InsertCollectionSite = typeof collectionSites.$inferInsert;
+
+// ── biometric_templates ────────────────────────────────────────────────────────
+export const biometricTemplates = pgTable("biometric_templates", {
+  id:           serial("id").primaryKey(),
+  subjectRef:   varchar("subjectRef", { length: 64 }).notNull(),
+  tenantId:     integer("tenantId").references(() => tenants.id, { onDelete: "set null" }),
+  modality:     biometricModalityEnum("modality").notNull(),
+  templateData: text("templateData").notNull(),
+  quality:      real("quality"),
+  deviceId:     varchar("deviceId", { length: 128 }),
+  enrolledBy:   integer("enrolledBy").references(() => users.id, { onDelete: "set null" }),
+  enrolledAt:   timestamp("enrolledAt").defaultNow().notNull(),
+  updatedAt:    timestamp("updatedAt").defaultNow().notNull(),
+}, (t) => ({
+  biometric_template_subject_idx: index("bt_subject_idx").on(t.subjectRef),
+  biometric_template_tenant_idx:  index("bt_tenant_idx").on(t.tenantId),
+  biometric_template_modality_idx:index("bt_modality_idx").on(t.modality),
+}));
+export type BiometricTemplate = typeof biometricTemplates.$inferSelect;
+export type InsertBiometricTemplate = typeof biometricTemplates.$inferInsert;
+
+// ── event_log ──────────────────────────────────────────────────────────────────
+export const eventLog = pgTable("event_log", {
+  id:          serial("id").primaryKey(),
+  eventType:   varchar("eventType", { length: 128 }).notNull(),
+  aggregateId: varchar("aggregateId", { length: 128 }),
+  tenantId:    integer("tenantId").references(() => tenants.id, { onDelete: "set null" }),
+  actorId:     integer("actorId").references(() => users.id, { onDelete: "set null" }),
+  payload:     json("payload"),
+  source:      varchar("source", { length: 64 }),
+  traceId:     varchar("traceId", { length: 64 }),
+  createdAt:   timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  event_log_type_idx:      index("el_type_idx").on(t.eventType),
+  event_log_aggregate_idx: index("el_aggregate_idx").on(t.aggregateId),
+  event_log_tenant_idx:    index("el_tenant_idx").on(t.tenantId),
+  event_log_created_idx:   index("el_created_idx").on(t.createdAt),
+}));
+export type EventLog = typeof eventLog.$inferSelect;
+export type InsertEventLog = typeof eventLog.$inferInsert;

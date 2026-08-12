@@ -1,0 +1,263 @@
+# BIS Nigerian Screening Platform — OpenAppsec WAF Policy
+# ─────────────────────────────────────────────────────────
+# Protects all screening API endpoints against:
+#   - SQL injection in NIN/BVN/name fields
+#   - XSS in candidate name/address fields
+#   - Path traversal in document upload endpoints
+#   - Credential stuffing on auth endpoints
+#   - Excessive data exposure (PII scrubbing in logs)
+#   - OWASP Top 10 (2021)
+#   - Nigerian-specific: BVN enumeration, NIN brute-force
+
+apiVersion: v1alpha1
+kind: OpenAppsecPolicy
+metadata:
+  name: bis-screening-waf
+  namespace: bis-platform
+  labels:
+    app: bis-pwa
+    environment: production
+
+spec:
+  # ─── Global Settings ──────────────────────────────────────────────────────
+  mode: prevent  # prevent | detect | inactive
+  log_level: warning
+  
+  # ─── Protected Assets ─────────────────────────────────────────────────────
+  assets:
+    - name: bis-pwa-api
+      urls:
+        - "/api/trpc/*"
+        - "/api/oauth/*"
+        - "/screen"
+        - "/batch"
+        - "/score"
+      methods: ["GET", "POST", "PUT", "DELETE", "PATCH"]
+
+    - name: bis-candidate-portal
+      urls:
+        - "/candidate/*"
+        - "/apply/*"
+        - "/consent/*"
+      methods: ["GET", "POST", "PUT"]
+
+    - name: bis-document-upload
+      urls:
+        - "/api/trpc/documents.*"
+        - "/upload/*"
+      methods: ["POST", "PUT"]
+
+  # ─── Threat Prevention Rules ──────────────────────────────────────────────
+  threat_prevention:
+    
+    # SQL Injection — critical for NIN/BVN/name parameters
+    sql_injection:
+      enabled: true
+      sensitivity: high
+      action: prevent
+      custom_signatures:
+        - name: "NIN field SQL injection"
+          pattern: "nin.*['\";]|['\";].*nin"
+          action: prevent
+        - name: "BVN field SQL injection"
+          pattern: "bvn.*['\";]|['\";].*bvn"
+          action: prevent
+
+    # XSS — protect candidate name/address rendering
+    xss:
+      enabled: true
+      sensitivity: high
+      action: prevent
+      # Allow rich text in candidate story fields (sanitize, don't block)
+      exceptions:
+        - url_pattern: "/api/trpc/ngScreening.candidateStory*"
+          action: sanitize
+
+    # Path Traversal — protect document storage
+    path_traversal:
+      enabled: true
+      action: prevent
+      patterns:
+        - "../"
+        - "..%2F"
+        - "..%5C"
+        - "%2e%2e%2f"
+
+    # Remote File Inclusion
+    rfi:
+      enabled: true
+      action: prevent
+
+    # Local File Inclusion
+    lfi:
+      enabled: true
+      action: prevent
+
+    # Command Injection
+    command_injection:
+      enabled: true
+      action: prevent
+
+    # SSRF — prevent internal network probing via webhook URLs
+    ssrf:
+      enabled: true
+      action: prevent
+      blocked_destinations:
+        - "169.254.169.254"  # AWS metadata
+        - "10.0.0.0/8"
+        - "172.16.0.0/12"
+        - "192.168.0.0/16"
+        - "127.0.0.0/8"
+        - "::1"
+
+  # ─── Rate Limiting (WAF layer — complements APISIX plugin) ────────────────
+  rate_limiting:
+    
+    - name: "NIN verification brute-force protection"
+      url_pattern: "/api/trpc/ngScreening.ninTrace*"
+      limit: 10
+      window: 60  # seconds
+      key: "ip"
+      action: block
+      block_duration: 300  # 5 min block after limit exceeded
+
+    - name: "BVN verification brute-force protection"
+      url_pattern: "/api/trpc/ngScreening.bvnVerify*"
+      limit: 10
+      window: 60
+      key: "ip"
+      action: block
+      block_duration: 300
+
+    - name: "Auth endpoint protection"
+      url_pattern: "/api/oauth/*"
+      limit: 20
+      window: 60
+      key: "ip"
+      action: block
+      block_duration: 600  # 10 min block
+
+    - name: "Candidate apply endpoint"
+      url_pattern: "/apply/*"
+      limit: 30
+      window: 60
+      key: "ip"
+      action: throttle
+
+  # ─── PII Protection (NDPR Compliance) ────────────────────────────────────
+  pii_protection:
+    enabled: true
+    # Mask PII in WAF logs (not in request body — only in log output)
+    mask_patterns:
+      - name: "Nigerian NIN"
+        pattern: "\\b[0-9]{11}\\b"
+        replacement: "NIN-REDACTED"
+        fields: ["request_body", "response_body", "uri"]
+      
+      - name: "Nigerian BVN"
+        pattern: "\\b[0-9]{11}\\b"
+        replacement: "BVN-REDACTED"
+        fields: ["request_body", "response_body"]
+      
+      - name: "Nigerian Phone"
+        pattern: "\\b(\\+234|0)[0-9]{10}\\b"
+        replacement: "PHONE-REDACTED"
+        fields: ["request_body", "response_body"]
+      
+      - name: "Email addresses"
+        pattern: "[a-zA-Z0-9._%+\\-]+@[a-zA-Z0-9.\\-]+\\.[a-zA-Z]{2,}"
+        replacement: "EMAIL-REDACTED"
+        fields: ["request_body", "response_body"]
+
+  # ─── Bot Protection ───────────────────────────────────────────────────────
+  bot_protection:
+    enabled: true
+    
+    known_bots:
+      search_engines: allow  # Google, Bing, etc.
+      monitoring: allow      # UptimeRobot, Pingdom
+      malicious: block       # Known scrapers, credential stuffers
+    
+    behavioral_detection:
+      enabled: true
+      # Detect automated NIN/BVN enumeration
+      anomaly_threshold: 0.85
+      actions:
+        low_risk: log
+        medium_risk: challenge
+        high_risk: block
+
+  # ─── Geo-Restriction ──────────────────────────────────────────────────────
+  geo_restriction:
+    # Allow Nigerian IPs and known diaspora locations
+    # Block high-risk countries for financial crime
+    mode: allowlist
+    allowed_countries:
+      - "NG"  # Nigeria
+      - "GB"  # UK (diaspora)
+      - "US"  # USA (diaspora)
+      - "CA"  # Canada (diaspora)
+      - "GH"  # Ghana (regional)
+      - "KE"  # Kenya (regional)
+      - "ZA"  # South Africa (regional)
+    
+    # Exceptions: allow all for monitoring/health endpoints
+    exceptions:
+      - url_pattern: "/health"
+        action: allow_all
+      - url_pattern: "/metrics"
+        action: allow_all
+
+  # ─── Custom Signatures ────────────────────────────────────────────────────
+  custom_signatures:
+    
+    - name: "EFCC watchlist enumeration"
+      description: "Detect systematic EFCC watchlist enumeration"
+      pattern: "efcc.*search.*[0-9]{3,}"
+      action: log_and_alert
+      severity: high
+
+    - name: "Bulk candidate data extraction"
+      description: "Detect bulk export attempts"
+      pattern: "limit.*[0-9]{4,}|offset.*[0-9]{5,}"
+      action: block
+      severity: critical
+
+    - name: "Adverse action bypass attempt"
+      description: "Detect attempts to skip adverse action workflow"
+      pattern: "skipAdverse|bypass.*adverse|force.*clear"
+      action: block
+      severity: critical
+
+  # ─── Response Inspection ─────────────────────────────────────────────────
+  response_inspection:
+    enabled: true
+    # Block responses that accidentally leak PII in error messages
+    block_patterns:
+      - "nin.*[0-9]{11}"
+      - "bvn.*[0-9]{11}"
+      - "password.*:"
+      - "secret.*:"
+      - "DATABASE_URL"
+      - "JWT_SECRET"
+
+  # ─── Logging & Alerting ───────────────────────────────────────────────────
+  logging:
+    format: json
+    include_request_body: false  # Never log request bodies (NDPR)
+    include_response_body: false
+    include_headers:
+      - "X-Tenant-ID"
+      - "X-Request-ID"
+      - "X-Forwarded-For"
+    
+    alerts:
+      - name: "Critical screening attack"
+        conditions:
+          - severity: critical
+          - action: block
+        channels:
+          - type: webhook
+            url: "${SLACK_WEBHOOK_URL}"
+          - type: email
+            to: "security@bis.ng"

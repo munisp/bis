@@ -466,7 +466,7 @@ export default function SystemHealthDashboard() {
                     ))}
                   </div>
                   <p className="text-xs text-slate-500 mt-3">
-                    Configured = credentials present in environment. Not set = sandbox fallback active.
+                    Configured = credentials present in environment. Not set = dependent checks are unavailable and return explicit errors.
                   </p>
                 </CardContent>
               </Card>

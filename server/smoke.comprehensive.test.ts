@@ -79,17 +79,17 @@ describe("Keycloak — Authentication & SSO", () => {
 describe("Permify — Policy-Based Access Control", () => {
   beforeEach(() => { vi.resetModules(); });
 
-  it("permifyCheck fails-open when PERMIFY_URL is not set", async () => {
+  it("permifyCheck denies when PERMIFY_URL is not set", async () => {
     delete process.env.PERMIFY_URL;
     const { permifyCheck } = await import("./permify");
-    expect(await permifyCheck("investigation", "inv-001", "read", "user-1")).toBe(true);
+    await expect(permifyCheck("investigation", "inv-001", "read", "user-1")).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
-  it("permifyCheck fails-open when Permify is unreachable", async () => {
+  it("permifyCheck denies when Permify is unreachable", async () => {
     process.env.PERMIFY_URL = "http://permify:3476";
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("ECONNREFUSED")));
     const { permifyCheck } = await import("./permify");
-    expect(await permifyCheck("case", "case-001", "close", "user-1")).toBe(true);
+    await expect(permifyCheck("case", "case-001", "close", "user-1")).rejects.toMatchObject({ code: "FORBIDDEN" });
     vi.unstubAllGlobals();
   });
 

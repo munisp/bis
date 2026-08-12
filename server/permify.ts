@@ -2,7 +2,7 @@
  * server/permify.ts
  * Permify fine-grained authorization helper for the BIS tRPC BFF.
  * Calls the Permify REST API to check permissions before executing procedures.
- * When PERMIFY_URL is not configured the helper fails-open (returns true).
+ * Authorization is denied whenever Permify is unconfigured or unavailable.
  */
 
 import { TRPCError } from "@trpc/server";
@@ -32,9 +32,7 @@ interface RelationshipTuple {
 
 /**
  * Check whether a user has a permission on an entity.
- * Fails-CLOSED when Permify is unavailable: throws FORBIDDEN to prevent privilege escalation.
- * When PERMIFY_URL is not configured (dev/test env), the check is bypassed (returns true).
- * In production, PERMIFY_URL must be set; any connectivity failure throws FORBIDDEN.
+ * Fails-CLOSED when Permify is unconfigured or unavailable to prevent privilege escalation.
  */
 export async function permifyCheck(
   entityType: string,
@@ -46,9 +44,12 @@ export async function permifyCheck(
   const PERMIFY_TENANT = getPermifyTenant();
   const PERMIFY_API_KEY = getPermifyApiKey();
 
-  // If Permify is not configured at all (local dev / test), bypass the check (fail-open).
-  // In production PERMIFY_URL must be set — enforced by validateEnv().
-  if (!PERMIFY_URL) return true;
+  if (!PERMIFY_URL) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "Authorization service is not configured — access denied",
+    });
+  }
 
   const body: CheckRequest = {
     metadata: { depth: 20 },
@@ -84,18 +85,11 @@ export async function permifyCheck(
     return data.can === "RESULT_ALLOWED";
   } catch (err) {
     if (err instanceof TRPCError) throw err;
-    // Network / timeout error — fail OPEN (test/dev) or CLOSED (production)
-    const isProduction = process.env.NODE_ENV === "production";
-    if (isProduction) {
-      console.error("[Permify] check error — denying access (fail-closed):", err);
-      throw new TRPCError({
-        code: "FORBIDDEN",
-        message: "Authorization service unavailable — access denied",
-      });
-    }
-    // In dev/test: fail-open so tests don't need a running Permify instance
-    console.error("[Permify] check error — fail-open in non-production:", err);
-    return true;
+    console.error("[Permify] check error — denying access (fail-closed):", err);
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "Authorization service unavailable — access denied",
+    });
   }
 }
 

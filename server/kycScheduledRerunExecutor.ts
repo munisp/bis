@@ -173,19 +173,51 @@ export async function runPendingKycReruns(): Promise<{ processed: number; failed
       const pep = pepResult.status === "fulfilled" ? pepResult.value : null;
       const credit = creditResult.status === "fulfilled" ? creditResult.value : null;
 
+      const unavailableProviders = [
+        rerun.nin && ninResult.status === "rejected" ? "NIN" : null,
+        rerun.bvn && bvnResult.status === "rejected" ? "BVN" : null,
+        sanctionsResult.status === "rejected" ? "sanctions" : null,
+        pepResult.status === "rejected" ? "PEP" : null,
+        rerun.bvn && creditResult.status === "rejected" ? "credit" : null,
+      ].filter((provider): provider is string => Boolean(provider));
+      if (unavailableProviders.length > 0) {
+        await db.update(kycRecords).set({
+          status: "review",
+          ninResult: nin as any,
+          bvnResult: bvn as any,
+          sanctionsResult: sanctions as any,
+          pepResult: pep as any,
+          creditResult: credit as any,
+        }).where(eq(kycRecords.id, record!.id));
+        throw new Error(`KYC re-run provider unavailable: ${unavailableProviders.join(", ")}`);
+      }
+
       // Score via risk engine
-      const scoreResult = await riskEngineFetch("/v1/score", {
-        subject_id: rerun.subjectName,
-        identity: {
-          nin_verified: !!nin?.status,
-          bvn_verified: !!bvn?.bvn,
-          nin_match_score: nin?.matchScore ?? 0,
-          bvn_match_score: bvn?.matchScore ?? 0,
-        },
-        sanctions: { ofac_hit: !sanctions?.clear, bvn_watchlisted: bvn?.watchlisted ?? false },
-        pep: { is_pep: pep?.isPEP ?? false },
-        credit: { credit_score: credit?.score ?? 700, defaults: credit?.defaults ?? 0 },
-      }).catch(() => ({ composite_score: 50, risk_tier: "medium" }));
+      let scoreResult: { composite_score: number; risk_tier: string };
+      try {
+        scoreResult = await riskEngineFetch("/v1/score", {
+          subject_id: rerun.subjectName,
+          identity: {
+            nin_verified: !!nin?.status,
+            bvn_verified: !!bvn?.bvn,
+            nin_match_score: nin?.matchScore ?? 0,
+            bvn_match_score: bvn?.matchScore ?? 0,
+          },
+          sanctions: { ofac_hit: !sanctions?.clear, bvn_watchlisted: bvn?.watchlisted ?? false },
+          pep: { is_pep: pep?.isPEP ?? false },
+          credit: { credit_score: credit?.score ?? 700, defaults: credit?.defaults ?? 0 },
+        });
+      } catch {
+        await db.update(kycRecords).set({
+          status: "review",
+          ninResult: nin as any,
+          bvnResult: bvn as any,
+          sanctionsResult: sanctions as any,
+          pepResult: pep as any,
+          creditResult: credit as any,
+        }).where(eq(kycRecords.id, record!.id));
+        throw new Error("KYC re-run risk scoring is unavailable");
+      }
 
       const status =
         scoreResult.risk_tier === "critical"

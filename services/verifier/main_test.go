@@ -5,16 +5,21 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 
 	"bis/verifier/internal"
 )
 
-func setupTestServer() *http.ServeMux {
-	os.Setenv("GATEWAY_SANDBOX", "true")
+func setupTestServer(t *testing.T) *http.ServeMux {
+	t.Helper()
 	cfg := internal.ConfigFromEnv()
-	cfg.SandboxMode = true
+	// Every provider is deliberately absent for these fail-closed tests.
+	cfg.SandboxMode = false
+	cfg.NIMCUrl = ""
+	cfg.NIBSSUrl = ""
+	cfg.CACUrl = ""
+	cfg.OFACUrl = ""
+	cfg.YouverifyAPIKey = ""
 	eng := internal.NewEngine(cfg)
 
 	mux := http.NewServeMux()
@@ -26,26 +31,36 @@ func setupTestServer() *http.ServeMux {
 	return mux
 }
 
-func TestHealthEndpoint(t *testing.T) {
-	mux := setupTestServer()
-	req := httptest.NewRequest("GET", "/health", nil)
+func withVerifierKey(t *testing.T) {
+	t.Helper()
+	previous := verifierKey
+	verifierKey = "test-key"
+	t.Cleanup(func() { verifierKey = previous })
+}
+
+func TestHealthEndpointReportsSyntheticResponsesDisabled(t *testing.T) {
+	mux := setupTestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
 	var resp map[string]any
-	json.NewDecoder(w.Body).Decode(&resp)
-	if resp["status"] != "ok" {
-		t.Errorf("expected status=ok, got %v", resp["status"])
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp["sandbox"] != false {
+		t.Fatalf("expected synthetic responses disabled, got sandbox=%v", resp["sandbox"])
 	}
 }
 
-func TestNINEndpointRequiresAuth(t *testing.T) {
-	mux := setupTestServer()
-	body := bytes.NewBufferString(`{"nin":"12345678901"}`)
-	req := httptest.NewRequest("POST", "/v1/nin", body)
-	req.Header.Set("Content-Type", "application/json")
+func TestVerificationEndpointsRequireAuthentication(t *testing.T) {
+	mux := setupTestServer(t)
+	previous := verifierKey
+	verifierKey = "test-key"
+	t.Cleanup(func() { verifierKey = previous })
+	req := httptest.NewRequest(http.MethodPost, "/v1/nin", bytes.NewBufferString(`{"nin":"12345678901"}`))
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	if w.Code != http.StatusUnauthorized {
@@ -53,93 +68,29 @@ func TestNINEndpointRequiresAuth(t *testing.T) {
 	}
 }
 
-func TestNINEndpointSandbox(t *testing.T) {
-	os.Setenv("BIS_VERIFIER_KEY", "test-key")
-	verifierKey = "test-key"
-	defer func() { verifierKey = envOr("BIS_VERIFIER_KEY", "dev-verifier-key-change-in-prod") }()
-
-	mux := setupTestServer()
-	body := bytes.NewBufferString(`{"nin":"12345678901"}`)
-	req := httptest.NewRequest("POST", "/v1/nin", body)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-BIS-Key", "test-key")
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+func TestVerificationEndpointsRejectSyntheticFallbacks(t *testing.T) {
+	withVerifierKey(t)
+	mux := setupTestServer(t)
+	cases := []struct {
+		name string
+		path string
+		body string
+	}{
+		{name: "NIN", path: "/v1/nin", body: `{"nin":"12345678901"}`},
+		{name: "BVN", path: "/v1/bvn", body: `{"bvn":"22345678901"}`},
+		{name: "CAC", path: "/v1/cac", body: `{"rc":"RC123456"}`},
+		{name: "sanctions", path: "/v1/sanctions", body: `{"name":"John Smith"}`},
 	}
-	var resp map[string]any
-	json.NewDecoder(w.Body).Decode(&resp)
-	if resp["sandbox"] != true {
-		t.Errorf("expected sandbox=true, got %v", resp["sandbox"])
-	}
-	if resp["nin"] != "12345678901" {
-		t.Errorf("expected nin=12345678901, got %v", resp["nin"])
-	}
-}
-
-func TestBVNEndpointSandbox(t *testing.T) {
-	os.Setenv("BIS_VERIFIER_KEY", "test-key")
-	verifierKey = "test-key"
-	defer func() { verifierKey = envOr("BIS_VERIFIER_KEY", "dev-verifier-key-change-in-prod") }()
-
-	mux := setupTestServer()
-	body := bytes.NewBufferString(`{"bvn":"22345678901"}`)
-	req := httptest.NewRequest("POST", "/v1/bvn", body)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-BIS-Key", "test-key")
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-	var resp map[string]any
-	json.NewDecoder(w.Body).Decode(&resp)
-	if resp["sandbox"] != true {
-		t.Errorf("expected sandbox=true, got %v", resp["sandbox"])
-	}
-}
-
-func TestSanctionsEndpointSandboxHit(t *testing.T) {
-	os.Setenv("BIS_VERIFIER_KEY", "test-key")
-	verifierKey = "test-key"
-	defer func() { verifierKey = envOr("BIS_VERIFIER_KEY", "dev-verifier-key-change-in-prod") }()
-
-	mux := setupTestServer()
-	body := bytes.NewBufferString(`{"name":"SANCTIONED ENTITY"}`)
-	req := httptest.NewRequest("POST", "/v1/sanctions", body)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-BIS-Key", "test-key")
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-	var resp map[string]any
-	json.NewDecoder(w.Body).Decode(&resp)
-	if resp["clear"] != false {
-		t.Errorf("expected clear=false for sanctioned entity, got %v", resp["clear"])
-	}
-}
-
-func TestSanctionsEndpointSandboxClear(t *testing.T) {
-	os.Setenv("BIS_VERIFIER_KEY", "test-key")
-	verifierKey = "test-key"
-	defer func() { verifierKey = envOr("BIS_VERIFIER_KEY", "dev-verifier-key-change-in-prod") }()
-
-	mux := setupTestServer()
-	body := bytes.NewBufferString(`{"name":"John Smith"}`)
-	req := httptest.NewRequest("POST", "/v1/sanctions", body)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-BIS-Key", "test-key")
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-	var resp map[string]any
-	json.NewDecoder(w.Body).Decode(&resp)
-	if resp["clear"] != true {
-		t.Errorf("expected clear=true for clean name, got %v", resp["clear"])
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, tc.path, bytes.NewBufferString(tc.body))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("X-BIS-Key", "test-key")
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, req)
+			if w.Code != http.StatusBadGateway {
+				t.Fatalf("expected 502 when no provider is configured, got %d: %s", w.Code, w.Body.String())
+			}
+		})
 	}
 }

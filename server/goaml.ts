@@ -15,7 +15,7 @@ import { startGoAmlFilingWorkflow } from "./temporal";
 
 /**
  * Submit an XML filing to the NFIU goAML production API.
- * Falls back to a simulated reference number if GOAML_API_KEY is not configured.
+ * Returns an explicit filing failure if NFIU credentials are unavailable.
  *
  * goAML API docs: https://goaml.nfiu.gov.ng/api/docs
  * Endpoint: POST /api/report
@@ -24,11 +24,13 @@ import { startGoAmlFilingWorkflow } from "./temporal";
  * Response: { referenceNumber: string, status: "accepted" | "rejected", errors?: string[] }
  */
 async function submitToNfiu(xmlPayload: string): Promise<{ referenceNumber: string; accepted: boolean; errors: string[] }> {
-  // If API key not configured, use simulated reference (dev/staging mode)
+  // A compliance filing must never be represented as accepted without NFIU.
   if (!ENV.goamlApiKey || !ENV.goamlInstitutionCode) {
-    const simulatedRef = `NFIU-${Date.now().toString(36).toUpperCase()}`;
-    console.warn(`[goAML] GOAML_API_KEY not set — using simulated reference: ${simulatedRef}`);
-    return { referenceNumber: simulatedRef, accepted: true, errors: [] };
+    return {
+      referenceNumber: "",
+      accepted: false,
+      errors: ["NFIU goAML is not configured; the filing was not submitted."],
+    };
   }
 
   const url = `${ENV.goamlApiUrl}/report`;
@@ -51,10 +53,11 @@ async function submitToNfiu(xmlPayload: string): Promise<{ referenceNumber: stri
     }
 
     const json = await res.json() as { referenceNumber?: string; status?: string; errors?: string[] };
+    const accepted = json.status === "accepted" && Boolean(json.referenceNumber);
     return {
-      referenceNumber: json.referenceNumber ?? `NFIU-${Date.now().toString(36).toUpperCase()}`,
-      accepted: json.status === "accepted",
-      errors: json.errors ?? [],
+      referenceNumber: json.referenceNumber ?? "",
+      accepted,
+      errors: accepted ? (json.errors ?? []) : (json.errors ?? ["NFIU did not return an accepted filing reference."]),
     };
   } catch (err: any) {
     return { referenceNumber: "", accepted: false, errors: [`Network error: ${err.message}`] };

@@ -285,13 +285,11 @@ export default function BiometricCaptureModal({
             onSuccess: (result) => {
               setLivenessScore(result.score ?? 0);
               setIsSandbox(result.sandbox ?? false);
-              if (result.sandbox) {
-                // Sandbox fallback — treat as passed
-                setStage("passive_done");
-                setTimeout(() => startActiveCapture(frame), 800);
-              } else if (!result.passed) {
+              if (result.sandbox || !result.passed) {
                 setError(
-                  `Passive liveness failed (score: ${((result.score ?? 0) * 100).toFixed(0)}%). Please ensure your face is clearly visible and try again.`
+                  result.sandbox
+                    ? "Biometric verification returned a non-authoritative result. Please retry when the verification service is available."
+                    : `Passive liveness failed (score: ${((result.score ?? 0) * 100).toFixed(0)}%). Please ensure your face is clearly visible and try again.`
                 );
                 setStage("failed");
               } else {
@@ -328,12 +326,14 @@ export default function BiometricCaptureModal({
           checkActiveLiveness.mutate(
             { frames, challenge, subjectRef },
             {
-              onSuccess: (result) => {
-                setActiveLivenessScore(result.score ?? 0);
-                if (!result.sandbox && !result.passed) {
-                  setError(
-                    `Active liveness failed. Challenge: "${CHALLENGE_LABELS[challenge]}". Please try again.`
-                  );
+            onSuccess: (result) => {
+              setActiveLivenessScore(result.score ?? 0);
+              if (result.sandbox || !result.passed) {
+                setError(
+                  result.sandbox
+                    ? "Biometric verification returned a non-authoritative result. Please retry when the verification service is available."
+                    : `Active liveness failed. Challenge: "${CHALLENGE_LABELS[challenge]}". Please try again.`
+                );
                   setStage("failed");
                 } else {
                   setStage("active_done");
@@ -366,7 +366,12 @@ export default function BiometricCaptureModal({
             setAntiSpoofScore(result.score ?? 0);
             setSpoofType(result.spoof_type ?? "genuine");
             setLastSessionId((result as any).sessionId);
-            if (!result.sandbox && !result.genuine) {
+            if (result.sandbox || !result.genuine) {
+              if (result.sandbox) {
+                setError("Anti-spoofing verification is unavailable because the biometric engine did not return an authoritative result.");
+                setStage("failed");
+                return;
+              }
               const spoofLabel =
                 ({
                   printed_photo: "Printed Photo",

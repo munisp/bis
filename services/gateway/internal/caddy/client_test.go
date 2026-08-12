@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap/zaptest"
 
-	"github.com/munisp/bis/services/gateway/internal/caddy"
+	"bis/gateway/internal/caddy"
 )
 
 // mockCaddyServer creates a test HTTP server simulating the Caddy Admin API.

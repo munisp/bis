@@ -13,9 +13,8 @@
 //   - OFAC/UN:       GET  https://api.ofac.treasury.gov/v1/search (env: OFAC_API_URL, OFAC_API_KEY)
 //   - CRC Credit:    POST https://api.creditreg.ng/v1/score       (env: CRC_API_URL, CRC_API_KEY)
 //
-// When an external API key is not configured, the gateway falls back to a
-// deterministic sandbox response (clearly flagged in the response as "sandbox: true").
-// This ensures the service is fully functional in development without real credentials.
+// An external provider must return an authoritative response before this gateway
+// reports an identity, compliance, credit, or biometric outcome.
 
 package main
 
@@ -26,7 +25,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math/rand"
 	"net/http"
 	"os"
 	"strings"
@@ -52,7 +50,7 @@ var (
 	riskEngineURL = envOr("RISK_ENGINE_URL", "http://localhost:8082")
 	eventProcURL  = envOr("EVENT_PROCESSOR_URL", "http://localhost:8083")
 
-	// External API credentials — empty = sandbox mode
+		// External API credentials — empty means the dependent route is unavailable.
 	nimcAPIURL  = envOr("NIMC_API_URL", "")
 	nimcAPIKey  = envOr("NIMC_API_KEY", "")
 	nibssAPIURL = envOr("NIBSS_API_URL", "")
@@ -325,8 +323,12 @@ func writeError(w http.ResponseWriter, status int, code, msg string) {
 	writeJSON(w, status, GatewayError{Code: code, Message: msg})
 }
 
-func now() string {
-	return time.Now().UTC().Format(time.RFC3339)
+func now() string { return time.Now().UTC().Format(time.RFC3339) }
+
+// operationRef creates an opaque local correlation identifier. It is never used
+// to synthesize identity, compliance, or screening outcomes.
+func operationRef(prefix string) string {
+	return fmt.Sprintf("%s-%d", prefix, time.Now().UTC().UnixNano())
 }
 
 // cacheGet retrieves a cached value from Redis. Returns nil if Redis is not configured or key missing.
@@ -406,75 +408,6 @@ func proxyExternalAPI(method, url, apiKey string, reqBody any) ([]byte, error) {
 	return body, nil
 }
 
-// ─── Sandbox data helpers ─────────────────────────────────────────────────────
-
-var nigerianStates = []string{
-	"Lagos", "Abuja", "Kano", "Rivers", "Oyo", "Delta", "Anambra",
-	"Kaduna", "Enugu", "Ogun", "Imo", "Borno", "Edo", "Kwara", "Plateau",
-}
-
-var nigerianFirstNames = []string{
-	"ADEBAYO", "NGOZI", "EMEKA", "FATIMA", "CHIOMA", "IBRAHIM", "AISHA",
-	"OLUWASEUN", "KELECHI", "AMINA", "TUNDE", "BLESSING", "UCHE", "HALIMA",
-}
-
-var nigerianLastNames = []string{
-	"OKAFOR", "IBRAHIM", "NWOSU", "ADEYEMI", "BELLO", "EZE", "JOHNSON",
-	"ABUBAKAR", "OKONKWO", "WILLIAMS", "MUSA", "OSEI", "DIKE", "LAWAL",
-}
-
-var banks = []string{
-	"Access Bank", "GTBank", "First Bank", "Zenith Bank", "UBA",
-	"Fidelity Bank", "Union Bank", "Stanbic IBTC", "Wema Bank", "Polaris Bank",
-}
-
-func deterministicRNG(seed string) *rand.Rand {
-	s := int64(0)
-	for _, c := range seed {
-		s += int64(c)
-	}
-	return rand.New(rand.NewSource(s))
-}
-
-func sandboxNIN(nin string) NINResult {
-	rng := deterministicRNG(nin)
-	state := nigerianStates[rng.Intn(len(nigerianStates))]
-	return NINResult{
-		NIN:        nin,
-		FirstName:  nigerianFirstNames[rng.Intn(len(nigerianFirstNames))],
-		LastName:   nigerianLastNames[rng.Intn(len(nigerianLastNames))],
-		MiddleName: nigerianFirstNames[rng.Intn(len(nigerianFirstNames))],
-		DOB:        fmt.Sprintf("%d-%02d-%02d", 1970+rng.Intn(35), 1+rng.Intn(12), 1+rng.Intn(28)),
-		Gender:     []string{"MALE", "FEMALE"}[rng.Intn(2)],
-		Phone:      fmt.Sprintf("0%d%07d", 803+rng.Intn(10), rng.Intn(9999999)),
-		State:      state,
-		LGA:        "Ikeja",
-		Address:    fmt.Sprintf("%d Adeola Odeku Street, %s", 10+rng.Intn(90), state),
-		Status:     "VERIFIED",
-		MatchScore: 0.92 + rng.Float64()*0.08,
-		VerifiedAt: now(),
-		Sandbox:    true,
-	}
-}
-
-func sandboxBVN(bvn string) BVNResult {
-	rng := deterministicRNG(bvn)
-	return BVNResult{
-		BVN:         bvn,
-		FirstName:   nigerianFirstNames[rng.Intn(len(nigerianFirstNames))],
-		LastName:    nigerianLastNames[rng.Intn(len(nigerianLastNames))],
-		MiddleName:  nigerianFirstNames[rng.Intn(len(nigerianFirstNames))],
-		DOB:         fmt.Sprintf("%d-%02d-%02d", 1975+rng.Intn(30), 1+rng.Intn(12), 1+rng.Intn(28)),
-		Phone:       fmt.Sprintf("0%d%07d", 812+rng.Intn(10), rng.Intn(9999999)),
-		Bank:        banks[rng.Intn(len(banks))],
-		AccountNo:   fmt.Sprintf("%010d", rng.Intn(9999999999)),
-		Watchlisted: rng.Float64() < 0.04,
-		MatchScore:  0.93 + rng.Float64()*0.07,
-		VerifiedAt:  now(),
-		Sandbox:     true,
-	}
-}
-
 // ─── Handlers ────────────────────────────────────────────────────────────────
 
 // GET /v1/nin/:nin — NIMC NIN lookup
@@ -501,8 +434,12 @@ func handleNINLookup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// BIS Verification Engine: own engine → Youverify → sandbox
+	// BIS Verification Engine: own engine → Youverify → explicit unavailable result.
 	vr := verifyEngine.LookupNIN(r.Context(), nin)
+	if vr.Source == "unavailable" {
+		writeError(w, http.StatusServiceUnavailable, "NIN_PROVIDER_UNAVAILABLE", vr.Error)
+		return
+	}
 	result := NINResult{
 		NIN:        vr.NIN,
 		FirstName:  vr.FirstName,
@@ -557,8 +494,12 @@ func handleBVNLookup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// BIS Verification Engine: own engine → Youverify → sandbox
+	// BIS Verification Engine: own engine → Youverify → explicit unavailable result.
 	vr := verifyEngine.LookupBVN(r.Context(), bvn)
+	if vr.Source == "unavailable" {
+		writeError(w, http.StatusServiceUnavailable, "BVN_PROVIDER_UNAVAILABLE", vr.Error)
+		return
+	}
 	result := BVNResult{
 		BVN:        vr.BVN,
 		FirstName:  vr.FirstName,
@@ -603,8 +544,12 @@ func handleCACLookup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// BIS Verification Engine: own engine → Youverify → sandbox
+	// BIS Verification Engine: own engine → Youverify → explicit unavailable result.
 	vr := verifyEngine.LookupCAC(r.Context(), rc)
+	if vr.Source == "unavailable" {
+		writeError(w, http.StatusServiceUnavailable, "CAC_PROVIDER_UNAVAILABLE", vr.Error)
+		return
+	}
 	result := CACResult{
 		RCNumber:    vr.RCNumber,
 		CompanyName: vr.CompanyName,
@@ -631,23 +576,6 @@ func handleCACLookup(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
-func sandboxCAC(rc string) CACResult {
-	rng := deterministicRNG(rc)
-	companyTypes := []string{"Private Limited Company", "Public Limited Company", "Business Name", "Incorporated Trustee"}
-	return CACResult{
-		RCNumber:     rc,
-		CompanyName:  fmt.Sprintf("%s %s LIMITED", nigerianLastNames[rng.Intn(len(nigerianLastNames))], []string{"TECH", "VENTURES", "SOLUTIONS", "ENTERPRISES", "GLOBAL"}[rng.Intn(5)]),
-		Status:       []string{"ACTIVE", "ACTIVE", "ACTIVE", "INACTIVE", "STRUCK_OFF"}[rng.Intn(5)],
-		Type:         companyTypes[rng.Intn(len(companyTypes))],
-		DateReg:      fmt.Sprintf("%d-%02d-%02d", 2000+rng.Intn(24), 1+rng.Intn(12), 1+rng.Intn(28)),
-		Address:      fmt.Sprintf("Plot %d, %s Road, Lagos", rng.Intn(100), nigerianStates[rng.Intn(len(nigerianStates))]),
-		Directors:    []string{nigerianFirstNames[rng.Intn(len(nigerianFirstNames))] + " " + nigerianLastNames[rng.Intn(len(nigerianLastNames))], nigerianFirstNames[rng.Intn(len(nigerianFirstNames))] + " " + nigerianLastNames[rng.Intn(len(nigerianLastNames))]},
-		Shareholders: []string{nigerianFirstNames[rng.Intn(len(nigerianFirstNames))] + " " + nigerianLastNames[rng.Intn(len(nigerianLastNames))] + " (60%)", nigerianFirstNames[rng.Intn(len(nigerianFirstNames))] + " " + nigerianLastNames[rng.Intn(len(nigerianLastNames))] + " (40%)"},
-		VerifiedAt:   now(),
-		Sandbox:      true,
-	}
-}
-
 // GET /v1/sanctions/:name — OFAC + UN + INTERPOL sanctions screening
 func handleSanctionsCheck(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimPrefix(r.URL.Path, "/v1/sanctions/")
@@ -666,8 +594,12 @@ func handleSanctionsCheck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// BIS Verification Engine: own engine → Youverify → sandbox
+	// BIS Verification Engine: own engine → Youverify → explicit unavailable result.
 	vr := verifyEngine.CheckSanctions(r.Context(), name)
+	if vr.Source == "unavailable" {
+		writeError(w, http.StatusServiceUnavailable, "SANCTIONS_PROVIDER_UNAVAILABLE", vr.Error)
+		return
+	}
 	// Map verify.SanctionsResult → gateway SanctionsResult
 	hits := make([]SanctionHit, 0, len(vr.Hits))
 	for _, h := range vr.Hits {
@@ -704,78 +636,9 @@ func handleSanctionsCheck(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
-func sandboxSanctions(name string) SanctionsResult {
-	rng := deterministicRNG(name)
-	hits := []SanctionHit{}
-	clear := true
-	// ~3% hit rate in sandbox
-	if rng.Float64() < 0.03 {
-		clear = false
-		hits = append(hits, SanctionHit{
-			List:       []string{"OFAC SDN", "UN Security Council", "EU Consolidated"}[rng.Intn(3)],
-			Name:       strings.ToUpper(name),
-			Score:      0.85 + rng.Float64()*0.15,
-			EntityType: []string{"Individual", "Entity"}[rng.Intn(2)],
-			Programs:   []string{"SDGT", "CYBER2"},
-			Reason:     "Designated for involvement in financial crime",
-		})
-	}
-	return SanctionsResult{
-		Queried:   name,
-		Hits:      hits,
-		Clear:     clear,
-		CheckedAt: now(),
-		Sandbox:   true,
-	}
-}
-
 // GET /v1/pep/:name — PEP screening
 func handlePEPCheck(w http.ResponseWriter, r *http.Request) {
-	name := strings.TrimPrefix(r.URL.Path, "/v1/pep/")
-	name = strings.ReplaceAll(name, "%20", " ")
-
-	cacheKey := "pep:" + strings.ToUpper(name)
-	if cached := cacheGet(r.Context(), cacheKey); cached != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("X-Cache", "HIT")
-		w.WriteHeader(http.StatusOK)
-		w.Write(cached)
-		return
-	}
-
-	rng := deterministicRNG(name)
-	isPEP := rng.Float64() < 0.08 // ~8% PEP rate
-	roles := []string{}
-	party := ""
-	if isPEP {
-		roles = []string{
-			[]string{"Senator", "Governor", "Minister", "House of Representatives Member", "Local Government Chairman"}[rng.Intn(5)],
-		}
-		party = []string{"APC", "PDP", "LP", "NNPP"}[rng.Intn(4)]
-	}
-
-	result := PEPResult{
-		Queried:   name,
-		IsPEP:     isPEP,
-		Roles:     roles,
-		Party:     party,
-		Country:   "Nigeria",
-		CheckedAt: now(),
-		Sandbox:   true,
-	}
-
-	if data, err := json.Marshal(result); err == nil {
-		cacheSet(r.Context(), cacheKey, data, 6*time.Hour)
-	}
-
-	publishEvent("bis.gateway.pep_check", map[string]any{
-		"name":      name,
-		"isPEP":     isPEP,
-		"sandbox":   true,
-		"timestamp": now(),
-	})
-
-	writeJSON(w, http.StatusOK, result)
+	writeError(w, http.StatusServiceUnavailable, "PEP_PROVIDER_UNAVAILABLE", "No live PEP provider is configured; no PEP decision was generated.")
 }
 
 // GET /v1/credit/:bvn — Credit bureau check
@@ -796,16 +659,17 @@ func handleCreditCheck(w http.ResponseWriter, r *http.Request) {
 	if crcAPIURL != "" && crcAPIKey != "" {
 		body, err := proxyExternalAPI("POST", crcAPIURL+"/score", crcAPIKey, map[string]string{"bvn": bvn})
 		if err != nil {
-			log.Printf("[WARN] CRC API error for BVN %s: %v — falling back to sandbox", bvn, err)
-			result = sandboxCredit(bvn)
+			writeError(w, http.StatusServiceUnavailable, "CREDIT_PROVIDER_UNAVAILABLE", "CRC credit provider did not return a result")
+			return
 		} else {
 			if err := json.Unmarshal(body, &result); err != nil {
-				log.Printf("[WARN] CRC response parse error: %v — falling back to sandbox", err)
-				result = sandboxCredit(bvn)
+				writeError(w, http.StatusBadGateway, "CREDIT_PROVIDER_INVALID_RESPONSE", "CRC credit provider returned an invalid response")
+				return
 			}
 		}
 	} else {
-		result = sandboxCredit(bvn)
+		writeError(w, http.StatusServiceUnavailable, "CREDIT_PROVIDER_UNAVAILABLE", "No live credit provider is configured")
+		return
 	}
 
 	if data, err := json.Marshal(result); err == nil {
@@ -820,30 +684,6 @@ func handleCreditCheck(w http.ResponseWriter, r *http.Request) {
 	})
 
 	writeJSON(w, http.StatusOK, result)
-}
-
-func sandboxCredit(bvn string) CreditResult {
-	rng := deterministicRNG(bvn)
-	score := 450 + rng.Intn(400)
-	grade := "A"
-	switch {
-	case score < 550:
-		grade = "D"
-	case score < 650:
-		grade = "C"
-	case score < 750:
-		grade = "B"
-	}
-	return CreditResult{
-		BVN:         bvn,
-		Score:       score,
-		Grade:       grade,
-		TotalLoans:  rng.Intn(8),
-		ActiveLoans: rng.Intn(3),
-		Defaults:    rng.Intn(2),
-		CheckedAt:   now(),
-		Sandbox:     true,
-	}
 }
 
 // POST /v1/risk-score — Proxy to Python risk engine
@@ -884,11 +724,7 @@ func handleRiskScore(w http.ResponseWriter, r *http.Request) {
 // POST /v1/workflow/start — Start a Temporal workflow
 func handleWorkflowStart(w http.ResponseWriter, r *http.Request) {
 	if temporalClient == nil {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"workflowId": fmt.Sprintf("wf-%d", time.Now().UnixMilli()),
-			"status":     "started",
-			"mode":       "direct", // no Temporal — direct execution
-		})
+		writeError(w, http.StatusServiceUnavailable, "TEMPORAL_UNAVAILABLE", "Workflow orchestration is unavailable; no workflow was started")
 		return
 	}
 
@@ -935,14 +771,7 @@ func handleBiometricLiveness(w http.ResponseWriter, r *http.Request) {
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		// Biometric engine not running — return sandbox response
-		writeJSON(w, http.StatusOK, map[string]any{
-			"liveness": true,
-			"score":    0.97,
-			"challenge": "blink",
-			"passed":   true,
-			"sandbox":  true,
-		})
+		writeError(w, http.StatusServiceUnavailable, "BIOMETRIC_ENGINE_UNAVAILABLE", "Biometric liveness engine is unavailable; no liveness decision was generated")
 		return
 	}
 	defer resp.Body.Close()
@@ -973,12 +802,7 @@ func handleBiometricEnroll(w http.ResponseWriter, r *http.Request) {
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"enrolled":   true,
-			"faceId":     fmt.Sprintf("face-%d", time.Now().UnixMilli()),
-			"quality":    0.94,
-			"sandbox":    true,
-		})
+		writeError(w, http.StatusServiceUnavailable, "BIOMETRIC_ENGINE_UNAVAILABLE", "Biometric enrollment engine is unavailable; no face template was enrolled")
 		return
 	}
 	defer resp.Body.Close()
@@ -1009,13 +833,7 @@ func handleBiometricVerify(w http.ResponseWriter, r *http.Request) {
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"match":      true,
-			"similarity": 0.96,
-			"threshold":  0.80,
-			"faceId":     r.URL.Query().Get("faceId"),
-			"sandbox":    true,
-		})
+		writeError(w, http.StatusServiceUnavailable, "BIOMETRIC_ENGINE_UNAVAILABLE", "Biometric verification engine is unavailable; no face-match decision was generated")
 		return
 	}
 	defer resp.Body.Close()
@@ -1046,10 +864,7 @@ func handleBiometricActiveLiveness(w http.ResponseWriter, r *http.Request) {
 	client := &http.Client{Timeout: 45 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"score": 0.97, "live": true, "challenge": "blink",
-			"challenge_completed": true, "frames_analysed": 10, "sandbox": true,
-		})
+		writeError(w, http.StatusServiceUnavailable, "BIOMETRIC_ENGINE_UNAVAILABLE", "Active liveness engine is unavailable; no liveness decision was generated")
 		return
 	}
 	defer resp.Body.Close()
@@ -1082,11 +897,7 @@ func handleBiometricAntispoofing(w http.ResponseWriter, r *http.Request) {
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"score": 0.98, "genuine": true, "reason": "passed",
-			"model": "texture_analysis_fallback", "sandbox": true,
-			"details": map[string]any{"sharpness": 0.95, "colour_depth": 0.92, "hf_score": 0.88},
-		})
+		writeError(w, http.StatusServiceUnavailable, "BIOMETRIC_ENGINE_UNAVAILABLE", "Anti-spoofing engine is unavailable; no anti-spoofing decision was generated")
 		return
 	}
 	defer resp.Body.Close()
@@ -1118,12 +929,7 @@ func handleBiometricFullVerify(w http.ResponseWriter, r *http.Request) {
 	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"verified": true, "overall_score": 0.96, "sandbox": true,
-			"liveness": map[string]any{"live": true, "score": 0.97},
-			"antispoofing": map[string]any{"genuine": true, "score": 0.98},
-			"face_match": nil, "failure_reasons": []string{},
-		})
+		writeError(w, http.StatusServiceUnavailable, "BIOMETRIC_ENGINE_UNAVAILABLE", "Composite biometric verification is unavailable; no verification decision was generated")
 		return
 	}
 	defer resp.Body.Close()
@@ -1155,10 +961,7 @@ func handleBiometricMatch(w http.ResponseWriter, r *http.Request) {
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"score": 0.96, "cosine_similarity": 0.92, "match": true,
-			"threshold": 0.40, "reason": "match", "using_arcface": false, "sandbox": true,
-		})
+		writeError(w, http.StatusServiceUnavailable, "BIOMETRIC_ENGINE_UNAVAILABLE", "Face-matching engine is unavailable; no match decision was generated")
 		return
 	}
 	defer resp.Body.Close()
@@ -1190,10 +993,7 @@ func handleBiometricDetect(w http.ResponseWriter, r *http.Request) {
 	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"face_detected": true, "face_count": 1, "quality_score": 0.94,
-			"bbox": map[string]any{"x": 0.2, "y": 0.1, "w": 0.6, "h": 0.8}, "sandbox": true,
-		})
+		writeError(w, http.StatusServiceUnavailable, "BIOMETRIC_ENGINE_UNAVAILABLE", "Face-detection engine is unavailable; no detection result was generated")
 		return
 	}
 	defer resp.Body.Close()
@@ -1224,10 +1024,7 @@ func handleBiometricLandmarks(w http.ResponseWriter, r *http.Request) {
 	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"landmarks_found": true, "landmark_count": 68, "sandbox": true,
-			"landmarks": []map[string]any{{"x": 0.3, "y": 0.4, "z": 0.0}},
-		})
+		writeError(w, http.StatusServiceUnavailable, "BIOMETRIC_ENGINE_UNAVAILABLE", "Landmark-extraction engine is unavailable; no landmark result was generated")
 		return
 	}
 	defer resp.Body.Close()
@@ -1258,10 +1055,7 @@ func handleBiometricFeatures(w http.ResponseWriter, r *http.Request) {
 	client := &http.Client{Timeout: 20 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"embedding_dimension": 512, "embedding_model": "arcface_fallback",
-			"face_detected": true, "quality_score": 0.94, "sandbox": true,
-		})
+		writeError(w, http.StatusServiceUnavailable, "BIOMETRIC_ENGINE_UNAVAILABLE", "Feature-extraction engine is unavailable; no embedding was generated")
 		return
 	}
 	defer resp.Body.Close()
@@ -1292,10 +1086,7 @@ func handleBiometricFaceExtract(w http.ResponseWriter, r *http.Request) {
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"success": true, "face_image": nil, "sandbox": true,
-			"face_dimensions": map[string]any{"width": 120, "height": 160},
-		})
+		writeError(w, http.StatusServiceUnavailable, "BIOMETRIC_ENGINE_UNAVAILABLE", "Document face-extraction engine is unavailable; no face image was extracted")
 		return
 	}
 	defer resp.Body.Close()
@@ -1326,10 +1117,7 @@ func handleBiometricDocumentMatch(w http.ResponseWriter, r *http.Request) {
 	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"verified": true, "overall_score": 0.95, "sandbox": true,
-			"document_face_found": true, "face_match": map[string]any{"match": true, "score": 0.95},
-		})
+		writeError(w, http.StatusServiceUnavailable, "BIOMETRIC_ENGINE_UNAVAILABLE", "Document-match engine is unavailable; no document-match decision was generated")
 		return
 	}
 	defer resp.Body.Close()
@@ -1361,16 +1149,7 @@ func handleDocumentOCR(w http.ResponseWriter, r *http.Request) {
 	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"documentType": "NIN_SLIP",
-			"nin":          "12345678901",
-			"firstName":    "ADAEZE",
-			"lastName":     "OKONKWO",
-			"dob":          "1990-05-15",
-			"faceExtracted": true,
-			"confidence":   0.91,
-			"sandbox":      true,
-		})
+		writeError(w, http.StatusServiceUnavailable, "BIOMETRIC_ENGINE_UNAVAILABLE", "Document OCR engine is unavailable; no document fields were extracted")
 		return
 	}
 	defer resp.Body.Close()
@@ -1470,26 +1249,7 @@ func handleNIPNameEnquiry(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	// Sandbox / fallback: deterministic mock based on account number digits
-	rng := deterministicRNG(req.AccountNumber)
-	nameIdx := rng.Intn(len(nipMockNames))
-	bankCode := req.BankCode
-	if bankCode == "" {
-		bankCodes := []string{"044", "058", "011", "057", "033", "070", "232", "076", "035", "214"}
-		bankCode = bankCodes[rng.Intn(len(bankCodes))]
-	}
-	bankName := nipBankNames[bankCode]
-	if bankName == "" {
-		bankName = "Nigerian Bank"
-	}
-	writeJSON(w, http.StatusOK, NIPNameEnquiryResponse{
-		AccountNumber: req.AccountNumber,
-		AccountName:   nipMockNames[nameIdx],
-		BankCode:      bankCode,
-		BankName:      bankName,
-		Verified:      true,
-		Source:        "sandbox",
-	})
+	writeError(w, http.StatusServiceUnavailable, "NIP_NAME_ENQUIRY_UNAVAILABLE", "NIBSS name enquiry did not return an authoritative beneficiary name")
 }
 
 // ─── Router ───────────────────────────────────────────────────────────────────

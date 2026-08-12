@@ -3,7 +3,7 @@
 // Priority chain for each verification type:
 //   1. BIS Own Engine  — direct calls to NIMC/NIBSS/CAC/OFAC APIs with BIS credentials
 //   2. Youverify       — aggregator fallback (https://youverify.co) when own engine fails or is unconfigured
-//   3. Sandbox         — deterministic mock data (always available, flagged as sandbox:true)
+//   3. Explicit unavailable result — no synthetic identity or screening data is returned
 //
 // Engine selection is controlled by environment variables:
 //   BIS_VERIFY_NIMC_URL  / BIS_VERIFY_NIMC_KEY   — BIS own NIMC endpoint
@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math/rand"
 	"net/http"
 	"os"
 	"strings"
@@ -82,8 +81,9 @@ type NINResult struct {
 	Status     string `json:"status"`
 	Photo      string `json:"photo,omitempty"`
 	CheckedAt  string `json:"checkedAt"`
-	Source     string `json:"source"` // "own", "youverify", "sandbox"
+	Source     string `json:"source"` // "own", "youverify", "unavailable"
 	Sandbox    bool   `json:"sandbox,omitempty"`
+	Error      string `json:"error,omitempty"`
 }
 
 type BVNResult struct {
@@ -100,6 +100,7 @@ type BVNResult struct {
 	CheckedAt     string `json:"checkedAt"`
 	Source        string `json:"source"`
 	Sandbox       bool   `json:"sandbox,omitempty"`
+	Error         string `json:"error,omitempty"`
 }
 
 type CACResult struct {
@@ -114,6 +115,7 @@ type CACResult struct {
 	CheckedAt     string   `json:"checkedAt"`
 	Source        string   `json:"source"`
 	Sandbox       bool     `json:"sandbox,omitempty"`
+	Error         string   `json:"error,omitempty"`
 }
 
 type SanctionHit struct {
@@ -132,6 +134,7 @@ type SanctionsResult struct {
 	CheckedAt string        `json:"checkedAt"`
 	Source    string        `json:"source"`
 	Sandbox   bool          `json:"sandbox,omitempty"`
+	Error     string        `json:"error,omitempty"`
 }
 
 // ─── Engine ───────────────────────────────────────────────────────────────────
@@ -227,11 +230,10 @@ func (e *Engine) LookupNIN(ctx context.Context, nin string) NINResult {
 		if result, err := e.youverifyNIN(ctx, nin); err == nil {
 			return result
 		} else {
-			log.Printf("[verify] Youverify NIN error for %s: %v — using sandbox", nin, err)
+			log.Printf("[verify] Youverify NIN error for %s: %v", nin, err)
 		}
 	}
-	// 3. Sandbox
-	return SandboxNIN(nin)
+	return NINResult{NIN: nin, Status: "UNAVAILABLE", CheckedAt: now(), Source: "unavailable", Error: "No configured NIN provider returned a verification result."}
 }
 
 func (e *Engine) ownNIN(ctx context.Context, nin string) (NINResult, error) {
@@ -313,11 +315,10 @@ func (e *Engine) LookupBVN(ctx context.Context, bvn string) BVNResult {
 		if result, err := e.youverifyBVN(ctx, bvn); err == nil {
 			return result
 		} else {
-			log.Printf("[verify] Youverify BVN error for %s: %v — using sandbox", bvn, err)
+			log.Printf("[verify] Youverify BVN error for %s: %v", bvn, err)
 		}
 	}
-	// 3. Sandbox
-	return SandboxBVN(bvn)
+	return BVNResult{BVN: bvn, Status: "UNAVAILABLE", CheckedAt: now(), Source: "unavailable", Error: "No configured BVN provider returned a verification result."}
 }
 
 func (e *Engine) ownBVN(ctx context.Context, bvn string) (BVNResult, error) {
@@ -394,11 +395,10 @@ func (e *Engine) LookupCAC(ctx context.Context, rc string) CACResult {
 		if result, err := e.youverifyCAC(ctx, rc); err == nil {
 			return result
 		} else {
-			log.Printf("[verify] Youverify CAC error for %s: %v — using sandbox", rc, err)
+			log.Printf("[verify] Youverify CAC error for %s: %v", rc, err)
 		}
 	}
-	// 3. Sandbox
-	return SandboxCAC(rc)
+	return CACResult{RCNumber: rc, Status: "UNAVAILABLE", CheckedAt: now(), Source: "unavailable", Error: "No configured CAC provider returned a verification result."}
 }
 
 func (e *Engine) ownCAC(ctx context.Context, rc string) (CACResult, error) {
@@ -472,11 +472,10 @@ func (e *Engine) CheckSanctions(ctx context.Context, name string) SanctionsResul
 		if result, err := e.youverifySanctions(ctx, name); err == nil {
 			return result
 		} else {
-			log.Printf("[verify] Youverify sanctions error for %s: %v — using sandbox", name, err)
+			log.Printf("[verify] Youverify sanctions error for %s: %v", name, err)
 		}
 	}
-	// 3. Sandbox
-	return SandboxSanctions(name)
+	return SanctionsResult{Queried: name, Clear: false, CheckedAt: now(), Source: "unavailable", Error: "No configured sanctions provider returned a screening result."}
 }
 
 func (e *Engine) ownSanctions(ctx context.Context, name string) (SanctionsResult, error) {
@@ -545,117 +544,4 @@ func (e *Engine) youverifySanctions(ctx context.Context, name string) (Sanctions
 		Source:    "youverify",
 		Sandbox:   false,
 	}, nil
-}
-
-// ─── Sandbox helpers ──────────────────────────────────────────────────────────
-
-var nigerianStates = []string{
-	"Lagos", "Abuja", "Kano", "Rivers", "Oyo", "Delta", "Anambra",
-	"Kaduna", "Enugu", "Ogun", "Imo", "Borno", "Edo", "Kwara", "Plateau",
-}
-var nigerianFirstNames = []string{
-	"ADEBAYO", "NGOZI", "EMEKA", "FATIMA", "CHIOMA", "IBRAHIM", "AISHA",
-	"OLUWASEUN", "KELECHI", "AMINA", "TUNDE", "BLESSING", "UCHE", "HALIMA",
-}
-var nigerianLastNames = []string{
-	"OKAFOR", "IBRAHIM", "NWOSU", "ADEYEMI", "BELLO", "EZE", "JOHNSON",
-	"ABUBAKAR", "OKONKWO", "WILLIAMS", "MUSA", "OSEI", "DIKE", "LAWAL",
-}
-var banks = []string{
-	"Access Bank", "GTBank", "First Bank", "Zenith Bank", "UBA",
-	"Fidelity Bank", "Union Bank", "Stanbic IBTC", "Wema Bank", "Polaris Bank",
-}
-
-func deterministicRNG(seed string) *rand.Rand {
-	s := int64(0)
-	for _, c := range seed {
-		s += int64(c)
-	}
-	return rand.New(rand.NewSource(s)) //nolint:gosec
-}
-
-func pick(rng *rand.Rand, slice []string) string {
-	return slice[rng.Intn(len(slice))]
-}
-
-func SandboxNIN(nin string) NINResult {
-	rng := deterministicRNG(nin)
-	genders := []string{"MALE", "FEMALE"}
-	return NINResult{
-		NIN:       nin,
-		FirstName: pick(rng, nigerianFirstNames),
-		LastName:  pick(rng, nigerianLastNames),
-		DOB:       fmt.Sprintf("19%02d-%02d-%02d", 60+rng.Intn(35), 1+rng.Intn(12), 1+rng.Intn(28)),
-		Gender:    genders[rng.Intn(2)],
-		Phone:     fmt.Sprintf("080%08d", rng.Intn(100000000)),
-		Address:   fmt.Sprintf("%d %s Street", 1+rng.Intn(200), pick(rng, nigerianLastNames)),
-		State:     pick(rng, nigerianStates),
-		Status:    "VERIFIED",
-		CheckedAt: now(),
-		Source:    "sandbox",
-		Sandbox:   true,
-	}
-}
-
-func SandboxBVN(bvn string) BVNResult {
-	rng := deterministicRNG(bvn)
-	genders := []string{"MALE", "FEMALE"}
-	return BVNResult{
-		BVN:           bvn,
-		FirstName:     pick(rng, nigerianFirstNames),
-		LastName:      pick(rng, nigerianLastNames),
-		DOB:           fmt.Sprintf("19%02d-%02d-%02d", 60+rng.Intn(35), 1+rng.Intn(12), 1+rng.Intn(28)),
-		Phone:         fmt.Sprintf("070%08d", rng.Intn(100000000)),
-		Gender:        genders[rng.Intn(2)],
-		BankName:      pick(rng, banks),
-		AccountNumber: fmt.Sprintf("%010d", rng.Intn(1000000000)),
-		Status:        "VERIFIED",
-		CheckedAt:     now(),
-		Source:        "sandbox",
-		Sandbox:       true,
-	}
-}
-
-func SandboxCAC(rc string) CACResult {
-	rng := deterministicRNG(rc)
-	statuses := []string{"ACTIVE", "ACTIVE", "ACTIVE", "INACTIVE", "STRUCK_OFF"}
-	types := []string{"PRIVATE LIMITED", "PUBLIC LIMITED", "BUSINESS NAME", "INCORPORATED TRUSTEE"}
-	return CACResult{
-		RCNumber:    rc,
-		CompanyName: fmt.Sprintf("%s %s %s", pick(rng, nigerianLastNames), pick(rng, nigerianLastNames), pick(rng, types)),
-		CompanyType: pick(rng, types),
-		Status:      statuses[rng.Intn(len(statuses))],
-		IncDate:     fmt.Sprintf("20%02d-%02d-%02d", rng.Intn(24), 1+rng.Intn(12), 1+rng.Intn(28)),
-		Address:     fmt.Sprintf("%d %s Avenue, %s", 1+rng.Intn(100), pick(rng, nigerianLastNames), pick(rng, nigerianStates)),
-		State:       pick(rng, nigerianStates),
-		Directors:   []string{pick(rng, nigerianFirstNames) + " " + pick(rng, nigerianLastNames), pick(rng, nigerianFirstNames) + " " + pick(rng, nigerianLastNames)},
-		CheckedAt:   now(),
-		Source:      "sandbox",
-		Sandbox:     true,
-	}
-}
-
-func SandboxSanctions(name string) SanctionsResult {
-	rng := deterministicRNG(name)
-	// ~5% hit rate for realism
-	clear := rng.Intn(20) != 0
-	hits := []SanctionHit{}
-	if !clear {
-		hits = []SanctionHit{{
-			List:       "OFAC-SDN",
-			Name:       name,
-			Score:      0.75 + rng.Float64()*0.25,
-			EntityType: "individual",
-			Programs:   []string{"SDGT"},
-			Reason:     "Possible name match — manual review required",
-		}}
-	}
-	return SanctionsResult{
-		Queried:   name,
-		Hits:      hits,
-		Clear:     clear,
-		CheckedAt: now(),
-		Source:    "sandbox",
-		Sandbox:   true,
-	}
 }

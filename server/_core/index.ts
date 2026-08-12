@@ -1,6 +1,8 @@
 import "dotenv/config";
 import { getDb } from '../db';
 
+import "../sentry.server.config";
+
 // BIS platform requires PostgreSQL. Override the platform-injected MySQL/TiDB URL
 // with the local PostgreSQL instance.
 const _dbUrl = process.env.DATABASE_URL ?? "";
@@ -20,6 +22,7 @@ import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import compression from "compression";
 import { register as promRegister, collectDefaultMetrics, Counter, Histogram, Gauge } from "prom-client";
 import { registerOAuthRoutes } from "./oauth";
+import { registerStorageProxy } from "./storageProxy";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
@@ -691,6 +694,9 @@ async function startServer() {
     });
   });
 
+  // Storage proxy: serves /manus-storage/* paths via signed URLs
+  registerStorageProxy(app);
+
   // OAuth callback under /api/oauth/callback
   registerOAuthRoutes(app);
 
@@ -1228,6 +1234,13 @@ async function startServer() {
       createContext,
     })
   );
+
+  // Sentry error handler — must be after all routes, before static serving
+  if (process.env.SENTRY_DSN) {
+    const { Sentry } = await import("../sentry.server.config");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    app.use(Sentry.expressErrorHandler() as any);
+  }
 
   // development mode uses Vite, production mode uses static files
   if (process.env.NODE_ENV === "development") {

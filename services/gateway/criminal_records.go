@@ -9,12 +9,11 @@
 //   - Kafka event publishing for every mutation
 //   - TigerBeetle audit ledger entries for billable operations
 //   - Temporal workflow triggers for long-running pipelines
-//   - Deterministic sandbox fallback when external APIs are unconfigured
+//   - Explicit unavailable-provider errors when authoritative APIs are unconfigured
 package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 	"math/rand"
 	"net/http"
@@ -121,8 +120,7 @@ func handleCriminalRecordRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Generate request reference
-	rng := deterministicRNG(req.SubjectName + req.Agency + req.State + now())
-	requestRef := fmt.Sprintf("CRR-%06d", rng.Intn(999999))
+	requestRef := operationRef("CRR")
 
 	// Trigger Temporal CriminalRecordsWorkflow
 	ctx := r.Context()
@@ -214,8 +212,7 @@ func handleCriminalRecordIngest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rng := deterministicRNG(req.RequestRef + req.OffenceDesc + now())
-	recordRef := fmt.Sprintf("CR-%08d", rng.Intn(99999999))
+	recordRef := operationRef("CR")
 
 	// Compute a preliminary risk contribution for this record
 	riskContribution := computeCriminalRiskContribution(req.OffenceCategory, req.Verdict, req.OutstandingWarrant)
@@ -364,9 +361,9 @@ func handleCorporateCheck(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	checkRef := fmt.Sprintf("CORP-%08d", deterministicRNG(req.RCNumber+now()).Intn(99999999))
+	checkRef := operationRef("CORP")
 
-	// Run checks in parallel (or sandbox fallback)
+	// Run authoritative checks only. Missing provider data must not be scored as clear.
 	results := map[string]interface{}{}
 	riskScore := 0.0
 	flags := []string{}
@@ -375,6 +372,10 @@ func handleCorporateCheck(w http.ResponseWriter, r *http.Request) {
 		switch check {
 		case "cac_full":
 			cacResult := runCACCheck(ctx, req.RCNumber)
+			if errMessage, unavailable := cacResult["error"].(string); unavailable {
+				writeError(w, http.StatusServiceUnavailable, "cac_unavailable", errMessage)
+				return
+			}
 			results["cac"] = cacResult
 			if status, ok := cacResult["status"].(string); ok && status != "active" {
 				riskScore += 20
@@ -382,6 +383,10 @@ func handleCorporateCheck(w http.ResponseWriter, r *http.Request) {
 			}
 		case "firs_tax":
 			firsResult := runFIRSCheck(ctx, req.RCNumber, req.TIN)
+			if errMessage, unavailable := firsResult["error"].(string); unavailable {
+				writeError(w, http.StatusServiceUnavailable, "firs_unavailable", errMessage)
+				return
+			}
 			results["firs"] = firsResult
 			if cleared, ok := firsResult["taxClearance"].(bool); ok && !cleared {
 				riskScore += 25
@@ -389,6 +394,10 @@ func handleCorporateCheck(w http.ResponseWriter, r *http.Request) {
 			}
 		case "directors":
 			dirResult := runDirectorsCheck(ctx, req.RCNumber)
+			if errMessage, unavailable := dirResult["error"].(string); unavailable {
+				writeError(w, http.StatusServiceUnavailable, "cac_directors_unavailable", errMessage)
+				return
+			}
 			results["directors"] = dirResult
 		case "sanctions":
 			name := req.CompanyName
@@ -400,6 +409,10 @@ func handleCorporateCheck(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			sanctResult := runCorporateSanctionsCheck(ctx, name, req.RCNumber)
+			if errMessage, unavailable := sanctResult["error"].(string); unavailable {
+				writeError(w, http.StatusServiceUnavailable, "sanctions_unavailable", errMessage)
+				return
+			}
 			results["sanctions"] = sanctResult
 			if hit, ok := sanctResult["hit"].(bool); ok && hit {
 				riskScore += 50
@@ -461,7 +474,7 @@ func handleCorporateCheck(w http.ResponseWriter, r *http.Request) {
 		"flags":       flags,
 		"results":     results,
 		"workflowId":  workflowID,
-		"sandbox":     cacAPIURL == "",
+		"sandbox":     false,
 		"timestamp":   now(),
 	})
 }
@@ -478,16 +491,10 @@ func runCACCheck(r interface{}, rcNumber string) map[string]interface{} {
 			}
 		}
 	}
-	cacResult := sandboxCAC(rcNumber)
 	return map[string]interface{}{
-		"rcNumber":    cacResult.RCNumber,
-		"companyName": cacResult.CompanyName,
-		"status":      cacResult.Status,
-		"type":        cacResult.Type,
-		"dateRegistered": cacResult.DateReg,
-		"address":     cacResult.Address,
-		"directors":   cacResult.Directors,
-		"sandbox":     cacResult.Sandbox,
+		"rcNumber": rcNumber,
+		"status":   "unavailable",
+		"error":    "CAC provider is unavailable; no corporate profile was returned.",
 	}
 }
 
@@ -505,22 +512,11 @@ func runFIRSCheck(r interface{}, rcNumber, tin string) map[string]interface{} {
 			}
 		}
 	}
-	// Sandbox fallback
-	rng := deterministicRNG(rcNumber + tin)
-	cleared := rng.Float64() > 0.3
-	outstanding := 0.0
-	if !cleared {
-		outstanding = float64(rng.Intn(5000000) + 100000)
-	}
 	return map[string]interface{}{
-		"rcNumber":         rcNumber,
-		"tin":              tin,
-		"taxClearance":     cleared,
-		"clearanceRef":     fmt.Sprintf("TCC-%08d", rng.Intn(99999999)),
-		"outstandingAmount": outstanding,
-		"lastFilingYear":   2024 - rng.Intn(3),
-		"complianceStatus": map[bool]string{true: "compliant", false: "non-compliant"}[cleared],
-		"sandbox":          true,
+		"rcNumber": rcNumber,
+		"tin":      tin,
+		"status":   "unavailable",
+		"error":    "FIRS provider is unavailable; no tax-clearance decision was returned.",
 	}
 }
 
@@ -535,55 +531,23 @@ func runDirectorsCheck(r interface{}, rcNumber string) map[string]interface{} {
 			}
 		}
 	}
-	// Sandbox fallback
-	rng := deterministicRNG(rcNumber + "directors")
-	count := rng.Intn(4) + 1
-	directors := make([]map[string]interface{}, count)
-	firstNames := []string{"Chukwuemeka", "Adaeze", "Babatunde", "Ngozi", "Emeka", "Funke"}
-	lastNames := []string{"Okonkwo", "Adeyemi", "Nwosu", "Abiodun", "Eze", "Balogun"}
-	roles := []string{"Director", "Managing Director", "Executive Director", "Non-Executive Director"}
-	for i := 0; i < count; i++ {
-		directors[i] = map[string]interface{}{
-			"name":        firstNames[rng.Intn(len(firstNames))] + " " + lastNames[rng.Intn(len(lastNames))],
-			"role":        roles[rng.Intn(len(roles))],
-			"nationality": "Nigerian",
-			"shareCount":  rng.Intn(10000) + 1000,
-			"sandbox":     true,
-		}
-	}
 	return map[string]interface{}{
-		"rcNumber":  rcNumber,
-		"directors": directors,
-		"count":     count,
-		"sandbox":   true,
+		"rcNumber": rcNumber,
+		"status":   "unavailable",
+		"error":    "CAC directors provider is unavailable; no director or UBO data was returned.",
 	}
 }
 
 // runCorporateSanctionsCheck checks a company name against sanctions lists.
 func runCorporateSanctionsCheck(r interface{}, companyName, rcNumber string) map[string]interface{} {
 	if companyName == "" {
-		return map[string]interface{}{"hit": false, "matches": []interface{}{}, "sandbox": true}
-	}
-	// Reuse existing sanctions check logic via internal call
-	rng := deterministicRNG(companyName + rcNumber + "sanctions")
-	hit := rng.Float64() < 0.05 // 5% sandbox hit rate for companies
-	matches := []interface{}{}
-	if hit {
-		matches = append(matches, map[string]interface{}{
-			"entity":      companyName,
-			"list":        "OFAC SDN",
-			"matchScore":  0.85 + rng.Float64()*0.15,
-			"type":        "Entity",
-			"program":     "SDGT",
-			"sandbox":     true,
-		})
+		return map[string]interface{}{"rcNumber": rcNumber, "status": "unavailable", "error": "A company name is required for sanctions screening."}
 	}
 	return map[string]interface{}{
 		"companyName": companyName,
 		"rcNumber":    rcNumber,
-		"hit":         hit,
-		"matches":     matches,
-		"sandbox":     true,
+		"status":      "unavailable",
+		"error":       "No corporate sanctions provider is configured; no screening decision was returned.",
 	}
 }
 
@@ -608,17 +572,7 @@ func handleAIScreeningSummary(w http.ResponseWriter, r *http.Request) {
 	data, err := proxyExternalAPI("POST", riskEngineURL+"/v1/ai/screening-summary", gatewayKey, reqBody)
 	if err != nil {
 		log.Printf("[AISummary] Risk engine proxy error: %v", err)
-		// Fallback: return a minimal summary
-		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"overallRisk":     "medium",
-			"riskScore":       50,
-			"keyFindings":     []string{"Insufficient data for full analysis"},
-			"redFlags":        []string{},
-			"recommendations": []string{"Gather additional verification documents"},
-			"narrative":       "Unable to generate full AI summary at this time. Manual review recommended.",
-			"sandbox":         true,
-			"timestamp":       now(),
-		})
+		writeError(w, http.StatusServiceUnavailable, "risk_engine_unavailable", "AI screening summary is unavailable; no risk assessment was generated.")
 		return
 	}
 
@@ -646,7 +600,7 @@ func handleFieldVisitCheckIn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	checkInRef := fmt.Sprintf("CHIN-%08d", deterministicRNG(req.TaskRef+req.AgentID+now()).Intn(99999999))
+	checkInRef := operationRef("CHIN")
 
 	// Cache check-in time in Redis for duration calculation at check-out
 	cacheSet(r.Context(), "field_visit:checkin:"+req.TaskRef, []byte(now()), 24*time.Hour)
@@ -695,7 +649,7 @@ func handleFieldVisitCheckOut(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Retrieve check-in time from Redis to compute duration
-	checkOutRef := fmt.Sprintf("CHOUT-%08d", deterministicRNG(req.TaskRef+req.AgentID+now()).Intn(99999999))
+	checkOutRef := operationRef("CHOUT")
 	durationMinutes := 0
 	if cached := cacheGet(r.Context(), "field_visit:checkin:"+req.TaskRef); cached != nil {
 		if checkInTime, err := time.Parse(time.RFC3339, string(cached)); err == nil {
@@ -834,55 +788,7 @@ func handleMojaloopComplianceCheck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check Redis cache for recent compliance result
-	cacheKey := "mojaloop:compliance:" + req.SubjectRef
-	if cached := cacheGet(r.Context(), cacheKey); cached != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("X-Cache", "HIT")
-		_, _ = w.Write(cached)
-		return
-	}
-
-	// Sandbox compliance logic
-	rng := deterministicRNG(req.SubjectRef + req.SubjectType)
-	approved := rng.Float64() > 0.1 // 90% approval rate in sandbox
-	riskLevel := "low"
-	if !approved {
-		riskLevel = "high"
-	} else if rng.Float64() < 0.2 {
-		riskLevel = "medium"
-	}
-
-	result := map[string]interface{}{
-		"subjectRef":    req.SubjectRef,
-		"subjectType":   req.SubjectType,
-		"approved":      approved,
-		"riskLevel":     riskLevel,
-		"complianceRef": fmt.Sprintf("COMP-%08d", rng.Intn(99999999)),
-		"checks": map[string]interface{}{
-			"sanctions":      true,
-			"pep":            true,
-			"criminalRecord": approved,
-			"aml":            approved,
-		},
-		"sandbox":   true,
-		"timestamp": now(),
-	}
-
-	// Cache for 5 minutes
-	if data, err := json.Marshal(result); err == nil {
-		cacheSet(r.Context(), cacheKey, data, 5*time.Minute)
-	}
-
-	publishEvent("bis.mojaloop.compliance_checked", map[string]interface{}{
-		"subjectRef":  req.SubjectRef,
-		"approved":    approved,
-		"riskLevel":   riskLevel,
-		"amount":      req.Amount,
-		"timestamp":   now(),
-	})
-
-	writeJSON(w, http.StatusOK, result)
+	writeError(w, http.StatusServiceUnavailable, "mojaloop_compliance_unavailable", "No authoritative Mojaloop compliance provider is configured; the transfer must not proceed.")
 }
 
 // ─── Kafka Topic Registration ─────────────────────────────────────────────────
@@ -906,41 +812,6 @@ func RegisterCriminalRecordsTopics() {
 		if err := kafkapkg.EnsureTopic(topic); err != nil {
 			log.Printf("[Kafka] Topic registration warning for %s: %v", topic, err)
 		}
-	}
-}
-
-// ─── Sandbox helpers ──────────────────────────────────────────────────────────
-
-// sandboxCriminalRecord returns a deterministic sandbox criminal record for testing.
-func sandboxCriminalRecord(nin, agency string) map[string]interface{} {
-	rng := deterministicRNG(nin + agency)
-	hasRecord := rng.Float64() < 0.15 // 15% sandbox hit rate
-	if !hasRecord {
-		return map[string]interface{}{
-			"nin":     nin,
-			"agency":  agency,
-			"records": []interface{}{},
-			"count":   0,
-			"sandbox": true,
-		}
-	}
-	categories := []string{"financial", "drug", "traffic", "property", "other"}
-	verdicts := []string{"convicted", "acquitted", "pending", "discharged"}
-	return map[string]interface{}{
-		"nin":    nin,
-		"agency": agency,
-		"records": []interface{}{
-			map[string]interface{}{
-				"recordRef":       fmt.Sprintf("CR-%08d", rng.Intn(99999999)),
-				"offenceCategory": categories[rng.Intn(len(categories))],
-				"verdict":         verdicts[rng.Intn(len(verdicts))],
-				"courtName":       []string{"FCT High Court", "Lagos State High Court", "Abuja Magistrate Court"}[rng.Intn(3)],
-				"dateCharged":     fmt.Sprintf("20%02d-%02d-%02d", rng.Intn(24), rng.Intn(12)+1, rng.Intn(28)+1),
-				"sandbox":         true,
-			},
-		},
-		"count":   1,
-		"sandbox": true,
 	}
 }
 

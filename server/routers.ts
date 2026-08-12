@@ -109,6 +109,7 @@ import {
   criminalRecords,
   criminalRecordAttachments,
   criminalRecordAudit,
+  collectionSites,
 } from "../drizzle/schema";
 import {
   getDashboardStats,
@@ -1978,14 +1979,41 @@ const kycRouter = router({
       const sanctions = sanctionsResult.status === "fulfilled" ? sanctionsResult.value : null;
       const pep = pepResult.status === "fulfilled" ? pepResult.value : null;
       const credit = creditResult.status === "fulfilled" ? creditResult.value : null;
+      const unavailableProviders = [
+        input.nin && ninResult.status === "rejected" ? "NIN" : null,
+        input.bvn && bvnResult.status === "rejected" ? "BVN" : null,
+        sanctionsResult.status === "rejected" ? "sanctions" : null,
+        pepResult.status === "rejected" ? "PEP" : null,
+        input.bvn && creditResult.status === "rejected" ? "credit" : null,
+      ].filter((provider): provider is string => Boolean(provider));
+      if (unavailableProviders.length > 0) {
+        const message = `KYC could not be completed because ${unavailableProviders.join(", ")} verification is unavailable.`;
+        await db.update(kycRecords).set({
+          status: "review",
+          ninResult: nin as any,
+          bvnResult: bvn as any,
+          sanctionsResult: sanctions as any,
+          pepResult: pep as any,
+          creditResult: credit as any,
+        }).where(eq(kycRecords.id, record!.id));
+        await writeAuditLog(db, { userId: ctx.user!.id, category: "kyc", action: "KYC review — provider unavailable", targetRef: input.subjectName, detail: { unavailableProviders } });
+        return { id: record!.id, status: "review", riskScore: null, nin, bvn, sanctions, pep, credit, error: message };
+      }
       // Score
-      const scoreResult = await riskEngineFetch("/v1/score", {
-        subject_id: input.subjectName,
-        identity: { nin_verified: !!nin?.status, bvn_verified: !!bvn?.bvn, nin_match_score: nin?.matchScore ?? 0, bvn_match_score: bvn?.matchScore ?? 0 },
-        sanctions: { ofac_hit: !sanctions?.clear, bvn_watchlisted: bvn?.watchlisted ?? false },
-        pep: { is_pep: pep?.isPEP ?? false },
-        credit: { credit_score: credit?.score ?? 700, defaults: credit?.defaults ?? 0 },
-      }).catch(() => ({ composite_score: 50, risk_tier: "medium" }));
+      let scoreResult: { composite_score: number; risk_tier: string };
+      try {
+        scoreResult = await riskEngineFetch("/v1/score", {
+          subject_id: input.subjectName,
+          identity: { nin_verified: !!nin?.status, bvn_verified: !!bvn?.bvn, nin_match_score: nin?.matchScore ?? 0, bvn_match_score: bvn?.matchScore ?? 0 },
+          sanctions: { ofac_hit: !sanctions?.clear, bvn_watchlisted: bvn?.watchlisted ?? false },
+          pep: { is_pep: pep?.isPEP ?? false },
+          credit: { credit_score: credit?.score ?? 700, defaults: credit?.defaults ?? 0 },
+        });
+      } catch {
+        await db.update(kycRecords).set({ status: "review", ninResult: nin as any, bvnResult: bvn as any, sanctionsResult: sanctions as any, pepResult: pep as any, creditResult: credit as any }).where(eq(kycRecords.id, record!.id));
+        await writeAuditLog(db, { userId: ctx.user!.id, category: "kyc", action: "KYC review — risk engine unavailable", targetRef: input.subjectName });
+        return { id: record!.id, status: "review", riskScore: null, nin, bvn, sanctions, pep, credit, error: "Risk scoring is unavailable; no KYC decision was issued." };
+      }
       const status = scoreResult.risk_tier === "critical" ? "failed" : scoreResult.risk_tier === "high" ? "review" : "passed";
       await db.update(kycRecords).set({
         status,
@@ -2052,13 +2080,32 @@ const kycRouter = router({
       const sanctions = sanctionsResult.status === "fulfilled" ? sanctionsResult.value : null;
       const pep = pepResult.status === "fulfilled" ? pepResult.value : null;
       const credit = creditResult.status === "fulfilled" ? creditResult.value : null;
-      const scoreResult = await riskEngineFetch("/v1/score", {
-        subject_id: input.subjectName,
-        identity: { nin_verified: !!nin?.status, bvn_verified: !!bvn?.bvn, nin_match_score: nin?.matchScore ?? 0, bvn_match_score: bvn?.matchScore ?? 0 },
-        sanctions: { ofac_hit: !sanctions?.clear, bvn_watchlisted: bvn?.watchlisted ?? false },
-        pep: { is_pep: pep?.isPEP ?? false },
-        credit: { credit_score: credit?.score ?? 700, defaults: credit?.defaults ?? 0 },
-      }).catch(() => ({ composite_score: 50, risk_tier: "medium" }));
+      const unavailableProviders = [
+        input.nin && ninResult.status === "rejected" ? "NIN" : null,
+        input.bvn && bvnResult.status === "rejected" ? "BVN" : null,
+        sanctionsResult.status === "rejected" ? "sanctions" : null,
+        pepResult.status === "rejected" ? "PEP" : null,
+        input.bvn && creditResult.status === "rejected" ? "credit" : null,
+      ].filter((provider): provider is string => Boolean(provider));
+      if (unavailableProviders.length > 0) {
+        await db.update(kycRecords).set({ status: "review", ninResult: nin as any, bvnResult: bvn as any, sanctionsResult: sanctions as any, pepResult: pep as any, creditResult: credit as any }).where(eq(kycRecords.id, record!.id));
+        await writeAuditLog(db, { userId: ctx.user!.id, category: "kyc", action: "KYC re-verification review — provider unavailable", targetRef: input.subjectName, detail: { unavailableProviders } });
+        return { status: "review", riskScore: null, error: `KYC re-verification could not be completed because ${unavailableProviders.join(", ")} verification is unavailable.` };
+      }
+      let scoreResult: { composite_score: number; risk_tier: string };
+      try {
+        scoreResult = await riskEngineFetch("/v1/score", {
+          subject_id: input.subjectName,
+          identity: { nin_verified: !!nin?.status, bvn_verified: !!bvn?.bvn, nin_match_score: nin?.matchScore ?? 0, bvn_match_score: bvn?.matchScore ?? 0 },
+          sanctions: { ofac_hit: !sanctions?.clear, bvn_watchlisted: bvn?.watchlisted ?? false },
+          pep: { is_pep: pep?.isPEP ?? false },
+          credit: { credit_score: credit?.score ?? 700, defaults: credit?.defaults ?? 0 },
+        });
+      } catch {
+        await db.update(kycRecords).set({ status: "review", ninResult: nin as any, bvnResult: bvn as any, sanctionsResult: sanctions as any, pepResult: pep as any, creditResult: credit as any }).where(eq(kycRecords.id, record!.id));
+        await writeAuditLog(db, { userId: ctx.user!.id, category: "kyc", action: "KYC re-verification review — risk engine unavailable", targetRef: input.subjectName });
+        return { status: "review", riskScore: null, error: "Risk scoring is unavailable; no KYC decision was issued." };
+      }
       const status = scoreResult.risk_tier === "critical" ? "failed" : scoreResult.risk_tier === "high" ? "review" : "passed";
       await db.update(kycRecords).set({
         status,
@@ -6800,6 +6847,28 @@ const criminalRecordsRouter = router({
 });
 
 
+const collectionSitesRouter = router({
+  list: protectedProcedure
+    .input(z.object({
+      status: z.enum(["active", "inactive", "suspended"]).optional(),
+      limit: z.number().int().min(1).max(200).default(100),
+    }))
+    .query(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Collection-site directory database is unavailable" });
+      const conditions = [
+        ctx.tenantId !== null ? eq(collectionSites.tenantId, ctx.tenantId) : undefined,
+        input.status ? eq(collectionSites.status, input.status) : undefined,
+      ].filter(Boolean);
+      const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+      const [sites, totalRows] = await Promise.all([
+        db.select().from(collectionSites).where(whereClause).orderBy(asc(collectionSites.state), asc(collectionSites.name)).limit(input.limit),
+        db.select({ total: count() }).from(collectionSites).where(whereClause),
+      ]);
+      return { sites, total: Number(totalRows[0]?.total ?? 0) };
+    }),
+});
+
 export const appRouter = router({
   system: systemRouter,
   auth: router({
@@ -6867,8 +6936,8 @@ export const appRouter = router({
   ngScreening: ngScreeningRouter,
   ngScreeningExt: ngScreeningExtRouter,
   criminalRecords: criminalRecordsRouter,
+  collectionSites: collectionSitesRouter,
   analytics: analyticsRouter,
   caddy: caddyRouter,
 });
 export type AppRouter = typeof appRouter;
-

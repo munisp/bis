@@ -249,7 +249,7 @@ export const insiderThreatRouter = router({
           input.tenantId,
           "read_insider_events",
           String(ctx.user.id),
-        ).catch(() => true); // fail-open if Permify unavailable
+        );
         if (!allowed) {
           throw new TRPCError({ code: "FORBIDDEN", message: "Access denied to this tenant's insider events" });
         }
