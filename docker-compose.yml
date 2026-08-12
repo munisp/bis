@@ -55,7 +55,7 @@ volumes:
 services:
 
   postgres:
-    image: postgres:16-alpine
+    image: postgres:18-alpine
     container_name: bis-postgres
     restart: unless-stopped
     environment:
