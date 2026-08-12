@@ -3490,3 +3490,13 @@
 - [x] Run YouVerify key injection script with production credentials — script validated placeholder detection; awaiting production key from user
 - [x] Implement BFF session-exchange endpoint — POST /api/auth/exchange validates Keycloak JWT (azp fallback), upserts user, issues session cookie; validated end-to-end (auth.me returns user profile via cookie)
 - [x] Configure branch protection rules on main — required checks: CodeQL (JS/TS, Go, Python) + node-tests; 1 approving review required; stale reviews dismissed; force pushes blocked
+- [x] Configure branch protection rules on main — required checks: CodeQL (JS/TS, Go, Python) + node-tests; 1 approving review required; stale reviews dismissed; force pushes blocked
+
+## Final Production Hardening (Aug 12 2026)
+- [x] Implement POST /api/auth/refresh endpoint for automatic session extension via Keycloak refresh tokens
+- [x] Add frontend loading states and error handling UI for YouVerify NIN/BVN verification flow (VerifyIdentityPage.tsx)
+- [x] Create user profile dashboard showing verified NIN/BVN details and session status (UserProfileDashboard.tsx)
+- [x] Comprehensive production-readiness audit: validate all features end-to-end — score 72/100 (docs/PRODUCTION_READINESS_AUDIT.md)
+- [x] Flow-of-funds atomicity audit: Paystack idempotency, NIP velocity gating, TigerBeetle double-entry all verified
+- [x] Fix critical flow-of-funds gap: added stablecoin transfer idempotency guard (reference-based dedup)
+- [x] Push all code to GitHub, merge all branches to main
