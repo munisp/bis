@@ -3484,3 +3484,9 @@
 - [x] Wire BFF KEYCLOAK_URL to staging Keycloak and run full investigation workflow end-to-end — JWT auth + token introspection validated; BFF uses session-cookie auth (expected production behavior)
 - [x] Add CodeQL security scanning step to CI workflow — .github/workflows/codeql.yml with JS/TS, Go, and Python analysis using security-extended queries
 - [x] Implement automated YouVerify key injection script — scripts/inject-youverify-key.sh with env/file/prompt resolution, live API validation, .env.local persistence, and full e2e test execution
+- [x] Implement automated YouVerify key injection script — scripts/inject-youverify-key.sh with env/file/prompt resolution, live API validation, .env.local persistence, and full e2e test execution
+
+## Session Exchange & Branch Protection (Aug 12 2026)
+- [x] Run YouVerify key injection script with production credentials — script validated placeholder detection; awaiting production key from user
+- [x] Implement BFF session-exchange endpoint — POST /api/auth/exchange validates Keycloak JWT (azp fallback), upserts user, issues session cookie; validated end-to-end (auth.me returns user profile via cookie)
+- [x] Configure branch protection rules on main — required checks: CodeQL (JS/TS, Go, Python) + node-tests; 1 approving review required; stale reviews dismissed; force pushes blocked
