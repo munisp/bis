@@ -3500,3 +3500,10 @@
 - [x] Flow-of-funds atomicity audit: Paystack idempotency, NIP velocity gating, TigerBeetle double-entry all verified
 - [x] Fix critical flow-of-funds gap: added stablecoin transfer idempotency guard (reference-based dedup)
 - [x] Push all code to GitHub, merge all branches to main
+
+## Feature Enhancement (Aug 12 2026 — Session 2)
+- [x] PDF/CSV export for verification history from UserProfileDashboard (CSV download + browser print-to-PDF)
+- [x] Real-time notification toast for NIN/BVN verification status changes (useVerificationNotifications hook via SSE)
+- [x] Step-by-step progress indicator on VerifyIdentityPage (4-step visual guide: Select ID → Enter Details → Verification → Result)
+- [x] Final production scan: 0 dangerous mock/stub paths, 0 Math.random in financial code, all sandbox refs are metadata-only
+- [x] Push all code to GitHub main

@@ -6,6 +6,7 @@
  */
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
+import { useVerificationNotifications } from "@/hooks/useVerificationNotifications";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -14,6 +15,59 @@ import { AlertCircle, CheckCircle2, Loader2, ShieldAlert, RefreshCw } from "luci
 import { toast } from "sonner";
 
 type VerificationStatus = "idle" | "loading" | "success" | "error" | "unavailable";
+
+// ── Step Progress Indicator ───────────────────────────────────────────────────
+const STEPS = [
+  { id: 1, label: "Select ID Type", description: "Choose NIN or BVN" },
+  { id: 2, label: "Enter Details", description: "Provide ID number and name" },
+  { id: 3, label: "Verification", description: "Real-time API check" },
+  { id: 4, label: "Result", description: "View verification outcome" },
+] as const;
+
+function getActiveStep(status: VerificationStatus, idNumber: string, idType: string): number {
+  if (status === "success" || status === "error" || status === "unavailable") return 4;
+  if (status === "loading") return 3;
+  if (idNumber.length > 0) return 2;
+  return 1;
+}
+
+function StepIndicator({ currentStep }: { currentStep: number }) {
+  return (
+    <div className="flex items-center justify-between mb-6">
+      {STEPS.map((step, idx) => {
+        const isActive = step.id === currentStep;
+        const isCompleted = step.id < currentStep;
+        return (
+          <div key={step.id} className="flex items-center flex-1">
+            <div className="flex flex-col items-center flex-shrink-0">
+              <div
+                className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-colors ${
+                  isCompleted
+                    ? "bg-green-600 text-white"
+                    : isActive
+                    ? "bg-blue-600 text-white ring-2 ring-blue-300"
+                    : "bg-muted text-muted-foreground"
+                }`}
+              >
+                {isCompleted ? "✓" : step.id}
+              </div>
+              <span className={`text-[10px] mt-1 text-center max-w-[72px] leading-tight ${
+                isActive ? "font-semibold text-blue-700" : "text-muted-foreground"
+              }`}>
+                {step.label}
+              </span>
+            </div>
+            {idx < STEPS.length - 1 && (
+              <div className={`flex-1 h-0.5 mx-2 mt-[-12px] ${
+                isCompleted ? "bg-green-500" : "bg-muted"
+              }`} />
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 interface VerificationResult {
   verified: boolean;
@@ -32,6 +86,10 @@ interface VerificationResult {
 
 export default function VerifyIdentityPage() {
   const [idType, setIdType] = useState<"nin" | "bvn">("nin");
+
+  // Real-time notification listener — shows toast when verification status changes
+  useVerificationNotifications();
+
   const [idNumber, setIdNumber] = useState("");
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
@@ -103,6 +161,9 @@ export default function VerifyIdentityPage() {
           Verify Nigerian National Identification Number (NIN) or Bank Verification Number (BVN)
         </p>
       </div>
+
+      {/* Step-by-Step Progress Indicator */}
+      <StepIndicator currentStep={getActiveStep(status, idNumber, idType)} />
 
       {/* Verification Form */}
       <Card>
