@@ -100,7 +100,7 @@
     "react-webcam": "^7.2.0",
     "recharts": "^3.10.1",
     "sonner": "^2.0.8",
-    "streamdown": "^1.4.0",
+    "streamdown": "^2.5.0",
     "superjson": "^1.13.3",
     "swagger-ui-express": "^5.0.1",
     "tailwind-merge": "^3.6.0",
