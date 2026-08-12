@@ -3,8 +3,9 @@
  * =========================================================================
  * Features:
  *   - Summary stats (unreconciled count, total outstanding, oldest age)
- *   - Retry All bulk action with visual progress bar
+ *   - Row-level checkboxes for selective bulk retry with progress bar
  *   - Date filtering and column sorting
+ *   - CSV export of filtered transactions
  *   - Detail modal with full JSON payload and error logs
  *   - Individual retry per row
  */
@@ -15,9 +16,10 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Loader2, AlertTriangle, CheckCircle2, RefreshCw, Database,
-  DollarSign, ArrowUpDown, Eye, PlayCircle, X, Copy,
+  DollarSign, ArrowUpDown, Eye, PlayCircle, X, Copy, Download,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -39,6 +41,37 @@ interface RetryQueueItem {
 type SortField = "date" | "amount" | "attempts" | "tenant";
 type SortDir = "asc" | "desc";
 
+// ── CSV Export ────────────────────────────────────────────────────────────────
+function escapeCSV(val: string): string {
+  if (val.includes(",") || val.includes('"') || val.includes("\n")) {
+    return `"${val.replace(/"/g, '""')}"`;
+  }
+  return val;
+}
+
+function exportToCSV(items: RetryQueueItem[]) {
+  const headers = ["Reference", "Tenant", "Amount (NGN)", "Attempts", "Status", "Last Error", "Created", "Next Retry"];
+  const rows = items.map((item) => [
+    item.reference,
+    item.tenantId,
+    String(item.amountKobo / 100),
+    String(item.attempts),
+    item.status,
+    item.lastError || "",
+    item.createdAt ? new Date(item.createdAt).toISOString() : "",
+    item.nextRetryAt ? new Date(item.nextRetryAt).toISOString() : "",
+  ]);
+  const csv = [headers.join(","), ...rows.map((row) => row.map(escapeCSV).join(","))].join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `bis-reconciliation-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  toast.success(`Exported ${items.length} records to CSV`);
+}
+
 // ── Detail Modal ──────────────────────────────────────────────────────────────
 function DetailModal({ item, onClose }: { item: RetryQueueItem; onClose: () => void }) {
   const jsonPayload = JSON.stringify(item, null, 2);
@@ -51,7 +84,6 @@ function DetailModal({ item, onClose }: { item: RetryQueueItem; onClose: () => v
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
       <div className="bg-background border rounded-xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col">
-        {/* Header */}
         <div className="flex items-center justify-between p-4 border-b">
           <div>
             <h3 className="font-semibold text-lg">Transaction Detail</h3>
@@ -61,10 +93,7 @@ function DetailModal({ item, onClose }: { item: RetryQueueItem; onClose: () => v
             <X className="h-4 w-4" />
           </Button>
         </div>
-
-        {/* Content */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {/* Summary Grid */}
           <div className="grid grid-cols-2 gap-3 text-sm">
             <div>
               <span className="text-muted-foreground">Tenant</span>
@@ -93,8 +122,6 @@ function DetailModal({ item, onClose }: { item: RetryQueueItem; onClose: () => v
               <p className="font-medium">{new Date(item.nextRetryAt).toLocaleString()}</p>
             </div>
           </div>
-
-          {/* Error Log */}
           {item.lastError && (
             <div>
               <Label className="text-xs text-muted-foreground">Last Error</Label>
@@ -103,8 +130,6 @@ function DetailModal({ item, onClose }: { item: RetryQueueItem; onClose: () => v
               </div>
             </div>
           )}
-
-          {/* Full JSON Payload */}
           <div>
             <div className="flex items-center justify-between mb-1">
               <Label className="text-xs text-muted-foreground">Full JSON Payload</Label>
@@ -117,8 +142,6 @@ function DetailModal({ item, onClose }: { item: RetryQueueItem; onClose: () => v
             </pre>
           </div>
         </div>
-
-        {/* Footer */}
         <div className="p-4 border-t flex justify-end">
           <Button variant="outline" onClick={onClose}>Close</Button>
         </div>
@@ -155,6 +178,7 @@ export default function ReconciliationDashboard() {
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [selectedRefs, setSelectedRefs] = useState<Set<string>>(new Set());
 
   const { data, isLoading, refetch } = trpc.admin.reconciliation.listUnreconciled.useQuery(
     { limit: 200 },
@@ -182,10 +206,13 @@ export default function ReconciliationDashboard() {
     retryMutation.mutate({ reference, tenantId, amountKobo });
   };
 
-  // ── Retry All ─────────────────────────────────────────────────────────────
-  const handleRetryAll = async () => {
-    const items = filteredAndSorted;
-    if (items.length === 0) return;
+  // ── Selective Bulk Retry ───────────────────────────────────────────────────
+  const handleRetrySelected = async () => {
+    const items = filteredAndSorted.filter((i) => selectedRefs.has(i.reference));
+    if (items.length === 0) {
+      toast.error("No items selected");
+      return;
+    }
     setBulkProgress({ current: 0, total: items.length });
 
     for (let i = 0; i < items.length; i++) {
@@ -198,59 +225,61 @@ export default function ReconciliationDashboard() {
           amountKobo: item.amountKobo,
         });
       } catch {
-        // Continue processing remaining items even if one fails
+        // Continue processing remaining items
       }
     }
 
     setBulkProgress(null);
+    setSelectedRefs(new Set());
     refetch();
     toast.success(`Bulk retry complete — processed ${items.length} items`);
+  };
+
+  // ── Select All / None ─────────────────────────────────────────────────────
+  const toggleSelectAll = () => {
+    if (selectedRefs.size === filteredAndSorted.length) {
+      setSelectedRefs(new Set());
+    } else {
+      setSelectedRefs(new Set(filteredAndSorted.map((i) => i.reference)));
+    }
+  };
+
+  const toggleSelect = (ref: string) => {
+    setSelectedRefs((prev) => {
+      const next = new Set(prev);
+      if (next.has(ref)) next.delete(ref);
+      else next.add(ref);
+      return next;
+    });
   };
 
   // ── Filtering & Sorting ───────────────────────────────────────────────────
   const filteredAndSorted = useMemo(() => {
     let items: RetryQueueItem[] = (data?.items ?? []) as any[];
-
-    // Date filter
     if (dateFrom) {
       const from = new Date(dateFrom).getTime();
       items = items.filter((i) => new Date(i.verifiedAt || i.createdAt).getTime() >= from);
     }
     if (dateTo) {
-      const to = new Date(dateTo).getTime() + 86_400_000; // end of day
+      const to = new Date(dateTo).getTime() + 86_400_000;
       items = items.filter((i) => new Date(i.verifiedAt || i.createdAt).getTime() <= to);
     }
-
-    // Sort
     items = [...items].sort((a, b) => {
       let cmp = 0;
       switch (sortField) {
-        case "date":
-          cmp = new Date(a.verifiedAt || a.createdAt).getTime() - new Date(b.verifiedAt || b.createdAt).getTime();
-          break;
-        case "amount":
-          cmp = a.amountKobo - b.amountKobo;
-          break;
-        case "attempts":
-          cmp = a.attempts - b.attempts;
-          break;
-        case "tenant":
-          cmp = a.tenantId.localeCompare(b.tenantId);
-          break;
+        case "date": cmp = new Date(a.verifiedAt || a.createdAt).getTime() - new Date(b.verifiedAt || b.createdAt).getTime(); break;
+        case "amount": cmp = a.amountKobo - b.amountKobo; break;
+        case "attempts": cmp = a.attempts - b.attempts; break;
+        case "tenant": cmp = a.tenantId.localeCompare(b.tenantId); break;
       }
       return sortDir === "desc" ? -cmp : cmp;
     });
-
     return items;
   }, [data?.items, dateFrom, dateTo, sortField, sortDir]);
 
   const toggleSort = (field: SortField) => {
-    if (sortField === field) {
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    } else {
-      setSortField(field);
-      setSortDir("desc");
-    }
+    if (sortField === field) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else { setSortField(field); setSortDir("desc"); }
   };
 
   if (isLoading) {
@@ -262,6 +291,7 @@ export default function ReconciliationDashboard() {
   }
 
   const stats = data?.stats ?? { total: 0, totalAmountNGN: 0, oldestAge: "—" };
+  const allSelected = filteredAndSorted.length > 0 && selectedRefs.size === filteredAndSorted.length;
 
   return (
     <div className="container max-w-6xl py-8 space-y-6">
@@ -275,18 +305,28 @@ export default function ReconciliationDashboard() {
             Transactions where TigerBeetle recording failed — verified by Paystack but not credited.
           </p>
         </div>
-        <Button
-          onClick={handleRetryAll}
-          disabled={filteredAndSorted.length === 0 || bulkProgress !== null}
-          className="gap-2"
-        >
-          {bulkProgress ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <PlayCircle className="h-4 w-4" />
-          )}
-          Retry All ({filteredAndSorted.length})
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            onClick={() => exportToCSV(filteredAndSorted)}
+            disabled={filteredAndSorted.length === 0}
+          >
+            <Download className="h-4 w-4 mr-1" />
+            CSV
+          </Button>
+          <Button
+            onClick={handleRetrySelected}
+            disabled={selectedRefs.size === 0 || bulkProgress !== null}
+            className="gap-2"
+          >
+            {bulkProgress ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <PlayCircle className="h-4 w-4" />
+            )}
+            Retry Selected ({selectedRefs.size})
+          </Button>
+        </div>
       </div>
 
       {/* Bulk Progress Bar */}
@@ -335,21 +375,11 @@ export default function ReconciliationDashboard() {
           <div className="flex items-end gap-4 flex-wrap">
             <div className="space-y-1">
               <Label className="text-xs">From Date</Label>
-              <Input
-                type="date"
-                value={dateFrom}
-                onChange={(e) => setDateFrom(e.target.value)}
-                className="w-40"
-              />
+              <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="w-40" />
             </div>
             <div className="space-y-1">
               <Label className="text-xs">To Date</Label>
-              <Input
-                type="date"
-                value={dateTo}
-                onChange={(e) => setDateTo(e.target.value)}
-                className="w-40"
-              />
+              <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-40" />
             </div>
             {(dateFrom || dateTo) && (
               <Button variant="ghost" size="sm" onClick={() => { setDateFrom(""); setDateTo(""); }}>
@@ -358,6 +388,7 @@ export default function ReconciliationDashboard() {
             )}
             <div className="ml-auto text-xs text-muted-foreground">
               Showing {filteredAndSorted.length} of {data?.items?.length ?? 0} items
+              {selectedRefs.size > 0 && ` · ${selectedRefs.size} selected`}
             </div>
           </div>
         </CardContent>
@@ -368,7 +399,7 @@ export default function ReconciliationDashboard() {
         <CardHeader>
           <CardTitle>Failed Ledger Credits</CardTitle>
           <CardDescription>
-            Click column headers to sort. Click the eye icon for full details.
+            Use checkboxes to select items for bulk retry. Click column headers to sort.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -383,7 +414,12 @@ export default function ReconciliationDashboard() {
           ) : (
             <div className="space-y-1">
               {/* Header Row */}
-              <div className="grid grid-cols-7 gap-2 text-xs font-medium text-muted-foreground border-b pb-2">
+              <div className="grid grid-cols-[32px_1fr_1fr_80px_60px_80px_70px_70px] gap-2 text-xs font-medium text-muted-foreground border-b pb-2 items-center">
+                <Checkbox
+                  checked={allSelected}
+                  onCheckedChange={toggleSelectAll}
+                  aria-label="Select all"
+                />
                 <span>Reference</span>
                 <button className="flex items-center gap-1 hover:text-foreground" onClick={() => toggleSort("tenant")}>
                   Tenant <ArrowUpDown className="h-3 w-3" />
@@ -392,7 +428,7 @@ export default function ReconciliationDashboard() {
                   Amount <ArrowUpDown className="h-3 w-3" />
                 </button>
                 <button className="flex items-center gap-1 hover:text-foreground" onClick={() => toggleSort("attempts")}>
-                  Attempts <ArrowUpDown className="h-3 w-3" />
+                  Tries <ArrowUpDown className="h-3 w-3" />
                 </button>
                 <button className="flex items-center gap-1 hover:text-foreground" onClick={() => toggleSort("date")}>
                   Date <ArrowUpDown className="h-3 w-3" />
@@ -403,7 +439,17 @@ export default function ReconciliationDashboard() {
 
               {/* Data Rows */}
               {filteredAndSorted.map((item: any) => (
-                <div key={item.reference} className="grid grid-cols-7 gap-2 items-center text-sm py-2 border-b border-dashed hover:bg-muted/30 transition-colors">
+                <div
+                  key={item.reference}
+                  className={`grid grid-cols-[32px_1fr_1fr_80px_60px_80px_70px_70px] gap-2 items-center text-sm py-2 border-b border-dashed hover:bg-muted/30 transition-colors ${
+                    selectedRefs.has(item.reference) ? "bg-blue-50/50" : ""
+                  }`}
+                >
+                  <Checkbox
+                    checked={selectedRefs.has(item.reference)}
+                    onCheckedChange={() => toggleSelect(item.reference)}
+                    aria-label={`Select ${item.reference}`}
+                  />
                   <span className="font-mono text-xs truncate" title={item.reference}>
                     {item.reference.slice(0, 18)}...
                   </span>
@@ -417,22 +463,14 @@ export default function ReconciliationDashboard() {
                     variant={item.status === "dead_letter" ? "destructive" : "outline"}
                     className="w-fit text-[10px]"
                   >
-                    {item.status === "dead_letter" ? "dead letter" : item.status || "pending"}
+                    {item.status === "dead_letter" ? "dead" : item.status || "pending"}
                   </Badge>
                   <div className="flex gap-1">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 w-7 p-0"
-                      onClick={() => setSelectedItem(item)}
-                      title="View details"
-                    >
+                    <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setSelectedItem(item)} title="View details">
                       <Eye className="h-3.5 w-3.5" />
                     </Button>
                     <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 w-7 p-0"
+                      variant="ghost" size="sm" className="h-7 w-7 p-0"
                       disabled={retrying === item.reference || bulkProgress !== null}
                       onClick={() => handleRetry(item.reference, item.tenantId, item.amountKobo)}
                       title="Retry credit"
@@ -458,4 +496,3 @@ export default function ReconciliationDashboard() {
     </div>
   );
 }
-

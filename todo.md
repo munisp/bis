@@ -3519,3 +3519,9 @@
 - [x] Implement date filtering and sorting options for failed transactions
 - [x] Create detailed view modal showing full JSON payload and error logs
 - [x] Push all code to GitHub main
+
+## Reconciliation Dashboard v2 (Aug 12 2026 — Session 5)
+- [x] Row-level checkboxes for selective bulk retry (select all / individual toggle)
+- [x] Real-time counter badge on sidebar navigation showing unreconciled count (30s refresh, destructive variant)
+- [x] CSV export button for currently filtered failed transactions (proper escaping, timestamped filename)
+- [x] Push all code to GitHub main

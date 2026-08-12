@@ -429,6 +429,12 @@ export default function BISLayout({ children, title, subtitle, actions }: BISLay
     staleTime: 30_000,
   });
 
+  // ── Live unreconciled count for Reconciliation badge ─────────────────────
+  const { data: reconData } = trpc.admin.reconciliation.listUnreconciled.useQuery(
+    { limit: 1 },
+    { refetchInterval: 30_000, staleTime: 15_000 }
+  );
+
   // Sync live alerts into notification state
   useEffect(() => {
     if (!alertsData) return;
@@ -567,6 +573,9 @@ export default function BISLayout({ children, title, subtitle, actions }: BISLay
       }
       if (item.href === '/notifications' && notifUnreadData?.count) {
         return { ...item, badge: notifUnreadData.count };
+      }
+      if (item.href === '/payment-rails/reconciliation' && reconData?.stats?.total) {
+        return { ...item, badge: reconData.stats.total, badgeVariant: 'destructive' as const };
       }
       return item;
     }),
