@@ -110,6 +110,7 @@ import {
   criminalRecordAttachments,
   criminalRecordAudit,
   collectionSites,
+  billingTopups,
 } from "../drizzle/schema";
 import {
   getDashboardStats,
@@ -118,7 +119,7 @@ import {
   getMonitors, createMonitor, updateMonitor,
   getScreeningRequests, createScreeningRequest, updateScreeningRequest,
 } from "./db";
-import { eq, desc, asc, and, ilike, gte, lte, lt, sql, count, inArray, isNotNull } from "drizzle-orm";
+import { eq, desc, asc, and, or, ilike, like, gte, lte, lt, sql, count, inArray, isNotNull, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { ENV } from "./_core/env";
 import { analyticsRouter } from "./orm/analyticsRouter"; // analytics.getDashboardStats is separate from db.getDashboardStats
@@ -6871,6 +6872,64 @@ const collectionSitesRouter = router({
 
 export const appRouter = router({
   system: systemRouter,
+  admin: router({
+    reconciliation: router({
+      /**
+       * List billing top-ups where TigerBeetle recording failed (tbTransferId is null or starts with 'fallback-').
+       */
+      listUnreconciled: protectedProcedure
+        .input(z.object({ limit: z.number().min(1).max(200).default(50) }))
+        .query(async ({ input }) => {
+          const db = await getDb();
+          if (!db) return { items: [], stats: { total: 0, totalAmountNGN: 0, oldestAge: "—" } };
+          const rows = await db.select().from(billingTopups)
+            .where(
+              or(
+                isNull(billingTopups.tbTransferId),
+                like(billingTopups.tbTransferId, "fallback-%")
+              )
+            )
+            .orderBy(desc(billingTopups.verifiedAt))
+            .limit(input.limit);
+          const totalAmountKobo = rows.reduce((sum, r) => sum + r.amountKobo, 0);
+          const oldest = rows.length > 0 ? rows[rows.length - 1].verifiedAt : null;
+          const oldestAge = oldest
+            ? `${Math.round((Date.now() - new Date(oldest).getTime()) / (1000 * 60 * 60))}h ago`
+            : "—";
+          return {
+            items: rows,
+            stats: { total: rows.length, totalAmountNGN: totalAmountKobo / 100, oldestAge },
+          };
+        }),
+      /**
+       * Retry crediting a tenant's TigerBeetle account for a previously failed top-up.
+       */
+      retryCredit: protectedProcedure
+        .input(z.object({
+          reference: z.string().min(1),
+          tenantId: z.string().min(1),
+          amountKobo: z.number().int().positive(),
+        }))
+        .mutation(async ({ input }) => {
+          const { creditTenantAccount } = await import("./billing");
+          const result = await creditTenantAccount({
+            tenantId: input.tenantId,
+            amountKobo: input.amountKobo,
+            reference: input.reference,
+          });
+          // Update the billing_topups record with the new transfer ID if successful
+          if (result.recorded) {
+            const db = await getDb();
+            if (db) {
+              await db.update(billingTopups)
+                .set({ tbTransferId: result.transferId })
+                .where(eq(billingTopups.reference, input.reference));
+            }
+          }
+          return result;
+        }),
+    }),
+  }),
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user ? { ...opts.ctx.user, isDemo: opts.ctx.isDemo } : null),
     logout: publicProcedure.mutation(({ ctx }) => {
