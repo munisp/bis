@@ -321,24 +321,35 @@ export default function Dashboard() {
         const bgColor = rate >= 90 ? "bg-green-50 border-green-200" : rate >= 70 ? "bg-amber-50 border-amber-200" : "bg-red-50 border-red-200";
         const strokeColor = rate >= 90 ? "#22c55e" : rate >= 70 ? "#f59e0b" : "#ef4444";
         return (
-          <div className={`rounded-lg border p-4 mb-4 flex items-center gap-4 ${bgColor}`}>
-            <div className="relative w-16 h-16">
-              <svg viewBox="0 0 36 36" className="w-16 h-16 -rotate-90">
-                <circle cx="18" cy="18" r="15.5" fill="none" stroke="#e5e7eb" strokeWidth="3" />
-                <circle cx="18" cy="18" r="15.5" fill="none" stroke={strokeColor} strokeWidth="3"
-                  strokeDasharray={`${rate * 0.975} 100`} strokeLinecap="round" />
-              </svg>
-              <div className="absolute inset-0 flex items-center justify-center">
-                <span className={`text-sm font-bold ${color}`}>{rate}%</span>
+          <>
+            {rate < 90 && (
+              <div role="alert" className="mb-4 flex items-start gap-3 rounded-lg border-2 border-amber-400 bg-amber-50 p-4 text-amber-950 shadow-sm">
+                <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-700" />
+                <div>
+                  <p className="font-semibold">Reconciliation health requires attention</p>
+                  <p className="mt-0.5 text-sm">The 24-hour ledger credit success rate is {rate}%, below the 90% operating threshold. Review pending and dead-lettered payments before they affect customer balances.</p>
+                </div>
+              </div>
+            )}
+            <div className={`rounded-lg border p-4 mb-4 flex items-center gap-4 ${bgColor}`}>
+              <div className="relative w-16 h-16">
+                <svg viewBox="0 0 36 36" className="w-16 h-16 -rotate-90">
+                  <circle cx="18" cy="18" r="15.5" fill="none" stroke="#e5e7eb" strokeWidth="3" />
+                  <circle cx="18" cy="18" r="15.5" fill="none" stroke={strokeColor} strokeWidth="3"
+                    strokeDasharray={`${rate * 0.975} 100`} strokeLinecap="round" />
+                </svg>
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <span className={`text-sm font-bold ${color}`}>{rate}%</span>
+                </div>
+              </div>
+              <div>
+                <p className="text-sm font-semibold">Reconciliation Health</p>
+                <p className="text-xs text-muted-foreground">
+                  24h success rate: {succeeded}/{total} payments credited to TigerBeetle
+                </p>
               </div>
             </div>
-            <div>
-              <p className="text-sm font-semibold">Reconciliation Health</p>
-              <p className="text-xs text-muted-foreground">
-                24h success rate: {succeeded}/{total} payments credited to TigerBeetle
-              </p>
-            </div>
-          </div>
+          </>
         );
       })()}
 

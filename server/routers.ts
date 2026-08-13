@@ -1,6 +1,7 @@
 import { COOKIE_NAME } from "@shared/const";
 import { withCache, invalidateCache, TTL } from "./cache";
 import { withCircuitBreaker } from "./circuitBreaker";
+import { getForceCreditDualApprovalThresholdKobo, requiresForceCreditDualApproval } from "./forceCreditPolicy";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { billingRouter } from "./billing";
 import { tenantsRouter } from "./tenants";
@@ -6979,6 +6980,13 @@ export const appRouter = router({
         .mutation(async ({ input, ctx }) => {
           const db = await getDb();
           if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+          const dualApprovalThresholdKobo = getForceCreditDualApprovalThresholdKobo();
+          if (requiresForceCreditDualApproval(input.amountKobo, dualApprovalThresholdKobo)) {
+            throw new TRPCError({
+              code: "PRECONDITION_FAILED",
+              message: `Dual approval is required for Force Credit requests of ₦${(dualApprovalThresholdKobo / 100).toLocaleString()} or more`,
+            });
+          }
           const operator = ctx.user?.name ?? ctx.user?.openId ?? "unknown";
           const auditEntry = `[FORCE_CREDIT ${new Date().toISOString()}] by ${operator}: ${input.auditNote}`;
 
@@ -7033,22 +7041,194 @@ export const appRouter = router({
           `);
           return { success: true, transferId: result.transferId, operator };
         }),
+      /** Return the dual-control policy used by the reconciliation UI. */
+      forceCreditPolicy: adminProcedure.query(() => {
+        const thresholdKobo = getForceCreditDualApprovalThresholdKobo();
+        return {
+          thresholdKobo,
+          thresholdNGN: thresholdKobo / 100,
+          requiresDifferentApprover: true,
+        };
+      }),
       /**
-       * Get failure rate data for the past 7 days (daily buckets).
+       * Request a two-person Force Credit recovery for a high-value dead-letter item.
+       * A requester cannot approve their own request, and the payment remains uncredited
+       * until the second admin records a successful TigerBeetle transfer.
        */
-      failureRateChart: protectedProcedure.query(async () => {
+      requestForceCredit: adminProcedure
+        .input(z.object({
+          reference: z.string().min(1),
+          tenantId: z.string().min(1),
+          amountKobo: z.number().int().positive(),
+          auditNote: z.string().min(10, "Audit note must be at least 10 characters"),
+        }))
+        .mutation(async ({ input, ctx }) => {
+          const db = await getDb();
+          if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+          const thresholdKobo = getForceCreditDualApprovalThresholdKobo();
+          if (!requiresForceCreditDualApproval(input.amountKobo, thresholdKobo)) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: "This amount is below the dual-approval threshold; use the standard Force Credit recovery" });
+          }
+          const [topup] = await db.select().from(billingTopups)
+            .where(and(
+              eq(billingTopups.reference, input.reference),
+              eq(billingTopups.tenantId, input.tenantId),
+              eq(billingTopups.amountKobo, input.amountKobo),
+            ))
+            .limit(1);
+          if (!topup) throw new TRPCError({ code: "NOT_FOUND", message: "Matching verified top-up was not found" });
+          if (topup.tbTransferId && !topup.tbTransferId.startsWith("fallback-")) {
+            throw new TRPCError({ code: "CONFLICT", message: "Top-up is already recorded in the ledger" });
+          }
+          const existing = await db.execute(sql`
+            SELECT "id" FROM force_credit_approvals
+            WHERE "reference" = ${input.reference} AND "status" IN ('pending', 'executing')
+            LIMIT 1
+          `);
+          const existingRows = (existing as any).rows ?? existing ?? [];
+          if (existingRows.length > 0) {
+            throw new TRPCError({ code: "CONFLICT", message: "A Force Credit approval request is already pending for this payment" });
+          }
+          const requested = await db.execute(sql`
+            INSERT INTO force_credit_approvals
+              ("reference", "tenantId", "amountKobo", "auditNote", "status", "requesterId", "requestedAt", "updatedAt")
+            VALUES
+              (${input.reference}, ${input.tenantId}, ${input.amountKobo}, ${input.auditNote}, 'pending', ${ctx.user!.id}, NOW(), NOW())
+            RETURNING "id", "requestedAt"
+          `);
+          const request = ((requested as any).rows ?? requested ?? [])[0];
+          await db.execute(sql`
+            INSERT INTO event_log ("eventType", "aggregateId", "actorId", "payload", "source", "createdAt")
+            VALUES ('force_credit_requested', ${input.reference}, ${ctx.user!.id}, CAST(${JSON.stringify({
+              amountKobo: input.amountKobo,
+              tenantId: input.tenantId,
+              auditNote: input.auditNote,
+              thresholdKobo,
+            })} AS json), 'admin_reconciliation', NOW())
+          `);
+          return { id: Number(request.id), status: "pending" as const, thresholdKobo };
+        }),
+      /** List approval requests so a second administrator can review them. */
+      listForceCreditApprovals: adminProcedure
+        .input(z.object({ status: z.enum(["pending", "executing", "executed", "failed"]).optional(), limit: z.number().min(1).max(200).default(100) }))
+        .query(async ({ input }) => {
+          const db = await getDb();
+          if (!db) return { approvals: [] };
+          const statusClause = input.status ? sql`AND a."status" = ${input.status}` : sql``;
+          const rows = await db.execute(sql`
+            SELECT a.*, requester."name" AS "requesterName", approver."name" AS "approverName"
+            FROM force_credit_approvals a
+            LEFT JOIN users requester ON requester."id" = a."requesterId"
+            LEFT JOIN users approver ON approver."id" = a."approverId"
+            WHERE 1 = 1 ${statusClause}
+            ORDER BY a."requestedAt" DESC
+            LIMIT ${input.limit}
+          `);
+          return { approvals: (rows as any).rows ?? rows ?? [] };
+        }),
+      /**
+       * Atomically claim, approve, and execute a high-value Force Credit request.
+       * The SQL claim prevents concurrent double execution and rejects self-approval.
+       */
+      approveForceCredit: adminProcedure
+        .input(z.object({ approvalId: z.number().int().positive(), approvalNote: z.string().min(10, "Approval note must be at least 10 characters") }))
+        .mutation(async ({ input, ctx }) => {
+          const db = await getDb();
+          if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+          const claim = await db.execute(sql`
+            UPDATE force_credit_approvals
+            SET "status" = 'executing', "approverId" = ${ctx.user!.id}, "approvalNote" = ${input.approvalNote},
+                "approvedAt" = NOW(), "updatedAt" = NOW()
+            WHERE "id" = ${input.approvalId} AND "status" = 'pending' AND "requesterId" <> ${ctx.user!.id}
+            RETURNING *
+          `);
+          const approval = ((claim as any).rows ?? claim ?? [])[0];
+          if (!approval) {
+            throw new TRPCError({ code: "CONFLICT", message: "Request is unavailable, already being processed, or requires a different approver" });
+          }
+          const [topup] = await db.select().from(billingTopups)
+            .where(and(
+              eq(billingTopups.reference, approval.reference),
+              eq(billingTopups.tenantId, approval.tenantId),
+              eq(billingTopups.amountKobo, Number(approval.amountKobo)),
+            ))
+            .limit(1);
+          if (!topup || (topup.tbTransferId && !topup.tbTransferId.startsWith("fallback-"))) {
+            await db.execute(sql`UPDATE force_credit_approvals SET "status" = 'failed', "updatedAt" = NOW() WHERE "id" = ${input.approvalId}`);
+            throw new TRPCError({ code: "CONFLICT", message: "Top-up is missing or already recorded in the ledger" });
+          }
+          const { creditTenantAccount } = await import("./billing");
+          const result = await creditTenantAccount({
+            tenantId: approval.tenantId,
+            amountKobo: Number(approval.amountKobo),
+            reference: approval.reference,
+          });
+          if (!result.recorded) {
+            await db.execute(sql`UPDATE force_credit_approvals SET "status" = 'failed', "updatedAt" = NOW() WHERE "id" = ${input.approvalId}`);
+            throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "TigerBeetle did not record the credit; the request remains auditable but no balance changed" });
+          }
+          const approver = ctx.user?.name ?? ctx.user?.openId ?? "unknown";
+          await db.update(billingTopups).set({ tbTransferId: result.transferId }).where(eq(billingTopups.reference, approval.reference));
+          await db.execute(sql`
+            UPDATE webhook_retry_queue
+            SET "status" = 'resolved', "lastError" = COALESCE("lastError", '') || ${'\n' + `[DUAL_APPROVED ${new Date().toISOString()}] by ${approver}: ${input.approvalNote}`}
+            WHERE "reference" = ${approval.reference}
+          `);
+          await db.execute(sql`
+            UPDATE force_credit_approvals
+            SET "status" = 'executed', "ledgerTransferId" = ${result.transferId}, "executedAt" = NOW(), "updatedAt" = NOW()
+            WHERE "id" = ${input.approvalId}
+          `);
+          await db.execute(sql`
+            INSERT INTO event_log ("eventType", "aggregateId", "actorId", "payload", "source", "createdAt")
+            VALUES ('force_credit_dual_approved', ${approval.reference}, ${ctx.user!.id}, CAST(${JSON.stringify({
+              approvalId: input.approvalId,
+              requesterId: approval.requesterId,
+              approverId: ctx.user!.id,
+              approvalNote: input.approvalNote,
+              tigerBeetleTransferId: result.transferId,
+            })} AS json), 'admin_reconciliation', NOW())
+          `);
+          return { success: true, transferId: result.transferId, requesterId: Number(approval.requesterId), approver };
+        }),
+      /** List channels represented in persisted Paystack top-ups for analytics filtering. */
+      listPaymentChannels: adminProcedure.query(async () => {
+        const db = await getDb();
+        if (!db) return { channels: [] as string[] };
+        const rows = await db.execute(sql`
+          SELECT DISTINCT COALESCE("channel", 'unknown') AS channel
+          FROM billing_topups
+          ORDER BY channel ASC
+        `);
+        return {
+          channels: ((rows as any).rows ?? rows ?? [])
+            .map((row: any) => String(row.channel ?? "unknown")),
+        };
+      }),
+      /**
+       * Get failure rate data for the past 7 days (daily buckets), optionally
+       * constrained to the persisted billing_topups payment channel.
+       */
+      failureRateChart: protectedProcedure
+        .input(z.object({ channel: z.string().min(1).max(64).optional() }).optional())
+        .query(async ({ input }) => {
         const db = await getDb();
         if (!db) return { days: [] };
+        const channelClause = input?.channel
+          ? sql`AND COALESCE(b."channel", 'unknown') = ${input.channel}`
+          : sql``;
         const rows = await db.execute(sql`
           SELECT
-            DATE("createdAt") as day,
+            DATE(q."createdAt") as day,
             COUNT(*) as total,
-            COUNT(*) FILTER (WHERE "status" = 'completed') as succeeded,
-            COUNT(*) FILTER (WHERE "status" = 'dead_letter') as dead_lettered,
-            COUNT(*) FILTER (WHERE "status" = 'pending') as pending
-          FROM webhook_retry_queue
-          WHERE "createdAt" >= NOW() - INTERVAL '7 days'
-          GROUP BY DATE("createdAt")
+            COUNT(*) FILTER (WHERE q."status" = 'completed') as succeeded,
+            COUNT(*) FILTER (WHERE q."status" = 'dead_letter') as dead_lettered,
+            COUNT(*) FILTER (WHERE q."status" = 'pending') as pending
+          FROM webhook_retry_queue q
+          LEFT JOIN billing_topups b ON b."reference" = q."reference"
+          WHERE q."createdAt" >= NOW() - INTERVAL '7 days'
+          ${channelClause}
+          GROUP BY DATE(q."createdAt")
           ORDER BY day ASC
         `);
         const days = ((rows as any).rows ?? rows ?? []).map((r: any) => ({
@@ -7058,7 +7238,7 @@ export const appRouter = router({
           deadLettered: Number(r.dead_lettered ?? 0),
           pending: Number(r.pending ?? 0),
         }));
-        return { days };
+        return { days, channel: input?.channel ?? null };
       }),
     }),
   }),

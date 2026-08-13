@@ -3564,3 +3564,28 @@ export const eventLog = pgTable("event_log", {
 }));
 export type EventLog = typeof eventLog.$inferSelect;
 export type InsertEventLog = typeof eventLog.$inferInsert;
+
+// ── force_credit_approvals ─────────────────────────────────────────────────────
+// Durable four-eyes-control records for high-value manual payment recovery.
+export const forceCreditApprovals = pgTable("force_credit_approvals", {
+  id:               serial("id").primaryKey(),
+  reference:        varchar("reference", { length: 256 }).notNull(),
+  tenantId:         varchar("tenantId", { length: 64 }).notNull(),
+  amountKobo:       integer("amountKobo").notNull(),
+  auditNote:        text("auditNote").notNull(),
+  status:           varchar("status", { length: 24 }).notNull().default("pending"),
+  requesterId:      integer("requesterId").references(() => users.id, { onDelete: "restrict" }).notNull(),
+  approverId:       integer("approverId").references(() => users.id, { onDelete: "restrict" }),
+  approvalNote:     text("approvalNote"),
+  ledgerTransferId: varchar("ledgerTransferId", { length: 128 }),
+  requestedAt:      timestamp("requestedAt").defaultNow().notNull(),
+  approvedAt:       timestamp("approvedAt"),
+  executedAt:       timestamp("executedAt"),
+  updatedAt:        timestamp("updatedAt").defaultNow().notNull(),
+}, (t) => ({
+  force_credit_reference_idx: index("fca_reference_idx").on(t.reference),
+  force_credit_status_idx:    index("fca_status_idx").on(t.status),
+  force_credit_requester_idx: index("fca_requester_idx").on(t.requesterId),
+}));
+export type ForceCreditApproval = typeof forceCreditApprovals.$inferSelect;
+export type InsertForceCreditApproval = typeof forceCreditApprovals.$inferInsert;

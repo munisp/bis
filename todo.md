@@ -3537,3 +3537,9 @@
 - [x] Force Credit admin action on dead-lettered items with mandatory audit note and authoritative TigerBeetle recording requirement
 - [x] Enhanced chart tooltips with exact transaction counts and formatted dates on hover
 - [x] Push all code to GitHub main (commit 6ed76c9)
+
+## Reconciliation Controls v5 (Aug 13 2026)
+- [x] Add payment-channel dropdown filtering to the reconciliation time-series chart and health metric
+- [x] Add dual approval for Force Credit requests above the configured threshold, with immutable approver audit trail
+- [x] Add an automatic dashboard warning banner for reconciliation health below 90%
+- [ ] Validate, checkpoint, and push all code to GitHub main

@@ -45,7 +45,25 @@ interface RetryQueueItem {
 
 type SortField = "date" | "amount" | "attempts" | "tenant";
 type SortDir = "asc" | "desc";
-type TabView = "pending" | "dead_letter";
+type TabView = "pending" | "dead_letter" | "approvals";
+
+interface ForceCreditApproval {
+  id: number;
+  reference: string;
+  tenantId: string;
+  amountKobo: number;
+  auditNote: string;
+  status: "pending" | "executing" | "executed" | "failed";
+  requesterId: number;
+  requesterName?: string | null;
+  approverId?: number | null;
+  approverName?: string | null;
+  approvalNote?: string | null;
+  ledgerTransferId?: string | null;
+  requestedAt: string;
+  approvedAt?: string | null;
+  executedAt?: string | null;
+}
 
 // ── CSV Export ────────────────────────────────────────────────────────────────
 function escapeCSV(val: string): string {
@@ -215,6 +233,68 @@ function ForceCreditDialog({ item, onClose, onSubmit, isLoading }: { item: Retry
   );
 }
 
+// ── Dual Approval Request Dialog ──────────────────────────────────────────────
+function DualApprovalRequestDialog({ item, thresholdNGN, onClose, onSubmit, isLoading }: { item: RetryQueueItem; thresholdNGN: number; onClose: () => void; onSubmit: (note: string) => void; isLoading: boolean }) {
+  const [note, setNote] = useState("");
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+      <div className="bg-background border border-amber-300 rounded-xl shadow-2xl w-full max-w-md flex flex-col">
+        <div className="flex items-center justify-between p-4 border-b border-amber-200 bg-amber-50 rounded-t-xl">
+          <div>
+            <h3 className="font-semibold text-amber-900">Request Dual Approval</h3>
+            <p className="text-xs text-amber-700 font-mono">{item.reference.slice(0, 30)}...</p>
+          </div>
+          <Button variant="ghost" size="sm" onClick={onClose}><X className="h-4 w-4" /></Button>
+        </div>
+        <div className="p-4 space-y-3">
+          <div className="p-3 rounded bg-amber-50 border border-amber-200 text-sm text-amber-900">
+            This ₦{(item.amountKobo / 100).toLocaleString()} recovery exceeds the ₦{thresholdNGN.toLocaleString()} control threshold. A different administrator must approve and execute the TigerBeetle ledger transfer.
+          </div>
+          <Textarea placeholder="Mandatory request rationale (min 10 characters)..." value={note} onChange={(event) => setNote(event.target.value)} rows={4} />
+          <p className="text-xs text-muted-foreground">{note.length}/10 minimum characters</p>
+        </div>
+        <div className="p-4 border-t flex justify-end gap-2">
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button className="bg-amber-600 hover:bg-amber-700" disabled={note.trim().length < 10 || isLoading} onClick={() => onSubmit(note.trim())}>
+            {isLoading ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}Submit for Approval
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Second Approver Dialog ────────────────────────────────────────────────────
+function ApprovalDialog({ approval, onClose, onSubmit, isLoading }: { approval: ForceCreditApproval; onClose: () => void; onSubmit: (note: string) => void; isLoading: boolean }) {
+  const [note, setNote] = useState("");
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+      <div className="bg-background border border-red-300 rounded-xl shadow-2xl w-full max-w-md flex flex-col">
+        <div className="flex items-center justify-between p-4 border-b border-red-200 bg-red-50 rounded-t-xl">
+          <div>
+            <h3 className="font-semibold text-red-900">Approve & Execute Recovery</h3>
+            <p className="text-xs text-red-700 font-mono">{approval.reference.slice(0, 30)}...</p>
+          </div>
+          <Button variant="ghost" size="sm" onClick={onClose}><X className="h-4 w-4" /></Button>
+        </div>
+        <div className="p-4 space-y-3">
+          <div className="p-3 rounded bg-red-50 border border-red-200 text-sm text-red-900">
+            You are the independent second approver. Approval triggers a TigerBeetle credit attempt; the payment remains unresolved if the ledger cannot record it.
+          </div>
+          <div className="text-sm"><span className="text-muted-foreground">Request rationale:</span> {approval.auditNote}</div>
+          <Textarea placeholder="Mandatory approval rationale (min 10 characters)..." value={note} onChange={(event) => setNote(event.target.value)} rows={3} />
+        </div>
+        <div className="p-4 border-t flex justify-end gap-2">
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button variant="destructive" disabled={note.trim().length < 10 || isLoading} onClick={() => onSubmit(note.trim())}>
+            {isLoading ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}Approve & Execute
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Dashboard ────────────────────────────────────────────────────────────
 export default function ReconciliationDashboard() {
   const [retrying, setRetrying] = useState<string | null>(null);
@@ -222,12 +302,15 @@ export default function ReconciliationDashboard() {
   const [selectedItem, setSelectedItem] = useState<RetryQueueItem | null>(null);
   const [resolvingItem, setResolvingItem] = useState<RetryQueueItem | null>(null);
   const [forceCreditItem, setForceCreditItem] = useState<RetryQueueItem | null>(null);
+  const [approvalRequestItem, setApprovalRequestItem] = useState<RetryQueueItem | null>(null);
+  const [approvalExecutionItem, setApprovalExecutionItem] = useState<ForceCreditApproval | null>(null);
   const [sortField, setSortField] = useState<SortField>("date");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [selectedRefs, setSelectedRefs] = useState<Set<string>>(new Set());
   const [activeTab, setActiveTab] = useState<TabView>("pending");
+  const [chartChannel, setChartChannel] = useState("");
 
   // ── Queries ─────────────────────────────────────────────────────────────────
   const { data, isLoading, refetch } = trpc.admin.reconciliation.listUnreconciled.useQuery(
@@ -236,9 +319,21 @@ export default function ReconciliationDashboard() {
   const { data: deadLetterData, refetch: refetchDead } = trpc.admin.reconciliation.listDeadLetters.useQuery(
     { limit: 200 }, { refetchInterval: 60_000 }
   );
-  const { data: chartData } = trpc.admin.reconciliation.failureRateChart.useQuery(undefined, {
-    refetchInterval: 60_000, staleTime: 30_000,
+  const { data: channelsData } = trpc.admin.reconciliation.listPaymentChannels.useQuery(undefined, {
+    staleTime: 60_000,
   });
+  const { data: forceCreditPolicy } = trpc.admin.reconciliation.forceCreditPolicy.useQuery(undefined, {
+    staleTime: 60_000,
+  });
+  const { data: approvalData, refetch: refetchApprovals } = trpc.admin.reconciliation.listForceCreditApprovals.useQuery(
+    {}, { refetchInterval: 30_000 }
+  );
+  const { data: chartData } = trpc.admin.reconciliation.failureRateChart.useQuery(
+    chartChannel ? { channel: chartChannel } : undefined,
+    {
+    refetchInterval: 60_000, staleTime: 30_000,
+    }
+  );
 
   // ── Filtering & Sorting ───────────────────────────────────────────────────
   const filteredAndSorted = useMemo(() => {
@@ -275,6 +370,26 @@ export default function ReconciliationDashboard() {
       setForceCreditItem(null);
     },
     onError: (err) => toast.error(err.message || "Force credit failed"),
+  });
+
+  const requestForceCreditMutation = trpc.admin.reconciliation.requestForceCredit.useMutation({
+    onSuccess: () => {
+      toast.success("Dual approval request submitted for a second administrator");
+      setApprovalRequestItem(null);
+      refetchApprovals();
+    },
+    onError: (error) => toast.error(error.message || "Approval request failed"),
+  });
+
+  const approveForceCreditMutation = trpc.admin.reconciliation.approveForceCredit.useMutation({
+    onSuccess: (result) => {
+      toast.success(`Dual-approved credit recorded as ${result.transferId}`);
+      setApprovalExecutionItem(null);
+      refetchApprovals();
+      refetchDead();
+      refetch();
+    },
+    onError: (error) => toast.error(error.message || "Approval execution failed"),
   });
 
   const resolveMutation = trpc.admin.reconciliation.addResolutionNote.useMutation({
@@ -348,6 +463,9 @@ export default function ReconciliationDashboard() {
 
   const stats = data?.stats ?? { total: 0, totalAmountNGN: 0, oldestAge: "—" };
   const deadLetters: RetryQueueItem[] = (deadLetterData?.items ?? []) as any[];
+  const approvals: ForceCreditApproval[] = (approvalData?.approvals ?? []) as any[];
+  const pendingApprovals = approvals.filter((approval) => approval.status === "pending");
+  const dualApprovalThresholdKobo = forceCreditPolicy?.thresholdKobo ?? 5_000_000;
   const allSelected = filteredAndSorted.length > 0 && selectedRefs.size === filteredAndSorted.length;
 
   return (
@@ -378,7 +496,25 @@ export default function ReconciliationDashboard() {
       {chartData?.days && chartData.days.length > 0 && (
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm">7-Day Failure Rate</CardTitle>
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <CardTitle className="text-sm">7-Day Failure Rate</CardTitle>
+                <CardDescription className="text-xs mt-0.5">
+                  {chartChannel ? `Filtered to ${chartChannel}` : "All payment channels"}
+                </CardDescription>
+              </div>
+              <select
+                aria-label="Filter reconciliation chart by payment channel"
+                value={chartChannel}
+                onChange={(event) => setChartChannel(event.target.value)}
+                className="h-8 rounded-md border border-input bg-background px-2 text-xs outline-none focus:ring-2 focus:ring-ring"
+              >
+                <option value="">All channels</option>
+                {(channelsData?.channels ?? []).map((channel: string) => (
+                  <option key={channel} value={channel}>{channel}</option>
+                ))}
+              </select>
+            </div>
           </CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={160}>
@@ -433,6 +569,12 @@ export default function ReconciliationDashboard() {
           onClick={() => setActiveTab("dead_letter")}
         >
           Dead Letter ({deadLetters.length})
+        </button>
+        <button
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === "approvals" ? "border-amber-600 text-amber-700" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+          onClick={() => setActiveTab("approvals")}
+        >
+          Approvals ({pendingApprovals.length})
         </button>
       </div>
 
@@ -514,7 +656,11 @@ export default function ReconciliationDashboard() {
                         <span className="text-sm font-medium">₦{(item.amountKobo / 100).toLocaleString()}</span>
                         <Button variant="outline" size="sm" onClick={() => setSelectedItem(item)}><Eye className="h-3 w-3 mr-1" /> Detail</Button>
                         <Button variant="outline" size="sm" onClick={() => setResolvingItem(item)}><StickyNote className="h-3 w-3 mr-1" /> Resolve</Button>
-                        <Button variant="destructive" size="sm" onClick={() => setForceCreditItem(item)}>Force Credit</Button>
+                        {item.amountKobo >= dualApprovalThresholdKobo ? (
+                          <Button className="bg-amber-600 hover:bg-amber-700" size="sm" onClick={() => setApprovalRequestItem(item)}>Request Approval</Button>
+                        ) : (
+                          <Button variant="destructive" size="sm" onClick={() => setForceCreditItem(item)}>Force Credit</Button>
+                        )}
                       </div>
                     </div>
                     <div className="flex gap-4 text-xs text-muted-foreground">
@@ -527,6 +673,41 @@ export default function ReconciliationDashboard() {
                         {item.lastError}
                       </div>
                     )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ═══ DUAL APPROVAL TAB ═══ */}
+      {activeTab === "approvals" && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2"><AlertTriangle className="h-5 w-5 text-amber-600" /> High-Value Force Credit Approvals</CardTitle>
+            <CardDescription>Each high-value recovery requires two different administrators and a successful TigerBeetle ledger record.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {approvals.length === 0 ? (
+              <div className="text-center py-8"><CheckCircle2 className="h-12 w-12 text-green-500 mx-auto mb-3" /><p className="font-medium text-green-800">No Approval Requests</p></div>
+            ) : (
+              <div className="space-y-3">
+                {approvals.map((approval) => (
+                  <div key={approval.id} className="border rounded-lg p-3 space-y-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="font-mono text-xs">{approval.reference}</p>
+                        <p className="text-sm font-medium mt-1">₦{(Number(approval.amountKobo) / 100).toLocaleString()} · {approval.tenantId}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Badge variant={approval.status === "executed" ? "default" : approval.status === "pending" ? "outline" : "destructive"}>{approval.status}</Badge>
+                        {approval.status === "pending" && <Button size="sm" variant="destructive" onClick={() => setApprovalExecutionItem(approval)}>Review & Approve</Button>}
+                      </div>
+                    </div>
+                    <p className="text-xs text-muted-foreground">Requested by {approval.requesterName ?? `user ${approval.requesterId}`} on {new Date(approval.requestedAt).toLocaleString()}</p>
+                    <div className="rounded bg-muted/60 p-2 text-xs"><span className="font-medium">Requester note:</span> {approval.auditNote}</div>
+                    {approval.approvalNote && <div className="rounded bg-green-50 p-2 text-xs text-green-900"><span className="font-medium">Approver note:</span> {approval.approvalNote}</div>}
                   </div>
                 ))}
               </div>
@@ -555,6 +736,28 @@ export default function ReconciliationDashboard() {
             auditNote: note,
           })}
           isLoading={forceCreditMutation.isPending}
+        />
+      )}
+      {approvalRequestItem && (
+        <DualApprovalRequestDialog
+          item={approvalRequestItem}
+          thresholdNGN={dualApprovalThresholdKobo / 100}
+          onClose={() => setApprovalRequestItem(null)}
+          onSubmit={(auditNote) => requestForceCreditMutation.mutate({
+            reference: approvalRequestItem.reference,
+            tenantId: approvalRequestItem.tenantId,
+            amountKobo: approvalRequestItem.amountKobo,
+            auditNote,
+          })}
+          isLoading={requestForceCreditMutation.isPending}
+        />
+      )}
+      {approvalExecutionItem && (
+        <ApprovalDialog
+          approval={approvalExecutionItem}
+          onClose={() => setApprovalExecutionItem(null)}
+          onSubmit={(approvalNote) => approveForceCreditMutation.mutate({ approvalId: approvalExecutionItem.id, approvalNote })}
+          isLoading={approveForceCreditMutation.isPending}
         />
       )}
     </div>
