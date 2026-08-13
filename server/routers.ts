@@ -6871,6 +6871,25 @@ const collectionSitesRouter = router({
     }),
 });
 
+async function getConfiguredForceCreditThresholdKobo(db: NonNullable<Awaited<ReturnType<typeof getDb>>>): Promise<number> {
+  const [setting] = await db.select({ value: platformSettings.value })
+    .from(platformSettings)
+    .where(and(
+      eq(platformSettings.namespace, "reconciliation"),
+      eq(platformSettings.key, "force_credit_dual_approval_threshold_kobo"),
+    ))
+    .limit(1);
+  const stored = setting?.value;
+  const candidate = typeof stored === "number"
+    ? stored
+    : typeof stored === "object" && stored !== null && "thresholdKobo" in stored
+      ? Number((stored as { thresholdKobo?: unknown }).thresholdKobo)
+      : NaN;
+  return Number.isSafeInteger(candidate) && candidate > 0
+    ? candidate
+    : getForceCreditDualApprovalThresholdKobo();
+}
+
 export const appRouter = router({
   system: systemRouter,
   admin: router({
@@ -6980,7 +6999,7 @@ export const appRouter = router({
         .mutation(async ({ input, ctx }) => {
           const db = await getDb();
           if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-          const dualApprovalThresholdKobo = getForceCreditDualApprovalThresholdKobo();
+          const dualApprovalThresholdKobo = await getConfiguredForceCreditThresholdKobo(db);
           if (requiresForceCreditDualApproval(input.amountKobo, dualApprovalThresholdKobo)) {
             throw new TRPCError({
               code: "PRECONDITION_FAILED",
@@ -7042,14 +7061,41 @@ export const appRouter = router({
           return { success: true, transferId: result.transferId, operator };
         }),
       /** Return the dual-control policy used by the reconciliation UI. */
-      forceCreditPolicy: adminProcedure.query(() => {
-        const thresholdKobo = getForceCreditDualApprovalThresholdKobo();
+      forceCreditPolicy: adminProcedure.query(async () => {
+        const db = await getDb();
+        const thresholdKobo = db
+          ? await getConfiguredForceCreditThresholdKobo(db)
+          : getForceCreditDualApprovalThresholdKobo();
         return {
           thresholdKobo,
           thresholdNGN: thresholdKobo / 100,
           requiresDifferentApprover: true,
         };
       }),
+      /** Update the server-enforced high-value recovery threshold with an immutable audit record. */
+      updateForceCreditPolicy: adminProcedure
+        .input(z.object({ thresholdKobo: z.number().int().min(10_000, "Threshold must be at least ₦100") }))
+        .mutation(async ({ input, ctx }) => {
+          const db = await getDb();
+          if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+          const previousThresholdKobo = await getConfiguredForceCreditThresholdKobo(db);
+          const updatedBy = ctx.user?.email ?? ctx.user?.name ?? String(ctx.user?.id ?? "unknown");
+          await db.execute(sql`
+            INSERT INTO platform_settings ("namespace", "key", "value", "updatedAt", "updatedBy")
+            VALUES ('reconciliation', 'force_credit_dual_approval_threshold_kobo', CAST(${JSON.stringify({ thresholdKobo: input.thresholdKobo })} AS json), NOW(), ${updatedBy})
+            ON CONFLICT ("namespace", "key")
+            DO UPDATE SET "value" = EXCLUDED."value", "updatedAt" = NOW(), "updatedBy" = EXCLUDED."updatedBy"
+          `);
+          await db.execute(sql`
+            INSERT INTO event_log ("eventType", "aggregateId", "actorId", "payload", "source", "createdAt")
+            VALUES ('force_credit_threshold_updated', 'force_credit_policy', ${ctx.user!.id}, CAST(${JSON.stringify({
+              previousThresholdKobo,
+              thresholdKobo: input.thresholdKobo,
+              updatedBy,
+            })} AS json), 'admin_reconciliation', NOW())
+          `);
+          return { success: true, thresholdKobo: input.thresholdKobo, previousThresholdKobo };
+        }),
       /**
        * Request a two-person Force Credit recovery for a high-value dead-letter item.
        * A requester cannot approve their own request, and the payment remains uncredited
@@ -7065,7 +7111,7 @@ export const appRouter = router({
         .mutation(async ({ input, ctx }) => {
           const db = await getDb();
           if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-          const thresholdKobo = getForceCreditDualApprovalThresholdKobo();
+          const thresholdKobo = await getConfiguredForceCreditThresholdKobo(db);
           if (!requiresForceCreditDualApproval(input.amountKobo, thresholdKobo)) {
             throw new TRPCError({ code: "BAD_REQUEST", message: "This amount is below the dual-approval threshold; use the standard Force Credit recovery" });
           }
@@ -7125,6 +7171,29 @@ export const appRouter = router({
             LIMIT ${input.limit}
           `);
           return { approvals: (rows as any).rows ?? rows ?? [] };
+        }),
+      /** Return the full requester, approver, ledger, and immutable event history for a recovery reference. */
+      forceCreditAuditHistory: adminProcedure
+        .input(z.object({ reference: z.string().min(1) }))
+        .query(async ({ input }) => {
+          const db = await getDb();
+          if (!db) return { approval: null, events: [] };
+          const approvalRows = await db.execute(sql`
+            SELECT a.*, requester."name" AS "requesterName", approver."name" AS "approverName"
+            FROM force_credit_approvals a
+            LEFT JOIN users requester ON requester."id" = a."requesterId"
+            LEFT JOIN users approver ON approver."id" = a."approverId"
+            WHERE a."reference" = ${input.reference}
+            ORDER BY a."requestedAt" DESC
+          `);
+          const eventRows = await db.execute(sql`
+            SELECT "eventType", "actorId", "payload", "source", "createdAt"
+            FROM event_log
+            WHERE "aggregateId" = ${input.reference} AND "eventType" LIKE 'force_credit%'
+            ORDER BY "createdAt" ASC
+          `);
+          const approvals = (approvalRows as any).rows ?? approvalRows ?? [];
+          return { approval: approvals[0] ?? null, events: (eventRows as any).rows ?? eventRows ?? [] };
         }),
       /**
        * Atomically claim, approve, and execute a high-value Force Credit request.

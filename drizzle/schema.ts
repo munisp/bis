@@ -512,7 +512,9 @@ export const platformSettings = pgTable("platform_settings", {
   value: jsonb("value"),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
   updatedBy: varchar("updatedBy", { length: 255 }),
-});
+}, (table) => [
+  uniqueIndex("platform_settings_namespace_key_unique").on(table.namespace, table.key),
+]);
 export type PlatformSetting = typeof platformSettings.$inferSelect;
 export type InsertPlatformSetting = typeof platformSettings.$inferInsert;
 

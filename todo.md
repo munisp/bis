@@ -3543,3 +3543,9 @@
 - [x] Add dual approval for Force Credit requests above the configured threshold, with immutable approver audit trail
 - [x] Add an automatic dashboard warning banner for reconciliation health below 90%
 - [x] Validate, checkpoint, and push all code to GitHub main (commit f9933d6)
+
+## Reconciliation Controls v6 (Aug 13 2026)
+- [x] Add a dedicated Pending Approvals admin workspace for high-value Force Credit requests
+- [x] Add a Force Credit audit-history modal showing requester, approver, and ledger events
+- [x] Add an auditable admin settings panel for the server-enforced dual-approval threshold
+- [ ] Validate, checkpoint, and push all code to GitHub main

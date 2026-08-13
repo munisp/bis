@@ -295,6 +295,74 @@ function ApprovalDialog({ approval, onClose, onSubmit, isLoading }: { approval: 
   );
 }
 
+// ── Force Credit Audit Modal ──────────────────────────────────────────────────
+function ForceCreditAuditModal({ reference, history, isLoading, onClose }: { reference: string; history?: any; isLoading: boolean; onClose: () => void }) {
+  const approval = history?.approval as ForceCreditApproval | null | undefined;
+  const events = (history?.events ?? []) as Array<{ eventType: string; actorId?: number | null; payload?: unknown; source?: string; createdAt: string }>;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+      <div className="bg-background border rounded-xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col">
+        <div className="flex items-center justify-between p-4 border-b">
+          <div>
+            <h3 className="font-semibold">Force Credit Audit History</h3>
+            <p className="text-xs text-muted-foreground font-mono break-all">{reference}</p>
+          </div>
+          <Button variant="ghost" size="sm" onClick={onClose}><X className="h-4 w-4" /></Button>
+        </div>
+        <div className="overflow-y-auto p-4 space-y-4">
+          {isLoading ? (
+            <div className="py-12 flex justify-center"><Loader2 className="h-6 w-6 animate-spin" /></div>
+          ) : (
+            <>
+              {approval && (
+                <Card className="bg-muted/30"><CardContent className="pt-4 grid gap-3 text-sm md:grid-cols-2">
+                  <div><p className="text-xs text-muted-foreground">Requester</p><p>{approval.requesterName ?? `user ${approval.requesterId}`}</p></div>
+                  <div><p className="text-xs text-muted-foreground">Approver</p><p>{approval.approverName ?? (approval.approverId ? `user ${approval.approverId}` : "Awaiting independent approval")}</p></div>
+                  <div><p className="text-xs text-muted-foreground">Request note</p><p>{approval.auditNote}</p></div>
+                  <div><p className="text-xs text-muted-foreground">Approval note</p><p>{approval.approvalNote ?? "Not yet approved"}</p></div>
+                  <div><p className="text-xs text-muted-foreground">Ledger transfer</p><p className="font-mono text-xs">{approval.ledgerTransferId ?? "Not recorded"}</p></div>
+                  <div><p className="text-xs text-muted-foreground">Status</p><Badge variant={approval.status === "executed" ? "default" : approval.status === "failed" ? "destructive" : "outline"}>{approval.status}</Badge></div>
+                </CardContent></Card>
+              )}
+              <div className="space-y-3">
+                <h4 className="text-sm font-semibold">Immutable Events</h4>
+                {events.length === 0 ? <p className="text-sm text-muted-foreground">No Force Credit events have been recorded for this reference.</p> : events.map((event, index) => (
+                  <div key={`${event.eventType}-${event.createdAt}-${index}`} className="border-l-2 border-primary/40 pl-3 py-1">
+                    <div className="flex flex-wrap items-center gap-2"><Badge variant="outline">{event.eventType}</Badge><span className="text-xs text-muted-foreground">{new Date(event.createdAt).toLocaleString()}</span></div>
+                    <pre className="mt-2 max-h-40 overflow-auto rounded bg-muted p-2 text-[11px] whitespace-pre-wrap">{JSON.stringify(event.payload, null, 2)}</pre>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Server-Enforced Threshold Configuration Dialog ────────────────────────────
+function ThresholdConfigurationDialog({ thresholdKobo, onClose, onSubmit, isLoading }: { thresholdKobo: number; onClose: () => void; onSubmit: (kobo: number) => void; isLoading: boolean }) {
+  const [naira, setNaira] = useState(String(thresholdKobo / 100));
+  const parsedKobo = Math.round(Number(naira) * 100);
+  const valid = Number.isSafeInteger(parsedKobo) && parsedKobo >= 10_000;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+      <div className="bg-background border rounded-xl shadow-2xl w-full max-w-md">
+        <div className="flex items-center justify-between p-4 border-b">
+          <div><h3 className="font-semibold">Dual-Approval Threshold</h3><p className="text-xs text-muted-foreground">Server-enforced payment recovery control</p></div>
+          <Button variant="ghost" size="sm" onClick={onClose}><X className="h-4 w-4" /></Button>
+        </div>
+        <div className="p-4 space-y-3">
+          <div className="rounded bg-amber-50 border border-amber-200 p-3 text-sm text-amber-900">Force Credit requests at or above this amount require a requester and a different approver. Changes are persisted and written to the immutable audit log.</div>
+          <div className="space-y-1"><Label htmlFor="threshold-naira">Threshold (NGN)</Label><Input id="threshold-naira" inputMode="decimal" value={naira} onChange={(event) => setNaira(event.target.value)} /><p className="text-xs text-muted-foreground">Minimum: ₦100. Stored as {Number.isFinite(parsedKobo) ? parsedKobo.toLocaleString() : "invalid"} kobo.</p></div>
+        </div>
+        <div className="p-4 border-t flex justify-end gap-2"><Button variant="outline" onClick={onClose}>Cancel</Button><Button disabled={!valid || isLoading} onClick={() => onSubmit(parsedKobo)}>{isLoading ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}Save Threshold</Button></div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Dashboard ────────────────────────────────────────────────────────────
 export default function ReconciliationDashboard() {
   const [retrying, setRetrying] = useState<string | null>(null);
@@ -304,6 +372,8 @@ export default function ReconciliationDashboard() {
   const [forceCreditItem, setForceCreditItem] = useState<RetryQueueItem | null>(null);
   const [approvalRequestItem, setApprovalRequestItem] = useState<RetryQueueItem | null>(null);
   const [approvalExecutionItem, setApprovalExecutionItem] = useState<ForceCreditApproval | null>(null);
+  const [auditReference, setAuditReference] = useState<string | null>(null);
+  const [thresholdConfigOpen, setThresholdConfigOpen] = useState(false);
   const [sortField, setSortField] = useState<SortField>("date");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [dateFrom, setDateFrom] = useState("");
@@ -322,11 +392,15 @@ export default function ReconciliationDashboard() {
   const { data: channelsData } = trpc.admin.reconciliation.listPaymentChannels.useQuery(undefined, {
     staleTime: 60_000,
   });
-  const { data: forceCreditPolicy } = trpc.admin.reconciliation.forceCreditPolicy.useQuery(undefined, {
+  const { data: forceCreditPolicy, refetch: refetchForceCreditPolicy } = trpc.admin.reconciliation.forceCreditPolicy.useQuery(undefined, {
     staleTime: 60_000,
   });
   const { data: approvalData, refetch: refetchApprovals } = trpc.admin.reconciliation.listForceCreditApprovals.useQuery(
     {}, { refetchInterval: 30_000 }
+  );
+  const { data: auditHistory, isLoading: auditHistoryLoading } = trpc.admin.reconciliation.forceCreditAuditHistory.useQuery(
+    { reference: auditReference ?? "unselected" },
+    { enabled: Boolean(auditReference), refetchOnWindowFocus: false }
   );
   const { data: chartData } = trpc.admin.reconciliation.failureRateChart.useQuery(
     chartChannel ? { channel: chartChannel } : undefined,
@@ -390,6 +464,15 @@ export default function ReconciliationDashboard() {
       refetch();
     },
     onError: (error) => toast.error(error.message || "Approval execution failed"),
+  });
+
+  const updateForceCreditPolicyMutation = trpc.admin.reconciliation.updateForceCreditPolicy.useMutation({
+    onSuccess: (result) => {
+      toast.success(`Dual approval now applies from ₦${(result.thresholdKobo / 100).toLocaleString()}`);
+      setThresholdConfigOpen(false);
+      refetchForceCreditPolicy();
+    },
+    onError: (error) => toast.error(error.message || "Threshold update failed"),
   });
 
   const resolveMutation = trpc.admin.reconciliation.addResolutionNote.useMutation({
@@ -574,7 +657,7 @@ export default function ReconciliationDashboard() {
           className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === "approvals" ? "border-amber-600 text-amber-700" : "border-transparent text-muted-foreground hover:text-foreground"}`}
           onClick={() => setActiveTab("approvals")}
         >
-          Approvals ({pendingApprovals.length})
+          Pending Approvals ({pendingApprovals.length})
         </button>
       </div>
 
@@ -685,8 +768,13 @@ export default function ReconciliationDashboard() {
       {activeTab === "approvals" && (
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center gap-2"><AlertTriangle className="h-5 w-5 text-amber-600" /> High-Value Force Credit Approvals</CardTitle>
-            <CardDescription>Each high-value recovery requires two different administrators and a successful TigerBeetle ledger record.</CardDescription>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <CardTitle className="flex items-center gap-2"><AlertTriangle className="h-5 w-5 text-amber-600" /> Pending High-Value Force Credit Approvals</CardTitle>
+                <CardDescription>Each high-value recovery requires two different administrators and a successful TigerBeetle ledger record.</CardDescription>
+              </div>
+              <Button variant="outline" size="sm" onClick={() => setThresholdConfigOpen(true)}>Configure Threshold</Button>
+            </div>
           </CardHeader>
           <CardContent>
             {approvals.length === 0 ? (
@@ -702,6 +790,7 @@ export default function ReconciliationDashboard() {
                       </div>
                       <div className="flex items-center gap-2">
                         <Badge variant={approval.status === "executed" ? "default" : approval.status === "pending" ? "outline" : "destructive"}>{approval.status}</Badge>
+                        <Button size="sm" variant="outline" onClick={() => setAuditReference(approval.reference)}>Audit Trail</Button>
                         {approval.status === "pending" && <Button size="sm" variant="destructive" onClick={() => setApprovalExecutionItem(approval)}>Review & Approve</Button>}
                       </div>
                     </div>
@@ -758,6 +847,22 @@ export default function ReconciliationDashboard() {
           onClose={() => setApprovalExecutionItem(null)}
           onSubmit={(approvalNote) => approveForceCreditMutation.mutate({ approvalId: approvalExecutionItem.id, approvalNote })}
           isLoading={approveForceCreditMutation.isPending}
+        />
+      )}
+      {auditReference && (
+        <ForceCreditAuditModal
+          reference={auditReference}
+          history={auditHistory}
+          isLoading={auditHistoryLoading}
+          onClose={() => setAuditReference(null)}
+        />
+      )}
+      {thresholdConfigOpen && (
+        <ThresholdConfigurationDialog
+          thresholdKobo={dualApprovalThresholdKobo}
+          onClose={() => setThresholdConfigOpen(false)}
+          onSubmit={(thresholdKobo) => updateForceCreditPolicyMutation.mutate({ thresholdKobo })}
+          isLoading={updateForceCreditPolicyMutation.isPending}
         />
       )}
     </div>

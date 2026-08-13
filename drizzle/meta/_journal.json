@@ -393,6 +393,13 @@
       "when": 1786581520624,
       "tag": "0055_force_credit_dual_approval",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1786582500000,
+      "tag": "0056_platform_settings_namespace_key_unique",
+      "breakpoints": true
     }
   ]
 }
