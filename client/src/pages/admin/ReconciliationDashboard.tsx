@@ -342,20 +342,52 @@ function ForceCreditAuditModal({ reference, history, isLoading, onClose }: { ref
 }
 
 // ── Server-Enforced Threshold Configuration Dialog ────────────────────────────
-function ThresholdConfigurationDialog({ thresholdKobo, onClose, onSubmit, isLoading }: { thresholdKobo: number; onClose: () => void; onSubmit: (kobo: number) => void; isLoading: boolean }) {
+function ThresholdConfigurationDialog({ thresholdKobo, approvers, candidates, history, onClose, onSubmit, onSetApprover, onRollback, isLoading, isSavingApprover, isRollingBack }: { thresholdKobo: number; approvers: Array<any>; candidates: Array<any>; history: Array<any>; onClose: () => void; onSubmit: (kobo: number) => void; onSetApprover: (userId: number, active: boolean) => void; onRollback: (historyEventId: number) => void; isLoading: boolean; isSavingApprover: boolean; isRollingBack: boolean }) {
   const [naira, setNaira] = useState(String(thresholdKobo / 100));
+  const [selectedUserId, setSelectedUserId] = useState("");
   const parsedKobo = Math.round(Number(naira) * 100);
   const valid = Number.isSafeInteger(parsedKobo) && parsedKobo >= 10_000;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-      <div className="bg-background border rounded-xl shadow-2xl w-full max-w-md">
+      <div className="bg-background border rounded-xl shadow-2xl w-full max-w-xl max-h-[85vh] flex flex-col">
         <div className="flex items-center justify-between p-4 border-b">
           <div><h3 className="font-semibold">Dual-Approval Threshold</h3><p className="text-xs text-muted-foreground">Server-enforced payment recovery control</p></div>
           <Button variant="ghost" size="sm" onClick={onClose}><X className="h-4 w-4" /></Button>
         </div>
-        <div className="p-4 space-y-3">
+        <div className="p-4 space-y-5 overflow-y-auto">
           <div className="rounded bg-amber-50 border border-amber-200 p-3 text-sm text-amber-900">Force Credit requests at or above this amount require a requester and a different approver. Changes are persisted and written to the immutable audit log.</div>
           <div className="space-y-1"><Label htmlFor="threshold-naira">Threshold (NGN)</Label><Input id="threshold-naira" inputMode="decimal" value={naira} onChange={(event) => setNaira(event.target.value)} /><p className="text-xs text-muted-foreground">Minimum: ₦100. Stored as {Number.isFinite(parsedKobo) ? parsedKobo.toLocaleString() : "invalid"} kobo.</p></div>
+          <div className="space-y-2 border-t pt-4">
+            <div><p className="text-sm font-semibold">Designated Approvers</p><p className="text-xs text-muted-foreground">Only active designated administrators can execute a high-value approval.</p></div>
+            <div className="flex gap-2">
+              <select aria-label="Select administrator to designate" value={selectedUserId} onChange={(event) => setSelectedUserId(event.target.value)} className="flex-1 h-9 rounded-md border border-input bg-background px-2 text-sm">
+                <option value="">Select an administrator</option>
+                {candidates.filter((candidate) => !approvers.some((approver) => Number(approver.userId) === Number(candidate.id) && approver.active)).map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name ?? candidate.email ?? `Admin ${candidate.id}`}</option>)}
+              </select>
+              <Button type="button" variant="outline" disabled={!selectedUserId || isSavingApprover} onClick={() => { onSetApprover(Number(selectedUserId), true); setSelectedUserId(""); }}>Designate</Button>
+            </div>
+            <div className="space-y-2">
+              {approvers.length === 0 ? <p className="text-xs text-amber-700">No approvers are designated. High-value requests will fail closed until an independent approver is assigned.</p> : approvers.map((approver) => (
+                <div key={approver.userId} className="flex items-center justify-between rounded border p-2 text-sm">
+                  <div><p>{approver.userName ?? approver.email ?? `User ${approver.userId}`}</p><p className="text-xs text-muted-foreground">{approver.active ? "Active approver" : "Revoked"}</p></div>
+                  <Button type="button" size="sm" variant={approver.active ? "destructive" : "outline"} disabled={isSavingApprover} onClick={() => onSetApprover(Number(approver.userId), !approver.active)}>{approver.active ? "Revoke" : "Restore"}</Button>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="space-y-2 border-t pt-4">
+            <div><p className="text-sm font-semibold">Threshold Version History</p><p className="text-xs text-muted-foreground">Restoring a version creates a new immutable rollback event; prior records are never overwritten.</p></div>
+            {history.length === 0 ? <p className="text-xs text-muted-foreground">No persisted threshold changes have been recorded yet.</p> : history.map((entry) => {
+              const payload = typeof entry.payload === "string" ? JSON.parse(entry.payload) : entry.payload ?? {};
+              const historicalKobo = Number(payload.thresholdKobo);
+              return (
+                <div key={entry.id} className="flex items-center justify-between gap-3 rounded border p-2 text-sm">
+                  <div><p>₦{Number.isFinite(historicalKobo) ? (historicalKobo / 100).toLocaleString() : "Unknown"}</p><p className="text-xs text-muted-foreground">{entry.actorName ?? entry.actorEmail ?? `user ${entry.actorId ?? "unknown"}`} · {new Date(entry.createdAt).toLocaleString()}</p></div>
+                  <Button type="button" size="sm" variant="outline" disabled={!Number.isSafeInteger(historicalKobo) || isLoading || isRollingBack || historicalKobo === thresholdKobo} onClick={() => onRollback(Number(entry.id))}>Revert</Button>
+                </div>
+              );
+            })}
+          </div>
         </div>
         <div className="p-4 border-t flex justify-end gap-2"><Button variant="outline" onClick={onClose}>Cancel</Button><Button disabled={!valid || isLoading} onClick={() => onSubmit(parsedKobo)}>{isLoading ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}Save Threshold</Button></div>
       </div>
@@ -395,9 +427,18 @@ export default function ReconciliationDashboard() {
   const { data: forceCreditPolicy, refetch: refetchForceCreditPolicy } = trpc.admin.reconciliation.forceCreditPolicy.useQuery(undefined, {
     staleTime: 60_000,
   });
+  const { data: policyHistoryData, refetch: refetchPolicyHistory } = trpc.admin.reconciliation.forceCreditPolicyHistory.useQuery(
+    { limit: 25 }, { staleTime: 30_000 }
+  );
   const { data: approvalData, refetch: refetchApprovals } = trpc.admin.reconciliation.listForceCreditApprovals.useQuery(
     {}, { refetchInterval: 30_000 }
   );
+  const { data: approversData, refetch: refetchApprovers } = trpc.admin.reconciliation.listForceCreditApprovers.useQuery(undefined, {
+    staleTime: 30_000,
+  });
+  const { data: approverCandidatesData } = trpc.admin.reconciliation.listForceCreditApproverCandidates.useQuery(undefined, {
+    staleTime: 30_000,
+  });
   const { data: auditHistory, isLoading: auditHistoryLoading } = trpc.admin.reconciliation.forceCreditAuditHistory.useQuery(
     { reference: auditReference ?? "unselected" },
     { enabled: Boolean(auditReference), refetchOnWindowFocus: false }
@@ -471,8 +512,24 @@ export default function ReconciliationDashboard() {
       toast.success(`Dual approval now applies from ₦${(result.thresholdKobo / 100).toLocaleString()}`);
       setThresholdConfigOpen(false);
       refetchForceCreditPolicy();
+      refetchPolicyHistory();
     },
     onError: (error) => toast.error(error.message || "Threshold update failed"),
+  });
+  const rollbackForceCreditPolicyMutation = trpc.admin.reconciliation.rollbackForceCreditPolicy.useMutation({
+    onSuccess: (result) => {
+      toast.success(`Threshold restored to ₦${(result.thresholdKobo / 100).toLocaleString()}`);
+      refetchForceCreditPolicy();
+      refetchPolicyHistory();
+    },
+    onError: (error) => toast.error(error.message || "Threshold rollback failed"),
+  });
+  const setForceCreditApproverMutation = trpc.admin.reconciliation.setForceCreditApprover.useMutation({
+    onSuccess: (result) => {
+      toast.success(result.active ? "Approver designated" : "Approver designation revoked");
+      refetchApprovers();
+    },
+    onError: (error) => toast.error(error.message || "Approver update failed"),
   });
 
   const resolveMutation = trpc.admin.reconciliation.addResolutionNote.useMutation({
@@ -860,9 +917,16 @@ export default function ReconciliationDashboard() {
       {thresholdConfigOpen && (
         <ThresholdConfigurationDialog
           thresholdKobo={dualApprovalThresholdKobo}
+          approvers={(approversData?.approvers ?? []) as any[]}
+          candidates={(approverCandidatesData?.users ?? []) as any[]}
+          history={(policyHistoryData?.history ?? []) as any[]}
           onClose={() => setThresholdConfigOpen(false)}
           onSubmit={(thresholdKobo) => updateForceCreditPolicyMutation.mutate({ thresholdKobo })}
+          onSetApprover={(userId, active) => setForceCreditApproverMutation.mutate({ userId, active })}
+          onRollback={(historyEventId) => rollbackForceCreditPolicyMutation.mutate({ historyEventId })}
           isLoading={updateForceCreditPolicyMutation.isPending}
+          isSavingApprover={setForceCreditApproverMutation.isPending}
+          isRollingBack={rollbackForceCreditPolicyMutation.isPending}
         />
       )}
     </div>

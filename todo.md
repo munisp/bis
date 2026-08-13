@@ -3549,3 +3549,9 @@
 - [x] Add a Force Credit audit-history modal showing requester, approver, and ledger events
 - [x] Add an auditable admin settings panel for the server-enforced dual-approval threshold
 - [x] Validate, checkpoint, and push all code to GitHub main (commit 7eeffcd)
+
+## Reconciliation Controls v7 (Aug 13 2026)
+- [x] Enforce designated approver RBAC for high-value Force Credit execution
+- [x] Add real-time in-app approver notifications for new Force Credit requests
+- [x] Add threshold configuration version history and audited rollback controls
+- [ ] Validate, checkpoint, and push all code to GitHub main

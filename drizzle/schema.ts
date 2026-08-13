@@ -518,6 +518,23 @@ export const platformSettings = pgTable("platform_settings", {
 export type PlatformSetting = typeof platformSettings.$inferSelect;
 export type InsertPlatformSetting = typeof platformSettings.$inferInsert;
 
+// ─── Designated Force Credit Approvers ─────────────────────────────────────────
+// Explicit assignment is required in addition to administrator access before a
+// user can execute a high-value Force Credit approval.
+export const forceCreditApprovers = pgTable("force_credit_approvers", {
+  id: serial("id").primaryKey(),
+  userId: integer("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+  active: boolean("active").notNull().default(true),
+  designatedBy: integer("designatedBy").references(() => users.id, { onDelete: "set null" }),
+  designatedAt: timestamp("designatedAt").defaultNow().notNull(),
+  revokedAt: timestamp("revokedAt"),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex("force_credit_approvers_user_unique").on(table.userId),
+  index("force_credit_approvers_active_idx").on(table.active),
+]);
+export type ForceCreditApprover = typeof forceCreditApprovers.$inferSelect;
+
 // ─── Onboarding Applications ──────────────────────────────────────────────────
 export const onboardingApplicationStatusEnum = pgEnum("onboarding_application_status", [
   "draft", "submitted", "awaiting_documents", "under_review", "approved", "rejected",

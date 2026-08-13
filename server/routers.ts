@@ -112,6 +112,7 @@ import {
   criminalRecordAudit,
   collectionSites,
   billingTopups,
+  forceCreditApprovers,
 } from "../drizzle/schema";
 import {
   getDashboardStats,
@@ -6890,6 +6891,16 @@ async function getConfiguredForceCreditThresholdKobo(db: NonNullable<Awaited<Ret
     : getForceCreditDualApprovalThresholdKobo();
 }
 
+async function assertDesignatedForceCreditApprover(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, userId: number): Promise<void> {
+  const [assignment] = await db.select({ active: forceCreditApprovers.active })
+    .from(forceCreditApprovers)
+    .where(and(eq(forceCreditApprovers.userId, userId), eq(forceCreditApprovers.active, true)))
+    .limit(1);
+  if (!assignment) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Only a designated Force Credit approver may authorize high-value recoveries" });
+  }
+}
+
 export const appRouter = router({
   system: systemRouter,
   admin: router({
@@ -7096,6 +7107,116 @@ export const appRouter = router({
           `);
           return { success: true, thresholdKobo: input.thresholdKobo, previousThresholdKobo };
         }),
+      /** List immutable threshold change events for audit review and controlled rollback. */
+      forceCreditPolicyHistory: adminProcedure
+        .input(z.object({ limit: z.number().min(1).max(100).default(25) }))
+        .query(async ({ input }) => {
+          const db = await getDb();
+          if (!db) return { history: [] };
+          const rows = await db.execute(sql`
+            SELECT e."id", e."eventType", e."actorId", e."payload", e."createdAt", u."name" AS "actorName", u."email" AS "actorEmail"
+            FROM event_log e
+            LEFT JOIN users u ON u."id" = e."actorId"
+            WHERE e."aggregateId" = 'force_credit_policy'
+              AND e."eventType" IN ('force_credit_threshold_updated', 'force_credit_threshold_reverted')
+            ORDER BY e."createdAt" DESC
+            LIMIT ${input.limit}
+          `);
+          return { history: (rows as any).rows ?? rows ?? [] };
+        }),
+      /** Restore a prior threshold value while preserving a separate immutable rollback event. */
+      rollbackForceCreditPolicy: adminProcedure
+        .input(z.object({ historyEventId: z.number().int().positive() }))
+        .mutation(async ({ input, ctx }) => {
+          const db = await getDb();
+          if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+          const rows = await db.execute(sql`
+            SELECT "payload" FROM event_log
+            WHERE "id" = ${input.historyEventId} AND "aggregateId" = 'force_credit_policy'
+              AND "eventType" IN ('force_credit_threshold_updated', 'force_credit_threshold_reverted')
+            LIMIT 1
+          `);
+          const event = ((rows as any).rows ?? rows ?? [])[0];
+          if (!event) throw new TRPCError({ code: "NOT_FOUND", message: "Threshold history event not found" });
+          const payload = typeof event.payload === "string" ? JSON.parse(event.payload) : event.payload;
+          const restoredThresholdKobo = Number(payload?.thresholdKobo);
+          if (!Number.isSafeInteger(restoredThresholdKobo) || restoredThresholdKobo < 10_000) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: "History event does not contain a valid threshold" });
+          }
+          const previousThresholdKobo = await getConfiguredForceCreditThresholdKobo(db);
+          const updatedBy = ctx.user?.email ?? ctx.user?.name ?? String(ctx.user?.id ?? "unknown");
+          await db.execute(sql`
+            INSERT INTO platform_settings ("namespace", "key", "value", "updatedAt", "updatedBy")
+            VALUES ('reconciliation', 'force_credit_dual_approval_threshold_kobo', CAST(${JSON.stringify({ thresholdKobo: restoredThresholdKobo })} AS json), NOW(), ${updatedBy})
+            ON CONFLICT ("namespace", "key")
+            DO UPDATE SET "value" = EXCLUDED."value", "updatedAt" = NOW(), "updatedBy" = EXCLUDED."updatedBy"
+          `);
+          await db.execute(sql`
+            INSERT INTO event_log ("eventType", "aggregateId", "actorId", "payload", "source", "createdAt")
+            VALUES ('force_credit_threshold_reverted', 'force_credit_policy', ${ctx.user!.id}, CAST(${JSON.stringify({
+              previousThresholdKobo,
+              thresholdKobo: restoredThresholdKobo,
+              restoredFromEventId: input.historyEventId,
+              updatedBy,
+            })} AS json), 'admin_reconciliation', NOW())
+          `);
+          return { success: true, thresholdKobo: restoredThresholdKobo, previousThresholdKobo };
+        }),
+      /** List users explicitly designated to approve high-value Force Credit recoveries. */
+      listForceCreditApprovers: adminProcedure.query(async () => {
+        const db = await getDb();
+        if (!db) return { approvers: [] };
+        const rows = await db.select({
+          userId: forceCreditApprovers.userId,
+          active: forceCreditApprovers.active,
+          designatedAt: forceCreditApprovers.designatedAt,
+          revokedAt: forceCreditApprovers.revokedAt,
+          userName: users.name,
+          email: users.email,
+          role: users.role,
+        }).from(forceCreditApprovers)
+          .innerJoin(users, eq(forceCreditApprovers.userId, users.id))
+          .orderBy(desc(forceCreditApprovers.active), asc(users.name));
+        return { approvers: rows };
+      }),
+      /** List platform administrators eligible for explicit Force Credit approver designation. */
+      listForceCreditApproverCandidates: adminProcedure.query(async () => {
+        const db = await getDb();
+        if (!db) return { users: [] };
+        const rows = await db.select({ id: users.id, name: users.name, email: users.email, role: users.role })
+          .from(users)
+          .where(eq(users.role, "admin"))
+          .orderBy(asc(users.name));
+        return { users: rows };
+      }),
+      /** Designate or revoke a specific administrator as a Force Credit approver. */
+      setForceCreditApprover: adminProcedure
+        .input(z.object({ userId: z.number().int().positive(), active: z.boolean() }))
+        .mutation(async ({ input, ctx }) => {
+          const db = await getDb();
+          if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+          const [target] = await db.select({ id: users.id, role: users.role, name: users.name })
+            .from(users).where(eq(users.id, input.userId)).limit(1);
+          if (!target) throw new TRPCError({ code: "NOT_FOUND", message: "User not found" });
+          if (target.role !== "admin") throw new TRPCError({ code: "BAD_REQUEST", message: "Only administrators can be designated as Force Credit approvers" });
+          await db.execute(sql`
+            INSERT INTO force_credit_approvers ("userId", "active", "designatedBy", "designatedAt", "revokedAt", "updatedAt")
+            VALUES (${input.userId}, ${input.active}, ${ctx.user!.id}, NOW(), ${input.active ? null : new Date()}, NOW())
+            ON CONFLICT ("userId")
+            DO UPDATE SET "active" = EXCLUDED."active", "designatedBy" = EXCLUDED."designatedBy",
+              "designatedAt" = CASE WHEN EXCLUDED."active" THEN NOW() ELSE force_credit_approvers."designatedAt" END,
+              "revokedAt" = CASE WHEN EXCLUDED."active" THEN NULL ELSE NOW() END, "updatedAt" = NOW()
+          `);
+          await db.execute(sql`
+            INSERT INTO event_log ("eventType", "aggregateId", "actorId", "payload", "source", "createdAt")
+            VALUES ('force_credit_approver_designation', ${String(input.userId)}, ${ctx.user!.id}, CAST(${JSON.stringify({
+              targetUserId: input.userId,
+              targetName: target.name,
+              active: input.active,
+            })} AS json), 'admin_reconciliation', NOW())
+          `);
+          return { success: true, userId: input.userId, active: input.active };
+        }),
       /**
        * Request a two-person Force Credit recovery for a high-value dead-letter item.
        * A requester cannot approve their own request, and the payment remains uncredited
@@ -7135,6 +7256,12 @@ export const appRouter = router({
           if (existingRows.length > 0) {
             throw new TRPCError({ code: "CONFLICT", message: "A Force Credit approval request is already pending for this payment" });
           }
+          const designatedApprovers = await db.select({ userId: forceCreditApprovers.userId })
+            .from(forceCreditApprovers)
+            .where(and(eq(forceCreditApprovers.active, true), sql`${forceCreditApprovers.userId} <> ${ctx.user!.id}`));
+          if (designatedApprovers.length === 0) {
+            throw new TRPCError({ code: "PRECONDITION_FAILED", message: "No independent designated Force Credit approver is available" });
+          }
           const requested = await db.execute(sql`
             INSERT INTO force_credit_approvals
               ("reference", "tenantId", "amountKobo", "auditNote", "status", "requesterId", "requestedAt", "updatedAt")
@@ -7152,6 +7279,13 @@ export const appRouter = router({
               thresholdKobo,
             })} AS json), 'admin_reconciliation', NOW())
           `);
+          await db.insert(notifications).values(designatedApprovers.map((approver) => ({
+            userId: approver.userId,
+            type: "force_credit_approval_requested",
+            title: "High-value Force Credit approval required",
+            body: `A ₦${(input.amountKobo / 100).toLocaleString()} recovery requires your independent approval.`,
+            link: "/payment-rails/reconciliation?tab=approvals",
+          })));
           return { id: Number(request.id), status: "pending" as const, thresholdKobo };
         }),
       /** List approval requests so a second administrator can review them. */
@@ -7204,6 +7338,7 @@ export const appRouter = router({
         .mutation(async ({ input, ctx }) => {
           const db = await getDb();
           if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+          await assertDesignatedForceCreditApprover(db, ctx.user!.id);
           const claim = await db.execute(sql`
             UPDATE force_credit_approvals
             SET "status" = 'executing', "approverId" = ${ctx.user!.id}, "approvalNote" = ${input.approvalNote},

@@ -714,6 +714,8 @@ async function startServer() {
 
   // Keycloak Bearer → session cookie exchange
   registerSessionExchangeRoute(app);
+  // PostgreSQL-backed user notification stream for immediate in-app alerts
+  registerNotificationStream(app);
 
   // ── Event Emitter SSE proxy ────────────────────────────────────────────────────
   // Proxies the Rust event-emitter SSE stream to authenticated PWA clients.
@@ -1321,3 +1323,4 @@ function gracefulShutdown(signal: string) {
 process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
 process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 import { registerSessionExchangeRoute } from "./sessionExchange";
+import { registerNotificationStream } from "./notificationStream";
