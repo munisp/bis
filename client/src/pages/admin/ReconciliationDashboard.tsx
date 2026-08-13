@@ -172,12 +172,56 @@ function ProgressBar({ current, total }: { current: number; total: number }) {
   );
 }
 
+
+// ── Force Credit Dialog ───────────────────────────────────────────────────────
+function ForceCreditDialog({ item, onClose, onSubmit, isLoading }: { item: RetryQueueItem; onClose: () => void; onSubmit: (note: string) => void; isLoading: boolean }) {
+  const [note, setNote] = useState("");
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+      <div className="bg-background border border-red-200 rounded-xl shadow-2xl w-full max-w-md flex flex-col">
+        <div className="flex items-center justify-between p-4 border-b border-red-200 bg-red-50/50 rounded-t-xl">
+          <div>
+            <h3 className="font-semibold text-red-800">Force Credit (Bypass TigerBeetle)</h3>
+            <p className="text-xs text-red-600 font-mono">{item.reference.slice(0, 30)}...</p>
+          </div>
+          <Button variant="ghost" size="sm" onClick={onClose}><X className="h-4 w-4" /></Button>
+        </div>
+        <div className="p-4 space-y-3">
+          <div className="p-3 rounded bg-red-50 border border-red-200 text-sm text-red-800">
+            <strong>Controlled recovery:</strong> This re-attempts the credit against TigerBeetle with a mandatory
+            compliance note. It cannot resolve the payment unless the authoritative double-entry ledger records it.
+          </div>
+          <div className="text-sm text-muted-foreground">
+            Amount: <strong>\u20a6{(item.amountKobo / 100).toLocaleString()}</strong> \u00b7 Tenant: <strong>{item.tenantId}</strong>
+          </div>
+          <Textarea
+            placeholder="Mandatory audit note: explain why this is being force-credited (min 10 chars)..."
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            rows={3}
+            className="border-red-200 focus:border-red-400"
+          />
+          <p className="text-xs text-muted-foreground">{note.length}/10 minimum characters</p>
+        </div>
+        <div className="p-4 border-t flex justify-end gap-2">
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button variant="destructive" disabled={note.trim().length < 10 || isLoading} onClick={() => onSubmit(note.trim())}>
+            {isLoading ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
+            Force Credit
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Dashboard ────────────────────────────────────────────────────────────
 export default function ReconciliationDashboard() {
   const [retrying, setRetrying] = useState<string | null>(null);
   const [bulkProgress, setBulkProgress] = useState<{ current: number; total: number } | null>(null);
   const [selectedItem, setSelectedItem] = useState<RetryQueueItem | null>(null);
   const [resolvingItem, setResolvingItem] = useState<RetryQueueItem | null>(null);
+  const [forceCreditItem, setForceCreditItem] = useState<RetryQueueItem | null>(null);
   const [sortField, setSortField] = useState<SortField>("date");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [dateFrom, setDateFrom] = useState("");
@@ -222,6 +266,15 @@ export default function ReconciliationDashboard() {
       refetch(); setRetrying(null);
     },
     onError: (err) => { toast.error(err.message || "Retry failed"); setRetrying(null); },
+  });
+
+  const forceCreditMutation = trpc.admin.reconciliation.forceCredit.useMutation({
+    onSuccess: (result) => {
+      toast.success(`Force credited — ${result.transferId} by ${result.operator}`);
+      refetchDead(); refetch();
+      setForceCreditItem(null);
+    },
+    onError: (err) => toast.error(err.message || "Force credit failed"),
   });
 
   const resolveMutation = trpc.admin.reconciliation.addResolutionNote.useMutation({
@@ -333,7 +386,17 @@ export default function ReconciliationDashboard() {
                 <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
                 <XAxis dataKey="day" tick={{ fontSize: 10 }} tickFormatter={(v) => v.slice(5)} />
                 <YAxis tick={{ fontSize: 10 }} allowDecimals={false} />
-                <Tooltip contentStyle={{ fontSize: 12 }} />
+                <Tooltip
+                  contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e5e7eb" }}
+                  labelFormatter={(label) => {
+                    const d = new Date(label + "T00:00:00");
+                    return d.toLocaleDateString("en-NG", { weekday: "short", month: "short", day: "numeric" });
+                  }}
+                  formatter={(value: number, name: string) => {
+                    const labels: Record<string, string> = { total: "Total Failures", succeeded: "Retried Successfully", deadLettered: "Dead Lettered", pending: "Still Pending" };
+                    return [value + " txns", labels[name] ?? name];
+                  }}
+                />
                 <Legend wrapperStyle={{ fontSize: 11 }} />
                 <Area type="monotone" dataKey="total" stackId="1" stroke="#6366f1" fill="#6366f1" fillOpacity={0.15} name="Total" />
                 <Area type="monotone" dataKey="succeeded" stackId="2" stroke="#22c55e" fill="#22c55e" fillOpacity={0.3} name="Succeeded" />
@@ -451,6 +514,7 @@ export default function ReconciliationDashboard() {
                         <span className="text-sm font-medium">₦{(item.amountKobo / 100).toLocaleString()}</span>
                         <Button variant="outline" size="sm" onClick={() => setSelectedItem(item)}><Eye className="h-3 w-3 mr-1" /> Detail</Button>
                         <Button variant="outline" size="sm" onClick={() => setResolvingItem(item)}><StickyNote className="h-3 w-3 mr-1" /> Resolve</Button>
+                        <Button variant="destructive" size="sm" onClick={() => setForceCreditItem(item)}>Force Credit</Button>
                       </div>
                     </div>
                     <div className="flex gap-4 text-xs text-muted-foreground">
@@ -478,6 +542,19 @@ export default function ReconciliationDashboard() {
           item={resolvingItem}
           onClose={() => setResolvingItem(null)}
           onSubmit={(note) => resolveMutation.mutate({ reference: resolvingItem.reference, note })}
+        />
+      )}
+      {forceCreditItem && (
+        <ForceCreditDialog
+          item={forceCreditItem}
+          onClose={() => setForceCreditItem(null)}
+          onSubmit={(note) => forceCreditMutation.mutate({
+            reference: forceCreditItem.reference,
+            tenantId: forceCreditItem.tenantId,
+            amountKobo: forceCreditItem.amountKobo,
+            auditNote: note,
+          })}
+          isLoading={forceCreditMutation.isPending}
         />
       )}
     </div>

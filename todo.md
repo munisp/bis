@@ -3531,3 +3531,9 @@
 - [x] Dead Letter tab with resolution notes (isolate max-retry items, add manual notes)
 - [x] 7-day failure rate time-series chart at top of dashboard (recharts AreaChart)
 - [x] Push all code to GitHub main
+
+## Reconciliation Dashboard v4 (Aug 12 2026 — Session 7)
+- [x] Reconciliation health score gauge on main BIS Dashboard (24h success rate percentage)
+- [x] Force Credit admin action on dead-lettered items with mandatory audit note and authoritative TigerBeetle recording requirement
+- [x] Enhanced chart tooltips with exact transaction counts and formatted dates on hover
+- [ ] Push all code to GitHub main

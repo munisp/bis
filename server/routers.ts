@@ -6877,7 +6877,7 @@ export const appRouter = router({
       /**
        * List billing top-ups where TigerBeetle recording failed (tbTransferId is null or starts with 'fallback-').
        */
-      listUnreconciled: protectedProcedure
+      listUnreconciled: adminProcedure
         .input(z.object({ limit: z.number().min(1).max(200).default(50) }))
         .query(async ({ input }) => {
           const db = await getDb();
@@ -6904,7 +6904,7 @@ export const appRouter = router({
       /**
        * Retry crediting a tenant's TigerBeetle account for a previously failed top-up.
        */
-      retryCredit: protectedProcedure
+      retryCredit: adminProcedure
         .input(z.object({
           reference: z.string().min(1),
           tenantId: z.string().min(1),
@@ -6931,7 +6931,7 @@ export const appRouter = router({
       /**
        * List dead-lettered items (exceeded max retries).
        */
-      listDeadLetters: protectedProcedure
+      listDeadLetters: adminProcedure
         .input(z.object({ limit: z.number().min(1).max(200).default(50) }))
         .query(async ({ input }) => {
           const db = await getDb();
@@ -6947,7 +6947,7 @@ export const appRouter = router({
       /**
        * Add a manual resolution note to a dead-lettered item.
        */
-      addResolutionNote: protectedProcedure
+      addResolutionNote: adminProcedure
         .input(z.object({
           reference: z.string().min(1),
           note: z.string().min(1).max(1000),
@@ -6963,6 +6963,75 @@ export const appRouter = router({
             WHERE "reference" = ${input.reference}
           `);
           return { success: true };
+        }),
+      /**
+       * Force Credit — administrator-authorized, ledger-backed recovery for a dead-lettered credit.
+       * This never creates a PostgreSQL-only balance. TigerBeetle must record the transfer before
+       * the recovery is marked resolved, and a mandatory audit note is retained for compliance.
+       */
+      forceCredit: adminProcedure
+        .input(z.object({
+          reference: z.string().min(1),
+          tenantId: z.string().min(1),
+          amountKobo: z.number().int().positive(),
+          auditNote: z.string().min(10, "Audit note must be at least 10 characters"),
+        }))
+        .mutation(async ({ input, ctx }) => {
+          const db = await getDb();
+          if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+          const operator = ctx.user?.name ?? ctx.user?.openId ?? "unknown";
+          const auditEntry = `[FORCE_CREDIT ${new Date().toISOString()}] by ${operator}: ${input.auditNote}`;
+
+          const [topup] = await db.select().from(billingTopups)
+            .where(and(
+              eq(billingTopups.reference, input.reference),
+              eq(billingTopups.tenantId, input.tenantId),
+              eq(billingTopups.amountKobo, input.amountKobo),
+            ))
+            .limit(1);
+          if (!topup) {
+            throw new TRPCError({ code: "NOT_FOUND", message: "Matching verified top-up was not found" });
+          }
+          if (topup.tbTransferId && !topup.tbTransferId.startsWith("fallback-")) {
+            throw new TRPCError({ code: "CONFLICT", message: "Top-up is already recorded in the ledger" });
+          }
+
+          // The authoritative double-entry ledger must record the transfer. Fail closed if it cannot.
+          const { creditTenantAccount } = await import("./billing");
+          const result = await creditTenantAccount({
+            tenantId: input.tenantId,
+            amountKobo: input.amountKobo,
+            reference: input.reference,
+          });
+          if (!result.recorded) {
+            throw new TRPCError({
+              code: "SERVICE_UNAVAILABLE",
+              message: "TigerBeetle did not record the credit; no manual balance change was made",
+            });
+          }
+
+          // Mark the verified ledger-backed recovery as resolved and retain the audit note.
+          await db.update(billingTopups)
+            .set({ tbTransferId: result.transferId })
+            .where(eq(billingTopups.reference, input.reference));
+          await db.execute(sql`
+            UPDATE webhook_retry_queue
+            SET "status" = 'resolved',
+                "lastError" = COALESCE("lastError", '') || ${'\n' + auditEntry}
+            WHERE "reference" = ${input.reference}
+          `);
+          // Write an immutable compliance audit event using the actual event_log schema.
+          await db.execute(sql`
+            INSERT INTO event_log ("eventType", "aggregateId", "actorId", "payload", "source", "createdAt")
+            VALUES ('force_credit', ${input.reference}, ${ctx.user?.id ?? null}, CAST(${JSON.stringify({
+              tenantId: input.tenantId,
+              amountKobo: input.amountKobo,
+              operator,
+              auditNote: input.auditNote,
+              tigerBeetleTransferId: result.transferId,
+            })} AS json), 'admin_reconciliation', NOW())
+          `);
+          return { success: true, transferId: result.transferId, operator };
         }),
       /**
        * Get failure rate data for the past 7 days (daily buckets).
