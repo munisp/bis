@@ -3572,4 +3572,4 @@
 - [x] Remediate all confirmed workspace-resolvable findings and add regression coverage
 - [x] Encrypt persisted TOTP secrets at rest with a dedicated runtime key and fail closed when that key is unavailable
 - [x] Derive a purpose-separated TOTP encryption subkey from the existing session secret when no dedicated key is configured
-- [ ] Validate the full control set, checkpoint it, and synchronize GitHub
+- [x] Validate the full control set, checkpoint it, and synchronize GitHub (commit c163577)
