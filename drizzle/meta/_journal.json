@@ -414,6 +414,13 @@
       "when": 1786584500000,
       "tag": "0058_in_app_notification_events",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1786662600000,
+      "tag": "0059_force_credit_approval_expiry",
+      "breakpoints": true
     }
   ]
 }

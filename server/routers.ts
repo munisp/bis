@@ -2,6 +2,7 @@ import { COOKIE_NAME } from "@shared/const";
 import { withCache, invalidateCache, TTL } from "./cache";
 import { withCircuitBreaker } from "./circuitBreaker";
 import { getForceCreditDualApprovalThresholdKobo, requiresForceCreditDualApproval } from "./forceCreditPolicy";
+import { getForceCreditApprovalExpiry } from "./forceCreditExpiryPolicy";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { billingRouter } from "./billing";
 import { tenantsRouter } from "./tenants";
@@ -112,6 +113,7 @@ import {
   criminalRecordAudit,
   collectionSites,
   billingTopups,
+  forceCreditApprovals,
   forceCreditApprovers,
 } from "../drizzle/schema";
 import {
@@ -7275,12 +7277,13 @@ export const appRouter = router({
           if (designatedApprovers.length === 0) {
             throw new TRPCError({ code: "PRECONDITION_FAILED", message: "No independent designated Force Credit approver is available" });
           }
+          const expiresAt = getForceCreditApprovalExpiry();
           const requested = await db.execute(sql`
             INSERT INTO force_credit_approvals
-              ("reference", "tenantId", "amountKobo", "auditNote", "status", "requesterId", "requestedAt", "updatedAt")
+              ("reference", "tenantId", "amountKobo", "auditNote", "status", "requesterId", "requestedAt", "expiresAt", "updatedAt")
             VALUES
-              (${input.reference}, ${input.tenantId}, ${input.amountKobo}, ${input.auditNote}, 'pending', ${ctx.user!.id}, NOW(), NOW())
-            RETURNING "id", "requestedAt"
+              (${input.reference}, ${input.tenantId}, ${input.amountKobo}, ${input.auditNote}, 'pending', ${ctx.user!.id}, NOW(), ${expiresAt}, NOW())
+            RETURNING "id", "requestedAt", "expiresAt"
           `);
           const request = ((requested as any).rows ?? requested ?? [])[0];
           await db.execute(sql`
@@ -7290,20 +7293,21 @@ export const appRouter = router({
               tenantId: input.tenantId,
               auditNote: input.auditNote,
               thresholdKobo,
+              expiresAt,
             })} AS json), 'admin_reconciliation', NOW())
           `);
           await db.insert(notifications).values(designatedApprovers.map((approver) => ({
             userId: approver.userId,
             type: "force_credit_approval_requested",
             title: "High-value Force Credit approval required",
-            body: `A ₦${(input.amountKobo / 100).toLocaleString()} recovery requires your independent approval.`,
+            body: `A ₦${(input.amountKobo / 100).toLocaleString()} recovery requires your independent approval within 24 hours.`,
             link: `/payment-rails/reconciliation?tab=approvals&approvalId=${Number(request.id)}`,
           })));
           return { id: Number(request.id), status: "pending" as const, thresholdKobo };
         }),
       /** List approval requests so a second administrator can review them. */
       listForceCreditApprovals: adminProcedure
-        .input(z.object({ status: z.enum(["pending", "executing", "executed", "failed", "rejected"]).optional(), limit: z.number().min(1).max(200).default(100) }))
+        .input(z.object({ status: z.enum(["pending", "executing", "executed", "failed", "rejected", "expired"]).optional(), limit: z.number().min(1).max(200).default(100) }))
         .query(async ({ input }) => {
           const db = await getDb();
           if (!db) return { approvals: [] };
@@ -7342,6 +7346,22 @@ export const appRouter = router({
           const approvals = (approvalRows as any).rows ?? approvalRows ?? [];
           return { approval: approvals[0] ?? null, events: (eventRows as any).rows ?? eventRows ?? [] };
         }),
+      /** Security-only audit feed. Failed OTP values are never persisted. */
+      listForceCreditMfaFailures: adminProcedure
+        .input(z.object({ limit: z.number().min(1).max(200).default(100) }))
+        .query(async ({ input }) => {
+          const db = await getDb();
+          if (!db) return { failures: [] };
+          const rows = await db.execute(sql`
+            SELECT e."id", e."aggregateId", e."actorId", e."payload", e."source", e."createdAt", u."name" AS "actorName", u."email" AS "actorEmail"
+            FROM event_log e
+            LEFT JOIN users u ON u."id" = e."actorId"
+            WHERE e."eventType" = 'force_credit_mfa_failed'
+            ORDER BY e."createdAt" DESC
+            LIMIT ${input.limit}
+          `);
+          return { failures: (rows as any).rows ?? rows ?? [] };
+        }),
       /**
        * Atomically claim, approve, and execute a high-value Force Credit request.
        * The SQL claim prevents concurrent double execution and rejects self-approval.
@@ -7352,12 +7372,28 @@ export const appRouter = router({
           const db = await getDb();
           if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
           await assertDesignatedForceCreditApprover(db, ctx.user!.id);
-          await assertForceCreditStepUpMfa(db, ctx.user!.id, input.totpCode);
+          const [mfaApproval] = await db.select({ reference: forceCreditApprovals.reference })
+            .from(forceCreditApprovals)
+            .where(eq(forceCreditApprovals.id, input.approvalId))
+            .limit(1);
+          try {
+            await assertForceCreditStepUpMfa(db, ctx.user!.id, input.totpCode);
+          } catch (error) {
+            await db.execute(sql`
+              INSERT INTO event_log ("eventType", "aggregateId", "actorId", "payload", "source", "createdAt")
+              VALUES ('force_credit_mfa_failed', ${mfaApproval?.reference ?? `approval:${input.approvalId}`}, ${ctx.user!.id}, CAST(${JSON.stringify({
+                approvalId: input.approvalId,
+                reason: error instanceof Error ? error.message : "MFA step-up failed",
+                mfaMethod: "totp",
+              })} AS json), 'admin_reconciliation', NOW())
+            `);
+            throw error;
+          }
           const claim = await db.execute(sql`
             UPDATE force_credit_approvals
             SET "status" = 'executing', "approverId" = ${ctx.user!.id}, "approvalNote" = ${input.approvalNote},
                 "approvedAt" = NOW(), "updatedAt" = NOW()
-            WHERE "id" = ${input.approvalId} AND "status" = 'pending' AND "requesterId" <> ${ctx.user!.id}
+            WHERE "id" = ${input.approvalId} AND "status" = 'pending' AND "expiresAt" > NOW() AND "requesterId" <> ${ctx.user!.id}
             RETURNING *
           `);
           const approval = ((claim as any).rows ?? claim ?? [])[0];

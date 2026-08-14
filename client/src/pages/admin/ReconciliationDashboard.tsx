@@ -13,6 +13,8 @@
  */
 import { useState, useMemo, useEffect, useCallback } from "react";
 import { trpc } from "@/lib/trpc";
+import { useAuth } from "@/_core/hooks/useAuth";
+import QRCode from "qrcode";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -45,7 +47,7 @@ interface RetryQueueItem {
 
 type SortField = "date" | "amount" | "attempts" | "tenant";
 type SortDir = "asc" | "desc";
-type TabView = "pending" | "dead_letter" | "approvals";
+type TabView = "pending" | "dead_letter" | "approvals" | "security";
 
 interface ForceCreditApproval {
   id: number;
@@ -53,7 +55,7 @@ interface ForceCreditApproval {
   tenantId: string;
   amountKobo: number;
   auditNote: string;
-  status: "pending" | "executing" | "executed" | "failed";
+  status: "pending" | "executing" | "executed" | "failed" | "rejected" | "expired";
   requesterId: number;
   requesterName?: string | null;
   approverId?: number | null;
@@ -61,6 +63,7 @@ interface ForceCreditApproval {
   approvalNote?: string | null;
   ledgerTransferId?: string | null;
   requestedAt: string;
+  expiresAt?: string;
   approvedAt?: string | null;
   executedAt?: string | null;
 }
@@ -90,6 +93,16 @@ function exportToCSV(items: RetryQueueItem[]) {
   a.click();
   URL.revokeObjectURL(url);
   toast.success(`Exported ${items.length} records to CSV`);
+}
+
+function formatApprovalCountdown(expiresAt: string | undefined, now: number): string {
+  if (!expiresAt) return "Deadline unavailable";
+  const remainingMs = new Date(expiresAt).getTime() - now;
+  if (remainingMs <= 0) return "Expiring now";
+  const totalMinutes = Math.floor(remainingMs / 60_000);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return `${hours}h ${minutes.toString().padStart(2, "0")}m remaining`;
 }
 
 // ── Detail Modal ──────────────────────────────────────────────────────────────
@@ -343,6 +356,46 @@ function ForceCreditAuditModal({ reference, history, isLoading, onClose }: { ref
   );
 }
 
+// ── Designated Approver Authenticator Enrollment ─────────────────────────────
+function AuthenticatorEnrollmentDialog({ onClose }: { onClose: () => void }) {
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const [code, setCode] = useState("");
+  const totpStatus = trpc.totp.status.useQuery();
+  const setupMutation = trpc.totp.setup.useMutation({
+    onSuccess: async (setup) => {
+      try {
+        setQrDataUrl(await QRCode.toDataURL(setup.otpauthUri, { width: 224, margin: 1, errorCorrectionLevel: "M" }));
+      } catch {
+        toast.error("Unable to render authenticator QR code");
+      }
+    },
+    onError: (error) => toast.error(error.message || "Authenticator setup failed"),
+  });
+  const verifyMutation = trpc.totp.verify.useMutation({
+    onSuccess: () => { toast.success("Authenticator enrolled for Force Credit approvals"); onClose(); },
+    onError: (error) => toast.error(error.message || "Authenticator code was not accepted"),
+  });
+  const setup = setupMutation.data;
+  const enabled = !!totpStatus.data?.enabled;
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-label="Authenticator enrollment">
+      <div className="w-full max-w-md rounded-xl border bg-background shadow-2xl">
+        <div className="flex items-center justify-between border-b p-4"><div><h3 className="font-semibold">Authenticator enrollment</h3><p className="text-xs text-muted-foreground">Required before authorizing high-value Force Credit.</p></div><Button variant="ghost" size="icon" onClick={onClose}><X className="h-4 w-4" /></Button></div>
+        <div className="space-y-4 p-4">
+          {enabled && !setup ? <div className="rounded border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-800 dark:text-emerald-200">Your authenticator is already verified and available for designated-approver MFA step-up.</div> : !setup ? <><p className="text-sm text-muted-foreground">Use an authenticator app such as Google Authenticator, Microsoft Authenticator, or 1Password. The QR code is generated locally and is never sent to a third-party QR service.</p><Button onClick={() => setupMutation.mutate()} disabled={setupMutation.isPending}>{setupMutation.isPending ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null}Generate QR code</Button></> : <>
+            <div className="flex justify-center rounded bg-white p-3"><img src={qrDataUrl ?? ""} alt="Scan this QR code with your authenticator app" className="h-56 w-56" /></div>
+            <p className="break-all rounded bg-muted p-2 font-mono text-xs">Manual key: {setup.secret}</p>
+            <div className="flex flex-wrap gap-1">{setup.backupCodes.map((backupCode) => <Badge key={backupCode} variant="outline" className="font-mono">{backupCode}</Badge>)}</div>
+            <p className="text-xs text-muted-foreground">Store backup codes securely. They are shown only during enrollment.</p>
+            <div className="space-y-1"><Label htmlFor="enrollment-code">Verify authenticator code</Label><Input id="enrollment-code" value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))} inputMode="numeric" autoComplete="one-time-code" className="font-mono tracking-[0.35em]" placeholder="000000" /></div>
+          </>}
+        </div>
+        <div className="flex justify-end gap-2 border-t p-4"><Button variant="outline" onClick={onClose}>Close</Button>{setup && <Button disabled={!/^\d{6}$/.test(code) || verifyMutation.isPending} onClick={() => verifyMutation.mutate({ code })}>{verifyMutation.isPending ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null}Verify & enable</Button>}</div>
+      </div>
+    </div>
+  );
+}
+
 // ── Server-Enforced Threshold Configuration Dialog ────────────────────────────
 function ThresholdConfigurationDialog({ thresholdKobo, approvers, candidates, history, onClose, onSubmit, onSetApprover, onRollback, isLoading, isSavingApprover, isRollingBack }: { thresholdKobo: number; approvers: Array<any>; candidates: Array<any>; history: Array<any>; onClose: () => void; onSubmit: (kobo: number) => void; onSetApprover: (userId: number, active: boolean) => void; onRollback: (historyEventId: number) => void; isLoading: boolean; isSavingApprover: boolean; isRollingBack: boolean }) {
   const [naira, setNaira] = useState(String(thresholdKobo / 100));
@@ -399,6 +452,7 @@ function ThresholdConfigurationDialog({ thresholdKobo, approvers, candidates, hi
 
 // ── Main Dashboard ────────────────────────────────────────────────────────────
 export default function ReconciliationDashboard() {
+  const { user } = useAuth();
   const [retrying, setRetrying] = useState<string | null>(null);
   const [bulkProgress, setBulkProgress] = useState<{ current: number; total: number } | null>(null);
   const [selectedItem, setSelectedItem] = useState<RetryQueueItem | null>(null);
@@ -408,6 +462,7 @@ export default function ReconciliationDashboard() {
   const [approvalExecutionItem, setApprovalExecutionItem] = useState<ForceCreditApproval | null>(null);
   const [auditReference, setAuditReference] = useState<string | null>(null);
   const [thresholdConfigOpen, setThresholdConfigOpen] = useState(false);
+  const [authenticatorWizardOpen, setAuthenticatorWizardOpen] = useState(false);
   const [sortField, setSortField] = useState<SortField>("date");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [dateFrom, setDateFrom] = useState("");
@@ -415,6 +470,12 @@ export default function ReconciliationDashboard() {
   const [selectedRefs, setSelectedRefs] = useState<Set<string>>(new Set());
   const [activeTab, setActiveTab] = useState<TabView>("pending");
   const [chartChannel, setChartChannel] = useState("");
+  const [clockNow, setClockNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (activeTab !== "approvals") return;
+    const timer = window.setInterval(() => setClockNow(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, [activeTab]);
 
   // ── Queries ─────────────────────────────────────────────────────────────────
   const { data, isLoading, refetch } = trpc.admin.reconciliation.listUnreconciled.useQuery(
@@ -441,9 +502,13 @@ export default function ReconciliationDashboard() {
   const { data: approverCandidatesData } = trpc.admin.reconciliation.listForceCreditApproverCandidates.useQuery(undefined, {
     staleTime: 30_000,
   });
+  const isCurrentDesignatedApprover = (approversData?.approvers ?? []).some((approver: any) => approver.active && Number(approver.userId) === Number(user?.id));
   const { data: auditHistory, isLoading: auditHistoryLoading } = trpc.admin.reconciliation.forceCreditAuditHistory.useQuery(
     { reference: auditReference ?? "unselected" },
     { enabled: Boolean(auditReference), refetchOnWindowFocus: false }
+  );
+  const { data: mfaFailureData, isLoading: mfaFailuresLoading } = trpc.admin.reconciliation.listForceCreditMfaFailures.useQuery(
+    { limit: 100 }, { refetchInterval: 30_000 }
   );
   const { data: chartData } = trpc.admin.reconciliation.failureRateChart.useQuery(
     chartChannel ? { channel: chartChannel } : undefined,
@@ -718,6 +783,12 @@ export default function ReconciliationDashboard() {
         >
           Pending Approvals ({pendingApprovals.length})
         </button>
+        <button
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === "security" ? "border-red-600 text-red-600" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+          onClick={() => setActiveTab("security")}
+        >
+          MFA Security ({mfaFailureData?.failures?.length ?? 0})
+        </button>
       </div>
 
       {/* ═══ PENDING TAB ═══ */}
@@ -832,7 +903,10 @@ export default function ReconciliationDashboard() {
                 <CardTitle className="flex items-center gap-2"><AlertTriangle className="h-5 w-5 text-amber-600" /> Pending High-Value Force Credit Approvals</CardTitle>
                 <CardDescription>Each high-value recovery requires two different administrators and a successful TigerBeetle ledger record.</CardDescription>
               </div>
-              <Button variant="outline" size="sm" onClick={() => setThresholdConfigOpen(true)}>Configure Threshold</Button>
+              <div className="flex flex-wrap justify-end gap-2">
+                {isCurrentDesignatedApprover && <Button variant="outline" size="sm" onClick={() => setAuthenticatorWizardOpen(true)}>Set up authenticator</Button>}
+                <Button variant="outline" size="sm" onClick={() => setThresholdConfigOpen(true)}>Configure Threshold</Button>
+              </div>
             </div>
           </CardHeader>
           <CardContent>
@@ -854,12 +928,28 @@ export default function ReconciliationDashboard() {
                       </div>
                     </div>
                     <p className="text-xs text-muted-foreground">Requested by {approval.requesterName ?? `user ${approval.requesterId}`} on {new Date(approval.requestedAt).toLocaleString()}</p>
+                    {approval.status === "pending" && <p className="text-xs font-medium text-amber-700 dark:text-amber-300">{formatApprovalCountdown(approval.expiresAt, clockNow)} · expires {approval.expiresAt ? new Date(approval.expiresAt).toLocaleString() : "after 24 hours"}</p>}
                     <div className="rounded bg-muted/60 p-2 text-xs"><span className="font-medium">Requester note:</span> {approval.auditNote}</div>
                     {approval.approvalNote && <div className="rounded bg-green-50 p-2 text-xs text-green-900"><span className="font-medium">Approver note:</span> {approval.approvalNote}</div>}
                   </div>
                 ))}
               </div>
             )}
+          </CardContent>
+        </Card>
+      )}
+
+      {activeTab === "security" && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2"><AlertTriangle className="h-5 w-5 text-red-600" /> Force Credit MFA Security Audit</CardTitle>
+            <CardDescription>Immutable records of failed TOTP step-up attempts. Authenticator codes are never stored.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {mfaFailuresLoading ? <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin" /></div> : (mfaFailureData?.failures ?? []).length === 0 ? <div className="py-10 text-center text-sm text-muted-foreground"><CheckCircle2 className="mx-auto mb-2 h-10 w-10 text-emerald-500" />No failed Force Credit MFA attempts recorded.</div> : <div className="space-y-3">{(mfaFailureData?.failures ?? []).map((failure: any) => {
+              const payload = typeof failure.payload === "string" ? (() => { try { return JSON.parse(failure.payload); } catch { return {}; } })() : (failure.payload ?? {});
+              return <div key={failure.id} className="rounded-lg border border-red-500/25 bg-red-500/5 p-3"><div className="flex flex-wrap items-start justify-between gap-2"><div><p className="font-mono text-xs">{failure.aggregateId}</p><p className="mt-1 text-sm font-medium">{failure.actorName ?? `User ${failure.actorId ?? "unknown"}`}</p><p className="text-xs text-muted-foreground">{failure.actorEmail ?? "No email recorded"}</p></div><Badge variant="destructive">MFA denied</Badge></div><div className="mt-3 grid gap-2 text-xs md:grid-cols-2"><p><span className="font-medium">Occurred:</span> {new Date(failure.createdAt).toLocaleString()}</p><p><span className="font-medium">Method:</span> {payload.mfaMethod ?? "totp"}</p><p className="md:col-span-2"><span className="font-medium">Reason:</span> {payload.reason ?? "Authenticator verification was rejected"}</p></div></div>;
+            })}</div>}
           </CardContent>
         </Card>
       )}
@@ -931,6 +1021,7 @@ export default function ReconciliationDashboard() {
           isRollingBack={rollbackForceCreditPolicyMutation.isPending}
         />
       )}
+      {authenticatorWizardOpen && <AuthenticatorEnrollmentDialog onClose={() => setAuthenticatorWizardOpen(false)} />}
     </div>
   );
 }

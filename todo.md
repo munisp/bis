@@ -3560,3 +3560,9 @@
 - [x] Add notification dropdown unread count, mark-all-read, and inline Force Credit decision controls
 - [x] Require an MFA step-up challenge before a designated approver authorizes a high-value Force Credit request
 - [x] Validate, checkpoint, and push all code to GitHub main (commit cfd7c73)
+
+## Reconciliation Controls v9 (Aug 14 2026)
+- [x] Add a designated-approver TOTP enrollment wizard with QR setup and verification
+- [ ] Deploy the expiry callback and provision its project Heartbeat job for automatic 24-hour Force Credit expiry
+- [x] Add a security audit view for failed Force Credit MFA authorization attempts
+- [ ] Validate, checkpoint, and push all code to GitHub main

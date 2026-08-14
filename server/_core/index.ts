@@ -873,6 +873,28 @@ async function startServer() {
     });
   });
 
+  // ── Scheduled task endpoint — Force Credit approval expiry ───────────────
+  // Heartbeat invokes this deployed callback; no in-process timer is used.
+  app.post("/api/scheduled/force-credit-expiry", async (req: Request, res: Response) => {
+    try {
+      const { sdk } = await import("./sdk");
+      const user = await sdk.authenticateRequest(req);
+      if (!user.isCron || !user.taskUid) {
+        res.status(403).json({ error: "cron-only" });
+        return;
+      }
+      const { expirePendingForceCreditApprovals } = await import("../forceCreditExpiry");
+      const result = await expirePendingForceCreditApprovals();
+      res.json({ ok: true, ...result, taskUid: user.taskUid });
+    } catch (error) {
+      res.status(500).json({
+        error: error instanceof Error ? error.message : "Force Credit expiry failed",
+        context: { url: req.originalUrl },
+        timestamp: new Date().toISOString(),
+      });
+    }
+  });
+
   // ── Scheduled task endpoint — alert rules evaluation ──────────────────────
   // Called by Manus scheduled task every 15 min via:
   //   curl -X POST $SCHEDULED_TASK_ENDPOINT_BASE/api/scheduled/alert-rules \

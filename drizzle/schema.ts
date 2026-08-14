@@ -3598,6 +3598,7 @@ export const forceCreditApprovals = pgTable("force_credit_approvals", {
   approvalNote:     text("approvalNote"),
   ledgerTransferId: varchar("ledgerTransferId", { length: 128 }),
   requestedAt:      timestamp("requestedAt").defaultNow().notNull(),
+  expiresAt:        timestamp("expiresAt").notNull(),
   approvedAt:       timestamp("approvedAt"),
   executedAt:       timestamp("executedAt"),
   updatedAt:        timestamp("updatedAt").defaultNow().notNull(),
@@ -3605,6 +3606,7 @@ export const forceCreditApprovals = pgTable("force_credit_approvals", {
   force_credit_reference_idx: index("fca_reference_idx").on(t.reference),
   force_credit_status_idx:    index("fca_status_idx").on(t.status),
   force_credit_requester_idx: index("fca_requester_idx").on(t.requesterId),
+  force_credit_expires_idx:   index("fca_expires_idx").on(t.status, t.expiresAt),
 }));
 export type ForceCreditApproval = typeof forceCreditApprovals.$inferSelect;
 export type InsertForceCreditApproval = typeof forceCreditApprovals.$inferInsert;
