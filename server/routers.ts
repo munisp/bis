@@ -28,7 +28,7 @@ import { socialMonitoringRouter } from "./socialMonitoring";
 import { biometricRouter } from "./biometric";
 import { lakehouseRouter } from "./lakehouse";
 import { lexRouter } from "./lex";
-import { sessionsRouter, totpRouter, notificationsRouter, investigationLinksRouter, exportSchedulesRouter } from "./platform";
+import { sessionsRouter, totpRouter, notificationsRouter, investigationLinksRouter, exportSchedulesRouter, validateTotp } from "./platform";
 import { archivalRouter } from "./archival";
 import { paymentRailsRouter } from "./paymentRails";
 import { documentVaultRouter } from "./documentVault";
@@ -6901,6 +6901,19 @@ async function assertDesignatedForceCreditApprover(db: NonNullable<Awaited<Retur
   }
 }
 
+async function assertForceCreditStepUpMfa(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, userId: number, totpCode: string): Promise<void> {
+  const [record] = await db.select({ secret: userTotpSecrets.secret, verified: userTotpSecrets.verified })
+    .from(userTotpSecrets)
+    .where(eq(userTotpSecrets.userId, userId))
+    .limit(1);
+  if (!record?.verified) {
+    throw new TRPCError({ code: "PRECONDITION_FAILED", message: "A verified authenticator app is required before authorizing a high-value Force Credit" });
+  }
+  if (!validateTotp(record.secret, totpCode)) {
+    throw new TRPCError({ code: "UNAUTHORIZED", message: "The authenticator code is invalid or expired" });
+  }
+}
+
 export const appRouter = router({
   system: systemRouter,
   admin: router({
@@ -7284,13 +7297,13 @@ export const appRouter = router({
             type: "force_credit_approval_requested",
             title: "High-value Force Credit approval required",
             body: `A ₦${(input.amountKobo / 100).toLocaleString()} recovery requires your independent approval.`,
-            link: "/payment-rails/reconciliation?tab=approvals",
+            link: `/payment-rails/reconciliation?tab=approvals&approvalId=${Number(request.id)}`,
           })));
           return { id: Number(request.id), status: "pending" as const, thresholdKobo };
         }),
       /** List approval requests so a second administrator can review them. */
       listForceCreditApprovals: adminProcedure
-        .input(z.object({ status: z.enum(["pending", "executing", "executed", "failed"]).optional(), limit: z.number().min(1).max(200).default(100) }))
+        .input(z.object({ status: z.enum(["pending", "executing", "executed", "failed", "rejected"]).optional(), limit: z.number().min(1).max(200).default(100) }))
         .query(async ({ input }) => {
           const db = await getDb();
           if (!db) return { approvals: [] };
@@ -7334,11 +7347,12 @@ export const appRouter = router({
        * The SQL claim prevents concurrent double execution and rejects self-approval.
        */
       approveForceCredit: adminProcedure
-        .input(z.object({ approvalId: z.number().int().positive(), approvalNote: z.string().min(10, "Approval note must be at least 10 characters") }))
+        .input(z.object({ approvalId: z.number().int().positive(), approvalNote: z.string().min(10, "Approval note must be at least 10 characters"), totpCode: z.string().length(6).regex(/^\d{6}$/) }))
         .mutation(async ({ input, ctx }) => {
           const db = await getDb();
           if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
           await assertDesignatedForceCreditApprover(db, ctx.user!.id);
+          await assertForceCreditStepUpMfa(db, ctx.user!.id, input.totpCode);
           const claim = await db.execute(sql`
             UPDATE force_credit_approvals
             SET "status" = 'executing', "approverId" = ${ctx.user!.id}, "approvalNote" = ${input.approvalNote},
@@ -7390,10 +7404,38 @@ export const appRouter = router({
               requesterId: approval.requesterId,
               approverId: ctx.user!.id,
               approvalNote: input.approvalNote,
+              mfaMethod: "totp",
               tigerBeetleTransferId: result.transferId,
             })} AS json), 'admin_reconciliation', NOW())
           `);
           return { success: true, transferId: result.transferId, requesterId: Number(approval.requesterId), approver };
+        }),
+      /** Reject a pending recovery request without performing any financial side effect. */
+      rejectForceCredit: adminProcedure
+        .input(z.object({ approvalId: z.number().int().positive(), rejectionNote: z.string().min(10, "Rejection note must be at least 10 characters") }))
+        .mutation(async ({ input, ctx }) => {
+          const db = await getDb();
+          if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+          await assertDesignatedForceCreditApprover(db, ctx.user!.id);
+          const result = await db.execute(sql`
+            UPDATE force_credit_approvals
+            SET "status" = 'rejected', "approverId" = ${ctx.user!.id}, "approvalNote" = ${input.rejectionNote},
+                "approvedAt" = NOW(), "updatedAt" = NOW()
+            WHERE "id" = ${input.approvalId} AND "status" = 'pending' AND "requesterId" <> ${ctx.user!.id}
+            RETURNING "reference", "tenantId", "amountKobo"
+          `);
+          const rejected = ((result as any).rows ?? result ?? [])[0];
+          if (!rejected) throw new TRPCError({ code: "CONFLICT", message: "Request is unavailable, already decided, or requires a different approver" });
+          await db.execute(sql`
+            INSERT INTO event_log ("eventType", "aggregateId", "actorId", "payload", "source", "createdAt")
+            VALUES ('force_credit_rejected', ${rejected.reference}, ${ctx.user!.id}, CAST(${JSON.stringify({
+              approvalId: input.approvalId,
+              tenantId: rejected.tenantId,
+              amountKobo: Number(rejected.amountKobo),
+              rejectionNote: input.rejectionNote,
+            })} AS json), 'admin_reconciliation', NOW())
+          `);
+          return { status: "rejected" as const };
         }),
       /** List channels represented in persisted Paystack top-ups for analytics filtering. */
       listPaymentChannels: adminProcedure.query(async () => {

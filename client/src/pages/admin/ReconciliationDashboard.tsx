@@ -265,8 +265,9 @@ function DualApprovalRequestDialog({ item, thresholdNGN, onClose, onSubmit, isLo
 }
 
 // ── Second Approver Dialog ────────────────────────────────────────────────────
-function ApprovalDialog({ approval, onClose, onSubmit, isLoading }: { approval: ForceCreditApproval; onClose: () => void; onSubmit: (note: string) => void; isLoading: boolean }) {
+function ApprovalDialog({ approval, onClose, onSubmit, isLoading }: { approval: ForceCreditApproval; onClose: () => void; onSubmit: (note: string, totpCode: string) => void; isLoading: boolean }) {
   const [note, setNote] = useState("");
+  const [totpCode, setTotpCode] = useState("");
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
       <div className="bg-background border border-red-300 rounded-xl shadow-2xl w-full max-w-md flex flex-col">
@@ -283,10 +284,11 @@ function ApprovalDialog({ approval, onClose, onSubmit, isLoading }: { approval: 
           </div>
           <div className="text-sm"><span className="text-muted-foreground">Request rationale:</span> {approval.auditNote}</div>
           <Textarea placeholder="Mandatory approval rationale (min 10 characters)..." value={note} onChange={(event) => setNote(event.target.value)} rows={3} />
+          <div className="space-y-1"><Label htmlFor="approval-totp">Authenticator code</Label><Input id="approval-totp" value={totpCode} onChange={(event) => setTotpCode(event.target.value.replace(/\D/g, "").slice(0, 6))} inputMode="numeric" autoComplete="one-time-code" className="font-mono tracking-[0.35em]" placeholder="000000" /><p className="text-xs text-muted-foreground">A fresh code from your verified authenticator app is required before a ledger credit can be attempted.</p></div>
         </div>
         <div className="p-4 border-t flex justify-end gap-2">
           <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button variant="destructive" disabled={note.trim().length < 10 || isLoading} onClick={() => onSubmit(note.trim())}>
+          <Button variant="destructive" disabled={note.trim().length < 10 || !/^\d{6}$/.test(totpCode) || isLoading} onClick={() => onSubmit(note.trim(), totpCode)}>
             {isLoading ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}Approve & Execute
           </Button>
         </div>
@@ -902,7 +904,7 @@ export default function ReconciliationDashboard() {
         <ApprovalDialog
           approval={approvalExecutionItem}
           onClose={() => setApprovalExecutionItem(null)}
-          onSubmit={(approvalNote) => approveForceCreditMutation.mutate({ approvalId: approvalExecutionItem.id, approvalNote })}
+          onSubmit={(approvalNote, totpCode) => approveForceCreditMutation.mutate({ approvalId: approvalExecutionItem.id, approvalNote, totpCode })}
           isLoading={approveForceCreditMutation.isPending}
         />
       )}

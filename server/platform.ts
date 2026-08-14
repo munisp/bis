@@ -187,7 +187,7 @@ export const totpRouter = router({
 });
 
 /** Simple TOTP validation (RFC 6238, SHA1, 6 digits, 30s window) */
-function validateTotp(secret: string, code: string): boolean {
+export function validateTotp(secret: string, code: string): boolean {
   // SECURITY: use timingSafeEqual to prevent timing attacks on TOTP comparison
   const now = Math.floor(Date.now() / 1000);
   let valid = false;

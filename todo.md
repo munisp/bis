@@ -3555,3 +3555,8 @@
 - [x] Add real-time in-app approver notifications for new Force Credit requests
 - [x] Add threshold configuration version history and audited rollback controls
 - [x] Validate, checkpoint, and push all code to GitHub main (commit daaa3cd)
+
+## Reconciliation Controls v8 (Aug 13 2026)
+- [x] Add notification dropdown unread count, mark-all-read, and inline Force Credit decision controls
+- [x] Require an MFA step-up challenge before a designated approver authorizes a high-value Force Credit request
+- [ ] Validate, checkpoint, and push all code to GitHub main
