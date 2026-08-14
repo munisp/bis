@@ -134,9 +134,8 @@ export const totpRouter = router({
   setup: writeProcedure.mutation(async ({ ctx }) => {
     const db = await getDb();
     if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-    // Generate a random 20-byte base32 secret
-    const secretBytes = crypto.randomBytes(20);
-    const secret = secretBytes.toString("base64").replace(/[^A-Z2-7]/gi, "").toUpperCase().slice(0, 32);
+    // Generate a full-entropy 20-byte RFC 4648 Base32 secret for authenticator apps.
+    const secret = generateTotpSecret();
     // Generate 10 backup codes
     const backupCodes = Array.from({ length: 10 }, () =>
       crypto.randomBytes(4).toString("hex").toUpperCase()
@@ -202,6 +201,19 @@ export function validateTotp(secret: string, code: string): boolean {
     }
   }
   return valid;
+}
+
+/** Produce a 160-bit RFC 4648 Base32 secret without filtering a Base64 string. */
+export function generateTotpSecret(byteLength = 20): string {
+  const bytes = crypto.randomBytes(byteLength);
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  let bits = "";
+  for (const byte of Array.from(bytes)) bits += byte.toString(2).padStart(8, "0");
+  let secret = "";
+  for (let offset = 0; offset + 5 <= bits.length; offset += 5) {
+    secret += alphabet[parseInt(bits.slice(offset, offset + 5), 2)];
+  }
+  return secret;
 }
 
 function generateHotp(secret: string, counter: number): string {
