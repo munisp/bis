@@ -3566,3 +3566,10 @@
 - [ ] Deploy the expiry callback and provision its project Heartbeat job for automatic 24-hour Force Credit expiry
 - [x] Add a security audit view for failed Force Credit MFA authorization attempts
 - [x] Validate, checkpoint, and push all code to GitHub main (commits 967bbcd and a7c02b0)
+
+## Reconciliation Controls v9 Final Gap Review (Aug 14 2026)
+- [x] Audit Force Credit authorization, TOTP enrollment, MFA audit, and expiry implementation for unresolved workspace findings
+- [x] Remediate all confirmed workspace-resolvable findings and add regression coverage
+- [x] Encrypt persisted TOTP secrets at rest with a dedicated runtime key and fail closed when that key is unavailable
+- [x] Derive a purpose-separated TOTP encryption subkey from the existing session secret when no dedicated key is configured
+- [ ] Validate the full control set, checkpoint it, and synchronize GitHub

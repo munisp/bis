@@ -29,7 +29,7 @@ import { socialMonitoringRouter } from "./socialMonitoring";
 import { biometricRouter } from "./biometric";
 import { lakehouseRouter } from "./lakehouse";
 import { lexRouter } from "./lex";
-import { sessionsRouter, totpRouter, notificationsRouter, investigationLinksRouter, exportSchedulesRouter, validateTotp } from "./platform";
+import { sessionsRouter, totpRouter, notificationsRouter, investigationLinksRouter, exportSchedulesRouter, decryptTotpSecret, validateTotp } from "./platform";
 import { archivalRouter } from "./archival";
 import { paymentRailsRouter } from "./paymentRails";
 import { documentVaultRouter } from "./documentVault";
@@ -6911,7 +6911,7 @@ async function assertForceCreditStepUpMfa(db: NonNullable<Awaited<ReturnType<typ
   if (!record?.verified) {
     throw new TRPCError({ code: "PRECONDITION_FAILED", message: "A verified authenticator app is required before authorizing a high-value Force Credit" });
   }
-  if (!validateTotp(record.secret, totpCode)) {
+  if (!validateTotp(decryptTotpSecret(record.secret), totpCode)) {
     throw new TRPCError({ code: "UNAUTHORIZED", message: "The authenticator code is invalid or expired" });
   }
 }

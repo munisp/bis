@@ -140,13 +140,14 @@ export const totpRouter = router({
     const backupCodes = Array.from({ length: 10 }, () =>
       crypto.randomBytes(4).toString("hex").toUpperCase()
     );
+    const backupCodeHashes = backupCodes.map((code) => hashTotpBackupCode(ctx.user.id, code));
     // Upsert the TOTP record (unverified)
     await db
       .insert(userTotpSecrets)
-      .values({ userId: ctx.user.id, secret, verified: false, backupCodes, updatedAt: new Date() })
+      .values({ userId: ctx.user.id, secret: encryptTotpSecret(secret), verified: false, backupCodes: backupCodeHashes, updatedAt: new Date() })
       .onConflictDoUpdate({
         target: userTotpSecrets.userId,
-        set: { secret, verified: false, backupCodes, updatedAt: new Date() },
+        set: { secret: encryptTotpSecret(secret), verified: false, backupCodes: backupCodeHashes, updatedAt: new Date() },
       });
     const issuer = "BIS%20Platform";
     const account = encodeURIComponent(ctx.user.email ?? ctx.user.openId ?? "user");
@@ -166,12 +167,18 @@ export const totpRouter = router({
         .where(eq(userTotpSecrets.userId, ctx.user.id))
         .limit(1);
       if (!record) throw new TRPCError({ code: "NOT_FOUND", message: "TOTP setup not initiated" });
-      // Validate TOTP code using time-based algorithm
-      const isValid = validateTotp(record.secret, input.code);
+      // Validate TOTP code using time-based algorithm after decrypting its protected seed.
+      const isValid = validateTotp(decryptTotpSecret(record.secret), input.code);
       if (!isValid) throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid TOTP code" });
+      const shouldMigrateLegacySeed = !isEncryptedTotpSecret(record.secret);
       await db
         .update(userTotpSecrets)
-        .set({ verified: true, enabledAt: new Date(), updatedAt: new Date() })
+        .set({
+          verified: true,
+          enabledAt: new Date(),
+          ...(shouldMigrateLegacySeed ? { secret: encryptTotpSecret(record.secret) } : {}),
+          updatedAt: new Date(),
+        })
         .where(eq(userTotpSecrets.userId, ctx.user.id));
       return { ok: true };
     }),
@@ -214,6 +221,82 @@ export function generateTotpSecret(byteLength = 20): string {
     secret += alphabet[parseInt(bits.slice(offset, offset + 5), 2)];
   }
   return secret;
+}
+
+/** Store backup-code verifiers only; raw codes are returned once during setup. */
+export function hashTotpBackupCode(userId: number, code: string): string {
+  return crypto.createHash("sha256").update(`bis-totp-backup:${userId}:${code}`).digest("hex");
+}
+
+const TOTP_ENCRYPTION_PREFIX = "bis-totp:v1:";
+
+function getTotpEncryptionKey(): Buffer {
+  const rootSecret = process.env.TOTP_ENCRYPTION_KEY ?? process.env.JWT_SECRET;
+  if (!rootSecret) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "TOTP encryption is unavailable because no runtime encryption root is configured",
+    });
+  }
+  return Buffer.from(crypto.hkdfSync(
+    "sha256",
+    Buffer.from(rootSecret, "utf8"),
+    Buffer.from("BIS TOTP seed encryption salt v1", "utf8"),
+    Buffer.from("aes-256-gcm", "utf8"),
+    32,
+  ));
+}
+
+export function isEncryptedTotpSecret(secret: string): boolean {
+  return secret.startsWith(TOTP_ENCRYPTION_PREFIX);
+}
+
+export function encryptTotpSecret(secret: string): string {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", getTotpEncryptionKey(), iv);
+  const ciphertext = Buffer.concat([cipher.update(secret, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `${TOTP_ENCRYPTION_PREFIX}${Buffer.concat([iv, tag, ciphertext]).toString("base64url")}`;
+}
+
+export function decryptTotpSecret(storedSecret: string): string {
+  if (!isEncryptedTotpSecret(storedSecret)) return storedSecret;
+  const encrypted = Buffer.from(storedSecret.slice(TOTP_ENCRYPTION_PREFIX.length), "base64url");
+  if (encrypted.length < 29) throw new TRPCError({ code: "BAD_REQUEST", message: "Stored TOTP seed is malformed" });
+  const iv = encrypted.subarray(0, 12);
+  const tag = encrypted.subarray(12, 28);
+  const ciphertext = encrypted.subarray(28);
+  try {
+    const decipher = crypto.createDecipheriv("aes-256-gcm", getTotpEncryptionKey(), iv);
+    decipher.setAuthTag(tag);
+    return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");
+  } catch {
+    throw new TRPCError({ code: "UNAUTHORIZED", message: "Stored TOTP seed could not be decrypted" });
+  }
+}
+
+/** Idempotently migrate legacy plaintext TOTP seeds to encrypted storage at startup. */
+export async function migrateLegacyTotpSeedsAtRest(): Promise<number> {
+  const db = await getDb();
+  if (!db) return 0;
+  const records = await db.select({ id: userTotpSecrets.id, secret: userTotpSecrets.secret, backupCodes: userTotpSecrets.backupCodes })
+    .from(userTotpSecrets);
+  let migrated = 0;
+  for (const record of records) {
+    const hasLegacySeed = !isEncryptedTotpSecret(record.secret);
+    const backupCodes = record.backupCodes ?? [];
+    const hasLegacyBackupCodes = backupCodes.some((code) => !/^[a-f0-9]{64}$/i.test(code));
+    if (!hasLegacySeed && !hasLegacyBackupCodes) continue;
+    await db.update(userTotpSecrets)
+      .set({
+        ...(hasLegacySeed ? { secret: encryptTotpSecret(record.secret) } : {}),
+        ...(hasLegacyBackupCodes ? { backupCodes: backupCodes.map((code) => /^[a-f0-9]{64}$/i.test(code) ? code : hashTotpBackupCode(record.id, code)) } : {}),
+        updatedAt: new Date(),
+      })
+      .where(eq(userTotpSecrets.id, record.id));
+    migrated += 1;
+  }
+  return migrated;
 }
 
 function generateHotp(secret: string, counter: number): string {
