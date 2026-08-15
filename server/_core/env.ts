@@ -1,7 +1,34 @@
+import { createHmac } from "node:crypto";
+
+type SessionSecretSource = Record<string, string | undefined>;
+
+export function resolveSessionSigningSource(source: SessionSecretSource = process.env): string {
+  return source.BIS_SESSION_SIGNING_SECRET ?? source.BUILT_IN_FORGE_API_KEY ?? source.JWT_SECRET ?? "";
+}
+
+export function resolveSessionSigningSecret(source: SessionSecretSource = process.env): string {
+  const explicitSecret = source.BIS_SESSION_SIGNING_SECRET;
+  if (explicitSecret) return explicitSecret;
+
+  const forgeCredential = source.BUILT_IN_FORGE_API_KEY;
+  if (forgeCredential) {
+    return createHmac("sha256", forgeCredential)
+      .update("bis-session-signing-root:v1")
+      .digest("hex");
+  }
+
+  return source.JWT_SECRET ?? "";
+}
+
+const sessionSigningSecret = resolveSessionSigningSecret();
+
 export const ENV = {
   // Core platform
   appId: process.env.VITE_APP_ID ?? "",
-  cookieSecret: process.env.JWT_SECRET ?? "",
+  // Production deployments may provide this independently of the platform's
+  // built-in JWT_SECRET. This value signs BFF session cookies and derives the
+  // purpose-separated authenticator-seed encryption key.
+  cookieSecret: sessionSigningSecret,
   databaseUrl: process.env.DATABASE_URL ?? "",
   oAuthServerUrl: process.env.OAUTH_SERVER_URL ?? "",
   ownerOpenId: process.env.OWNER_OPEN_ID ?? "",
@@ -92,7 +119,7 @@ export const ENV = {
   gatewayUrl: process.env.GATEWAY_URL ?? "http://localhost:8081",
 
   // Audit HMAC secret (falls back to JWT_SECRET for dev convenience)
-  auditHmacSecret: process.env.AUDIT_HMAC_SECRET ?? process.env.JWT_SECRET ?? "bis-audit-hmac-dev",
+  auditHmacSecret: process.env.AUDIT_HMAC_SECRET ?? sessionSigningSecret ?? "bis-audit-hmac-dev",
   // LLM/Forge URL (alias for forgeApiUrl, used in health checks)
   llmUrl: process.env.BUILT_IN_FORGE_API_URL ?? "",
   // Gateway / verification engine
