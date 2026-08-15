@@ -3,7 +3,7 @@ import { ForbiddenError } from "@shared/_core/errors";
 import axios, { type AxiosInstance } from "axios";
 import { parse as parseCookieHeader } from "cookie";
 import type { Request } from "express";
-import { SignJWT, jwtVerify } from "jose";
+import { decodeJwt, SignJWT, jwtVerify } from "jose";
 import { SESSION_INACTIVITY_MS } from "@shared/const";
 import type { User } from "../../drizzle/schema";
 import * as db from "../db";
@@ -27,6 +27,21 @@ export type SessionPayload = {
 
 const CRON_OPEN_ID_PREFIX = "cron_";
 export type AuthenticatedUser = User & { taskUid?: string; isCron?: boolean };
+
+/**
+ * Platform Heartbeat cookies are signed by the scheduler, not by this BFF's
+ * session root. The decoded value is only a routing hint: authorization still
+ * requires the server-side GetUserInfoWithJwt exchange below.
+ */
+export function getCronTokenCandidate(cookieValue: string | undefined | null): string | null {
+  if (!cookieValue) return null;
+  try {
+    const { openId } = decodeJwt(cookieValue) as Record<string, unknown>;
+    return isNonEmptyString(openId) && openId.startsWith(CRON_OPEN_ID_PREFIX) ? openId : null;
+  } catch {
+    return null;
+  }
+}
 
 function buildCronUser(userInfo: GetUserInfoWithJwtResponse): AuthenticatedUser {
   const now = new Date();
@@ -278,19 +293,25 @@ class SDKServer {
   }
 
   async authenticateRequest(req: Request): Promise<AuthenticatedUser> {
-    // Regular authentication flow
     const cookies = this.parseCookies(req.headers.cookie);
     const sessionCookie = cookies.get(COOKIE_NAME);
+
+    // Heartbeat uses a Manus-signed cron cookie. Never trust its decoded
+    // payload directly; exchange it with the OAuth service and require the
+    // authoritative task UID before allowing scheduled work.
+    if (getCronTokenCandidate(sessionCookie)) {
+      const userInfo = await this.getUserInfoWithJwt(sessionCookie ?? "");
+      if (!userInfo.openId.startsWith(CRON_OPEN_ID_PREFIX) || !userInfo.taskUid) {
+        throw ForbiddenError("Cron session missing task_uid");
+      }
+      return buildCronUser(userInfo);
+    }
+
+    // Regular BFF session authentication flow
     const session = await this.verifySession(sessionCookie);
 
     if (!session) {
       throw ForbiddenError("Invalid session cookie");
-    }
-
-    if (session.openId.startsWith(CRON_OPEN_ID_PREFIX)) {
-      const userInfo = await this.getUserInfoWithJwt(sessionCookie ?? "");
-      if (!userInfo.taskUid) throw ForbiddenError("Cron session missing task_uid");
-      return buildCronUser(userInfo);
     }
 
     const sessionUserId = session.openId;
