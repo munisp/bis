@@ -512,9 +512,28 @@ export const platformSettings = pgTable("platform_settings", {
   value: jsonb("value"),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
   updatedBy: varchar("updatedBy", { length: 255 }),
-});
+}, (table) => [
+  uniqueIndex("platform_settings_namespace_key_unique").on(table.namespace, table.key),
+]);
 export type PlatformSetting = typeof platformSettings.$inferSelect;
 export type InsertPlatformSetting = typeof platformSettings.$inferInsert;
+
+// ─── Designated Force Credit Approvers ─────────────────────────────────────────
+// Explicit assignment is required in addition to administrator access before a
+// user can execute a high-value Force Credit approval.
+export const forceCreditApprovers = pgTable("force_credit_approvers", {
+  id: serial("id").primaryKey(),
+  userId: integer("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+  active: boolean("active").notNull().default(true),
+  designatedBy: integer("designatedBy").references(() => users.id, { onDelete: "set null" }),
+  designatedAt: timestamp("designatedAt").defaultNow().notNull(),
+  revokedAt: timestamp("revokedAt"),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex("force_credit_approvers_user_unique").on(table.userId),
+  index("force_credit_approvers_active_idx").on(table.active),
+]);
+export type ForceCreditApprover = typeof forceCreditApprovers.$inferSelect;
 
 // ─── Onboarding Applications ──────────────────────────────────────────────────
 export const onboardingApplicationStatusEnum = pgEnum("onboarding_application_status", [
@@ -3564,3 +3583,30 @@ export const eventLog = pgTable("event_log", {
 }));
 export type EventLog = typeof eventLog.$inferSelect;
 export type InsertEventLog = typeof eventLog.$inferInsert;
+
+// ── force_credit_approvals ─────────────────────────────────────────────────────
+// Durable four-eyes-control records for high-value manual payment recovery.
+export const forceCreditApprovals = pgTable("force_credit_approvals", {
+  id:               serial("id").primaryKey(),
+  reference:        varchar("reference", { length: 256 }).notNull(),
+  tenantId:         varchar("tenantId", { length: 64 }).notNull(),
+  amountKobo:       integer("amountKobo").notNull(),
+  auditNote:        text("auditNote").notNull(),
+  status:           varchar("status", { length: 24 }).notNull().default("pending"),
+  requesterId:      integer("requesterId").references(() => users.id, { onDelete: "restrict" }).notNull(),
+  approverId:       integer("approverId").references(() => users.id, { onDelete: "restrict" }),
+  approvalNote:     text("approvalNote"),
+  ledgerTransferId: varchar("ledgerTransferId", { length: 128 }),
+  requestedAt:      timestamp("requestedAt").defaultNow().notNull(),
+  expiresAt:        timestamp("expiresAt").notNull(),
+  approvedAt:       timestamp("approvedAt"),
+  executedAt:       timestamp("executedAt"),
+  updatedAt:        timestamp("updatedAt").defaultNow().notNull(),
+}, (t) => ({
+  force_credit_reference_idx: index("fca_reference_idx").on(t.reference),
+  force_credit_status_idx:    index("fca_status_idx").on(t.status),
+  force_credit_requester_idx: index("fca_requester_idx").on(t.requesterId),
+  force_credit_expires_idx:   index("fca_expires_idx").on(t.status, t.expiresAt),
+}));
+export type ForceCreditApproval = typeof forceCreditApprovals.$inferSelect;
+export type InsertForceCreditApproval = typeof forceCreditApprovals.$inferInsert;

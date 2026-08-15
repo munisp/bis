@@ -25,6 +25,7 @@ import { protectedProcedure, router } from "./_core/trpc";
 import { ENV } from "./_core/env";
 import { TRPCError } from "@trpc/server";
 import { publishStablecoinEvent } from "./dapr";
+import { getDb } from "./db";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -99,6 +100,28 @@ export const stablecoinRouter = router({
       })
     )
     .mutation(async ({ input, ctx }) => {
+      // ── Idempotency guard: prevent duplicate chain transfers for the same txRef ──
+      const db = await getDb();
+      if (db) {
+        const { transactions } = await import("../drizzle/schema");
+        const { eq } = await import("drizzle-orm");
+        const [existing] = await db.select().from(transactions)
+          .where(eq(transactions.txRef, input.txRef)).limit(1);
+        if (existing) {
+          return {
+            txRef: existing.txRef,
+            txHash: (existing as any).tigerBeetleId ?? "",
+            status: existing.status,
+            network: input.network,
+            currency: input.currency,
+            gasUsed: null,
+            sandbox: false,
+            initiatedAt: existing.createdAt?.toISOString() ?? new Date().toISOString(),
+            idempotent: true,
+          };
+        }
+      }
+
       const result = await gatewayPost<{
         txRef: string;
         txHash: string;
@@ -125,6 +148,25 @@ export const stablecoinRouter = router({
       // Publish stablecoin transfer event to Dapr pub/sub for AML monitoring
       publishStablecoinEvent({ eventType: "transfer_initiated", txRef: result.txRef, network: result.network, currency: result.currency, amountUnits: input.amountUnits, status: result.status, actorId: ctx.user.id, tenantId: ctx.tenantId ?? undefined,
        }).catch(e => console.warn("[Stablecoin] Dapr publish failed:", e));
+
+      // Persist the transfer record for idempotency and audit
+      if (db) {
+        const { transactions } = await import("../drizzle/schema");
+        await db.insert(transactions).values({
+          txRef: result.txRef,
+          type: "stablecoin" as any,
+          status: result.status === "confirmed" ? "completed" : "pending",
+          amount: parseInt(input.amountUnits, 10),
+          currency: input.currency,
+          originatorAccount: input.fromAddress,
+          originatorName: `user:${ctx.user.id}`,
+          beneficiaryAccount: input.toAddress,
+          beneficiaryName: input.toAddress,
+          narration: input.narration ?? `Stablecoin transfer on ${input.network}`,
+          tigerBeetleId: result.txHash,
+        }).onConflictDoNothing();
+      }
+
       return transferResult;
     }),
 
