@@ -3573,3 +3573,10 @@
 - [x] Encrypt persisted TOTP secrets at rest with a dedicated runtime key and fail closed when that key is unavailable
 - [x] Derive a purpose-separated TOTP encryption subkey from the existing session secret when no dedicated key is configured
 - [x] Validate the full control set, checkpoint it, and synchronize GitHub (commit c163577)
+
+## GitHub Repository Consolidation (Aug 15 2026)
+- [x] Inspect main, all open pull requests, and branch divergence (47 Dependabot PRs open; all currently report no completed CI checks)
+- [x] Repair the production Workbox precache-size build failure and validate a deployable production build
+- [ ] Synchronize all completed workspace changes to GitHub main
+- [ ] Merge only pull requests with compatible, validated changes
+- [ ] Verify final main branch and document any unmergeable external blockers
