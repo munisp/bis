@@ -3,7 +3,7 @@ import { ForbiddenError } from "@shared/_core/errors";
 import axios, { type AxiosInstance } from "axios";
 import { parse as parseCookieHeader } from "cookie";
 import type { Request } from "express";
-import { SignJWT, jwtVerify } from "jose";
+import { decodeJwt, SignJWT, jwtVerify } from "jose";
 import { SESSION_INACTIVITY_MS } from "@shared/const";
 import type { User } from "../../drizzle/schema";
 import * as db from "../db";
@@ -24,6 +24,45 @@ export type SessionPayload = {
   appId: string;
   name: string;
 };
+
+const CRON_OPEN_ID_PREFIX = "cron_";
+export type AuthenticatedUser = User & { taskUid?: string; isCron?: boolean };
+
+/**
+ * Platform Heartbeat cookies are signed by the scheduler, not by this BFF's
+ * session root. The decoded value is only a routing hint: authorization still
+ * requires the server-side GetUserInfoWithJwt exchange below.
+ */
+export function getCronTokenCandidate(cookieValue: string | undefined | null): string | null {
+  if (!cookieValue) return null;
+  try {
+    const { openId } = decodeJwt(cookieValue) as Record<string, unknown>;
+    return isNonEmptyString(openId) && openId.startsWith(CRON_OPEN_ID_PREFIX) ? openId : null;
+  } catch {
+    return null;
+  }
+}
+
+export function hasAuthoritativeCronTask(userInfo: Pick<GetUserInfoWithJwtResponse, "openId" | "taskUid">): boolean {
+  return userInfo.openId.startsWith(CRON_OPEN_ID_PREFIX) && isNonEmptyString(userInfo.taskUid);
+}
+
+function buildCronUser(userInfo: GetUserInfoWithJwtResponse): AuthenticatedUser {
+  const now = new Date();
+  return {
+    id: -1,
+    openId: userInfo.openId,
+    name: userInfo.name || "Manus Scheduled Task",
+    email: null,
+    loginMethod: null,
+    role: "user",
+    createdAt: now,
+    updatedAt: now,
+    lastSignedIn: now,
+    taskUid: userInfo.taskUid ?? undefined,
+    isCron: true,
+  } as AuthenticatedUser;
+}
 
 const EXCHANGE_TOKEN_PATH = `/webdev.v1.WebDevAuthPublicService/ExchangeToken`;
 const GET_USER_INFO_PATH = `/webdev.v1.WebDevAuthPublicService/GetUserInfo`;
@@ -257,13 +296,37 @@ class SDKServer {
     } as GetUserInfoWithJwtResponse;
   }
 
-  async authenticateRequest(req: Request): Promise<User> {
-    // Regular authentication flow
+  async authenticateRequest(req: Request): Promise<AuthenticatedUser> {
     const cookies = this.parseCookies(req.headers.cookie);
     const sessionCookie = cookies.get(COOKIE_NAME);
+
+    // Heartbeat uses a Manus-signed cron cookie. Never trust its decoded
+    // payload directly; exchange it with the OAuth service and require the
+    // authoritative task UID before allowing scheduled work.
+    if (getCronTokenCandidate(sessionCookie)) {
+      const userInfo = await this.getUserInfoWithJwt(sessionCookie ?? "");
+      if (!hasAuthoritativeCronTask(userInfo)) {
+        throw ForbiddenError("Cron session missing task_uid");
+      }
+      return buildCronUser(userInfo);
+    }
+
+    // Regular BFF session authentication flow
     const session = await this.verifySession(sessionCookie);
 
     if (!session) {
+      // Some platform Heartbeat deployments use an opaque session cookie that
+      // cannot be verified with the BFF's session root. Exchange it only with
+      // the OAuth service and require the authoritative cron identity plus
+      // scheduler-owned task UID before permitting scheduled work.
+      try {
+        const userInfo = await this.getUserInfoWithJwt(sessionCookie ?? "");
+        if (hasAuthoritativeCronTask(userInfo)) {
+          return buildCronUser(userInfo);
+        }
+      } catch (error) {
+        console.warn("[Auth] Platform cron token exchange failed", String(error));
+      }
       throw ForbiddenError("Invalid session cookie");
     }
 

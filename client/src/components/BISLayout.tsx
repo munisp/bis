@@ -11,7 +11,7 @@ import {
   UserCheck, BarChart3, Key, Zap, CheckCheck, ArrowRight, Sun, Moon, ClipboardList, Wallet, UserSearch, Shield, BarChart2,
   BookOpen, Link2, Brain, Gavel, ClipboardCheck, SendToBack, Smartphone, Download, Link as LinkIcon, BellRing, ShieldAlert,
   FileBarChart, TrendingUp, Landmark, Scale, Lock, Server, Workflow, Database as DbIcon, ArrowLeftRight, Coins,
-  Map
+  Map, Loader2
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -23,6 +23,7 @@ import { useAuth } from '@/_core/hooks/useAuth';
 import { useEventStream } from '@/hooks/useEventStream';
 import { GlobalSearchBar } from '@/components/GlobalSearchBar';
 import { useSessionHeartbeat } from '@/hooks/useSessionHeartbeat';
+import { toast } from 'sonner';
 
 // ─── Nav config ───────────────────────────────────────────────────────────────
 
@@ -214,6 +215,9 @@ interface Notification {
   body: string;
   time: string;
   ref?: string;
+  href?: string;
+  source?: 'alert' | 'in_app';
+  approvalId?: number;
   read: boolean;
 }
 
@@ -275,12 +279,14 @@ function NotificationPanel({
   notifications,
   onMarkRead,
   onMarkAllRead,
+  onForceCreditDecision,
   onClose,
   onNavigate,
 }: {
   notifications: Notification[];
   onMarkRead: (id: string) => void;
   onMarkAllRead: () => void;
+  onForceCreditDecision: (approvalId: number, decision: 'approve' | 'reject') => void;
   onClose: () => void;
   onNavigate: (href: string) => void;
 }) {
@@ -350,13 +356,19 @@ function NotificationPanel({
                     <p className="text-xs font-mono font-semibold text-foreground leading-tight">{notif.title}</p>
                     <p className="text-[11px] text-muted-foreground mt-0.5 leading-snug line-clamp-2">{notif.body}</p>
                     <div className="flex items-center gap-2 mt-1.5">
-                      {notif.ref && (
+                      {(notif.ref || notif.href) && (
                         <button
-                          onClick={() => { onNavigate('/investigations'); onClose(); }}
+                          onClick={() => { onNavigate(notif.href ?? '/investigations'); onClose(); }}
                           className="flex items-center gap-1 text-[10px] font-mono text-primary hover:text-primary/80 transition-colors"
                         >
-                          <ArrowRight size={9} /> View {notif.ref}
+                          <ArrowRight size={9} /> {notif.href ? 'Review approval' : `View ${notif.ref}`}
                         </button>
+                      )}
+                      {!notif.read && notif.approvalId && (
+                        <>
+                          <button onClick={() => onForceCreditDecision(notif.approvalId!, 'approve')} className="text-[10px] font-mono text-emerald-500 hover:text-emerald-400 transition-colors">Approve</button>
+                          <button onClick={() => onForceCreditDecision(notif.approvalId!, 'reject')} className="text-[10px] font-mono text-red-500 hover:text-red-400 transition-colors">Reject</button>
+                        </>
                       )}
                       {!notif.read && (
                         <button
@@ -388,6 +400,26 @@ function NotificationPanel({
   );
 }
 
+function ForceCreditDecisionPrompt({ decision, onClose, onSubmit, isPending }: { decision: { approvalId: number; decision: 'approve' | 'reject' }; onClose: () => void; onSubmit: (note: string, totpCode: string) => void; isPending: boolean }) {
+  const [note, setNote] = useState("");
+  const [totpCode, setTotpCode] = useState("");
+  const approving = decision.decision === 'approve';
+  const valid = note.trim().length >= 10 && (!approving || /^\d{6}$/.test(totpCode));
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-label={approving ? "Approve Force Credit" : "Reject Force Credit"}>
+      <div className="w-full max-w-md rounded-xl border bg-popover shadow-2xl">
+        <div className="flex items-center justify-between border-b px-4 py-3"><div><h3 className="text-sm font-semibold">{approving ? 'Authorize Force Credit' : 'Reject Force Credit'}</h3><p className="text-xs text-muted-foreground">Approval request #{decision.approvalId}</p></div><Button variant="ghost" size="icon" onClick={onClose} disabled={isPending}><X size={15} /></Button></div>
+        <div className="space-y-3 p-4">
+          <label className="block text-xs font-medium">{approving ? 'Authorization note' : 'Rejection note'}<textarea value={note} onChange={(event) => setNote(event.target.value)} className="mt-1 min-h-20 w-full rounded-md border bg-background p-2 text-sm" placeholder="State the basis for this decision (minimum 10 characters)" /></label>
+          {approving && <label className="block text-xs font-medium">Authenticator code<input value={totpCode} onChange={(event) => setTotpCode(event.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" autoComplete="one-time-code" className="mt-1 w-full rounded-md border bg-background p-2 font-mono tracking-[0.35em] text-sm" placeholder="000000" /></label>}
+          {approving && <p className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-300">A fresh six-digit code from your verified authenticator app is required. The server validates it before recording any ledger credit.</p>}
+        </div>
+        <div className="flex justify-end gap-2 border-t p-4"><Button variant="outline" onClick={onClose} disabled={isPending}>Cancel</Button><Button variant={approving ? 'default' : 'destructive'} disabled={!valid || isPending} onClick={() => onSubmit(note.trim(), totpCode)}>{isPending ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null}{approving ? 'Approve with MFA' : 'Reject request'}</Button></div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Layout ──────────────────────────────────────────────────────────────
 
 interface BISLayoutProps {
@@ -403,6 +435,7 @@ export default function BISLayout({ children, title, subtitle, actions }: BISLay
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [bellOpen, setBellOpen] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [forceCreditDecision, setForceCreditDecision] = useState<{ approvalId: number; decision: 'approve' | 'reject' } | null>(null);
   const { theme, toggleTheme } = useTheme();
   const { user, isAuthenticated } = useAuth();
   // Keep session alive while the user is actively using the app
@@ -425,25 +458,51 @@ export default function BISLayout({ children, title, subtitle, actions }: BISLay
     { refetchInterval: 30_000, staleTime: 15_000 }
   );
   const { data: notifUnreadData } = trpc.notifications.unreadCount.useQuery(undefined, {
-    refetchInterval: 60_000,
-    staleTime: 30_000,
+    refetchInterval: 5_000,
+    staleTime: 0,
   });
+  const { data: persistedNotificationsData } = trpc.notifications.list.useQuery(
+    { unreadOnly: false, limit: 20, offset: 0 },
+    { refetchInterval: 5_000, staleTime: 0 }
+  );
 
-  // Sync live alerts into notification state
+  // ── Live unreconciled count for Reconciliation badge ─────────────────────
+  const { data: reconData } = trpc.admin.reconciliation.listUnreconciled.useQuery(
+    { limit: 1 },
+    { refetchInterval: 30_000, staleTime: 15_000 }
+  );
+
+  // Merge live alerts with persisted user-scoped notifications. The persisted
+  // branch is how designated approvers receive Force Credit requests.
   useEffect(() => {
-    if (!alertsData) return;
-    setNotifications(
-      alertsData.map((a: any) => ({
+    const alertNotifications: Notification[] = (alertsData ?? []).map((a: any) => ({
         id: String(a.id),
         severity: alertSeverityToNotif(a.severity),
         title: a.title,
         body: a.body ?? '',
         time: new Date(a.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         ref: a.investigationRef ?? undefined,
+        source: 'alert',
         read: !!a.acknowledged,
-      }))
-    );
-  }, [alertsData]);
+      }));
+    const inAppNotifications: Notification[] = (persistedNotificationsData?.notifications ?? []).map((notification: any) => {
+      const approvalId = notification.type === 'force_credit_approval_requested'
+        ? Number(new URL(notification.link ?? '', window.location.origin).searchParams.get('approvalId'))
+        : NaN;
+      return {
+        id: `in-app-${notification.id}`,
+        severity: notification.type === 'force_credit_approval_requested' ? 'high' : 'low',
+        title: notification.title,
+        body: notification.body ?? '',
+        time: new Date(notification.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        href: notification.link ?? undefined,
+        source: 'in_app',
+        approvalId: Number.isInteger(approvalId) && approvalId > 0 ? approvalId : undefined,
+        read: !!notification.read,
+      };
+    });
+    setNotifications([...inAppNotifications, ...alertNotifications]);
+  }, [alertsData, persistedNotificationsData]);
 
   // ── SSE event stream — instant invalidation on new alerts ─────────────────
   const utils = trpc.useUtils();
@@ -473,6 +532,22 @@ export default function BISLayout({ children, title, subtitle, actions }: BISLay
       }
     },
   });
+
+  // User-scoped PostgreSQL LISTEN/NOTIFY stream. The database remains the source
+  // of truth; this event only invalidates cached dropdown data immediately.
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const stream = new EventSource("/api/notifications/stream");
+    const refreshNotifications = () => {
+      utils.notifications.list.invalidate();
+      utils.notifications.unreadCount.invalidate();
+    };
+    stream.addEventListener("notification", refreshNotifications);
+    return () => {
+      stream.removeEventListener("notification", refreshNotifications);
+      stream.close();
+    };
+  }, [isAuthenticated, utils]);
 
   // ── Web Push: register SW + request permission + register token ────────────
   const registerTokenMutation = trpc.push.registerToken.useMutation();
@@ -529,17 +604,59 @@ export default function BISLayout({ children, title, subtitle, actions }: BISLay
   const markReadMutation = trpc.alerts.acknowledge.useMutation({
     onSuccess: () => utils.alerts.list.invalidate(),
   });
+  const markInAppReadMutation = trpc.notifications.markRead.useMutation({
+    onSuccess: () => {
+      utils.notifications.list.invalidate();
+      utils.notifications.unreadCount.invalidate();
+    },
+  });
+  const markAllInAppReadMutation = trpc.notifications.markAllRead.useMutation({
+    onSuccess: () => {
+      utils.notifications.list.invalidate();
+      utils.notifications.unreadCount.invalidate();
+    },
+  });
+  const dismissApprovalNotification = (approvalId: number) => {
+    const notification = notifications.find((item) => item.approvalId === approvalId && !item.read);
+    if (notification) markRead(notification.id);
+  };
+  const approveForceCreditMutation = trpc.admin.reconciliation.approveForceCredit.useMutation({
+    onSuccess: (result) => {
+      toast.success(`Force Credit approved and recorded as ${result.transferId}`);
+      if (forceCreditDecision) dismissApprovalNotification(forceCreditDecision.approvalId);
+      setForceCreditDecision(null);
+      utils.admin.reconciliation.listForceCreditApprovals.invalidate();
+      utils.notifications.list.invalidate();
+      utils.notifications.unreadCount.invalidate();
+    },
+    onError: (error) => toast.error(error.message || "Force Credit approval failed"),
+  });
+  const rejectForceCreditMutation = trpc.admin.reconciliation.rejectForceCredit.useMutation({
+    onSuccess: () => {
+      toast.success("Force Credit request rejected");
+      if (forceCreditDecision) dismissApprovalNotification(forceCreditDecision.approvalId);
+      setForceCreditDecision(null);
+      utils.admin.reconciliation.listForceCreditApprovals.invalidate();
+      utils.notifications.list.invalidate();
+      utils.notifications.unreadCount.invalidate();
+    },
+    onError: (error) => toast.error(error.message || "Force Credit rejection failed"),
+  });
 
   const markRead = (id: string) => {
     setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
-    markReadMutation.mutate({ id: parseInt(id, 10) });
+    if (id.startsWith('in-app-')) {
+      markInAppReadMutation.mutate({ id: parseInt(id.replace('in-app-', ''), 10) });
+    } else {
+      markReadMutation.mutate({ id: parseInt(id, 10) });
+    }
   };
 
   const markAllRead = () => {
     setNotifications(prev => prev.map(n => ({ ...n, read: true })));
-    notifications
-      .filter(n => !n.read)
+    notifications.filter(n => !n.read && n.source === 'alert')
       .forEach(n => markReadMutation.mutate({ id: parseInt(n.id, 10) }));
+    if (notifications.some(n => !n.read && n.source === 'in_app')) markAllInAppReadMutation.mutate();
   };
 
   // ── Build nav groups with live badges (filter admin-only items) ────────────
@@ -567,6 +684,9 @@ export default function BISLayout({ children, title, subtitle, actions }: BISLay
       }
       if (item.href === '/notifications' && notifUnreadData?.count) {
         return { ...item, badge: notifUnreadData.count };
+      }
+      if (item.href === '/payment-rails/reconciliation' && reconData?.stats?.total) {
+        return { ...item, badge: reconData.stats.total, badgeVariant: 'destructive' as const };
       }
       return item;
     }),
@@ -726,8 +846,23 @@ export default function BISLayout({ children, title, subtitle, actions }: BISLay
           notifications={notifications}
           onMarkRead={markRead}
           onMarkAllRead={markAllRead}
+          onForceCreditDecision={(approvalId, decision) => setForceCreditDecision({ approvalId, decision })}
           onClose={() => setBellOpen(false)}
           onNavigate={navigate}
+        />
+      )}
+      {forceCreditDecision && (
+        <ForceCreditDecisionPrompt
+          decision={forceCreditDecision}
+          onClose={() => setForceCreditDecision(null)}
+          onSubmit={(note, totpCode) => {
+            if (forceCreditDecision.decision === 'approve') {
+              approveForceCreditMutation.mutate({ approvalId: forceCreditDecision.approvalId, approvalNote: note, totpCode });
+            } else {
+              rejectForceCreditMutation.mutate({ approvalId: forceCreditDecision.approvalId, rejectionNote: note });
+            }
+          }}
+          isPending={approveForceCreditMutation.isPending || rejectForceCreditMutation.isPending}
         />
       )}
     </div>
