@@ -3586,6 +3586,7 @@
 ## GitHub CI Permission Recovery (Aug 15 2026)
 - [ ] Grant the GitHub App or token permission to create and update Actions workflow files
 - [ ] Publish the PostgreSQL-backed CI workflow and verify required PR checks
+- [ ] Publish CodeQL static analysis for JavaScript/TypeScript, Python, Go, and Rust
 - [ ] Merge only validated Dependabot pull requests after required checks pass
 - [x] Verify GitHub main and remaining pull-request state (47 open Dependabot PRs; 0 report checks)
 
