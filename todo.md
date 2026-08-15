@@ -3593,4 +3593,4 @@
 - [x] Derive a purpose-separated session-signing root from the platform Forge credential when no dedicated secret is supplied
 - [ ] Remove unsafe production fallback secrets and localhost-only service defaults
 - [x] Validate a successful production build and deployment startup
-- [ ] Synchronize the recovery changes to GitHub main
+- [x] Synchronize the recovery changes to GitHub main
