@@ -3563,7 +3563,8 @@
 
 ## Reconciliation Controls v9 (Aug 14 2026)
 - [x] Add a designated-approver TOTP enrollment wizard with QR setup and verification
-- [ ] Deploy the expiry callback and provision its project Heartbeat job for automatic 24-hour Force Credit expiry
+- [x] Deploy the expiry callback and provision the enabled project Heartbeat job (2urXuYAg4pSm9vT4XBS7cp) for automatic 24-hour Force Credit expiry
+- [ ] Verify the first authenticated production execution of the Force Credit expiry Heartbeat
 - [x] Add a security audit view for failed Force Credit MFA authorization attempts
 - [x] Validate, checkpoint, and push all code to GitHub main (commits 967bbcd and a7c02b0)
 
@@ -3580,17 +3581,17 @@
 - [x] Restore GitHub Actions CI workflow files or document the missing-workflow permission blocker (GitHub rejected the valid workflow because the current GitHub App lacks `workflows` permission)
 - [x] Synchronize all completed workspace changes to GitHub main (commit 986ad64)
 - [ ] Merge only pull requests with compatible, validated changes
-- [ ] Verify final main branch and document any unmergeable external blockers
+- [x] Verify GitHub main at a50623d and document external blockers: CI workflow absent and 47 Dependabot PRs have no reported checks
 
 ## GitHub CI Permission Recovery (Aug 15 2026)
 - [ ] Grant the GitHub App or token permission to create and update Actions workflow files
 - [ ] Publish the PostgreSQL-backed CI workflow and verify required PR checks
 - [ ] Merge only validated Dependabot pull requests after required checks pass
-- [ ] Verify the final main branch and remaining PR state
+- [x] Verify GitHub main and remaining pull-request state (47 open Dependabot PRs; 0 report checks)
 
 ## Production Deployment Recovery (Aug 15 2026)
 - [x] Recover production session signing with a strong purpose-separated root and validate startup secret requirements
 - [x] Derive a purpose-separated session-signing root from the platform Forge credential when no dedicated secret is supplied
 - [ ] Remove unsafe production fallback secrets and localhost-only service defaults
 - [x] Validate a successful production build and deployment startup
-- [x] Synchronize the recovery changes to GitHub main
+- [ ] Synchronize the recovery changes to GitHub main
