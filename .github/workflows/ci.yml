@@ -41,7 +41,7 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Apply PostgreSQL migrations
         run: |
-          for migration in $(find drizzle -maxdepth 1 -name '*.sql' -print | sort); do
+          for migration in $(find drizzle -maxdepth 1 -type f -name '[0-9][0-9][0-9][0-9]_*.sql' ! -name '*.rollback.sql' -print | sort); do
             psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$migration"
           done
       - name: Type-check
