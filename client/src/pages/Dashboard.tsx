@@ -171,6 +171,9 @@ export default function Dashboard() {
   const utils = trpc.useUtils();
   const { data: stats, isLoading: statsLoading } = trpc.dashboard.stats.useQuery();
   const { data: recentInvData } = trpc.investigations.list.useQuery({ limit: 6, offset: 0 });
+  const { data: reconHealth } = trpc.admin.reconciliation.failureRateChart.useQuery(undefined, {
+    refetchInterval: 60_000, staleTime: 30_000,
+  });
   const { data: alertsData } = trpc.alerts.list.useQuery({ limit: 4 });
   const { data: dataSourcesData } = trpc.dataSources.list.useQuery();
   const { data: recentTriggersData } = trpc.alertRules.recentTriggers.useQuery();
@@ -307,6 +310,48 @@ export default function Dashboard() {
         <StatCard label="Avg Process" value={`${stats?.avgProcessingTimeMin ?? 0}m`} sub="per investigation" icon={<Clock size={14} />} color="blue" />
         <StatCard label="Unread Alerts" value={stats?.alertsToday ?? 0} icon={<AlertTriangle size={14} />} color="red" />
       </div>
+
+      {/* ── Reconciliation Health Gauge ── */}
+      {reconHealth?.days && reconHealth.days.length > 0 && (() => {
+        const last24h = reconHealth.days.slice(-1)[0];
+        const total = last24h?.total ?? 0;
+        const succeeded = last24h?.succeeded ?? 0;
+        const rate = total > 0 ? Math.round((succeeded / total) * 100) : 100;
+        const color = rate >= 90 ? "text-green-600" : rate >= 70 ? "text-amber-600" : "text-red-600";
+        const bgColor = rate >= 90 ? "bg-green-50 border-green-200" : rate >= 70 ? "bg-amber-50 border-amber-200" : "bg-red-50 border-red-200";
+        const strokeColor = rate >= 90 ? "#22c55e" : rate >= 70 ? "#f59e0b" : "#ef4444";
+        return (
+          <>
+            {rate < 90 && (
+              <div role="alert" className="mb-4 flex items-start gap-3 rounded-lg border-2 border-amber-400 bg-amber-50 p-4 text-amber-950 shadow-sm">
+                <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-700" />
+                <div>
+                  <p className="font-semibold">Reconciliation health requires attention</p>
+                  <p className="mt-0.5 text-sm">The 24-hour ledger credit success rate is {rate}%, below the 90% operating threshold. Review pending and dead-lettered payments before they affect customer balances.</p>
+                </div>
+              </div>
+            )}
+            <div className={`rounded-lg border p-4 mb-4 flex items-center gap-4 ${bgColor}`}>
+              <div className="relative w-16 h-16">
+                <svg viewBox="0 0 36 36" className="w-16 h-16 -rotate-90">
+                  <circle cx="18" cy="18" r="15.5" fill="none" stroke="#e5e7eb" strokeWidth="3" />
+                  <circle cx="18" cy="18" r="15.5" fill="none" stroke={strokeColor} strokeWidth="3"
+                    strokeDasharray={`${rate * 0.975} 100`} strokeLinecap="round" />
+                </svg>
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <span className={`text-sm font-bold ${color}`}>{rate}%</span>
+                </div>
+              </div>
+              <div>
+                <p className="text-sm font-semibold">Reconciliation Health</p>
+                <p className="text-xs text-muted-foreground">
+                  24h success rate: {succeeded}/{total} payments credited to TigerBeetle
+                </p>
+              </div>
+            </div>
+          </>
+        );
+      })()}
 
       {/* ── Main Grid ── */}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 mb-4">

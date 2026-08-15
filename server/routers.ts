@@ -1,6 +1,8 @@
 import { COOKIE_NAME } from "@shared/const";
 import { withCache, invalidateCache, TTL } from "./cache";
 import { withCircuitBreaker } from "./circuitBreaker";
+import { getForceCreditDualApprovalThresholdKobo, requiresForceCreditDualApproval } from "./forceCreditPolicy";
+import { getForceCreditApprovalExpiry } from "./forceCreditExpiryPolicy";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { billingRouter } from "./billing";
 import { tenantsRouter } from "./tenants";
@@ -27,7 +29,7 @@ import { socialMonitoringRouter } from "./socialMonitoring";
 import { biometricRouter } from "./biometric";
 import { lakehouseRouter } from "./lakehouse";
 import { lexRouter } from "./lex";
-import { sessionsRouter, totpRouter, notificationsRouter, investigationLinksRouter, exportSchedulesRouter } from "./platform";
+import { sessionsRouter, totpRouter, notificationsRouter, investigationLinksRouter, exportSchedulesRouter, decryptTotpSecret, validateTotp } from "./platform";
 import { archivalRouter } from "./archival";
 import { paymentRailsRouter } from "./paymentRails";
 import { documentVaultRouter } from "./documentVault";
@@ -110,6 +112,9 @@ import {
   criminalRecordAttachments,
   criminalRecordAudit,
   collectionSites,
+  billingTopups,
+  forceCreditApprovals,
+  forceCreditApprovers,
 } from "../drizzle/schema";
 import {
   getDashboardStats,
@@ -118,7 +123,7 @@ import {
   getMonitors, createMonitor, updateMonitor,
   getScreeningRequests, createScreeningRequest, updateScreeningRequest,
 } from "./db";
-import { eq, desc, asc, and, ilike, gte, lte, lt, sql, count, inArray, isNotNull } from "drizzle-orm";
+import { eq, desc, asc, and, or, ilike, like, gte, lte, lt, sql, count, inArray, isNotNull, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { ENV } from "./_core/env";
 import { analyticsRouter } from "./orm/analyticsRouter"; // analytics.getDashboardStats is separate from db.getDashboardStats
@@ -6869,8 +6874,656 @@ const collectionSitesRouter = router({
     }),
 });
 
+async function getConfiguredForceCreditThresholdKobo(db: NonNullable<Awaited<ReturnType<typeof getDb>>>): Promise<number> {
+  const [setting] = await db.select({ value: platformSettings.value })
+    .from(platformSettings)
+    .where(and(
+      eq(platformSettings.namespace, "reconciliation"),
+      eq(platformSettings.key, "force_credit_dual_approval_threshold_kobo"),
+    ))
+    .limit(1);
+  const stored = setting?.value;
+  const candidate = typeof stored === "number"
+    ? stored
+    : typeof stored === "object" && stored !== null && "thresholdKobo" in stored
+      ? Number((stored as { thresholdKobo?: unknown }).thresholdKobo)
+      : NaN;
+  return Number.isSafeInteger(candidate) && candidate > 0
+    ? candidate
+    : getForceCreditDualApprovalThresholdKobo();
+}
+
+async function assertDesignatedForceCreditApprover(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, userId: number): Promise<void> {
+  const [assignment] = await db.select({ active: forceCreditApprovers.active })
+    .from(forceCreditApprovers)
+    .where(and(eq(forceCreditApprovers.userId, userId), eq(forceCreditApprovers.active, true)))
+    .limit(1);
+  if (!assignment) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Only a designated Force Credit approver may authorize high-value recoveries" });
+  }
+}
+
+async function assertForceCreditStepUpMfa(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, userId: number, totpCode: string): Promise<void> {
+  const [record] = await db.select({ secret: userTotpSecrets.secret, verified: userTotpSecrets.verified })
+    .from(userTotpSecrets)
+    .where(eq(userTotpSecrets.userId, userId))
+    .limit(1);
+  if (!record?.verified) {
+    throw new TRPCError({ code: "PRECONDITION_FAILED", message: "A verified authenticator app is required before authorizing a high-value Force Credit" });
+  }
+  if (!validateTotp(decryptTotpSecret(record.secret), totpCode)) {
+    throw new TRPCError({ code: "UNAUTHORIZED", message: "The authenticator code is invalid or expired" });
+  }
+}
+
 export const appRouter = router({
   system: systemRouter,
+  admin: router({
+    reconciliation: router({
+      /**
+       * List billing top-ups where TigerBeetle recording failed (tbTransferId is null or starts with 'fallback-').
+       */
+      listUnreconciled: adminProcedure
+        .input(z.object({ limit: z.number().min(1).max(200).default(50) }))
+        .query(async ({ input }) => {
+          const db = await getDb();
+          if (!db) return { items: [], stats: { total: 0, totalAmountNGN: 0, oldestAge: "—" } };
+          const rows = await db.select().from(billingTopups)
+            .where(
+              or(
+                isNull(billingTopups.tbTransferId),
+                like(billingTopups.tbTransferId, "fallback-%")
+              )
+            )
+            .orderBy(desc(billingTopups.verifiedAt))
+            .limit(input.limit);
+          const totalAmountKobo = rows.reduce((sum, r) => sum + r.amountKobo, 0);
+          const oldest = rows.length > 0 ? rows[rows.length - 1].verifiedAt : null;
+          const oldestAge = oldest
+            ? `${Math.round((Date.now() - new Date(oldest).getTime()) / (1000 * 60 * 60))}h ago`
+            : "—";
+          return {
+            items: rows,
+            stats: { total: rows.length, totalAmountNGN: totalAmountKobo / 100, oldestAge },
+          };
+        }),
+      /**
+       * Retry crediting a tenant's TigerBeetle account for a previously failed top-up.
+       */
+      retryCredit: adminProcedure
+        .input(z.object({
+          reference: z.string().min(1),
+          tenantId: z.string().min(1),
+          amountKobo: z.number().int().positive(),
+        }))
+        .mutation(async ({ input }) => {
+          const { creditTenantAccount } = await import("./billing");
+          const result = await creditTenantAccount({
+            tenantId: input.tenantId,
+            amountKobo: input.amountKobo,
+            reference: input.reference,
+          });
+          // Update the billing_topups record with the new transfer ID if successful
+          if (result.recorded) {
+            const db = await getDb();
+            if (db) {
+              await db.update(billingTopups)
+                .set({ tbTransferId: result.transferId })
+                .where(eq(billingTopups.reference, input.reference));
+            }
+          }
+          return result;
+        }),
+      /**
+       * List dead-lettered items (exceeded max retries).
+       */
+      listDeadLetters: adminProcedure
+        .input(z.object({ limit: z.number().min(1).max(200).default(50) }))
+        .query(async ({ input }) => {
+          const db = await getDb();
+          if (!db) return { items: [] };
+          const rows = await db.execute(sql`
+            SELECT * FROM webhook_retry_queue
+            WHERE "status" = 'dead_letter'
+            ORDER BY "createdAt" DESC
+            LIMIT ${input.limit}
+          `);
+          return { items: (rows as any).rows ?? rows ?? [] };
+        }),
+      /**
+       * Add a manual resolution note to a dead-lettered item.
+       */
+      addResolutionNote: adminProcedure
+        .input(z.object({
+          reference: z.string().min(1),
+          note: z.string().min(1).max(1000),
+        }))
+        .mutation(async ({ input, ctx }) => {
+          const db = await getDb();
+          if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+          const noteEntry = `[${new Date().toISOString()}] ${ctx.user?.name ?? "admin"}: ${input.note}`;
+          await db.execute(sql`
+            UPDATE webhook_retry_queue
+            SET "lastError" = COALESCE("lastError", '') || ${'\n' + noteEntry},
+                "status" = 'resolved'
+            WHERE "reference" = ${input.reference}
+          `);
+          return { success: true };
+        }),
+      /**
+       * Force Credit — administrator-authorized, ledger-backed recovery for a dead-lettered credit.
+       * This never creates a PostgreSQL-only balance. TigerBeetle must record the transfer before
+       * the recovery is marked resolved, and a mandatory audit note is retained for compliance.
+       */
+      forceCredit: adminProcedure
+        .input(z.object({
+          reference: z.string().min(1),
+          tenantId: z.string().min(1),
+          amountKobo: z.number().int().positive(),
+          auditNote: z.string().min(10, "Audit note must be at least 10 characters"),
+        }))
+        .mutation(async ({ input, ctx }) => {
+          const db = await getDb();
+          if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+          const dualApprovalThresholdKobo = await getConfiguredForceCreditThresholdKobo(db);
+          if (requiresForceCreditDualApproval(input.amountKobo, dualApprovalThresholdKobo)) {
+            throw new TRPCError({
+              code: "PRECONDITION_FAILED",
+              message: `Dual approval is required for Force Credit requests of ₦${(dualApprovalThresholdKobo / 100).toLocaleString()} or more`,
+            });
+          }
+          const operator = ctx.user?.name ?? ctx.user?.openId ?? "unknown";
+          const auditEntry = `[FORCE_CREDIT ${new Date().toISOString()}] by ${operator}: ${input.auditNote}`;
+
+          const [topup] = await db.select().from(billingTopups)
+            .where(and(
+              eq(billingTopups.reference, input.reference),
+              eq(billingTopups.tenantId, input.tenantId),
+              eq(billingTopups.amountKobo, input.amountKobo),
+            ))
+            .limit(1);
+          if (!topup) {
+            throw new TRPCError({ code: "NOT_FOUND", message: "Matching verified top-up was not found" });
+          }
+          if (topup.tbTransferId && !topup.tbTransferId.startsWith("fallback-")) {
+            throw new TRPCError({ code: "CONFLICT", message: "Top-up is already recorded in the ledger" });
+          }
+
+          // The authoritative double-entry ledger must record the transfer. Fail closed if it cannot.
+          const { creditTenantAccount } = await import("./billing");
+          const result = await creditTenantAccount({
+            tenantId: input.tenantId,
+            amountKobo: input.amountKobo,
+            reference: input.reference,
+          });
+          if (!result.recorded) {
+            throw new TRPCError({
+              code: "SERVICE_UNAVAILABLE",
+              message: "TigerBeetle did not record the credit; no manual balance change was made",
+            });
+          }
+
+          // Mark the verified ledger-backed recovery as resolved and retain the audit note.
+          await db.update(billingTopups)
+            .set({ tbTransferId: result.transferId })
+            .where(eq(billingTopups.reference, input.reference));
+          await db.execute(sql`
+            UPDATE webhook_retry_queue
+            SET "status" = 'resolved',
+                "lastError" = COALESCE("lastError", '') || ${'\n' + auditEntry}
+            WHERE "reference" = ${input.reference}
+          `);
+          // Write an immutable compliance audit event using the actual event_log schema.
+          await db.execute(sql`
+            INSERT INTO event_log ("eventType", "aggregateId", "actorId", "payload", "source", "createdAt")
+            VALUES ('force_credit', ${input.reference}, ${ctx.user?.id ?? null}, CAST(${JSON.stringify({
+              tenantId: input.tenantId,
+              amountKobo: input.amountKobo,
+              operator,
+              auditNote: input.auditNote,
+              tigerBeetleTransferId: result.transferId,
+            })} AS json), 'admin_reconciliation', NOW())
+          `);
+          return { success: true, transferId: result.transferId, operator };
+        }),
+      /** Return the dual-control policy used by the reconciliation UI. */
+      forceCreditPolicy: adminProcedure.query(async () => {
+        const db = await getDb();
+        const thresholdKobo = db
+          ? await getConfiguredForceCreditThresholdKobo(db)
+          : getForceCreditDualApprovalThresholdKobo();
+        return {
+          thresholdKobo,
+          thresholdNGN: thresholdKobo / 100,
+          requiresDifferentApprover: true,
+        };
+      }),
+      /** Update the server-enforced high-value recovery threshold with an immutable audit record. */
+      updateForceCreditPolicy: adminProcedure
+        .input(z.object({ thresholdKobo: z.number().int().min(10_000, "Threshold must be at least ₦100") }))
+        .mutation(async ({ input, ctx }) => {
+          const db = await getDb();
+          if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+          const previousThresholdKobo = await getConfiguredForceCreditThresholdKobo(db);
+          const updatedBy = ctx.user?.email ?? ctx.user?.name ?? String(ctx.user?.id ?? "unknown");
+          await db.execute(sql`
+            INSERT INTO platform_settings ("namespace", "key", "value", "updatedAt", "updatedBy")
+            VALUES ('reconciliation', 'force_credit_dual_approval_threshold_kobo', CAST(${JSON.stringify({ thresholdKobo: input.thresholdKobo })} AS json), NOW(), ${updatedBy})
+            ON CONFLICT ("namespace", "key")
+            DO UPDATE SET "value" = EXCLUDED."value", "updatedAt" = NOW(), "updatedBy" = EXCLUDED."updatedBy"
+          `);
+          await db.execute(sql`
+            INSERT INTO event_log ("eventType", "aggregateId", "actorId", "payload", "source", "createdAt")
+            VALUES ('force_credit_threshold_updated', 'force_credit_policy', ${ctx.user!.id}, CAST(${JSON.stringify({
+              previousThresholdKobo,
+              thresholdKobo: input.thresholdKobo,
+              updatedBy,
+            })} AS json), 'admin_reconciliation', NOW())
+          `);
+          return { success: true, thresholdKobo: input.thresholdKobo, previousThresholdKobo };
+        }),
+      /** List immutable threshold change events for audit review and controlled rollback. */
+      forceCreditPolicyHistory: adminProcedure
+        .input(z.object({ limit: z.number().min(1).max(100).default(25) }))
+        .query(async ({ input }) => {
+          const db = await getDb();
+          if (!db) return { history: [] };
+          const rows = await db.execute(sql`
+            SELECT e."id", e."eventType", e."actorId", e."payload", e."createdAt", u."name" AS "actorName", u."email" AS "actorEmail"
+            FROM event_log e
+            LEFT JOIN users u ON u."id" = e."actorId"
+            WHERE e."aggregateId" = 'force_credit_policy'
+              AND e."eventType" IN ('force_credit_threshold_updated', 'force_credit_threshold_reverted')
+            ORDER BY e."createdAt" DESC
+            LIMIT ${input.limit}
+          `);
+          return { history: (rows as any).rows ?? rows ?? [] };
+        }),
+      /** Restore a prior threshold value while preserving a separate immutable rollback event. */
+      rollbackForceCreditPolicy: adminProcedure
+        .input(z.object({ historyEventId: z.number().int().positive() }))
+        .mutation(async ({ input, ctx }) => {
+          const db = await getDb();
+          if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+          const rows = await db.execute(sql`
+            SELECT "payload" FROM event_log
+            WHERE "id" = ${input.historyEventId} AND "aggregateId" = 'force_credit_policy'
+              AND "eventType" IN ('force_credit_threshold_updated', 'force_credit_threshold_reverted')
+            LIMIT 1
+          `);
+          const event = ((rows as any).rows ?? rows ?? [])[0];
+          if (!event) throw new TRPCError({ code: "NOT_FOUND", message: "Threshold history event not found" });
+          const payload = typeof event.payload === "string" ? JSON.parse(event.payload) : event.payload;
+          const restoredThresholdKobo = Number(payload?.thresholdKobo);
+          if (!Number.isSafeInteger(restoredThresholdKobo) || restoredThresholdKobo < 10_000) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: "History event does not contain a valid threshold" });
+          }
+          const previousThresholdKobo = await getConfiguredForceCreditThresholdKobo(db);
+          const updatedBy = ctx.user?.email ?? ctx.user?.name ?? String(ctx.user?.id ?? "unknown");
+          await db.execute(sql`
+            INSERT INTO platform_settings ("namespace", "key", "value", "updatedAt", "updatedBy")
+            VALUES ('reconciliation', 'force_credit_dual_approval_threshold_kobo', CAST(${JSON.stringify({ thresholdKobo: restoredThresholdKobo })} AS json), NOW(), ${updatedBy})
+            ON CONFLICT ("namespace", "key")
+            DO UPDATE SET "value" = EXCLUDED."value", "updatedAt" = NOW(), "updatedBy" = EXCLUDED."updatedBy"
+          `);
+          await db.execute(sql`
+            INSERT INTO event_log ("eventType", "aggregateId", "actorId", "payload", "source", "createdAt")
+            VALUES ('force_credit_threshold_reverted', 'force_credit_policy', ${ctx.user!.id}, CAST(${JSON.stringify({
+              previousThresholdKobo,
+              thresholdKobo: restoredThresholdKobo,
+              restoredFromEventId: input.historyEventId,
+              updatedBy,
+            })} AS json), 'admin_reconciliation', NOW())
+          `);
+          return { success: true, thresholdKobo: restoredThresholdKobo, previousThresholdKobo };
+        }),
+      /** List users explicitly designated to approve high-value Force Credit recoveries. */
+      listForceCreditApprovers: adminProcedure.query(async () => {
+        const db = await getDb();
+        if (!db) return { approvers: [] };
+        const rows = await db.select({
+          userId: forceCreditApprovers.userId,
+          active: forceCreditApprovers.active,
+          designatedAt: forceCreditApprovers.designatedAt,
+          revokedAt: forceCreditApprovers.revokedAt,
+          userName: users.name,
+          email: users.email,
+          role: users.role,
+        }).from(forceCreditApprovers)
+          .innerJoin(users, eq(forceCreditApprovers.userId, users.id))
+          .orderBy(desc(forceCreditApprovers.active), asc(users.name));
+        return { approvers: rows };
+      }),
+      /** List platform administrators eligible for explicit Force Credit approver designation. */
+      listForceCreditApproverCandidates: adminProcedure.query(async () => {
+        const db = await getDb();
+        if (!db) return { users: [] };
+        const rows = await db.select({ id: users.id, name: users.name, email: users.email, role: users.role })
+          .from(users)
+          .where(eq(users.role, "admin"))
+          .orderBy(asc(users.name));
+        return { users: rows };
+      }),
+      /** Designate or revoke a specific administrator as a Force Credit approver. */
+      setForceCreditApprover: adminProcedure
+        .input(z.object({ userId: z.number().int().positive(), active: z.boolean() }))
+        .mutation(async ({ input, ctx }) => {
+          const db = await getDb();
+          if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+          const [target] = await db.select({ id: users.id, role: users.role, name: users.name })
+            .from(users).where(eq(users.id, input.userId)).limit(1);
+          if (!target) throw new TRPCError({ code: "NOT_FOUND", message: "User not found" });
+          if (target.role !== "admin") throw new TRPCError({ code: "BAD_REQUEST", message: "Only administrators can be designated as Force Credit approvers" });
+          await db.execute(sql`
+            INSERT INTO force_credit_approvers ("userId", "active", "designatedBy", "designatedAt", "revokedAt", "updatedAt")
+            VALUES (${input.userId}, ${input.active}, ${ctx.user!.id}, NOW(), ${input.active ? null : new Date()}, NOW())
+            ON CONFLICT ("userId")
+            DO UPDATE SET "active" = EXCLUDED."active", "designatedBy" = EXCLUDED."designatedBy",
+              "designatedAt" = CASE WHEN EXCLUDED."active" THEN NOW() ELSE force_credit_approvers."designatedAt" END,
+              "revokedAt" = CASE WHEN EXCLUDED."active" THEN NULL ELSE NOW() END, "updatedAt" = NOW()
+          `);
+          await db.execute(sql`
+            INSERT INTO event_log ("eventType", "aggregateId", "actorId", "payload", "source", "createdAt")
+            VALUES ('force_credit_approver_designation', ${String(input.userId)}, ${ctx.user!.id}, CAST(${JSON.stringify({
+              targetUserId: input.userId,
+              targetName: target.name,
+              active: input.active,
+            })} AS json), 'admin_reconciliation', NOW())
+          `);
+          return { success: true, userId: input.userId, active: input.active };
+        }),
+      /**
+       * Request a two-person Force Credit recovery for a high-value dead-letter item.
+       * A requester cannot approve their own request, and the payment remains uncredited
+       * until the second admin records a successful TigerBeetle transfer.
+       */
+      requestForceCredit: adminProcedure
+        .input(z.object({
+          reference: z.string().min(1),
+          tenantId: z.string().min(1),
+          amountKobo: z.number().int().positive(),
+          auditNote: z.string().min(10, "Audit note must be at least 10 characters"),
+        }))
+        .mutation(async ({ input, ctx }) => {
+          const db = await getDb();
+          if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+          const thresholdKobo = await getConfiguredForceCreditThresholdKobo(db);
+          if (!requiresForceCreditDualApproval(input.amountKobo, thresholdKobo)) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: "This amount is below the dual-approval threshold; use the standard Force Credit recovery" });
+          }
+          const [topup] = await db.select().from(billingTopups)
+            .where(and(
+              eq(billingTopups.reference, input.reference),
+              eq(billingTopups.tenantId, input.tenantId),
+              eq(billingTopups.amountKobo, input.amountKobo),
+            ))
+            .limit(1);
+          if (!topup) throw new TRPCError({ code: "NOT_FOUND", message: "Matching verified top-up was not found" });
+          if (topup.tbTransferId && !topup.tbTransferId.startsWith("fallback-")) {
+            throw new TRPCError({ code: "CONFLICT", message: "Top-up is already recorded in the ledger" });
+          }
+          const existing = await db.execute(sql`
+            SELECT "id" FROM force_credit_approvals
+            WHERE "reference" = ${input.reference} AND "status" IN ('pending', 'executing')
+            LIMIT 1
+          `);
+          const existingRows = (existing as any).rows ?? existing ?? [];
+          if (existingRows.length > 0) {
+            throw new TRPCError({ code: "CONFLICT", message: "A Force Credit approval request is already pending for this payment" });
+          }
+          const designatedApprovers = await db.select({ userId: forceCreditApprovers.userId })
+            .from(forceCreditApprovers)
+            .where(and(eq(forceCreditApprovers.active, true), sql`${forceCreditApprovers.userId} <> ${ctx.user!.id}`));
+          if (designatedApprovers.length === 0) {
+            throw new TRPCError({ code: "PRECONDITION_FAILED", message: "No independent designated Force Credit approver is available" });
+          }
+          const expiresAt = getForceCreditApprovalExpiry();
+          const requested = await db.execute(sql`
+            INSERT INTO force_credit_approvals
+              ("reference", "tenantId", "amountKobo", "auditNote", "status", "requesterId", "requestedAt", "expiresAt", "updatedAt")
+            VALUES
+              (${input.reference}, ${input.tenantId}, ${input.amountKobo}, ${input.auditNote}, 'pending', ${ctx.user!.id}, NOW(), ${expiresAt}, NOW())
+            RETURNING "id", "requestedAt", "expiresAt"
+          `);
+          const request = ((requested as any).rows ?? requested ?? [])[0];
+          await db.execute(sql`
+            INSERT INTO event_log ("eventType", "aggregateId", "actorId", "payload", "source", "createdAt")
+            VALUES ('force_credit_requested', ${input.reference}, ${ctx.user!.id}, CAST(${JSON.stringify({
+              amountKobo: input.amountKobo,
+              tenantId: input.tenantId,
+              auditNote: input.auditNote,
+              thresholdKobo,
+              expiresAt,
+            })} AS json), 'admin_reconciliation', NOW())
+          `);
+          await db.insert(notifications).values(designatedApprovers.map((approver) => ({
+            userId: approver.userId,
+            type: "force_credit_approval_requested",
+            title: "High-value Force Credit approval required",
+            body: `A ₦${(input.amountKobo / 100).toLocaleString()} recovery requires your independent approval within 24 hours.`,
+            link: `/payment-rails/reconciliation?tab=approvals&approvalId=${Number(request.id)}`,
+          })));
+          return { id: Number(request.id), status: "pending" as const, thresholdKobo };
+        }),
+      /** List approval requests so a second administrator can review them. */
+      listForceCreditApprovals: adminProcedure
+        .input(z.object({ status: z.enum(["pending", "executing", "executed", "failed", "rejected", "expired"]).optional(), limit: z.number().min(1).max(200).default(100) }))
+        .query(async ({ input }) => {
+          const db = await getDb();
+          if (!db) return { approvals: [] };
+          const statusClause = input.status ? sql`AND a."status" = ${input.status}` : sql``;
+          const rows = await db.execute(sql`
+            SELECT a.*, requester."name" AS "requesterName", approver."name" AS "approverName"
+            FROM force_credit_approvals a
+            LEFT JOIN users requester ON requester."id" = a."requesterId"
+            LEFT JOIN users approver ON approver."id" = a."approverId"
+            WHERE 1 = 1 ${statusClause}
+            ORDER BY a."requestedAt" DESC
+            LIMIT ${input.limit}
+          `);
+          return { approvals: (rows as any).rows ?? rows ?? [] };
+        }),
+      /** Return the full requester, approver, ledger, and immutable event history for a recovery reference. */
+      forceCreditAuditHistory: adminProcedure
+        .input(z.object({ reference: z.string().min(1) }))
+        .query(async ({ input }) => {
+          const db = await getDb();
+          if (!db) return { approval: null, events: [] };
+          const approvalRows = await db.execute(sql`
+            SELECT a.*, requester."name" AS "requesterName", approver."name" AS "approverName"
+            FROM force_credit_approvals a
+            LEFT JOIN users requester ON requester."id" = a."requesterId"
+            LEFT JOIN users approver ON approver."id" = a."approverId"
+            WHERE a."reference" = ${input.reference}
+            ORDER BY a."requestedAt" DESC
+          `);
+          const eventRows = await db.execute(sql`
+            SELECT "eventType", "actorId", "payload", "source", "createdAt"
+            FROM event_log
+            WHERE "aggregateId" = ${input.reference} AND "eventType" LIKE 'force_credit%'
+            ORDER BY "createdAt" ASC
+          `);
+          const approvals = (approvalRows as any).rows ?? approvalRows ?? [];
+          return { approval: approvals[0] ?? null, events: (eventRows as any).rows ?? eventRows ?? [] };
+        }),
+      /** Security-only audit feed. Failed OTP values are never persisted. */
+      listForceCreditMfaFailures: adminProcedure
+        .input(z.object({ limit: z.number().min(1).max(200).default(100) }))
+        .query(async ({ input }) => {
+          const db = await getDb();
+          if (!db) return { failures: [] };
+          const rows = await db.execute(sql`
+            SELECT e."id", e."aggregateId", e."actorId", e."payload", e."source", e."createdAt", u."name" AS "actorName", u."email" AS "actorEmail"
+            FROM event_log e
+            LEFT JOIN users u ON u."id" = e."actorId"
+            WHERE e."eventType" = 'force_credit_mfa_failed'
+            ORDER BY e."createdAt" DESC
+            LIMIT ${input.limit}
+          `);
+          return { failures: (rows as any).rows ?? rows ?? [] };
+        }),
+      /**
+       * Atomically claim, approve, and execute a high-value Force Credit request.
+       * The SQL claim prevents concurrent double execution and rejects self-approval.
+       */
+      approveForceCredit: adminProcedure
+        .input(z.object({ approvalId: z.number().int().positive(), approvalNote: z.string().min(10, "Approval note must be at least 10 characters"), totpCode: z.string().length(6).regex(/^\d{6}$/) }))
+        .mutation(async ({ input, ctx }) => {
+          const db = await getDb();
+          if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+          await assertDesignatedForceCreditApprover(db, ctx.user!.id);
+          const [mfaApproval] = await db.select({ reference: forceCreditApprovals.reference })
+            .from(forceCreditApprovals)
+            .where(eq(forceCreditApprovals.id, input.approvalId))
+            .limit(1);
+          try {
+            await assertForceCreditStepUpMfa(db, ctx.user!.id, input.totpCode);
+          } catch (error) {
+            await db.execute(sql`
+              INSERT INTO event_log ("eventType", "aggregateId", "actorId", "payload", "source", "createdAt")
+              VALUES ('force_credit_mfa_failed', ${mfaApproval?.reference ?? `approval:${input.approvalId}`}, ${ctx.user!.id}, CAST(${JSON.stringify({
+                approvalId: input.approvalId,
+                reason: error instanceof Error ? error.message : "MFA step-up failed",
+                mfaMethod: "totp",
+              })} AS json), 'admin_reconciliation', NOW())
+            `);
+            throw error;
+          }
+          const claim = await db.execute(sql`
+            UPDATE force_credit_approvals
+            SET "status" = 'executing', "approverId" = ${ctx.user!.id}, "approvalNote" = ${input.approvalNote},
+                "approvedAt" = NOW(), "updatedAt" = NOW()
+            WHERE "id" = ${input.approvalId} AND "status" = 'pending' AND "expiresAt" > NOW() AND "requesterId" <> ${ctx.user!.id}
+            RETURNING *
+          `);
+          const approval = ((claim as any).rows ?? claim ?? [])[0];
+          if (!approval) {
+            throw new TRPCError({ code: "CONFLICT", message: "Request is unavailable, already being processed, or requires a different approver" });
+          }
+          const [topup] = await db.select().from(billingTopups)
+            .where(and(
+              eq(billingTopups.reference, approval.reference),
+              eq(billingTopups.tenantId, approval.tenantId),
+              eq(billingTopups.amountKobo, Number(approval.amountKobo)),
+            ))
+            .limit(1);
+          if (!topup || (topup.tbTransferId && !topup.tbTransferId.startsWith("fallback-"))) {
+            await db.execute(sql`UPDATE force_credit_approvals SET "status" = 'failed', "updatedAt" = NOW() WHERE "id" = ${input.approvalId}`);
+            throw new TRPCError({ code: "CONFLICT", message: "Top-up is missing or already recorded in the ledger" });
+          }
+          const { creditTenantAccount } = await import("./billing");
+          const result = await creditTenantAccount({
+            tenantId: approval.tenantId,
+            amountKobo: Number(approval.amountKobo),
+            reference: approval.reference,
+          });
+          if (!result.recorded) {
+            await db.execute(sql`UPDATE force_credit_approvals SET "status" = 'failed', "updatedAt" = NOW() WHERE "id" = ${input.approvalId}`);
+            throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "TigerBeetle did not record the credit; the request remains auditable but no balance changed" });
+          }
+          const approver = ctx.user?.name ?? ctx.user?.openId ?? "unknown";
+          await db.update(billingTopups).set({ tbTransferId: result.transferId }).where(eq(billingTopups.reference, approval.reference));
+          await db.execute(sql`
+            UPDATE webhook_retry_queue
+            SET "status" = 'resolved', "lastError" = COALESCE("lastError", '') || ${'\n' + `[DUAL_APPROVED ${new Date().toISOString()}] by ${approver}: ${input.approvalNote}`}
+            WHERE "reference" = ${approval.reference}
+          `);
+          await db.execute(sql`
+            UPDATE force_credit_approvals
+            SET "status" = 'executed', "ledgerTransferId" = ${result.transferId}, "executedAt" = NOW(), "updatedAt" = NOW()
+            WHERE "id" = ${input.approvalId}
+          `);
+          await db.execute(sql`
+            INSERT INTO event_log ("eventType", "aggregateId", "actorId", "payload", "source", "createdAt")
+            VALUES ('force_credit_dual_approved', ${approval.reference}, ${ctx.user!.id}, CAST(${JSON.stringify({
+              approvalId: input.approvalId,
+              requesterId: approval.requesterId,
+              approverId: ctx.user!.id,
+              approvalNote: input.approvalNote,
+              mfaMethod: "totp",
+              tigerBeetleTransferId: result.transferId,
+            })} AS json), 'admin_reconciliation', NOW())
+          `);
+          return { success: true, transferId: result.transferId, requesterId: Number(approval.requesterId), approver };
+        }),
+      /** Reject a pending recovery request without performing any financial side effect. */
+      rejectForceCredit: adminProcedure
+        .input(z.object({ approvalId: z.number().int().positive(), rejectionNote: z.string().min(10, "Rejection note must be at least 10 characters") }))
+        .mutation(async ({ input, ctx }) => {
+          const db = await getDb();
+          if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+          await assertDesignatedForceCreditApprover(db, ctx.user!.id);
+          const result = await db.execute(sql`
+            UPDATE force_credit_approvals
+            SET "status" = 'rejected', "approverId" = ${ctx.user!.id}, "approvalNote" = ${input.rejectionNote},
+                "approvedAt" = NOW(), "updatedAt" = NOW()
+            WHERE "id" = ${input.approvalId} AND "status" = 'pending' AND "requesterId" <> ${ctx.user!.id}
+            RETURNING "reference", "tenantId", "amountKobo"
+          `);
+          const rejected = ((result as any).rows ?? result ?? [])[0];
+          if (!rejected) throw new TRPCError({ code: "CONFLICT", message: "Request is unavailable, already decided, or requires a different approver" });
+          await db.execute(sql`
+            INSERT INTO event_log ("eventType", "aggregateId", "actorId", "payload", "source", "createdAt")
+            VALUES ('force_credit_rejected', ${rejected.reference}, ${ctx.user!.id}, CAST(${JSON.stringify({
+              approvalId: input.approvalId,
+              tenantId: rejected.tenantId,
+              amountKobo: Number(rejected.amountKobo),
+              rejectionNote: input.rejectionNote,
+            })} AS json), 'admin_reconciliation', NOW())
+          `);
+          return { status: "rejected" as const };
+        }),
+      /** List channels represented in persisted Paystack top-ups for analytics filtering. */
+      listPaymentChannels: adminProcedure.query(async () => {
+        const db = await getDb();
+        if (!db) return { channels: [] as string[] };
+        const rows = await db.execute(sql`
+          SELECT DISTINCT COALESCE("channel", 'unknown') AS channel
+          FROM billing_topups
+          ORDER BY channel ASC
+        `);
+        return {
+          channels: ((rows as any).rows ?? rows ?? [])
+            .map((row: any) => String(row.channel ?? "unknown")),
+        };
+      }),
+      /**
+       * Get failure rate data for the past 7 days (daily buckets), optionally
+       * constrained to the persisted billing_topups payment channel.
+       */
+      failureRateChart: protectedProcedure
+        .input(z.object({ channel: z.string().min(1).max(64).optional() }).optional())
+        .query(async ({ input }) => {
+        const db = await getDb();
+        if (!db) return { days: [] };
+        const channelClause = input?.channel
+          ? sql`AND COALESCE(b."channel", 'unknown') = ${input.channel}`
+          : sql``;
+        const rows = await db.execute(sql`
+          SELECT
+            DATE(q."createdAt") as day,
+            COUNT(*) as total,
+            COUNT(*) FILTER (WHERE q."status" = 'completed') as succeeded,
+            COUNT(*) FILTER (WHERE q."status" = 'dead_letter') as dead_lettered,
+            COUNT(*) FILTER (WHERE q."status" = 'pending') as pending
+          FROM webhook_retry_queue q
+          LEFT JOIN billing_topups b ON b."reference" = q."reference"
+          WHERE q."createdAt" >= NOW() - INTERVAL '7 days'
+          ${channelClause}
+          GROUP BY DATE(q."createdAt")
+          ORDER BY day ASC
+        `);
+        const days = ((rows as any).rows ?? rows ?? []).map((r: any) => ({
+          day: r.day ? new Date(r.day).toISOString().slice(0, 10) : "",
+          total: Number(r.total ?? 0),
+          succeeded: Number(r.succeeded ?? 0),
+          deadLettered: Number(r.dead_lettered ?? 0),
+          pending: Number(r.pending ?? 0),
+        }));
+        return { days, channel: input?.channel ?? null };
+      }),
+    }),
+  }),
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user ? { ...opts.ctx.user, isDemo: opts.ctx.isDemo } : null),
     logout: publicProcedure.mutation(({ ctx }) => {
