@@ -3563,8 +3563,9 @@
 
 ## Reconciliation Controls v9 (Aug 14 2026)
 - [x] Add a designated-approver TOTP enrollment wizard with QR setup and verification
-- [x] Deploy the expiry callback and provision the enabled project Heartbeat job (2urXuYAg4pSm9vT4XBS7cp) for automatic 24-hour Force Credit expiry
-- [ ] Verify the first authenticated production execution of the Force Credit expiry Heartbeat
+- [x] Deploy the expiry callback and provision the project Heartbeat job (2urXuYAg4pSm9vT4XBS7cp); paused after confirming production has no reachable PostgreSQL schema
+- [x] Verify the first authenticated production execution of the Force Credit expiry Heartbeat; cron authentication succeeded and failed closed at the unavailable database boundary
+- [ ] Configure managed PostgreSQL, resume the paused expiry Heartbeat, and verify a successful idempotent execution
 - [x] Add a security audit view for failed Force Credit MFA authorization attempts
 - [x] Validate, checkpoint, and push all code to GitHub main (commits 967bbcd and a7c02b0)
 
@@ -3584,9 +3585,10 @@
 - [x] Verify GitHub main at a50623d and document external blockers: CI workflow absent and 47 Dependabot PRs have no reported checks
 
 ## GitHub CI Permission Recovery (Aug 15 2026)
-- [ ] Grant the GitHub App or token permission to create and update Actions workflow files
-- [ ] Publish the PostgreSQL-backed CI workflow and verify required PR checks
-- [ ] Publish CodeQL static analysis for JavaScript/TypeScript, Python, Go, and Rust
+- [x] Verify the GitHub credential can create workflow files and publish the CI workflow
+- [x] Publish PostgreSQL-backed CI and validate it on main (run 31912750609 passed)
+- [x] Publish CodeQL static analysis for JavaScript/TypeScript, Python, Go, and Rust (run 31912750627 passed)
+- [ ] Trigger and review the new CI and CodeQL checks for each Dependabot pull request
 - [ ] Merge only validated Dependabot pull requests after required checks pass
 - [x] Verify GitHub main and remaining pull-request state (47 open Dependabot PRs; 0 report checks)
 
