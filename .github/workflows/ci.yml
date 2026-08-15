@@ -39,8 +39,8 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Apply PostgreSQL migrations
-        run: pnpm drizzle-kit migrate
+      - name: Initialize disposable PostgreSQL test schema
+        run: pnpm drizzle-kit push --force
       - name: Type-check
         run: pnpm check --noEmit
       - name: Production build
