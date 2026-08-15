@@ -19,7 +19,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 uuid            = { version = "1", features = ["v4"] }
 chrono          = { version = "0.4", features = ["serde"] }
 rdkafka         = { version = "0.36", features = ["cmake-build"] }
-redis           = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
+redis           = { version = "1.5", features = ["tokio-comp", "connection-manager"] }
 tower-http      = { version = "0.5", features = ["cors", "trace"] }
 thiserror       = "1"
 anyhow          = "1"
