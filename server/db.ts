@@ -49,6 +49,15 @@ export async function getDb() {
   return _db;
 }
 
+/**
+ * Return the shared PostgreSQL pool after initializing the Drizzle connection.
+ * Used by LISTEN/NOTIFY-backed infrastructure that must share the application DB.
+ */
+export async function getPgPool(): Promise<Pool | null> {
+  await getDb();
+  return _pool;
+}
+
 // ─── Users ────────────────────────────────────────────────────────────────────
 
 export async function upsertUser(user: InsertUser): Promise<void> {
