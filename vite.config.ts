@@ -171,6 +171,10 @@ const lexPWA = VitePWA({
   workbox: {
     navigateFallback: "/lex/submit",
     navigateFallbackAllowlist: [/^\/lex\//],
+    // The shared non-LEX vendor bundle can exceed Workbox's 2 MiB precache
+    // ceiling. It remains available through runtime caching when online, while
+    // the LEX shell and its critical assets retain offline precache support.
+    globIgnores: ["**/vendor-misc-*.js"],
     runtimeCaching: [
       {
         urlPattern: /\/api\/trpc\/lex\.listAgencies/,
@@ -242,10 +246,9 @@ export default defineConfig({
           if (id.includes('/lucide-react/')) {
             return 'vendor-icons';
           }
-          // Vendor: everything else in node_modules
-          if (id.includes('node_modules')) {
-            return 'vendor-misc';
-          }
+          // Leave all remaining dependencies to Rollup's import graph. Grouping
+          // every package into one catch-all chunk previously produced a 12.5 MB
+          // asset that Workbox could not precache and that was expensive to render.
         },
       },
     },

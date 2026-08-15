@@ -45,10 +45,28 @@ export async function verifyKeycloakToken(token: string): Promise<KeycloakClaims
   if (!jwks || !issuer) return null; // Keycloak not configured — skip
   try {
     const clientId = ENV.keycloakClientId;
-    const { payload } = await jwtVerify(token, jwks, {
-      issuer,
-      audience: clientId,
-    });
+    // Keycloak access tokens set aud="account" by default for confidential clients.
+    // The authorized party (azp) contains the actual client ID.
+    // First try strict audience check; if it fails on the aud claim specifically,
+    // verify signature+issuer only and then manually validate azp.
+    let payload;
+    try {
+      ({ payload } = await jwtVerify(token, jwks, {
+        issuer,
+        audience: clientId,
+      }));
+    } catch (audErr: any) {
+      if (audErr?.code === "ERR_JWT_CLAIM_VALIDATION_FAILED" && audErr?.claim === "aud") {
+        // Retry without audience check, then validate azp manually
+        ({ payload } = await jwtVerify(token, jwks, { issuer }));
+        const azp = (payload as any).azp;
+        if (azp !== clientId) {
+          throw new Error(`unexpected "azp" claim value: ${azp}, expected ${clientId}`);
+        }
+      } else {
+        throw audErr;
+      }
+    }
     return payload as KeycloakClaims;
   } catch (err) {
     // Invalid token, JWKS fetch failure, or signature mismatch — return null (fail-closed)
