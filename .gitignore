@@ -119,4 +119,3 @@ services/event-emitter/target/
 services/aml-engine/target/
 services/event-processor/target/
 .project-config.json
-.github/workflows/

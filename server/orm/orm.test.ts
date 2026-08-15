@@ -19,6 +19,9 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { and, eq, isNull, sql } from "drizzle-orm";
+import { resolve } from "node:path";
+
+const repositoryFile = (...segments: string[]) => resolve(process.cwd(), ...segments);
 
 // ─── Mock the DB and schema ───────────────────────────────────────────────────
 
@@ -899,7 +902,7 @@ describe("Seed Data", () => {
   it("seed.ts should export a main function", async () => {
     // Just verify the file exists and is importable as a module
     const fs = await import("fs");
-    expect(fs.existsSync("/home/ubuntu/bis/drizzle/seed.ts")).toBe(true);
+    expect(fs.existsSync(repositoryFile("drizzle", "seed.ts"))).toBe(true);
   });
 });
 
@@ -908,30 +911,30 @@ describe("Seed Data", () => {
 describe("Migration SQL Files", () => {
   it("0055_drizzle_orm_improvements.sql should exist", async () => {
     const fs = await import("fs");
-    expect(fs.existsSync("/home/ubuntu/bis/drizzle/0055_drizzle_orm_improvements.sql")).toBe(true);
+    expect(fs.existsSync(repositoryFile("drizzle", "0055_drizzle_orm_improvements.sql"))).toBe(true);
   });
 
   it("0055_drizzle_orm_improvements.rollback.sql should exist", async () => {
     const fs = await import("fs");
-    expect(fs.existsSync("/home/ubuntu/bis/drizzle/0055_drizzle_orm_improvements.rollback.sql")).toBe(true);
+    expect(fs.existsSync(repositoryFile("drizzle", "0055_drizzle_orm_improvements.rollback.sql"))).toBe(true);
   });
 
   it("migration SQL should include jsonb upgrades", async () => {
     const fs = await import("fs");
-    const content = fs.readFileSync("/home/ubuntu/bis/drizzle/0055_drizzle_orm_improvements.sql", "utf8");
+    const content = fs.readFileSync(repositoryFile("drizzle", "0055_drizzle_orm_improvements.sql"), "utf8");
     expect(content).toContain("TYPE jsonb");
   });
 
   it("migration SQL should include soft-delete columns", async () => {
     const fs = await import("fs");
-    const content = fs.readFileSync("/home/ubuntu/bis/drizzle/0055_drizzle_orm_improvements.sql", "utf8");
+    const content = fs.readFileSync(repositoryFile("drizzle", "0055_drizzle_orm_improvements.sql"), "utf8");
     expect(content).toContain("deletedAt");
     expect(content).toContain("deletedBy");
   });
 
   it("migration SQL should include GIN full-text search indexes", async () => {
     const fs = await import("fs");
-    const content = fs.readFileSync("/home/ubuntu/bis/drizzle/0055_drizzle_orm_improvements.sql", "utf8");
+    const content = fs.readFileSync(repositoryFile("drizzle", "0055_drizzle_orm_improvements.sql"), "utf8");
     expect(content).toContain("investigations_search_idx");
     expect(content).toContain("kyc_records_search_idx");
     expect(content).toContain("cases_search_idx");
@@ -939,7 +942,7 @@ describe("Migration SQL Files", () => {
 
   it("migration SQL should include CHECK constraints", async () => {
     const fs = await import("fs");
-    const content = fs.readFileSync("/home/ubuntu/bis/drizzle/0055_drizzle_orm_improvements.sql", "utf8");
+    const content = fs.readFileSync(repositoryFile("drizzle", "0055_drizzle_orm_improvements.sql"), "utf8");
     expect(content).toContain("investigations_risk_score_check");
     expect(content).toContain("kyc_records_risk_score_check");
     expect(content).toContain("cases_risk_score_check");
@@ -947,13 +950,13 @@ describe("Migration SQL Files", () => {
 
   it("rollback SQL should include DROP INDEX statements", async () => {
     const fs = await import("fs");
-    const content = fs.readFileSync("/home/ubuntu/bis/drizzle/0055_drizzle_orm_improvements.rollback.sql", "utf8");
+    const content = fs.readFileSync(repositoryFile("drizzle", "0055_drizzle_orm_improvements.rollback.sql"), "utf8");
     expect(content).toContain("DROP INDEX");
   });
 
   it("rollback SQL should include DROP CONSTRAINT statements", async () => {
     const fs = await import("fs");
-    const content = fs.readFileSync("/home/ubuntu/bis/drizzle/0055_drizzle_orm_improvements.rollback.sql", "utf8");
+    const content = fs.readFileSync(repositoryFile("drizzle", "0055_drizzle_orm_improvements.rollback.sql"), "utf8");
     expect(content).toContain("DROP CONSTRAINT");
   });
 });
@@ -968,7 +971,7 @@ describe("Prepared Statements", () => {
 
   it("prepared.ts should exist", async () => {
     const fs = await import("fs");
-    expect(fs.existsSync("/home/ubuntu/bis/server/orm/prepared.ts")).toBe(true);
+    expect(fs.existsSync(repositoryFile("server", "orm", "prepared.ts"))).toBe(true);
   });
 });
 

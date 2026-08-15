@@ -1,0 +1,46 @@
+{
+  "timestamp": "2026-08-12T18:28:42.077Z",
+  "config": {
+    "KEYCLOAK_URL": "http://localhost:8080",
+    "BFF_URL": "http://localhost:3000",
+    "TEST_USER": "staging-investigator"
+  },
+  "results": [
+    {
+      "step": "1. Keycloak Authentication",
+      "status": "PASS",
+      "detail": "Token acquired (eyJhbGciOiJSUzI1NiIs...)",
+      "timestamp": "2026-08-12T18:28:41.866Z"
+    },
+    {
+      "step": "2. BFF Token Verification",
+      "status": "WARN",
+      "detail": "BFF returned 405 — may need session cookie flow",
+      "timestamp": "2026-08-12T18:28:41.965Z"
+    },
+    {
+      "step": "3. Create Candidate Profile",
+      "status": "WARN",
+      "detail": "Status 404: {\"error\":{\"json\":{\"message\":\"No procedure found on path \\\"ngScreening.candidates.create\\\"\",\"code\":-3",
+      "timestamp": "2026-08-12T18:28:42.031Z"
+    },
+    {
+      "step": "4. Create Investigation",
+      "status": "WARN",
+      "detail": "Status 401: {\"error\":{\"json\":{\"message\":\"Please login (10001)\",\"code\":-32001,\"data\":{\"code\":\"UNAUTHORIZED\",\"http",
+      "timestamp": "2026-08-12T18:28:42.053Z"
+    },
+    {
+      "step": "5. List Investigations",
+      "status": "WARN",
+      "detail": "Status 405: {\"error\":{\"json\":{\"message\":\"Unsupported POST-request to query procedure at path \\\"investigations.li",
+      "timestamp": "2026-08-12T18:28:42.068Z"
+    },
+    {
+      "step": "6. Token Introspection",
+      "status": "PASS",
+      "detail": "Token active, sub=d25bf91e..., exp=2026-08-12T18:33:41.000Z",
+      "timestamp": "2026-08-12T18:28:42.077Z"
+    }
+  ]
+}
