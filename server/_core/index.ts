@@ -45,6 +45,7 @@ import { startVapidRotationReminderScheduler } from "../vapidRotationReminder";
 import { startBroadcastScheduler } from "../broadcastScheduler";
 import { validateEnv } from "../envValidation";
 import { ENV } from "./env";
+import { startWebhookRetryScheduler } from "../webhookRetry";
 
 // ── Structured logger ─────────────────────────────────────────────────────────
 function log(level: "info" | "warn" | "error", msg: string, meta?: Record<string, unknown>) {
@@ -466,6 +467,17 @@ async function startServer() {
         if (amountKobo > 0 && tenantId !== "unknown") {
           const result = await creditTenantAccount({ tenantId, amountKobo, reference });
           console.log(`[PaystackWebhook] Credited tenant=${tenantId} amount=${amountKobo} kobo recorded=${result.recorded} transferId=${result.transferId}`);
+          // If TigerBeetle recording failed, enqueue for retry with exponential backoff
+          if (!result.recorded) {
+            const { enqueueFailedWebhook } = await import("../webhookRetry");
+            await enqueueFailedWebhook({
+              reference,
+              tenantId,
+              amountKobo,
+              error: "Initial credit attempt failed — TB unavailable",
+            });
+            console.warn(`[PaystackWebhook] TB credit failed for ${reference} — enqueued for retry`);
+          }
           await notifyOwner({
             title: `Payment Received — ₦${(amountKobo / 100).toLocaleString()}`,
             content: `Tenant **${tenantId}** topped up ₦${(amountKobo / 100).toLocaleString()} via Paystack.\nReference: \`${reference}\`\nTigerBeetle transfer: \`${result.transferId}\` (recorded=${result.recorded})`,
@@ -700,6 +712,11 @@ async function startServer() {
   // OAuth callback under /api/oauth/callback
   registerOAuthRoutes(app);
 
+  // Keycloak Bearer → session cookie exchange
+  registerSessionExchangeRoute(app);
+  // PostgreSQL-backed user notification stream for immediate in-app alerts
+  registerNotificationStream(app);
+
   // ── Event Emitter SSE proxy ────────────────────────────────────────────────────
   // Proxies the Rust event-emitter SSE stream to authenticated PWA clients.
   // Client usage: new EventSource('/api/events/stream') after login.
@@ -854,6 +871,28 @@ async function startServer() {
       clearInterval(heartbeat);
       portalSseManager.unregister(clientId);
     });
+  });
+
+  // ── Scheduled task endpoint — Force Credit approval expiry ───────────────
+  // Heartbeat invokes this deployed callback; no in-process timer is used.
+  app.post("/api/scheduled/force-credit-expiry", async (req: Request, res: Response) => {
+    try {
+      const { sdk } = await import("./sdk");
+      const user = await sdk.authenticateRequest(req);
+      if (!user.isCron || !user.taskUid) {
+        res.status(403).json({ error: "cron-only" });
+        return;
+      }
+      const { expirePendingForceCreditApprovals } = await import("../forceCreditExpiry");
+      const result = await expirePendingForceCreditApprovals();
+      res.json({ ok: true, ...result, taskUid: user.taskUid });
+    } catch (error) {
+      res.status(500).json({
+        error: error instanceof Error ? error.message : "Force Credit expiry failed",
+        context: { url: req.originalUrl },
+        timestamp: new Date().toISOString(),
+      });
+    }
   });
 
   // ── Scheduled task endpoint — alert rules evaluation ──────────────────────
@@ -1275,6 +1314,11 @@ startServer()
     startBiometricSessionLogArchiver();   // Weekly biometric session log archival (90d hot→cold S3)
     startVapidRotationReminderScheduler(); // Daily VAPID key age check — notifies owner after 90 days
     startBroadcastScheduler(); // 1-min poll for overdue scheduled broadcasts
+    startWebhookRetryScheduler(); // 10s poll for failed Paystack webhook credits (exponential backoff)
+    void import("../platform").then(async ({ migrateLegacyTotpSeedsAtRest }) => {
+      const migrated = await migrateLegacyTotpSeedsAtRest();
+      if (migrated > 0) log("info", "Encrypted legacy TOTP seeds", { migrated });
+    }).catch((error) => log("error", "Legacy TOTP seed encryption migration failed", { error: String(error) }));
     return srv;
   })
   .catch((err) => {
@@ -1304,3 +1348,5 @@ function gracefulShutdown(signal: string) {
 
 process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
 process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+import { registerSessionExchangeRoute } from "./sessionExchange";
+import { registerNotificationStream } from "./notificationStream";
