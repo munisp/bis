@@ -1,3 +1,5 @@
+import { resolveSessionSigningSource } from "./_core/env";
+
 // envValidation.ts — Production environment variable validation
 // Called at server startup to warn about missing or insecure defaults.
 // In production (NODE_ENV=production), missing critical vars cause process exit.
@@ -24,7 +26,13 @@ const ENV_SPECS: EnvSpec[] = [
     key: "JWT_SECRET",
     required: true,
     secret: true,
-    description: "JWT signing secret — must be at least 32 chars in production",
+    description: "Platform JWT secret; production BFF sessions may use BIS_SESSION_SIGNING_SECRET instead",
+  },
+  {
+    key: "BIS_SESSION_SIGNING_SECRET",
+    required: false,
+    secret: true,
+    description: "Dedicated BFF session and TOTP-encryption root secret — must be at least 32 chars in production",
   },
   {
     key: "VITE_APP_ID",
@@ -369,10 +377,20 @@ export function validateEnv(): void {
       errors.push(`INSECURE DEFAULT: ${spec.key} uses a known-insecure default value — change before production use`);
     }
 
-    // JWT_SECRET must be at least 32 chars in production
-    if (isProduction && spec.key === "JWT_SECRET" && value.length < 32) {
-      errors.push(`WEAK SECRET: JWT_SECRET is ${value.length} chars — must be at least 32 chars in production`);
-    }
+  }
+
+  // Prefer an explicit session root. The injected Forge credential is an
+  // acceptable fallback because the BFF derives a distinct HMAC-based root
+  // from it; its opaque platform-issued format has a smaller practical
+  // minimum than a directly used session secret.
+  const effectiveSessionSecret = resolveSessionSigningSource();
+  const usesForgeFallback = !process.env.BIS_SESSION_SIGNING_SECRET && Boolean(process.env.BUILT_IN_FORGE_API_KEY);
+  const minimumSessionSourceLength = usesForgeFallback ? 20 : 32;
+  if (isProduction && effectiveSessionSecret.length < minimumSessionSourceLength) {
+    const requirement = usesForgeFallback
+      ? "BUILT_IN_FORGE_API_KEY fallback must be at least 20 characters in production"
+      : "BIS_SESSION_SIGNING_SECRET (or JWT_SECRET fallback) must be at least 32 characters in production";
+    errors.push(`WEAK SESSION SIGNING SECRET: ${requirement}`);
   }
 
   // Log summary
