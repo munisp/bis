@@ -1,0 +1,52 @@
+name: BIS Validation
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  bff:
+    name: bff-validation
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: bis_user
+          POSTGRES_PASSWORD: bis_secure_2026
+          POSTGRES_DB: bis_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U bis_user -d bis_db"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://bis_user:bis_secure_2026@localhost:5432/bis_db
+      JWT_SECRET: ci-session-secret-not-for-production
+      KEYCLOAK_URL: https://auth.bis.invalid
+      KEYCLOAK_REALM: bis
+      KEYCLOAK_CLIENT_ID: bis-bff
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Initialize disposable PostgreSQL test schema
+        run: pnpm drizzle-kit push --force
+      - name: Type-check
+        run: pnpm check --noEmit
+      - name: Production build
+        run: pnpm run build
+      - name: Test
+        run: pnpm test
