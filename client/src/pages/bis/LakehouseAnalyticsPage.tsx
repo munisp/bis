@@ -171,7 +171,10 @@ function KycStatusChart() {
                 cx="50%"
                 cy="50%"
                 outerRadius={70}
-                label={({ status, percent }) => `${status} ${(percent * 100).toFixed(0)}%`}
+                label={props => {
+                  const value = props as { status?: string; name?: string; percent?: number };
+                  return `${value.status ?? value.name ?? "Unknown"} ${((value.percent ?? 0) * 100).toFixed(0)}%`;
+                }}
                 labelLine={false}
               >
                 {rows.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}

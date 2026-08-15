@@ -115,7 +115,10 @@ export default function NgAnalyticsPage() {
                     innerRadius={60}
                     outerRadius={90}
                     dataKey="value"
-                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                    label={props => {
+                      const value = props as { name?: string; percent?: number };
+                      return `${value.name ?? "Unknown"} ${((value.percent ?? 0) * 100).toFixed(0)}%`;
+                    }}
                     labelLine={false}
                   >
                     {outcomeData.map((entry, i) => (
@@ -152,7 +155,10 @@ export default function NgAnalyticsPage() {
                     innerRadius={60}
                     outerRadius={90}
                     dataKey="value"
-                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                    label={props => {
+                      const value = props as { name?: string; percent?: number };
+                      return `${value.name ?? "Unknown"} ${((value.percent ?? 0) * 100).toFixed(0)}%`;
+                    }}
                     labelLine={false}
                   >
                     <Cell fill="#10b981" />

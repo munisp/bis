@@ -735,9 +735,10 @@ export default function ReconciliationDashboard() {
                     const d = new Date(label + "T00:00:00");
                     return d.toLocaleDateString("en-NG", { weekday: "short", month: "short", day: "numeric" });
                   }}
-                  formatter={(value: number, name: string) => {
+                  formatter={(value, name) => {
                     const labels: Record<string, string> = { total: "Total Failures", succeeded: "Retried Successfully", deadLettered: "Dead Lettered", pending: "Still Pending" };
-                    return [value + " txns", labels[name] ?? name];
+                    const label = String(name ?? "");
+                    return [Number(value ?? 0) + " txns", labels[label] ?? label];
                   }}
                 />
                 <Legend wrapperStyle={{ fontSize: 11 }} />
