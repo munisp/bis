@@ -43,6 +43,10 @@ export function getCronTokenCandidate(cookieValue: string | undefined | null): s
   }
 }
 
+export function hasAuthoritativeCronTask(userInfo: Pick<GetUserInfoWithJwtResponse, "openId" | "taskUid">): boolean {
+  return userInfo.openId.startsWith(CRON_OPEN_ID_PREFIX) && isNonEmptyString(userInfo.taskUid);
+}
+
 function buildCronUser(userInfo: GetUserInfoWithJwtResponse): AuthenticatedUser {
   const now = new Date();
   return {
@@ -301,7 +305,7 @@ class SDKServer {
     // authoritative task UID before allowing scheduled work.
     if (getCronTokenCandidate(sessionCookie)) {
       const userInfo = await this.getUserInfoWithJwt(sessionCookie ?? "");
-      if (!userInfo.openId.startsWith(CRON_OPEN_ID_PREFIX) || !userInfo.taskUid) {
+      if (!hasAuthoritativeCronTask(userInfo)) {
         throw ForbiddenError("Cron session missing task_uid");
       }
       return buildCronUser(userInfo);
@@ -311,6 +315,18 @@ class SDKServer {
     const session = await this.verifySession(sessionCookie);
 
     if (!session) {
+      // Some platform Heartbeat deployments use an opaque session cookie that
+      // cannot be verified with the BFF's session root. Exchange it only with
+      // the OAuth service and require the authoritative cron identity plus
+      // scheduler-owned task UID before permitting scheduled work.
+      try {
+        const userInfo = await this.getUserInfoWithJwt(sessionCookie ?? "");
+        if (hasAuthoritativeCronTask(userInfo)) {
+          return buildCronUser(userInfo);
+        }
+      } catch (error) {
+        console.warn("[Auth] Platform cron token exchange failed", String(error));
+      }
       throw ForbiddenError("Invalid session cookie");
     }
 
