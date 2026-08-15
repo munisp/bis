@@ -3577,6 +3577,20 @@
 ## GitHub Repository Consolidation (Aug 15 2026)
 - [x] Inspect main, all open pull requests, and branch divergence (47 Dependabot PRs open; all currently report no completed CI checks)
 - [x] Repair the production Workbox precache-size build failure and validate a deployable production build
-- [ ] Synchronize all completed workspace changes to GitHub main
+- [x] Restore GitHub Actions CI workflow files or document the missing-workflow permission blocker (GitHub rejected the valid workflow because the current GitHub App lacks `workflows` permission)
+- [x] Synchronize all completed workspace changes to GitHub main (commit 986ad64)
 - [ ] Merge only pull requests with compatible, validated changes
 - [ ] Verify final main branch and document any unmergeable external blockers
+
+## GitHub CI Permission Recovery (Aug 15 2026)
+- [ ] Grant the GitHub App or token permission to create and update Actions workflow files
+- [ ] Publish the PostgreSQL-backed CI workflow and verify required PR checks
+- [ ] Merge only validated Dependabot pull requests after required checks pass
+- [ ] Verify the final main branch and remaining PR state
+
+## Production Deployment Recovery (Aug 15 2026)
+- [x] Recover production session signing with a strong purpose-separated root and validate startup secret requirements
+- [x] Derive a purpose-separated session-signing root from the platform Forge credential when no dedicated secret is supplied
+- [ ] Remove unsafe production fallback secrets and localhost-only service defaults
+- [x] Validate a successful production build and deployment startup
+- [ ] Synchronize the recovery changes to GitHub main
