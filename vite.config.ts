@@ -219,6 +219,9 @@ export default defineConfig({
     // an explicit ES2022 target keeps both application and Workbox transforms
     // deterministic.
     target: "es2022",
+    // CI and constrained deployment builders do not need per-asset gzip estimates;
+    // disabling them avoids a second full in-memory pass over the generated chunks.
+    reportCompressedSize: false,
     chunkSizeWarningLimit: 600,
     rollupOptions: {
       output: {

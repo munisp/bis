@@ -881,8 +881,6 @@ describe("cursorPage() pagination", () => {
 
 describe("Migration Helpers", () => {
   it("getMigrationStatus() should handle missing migrations table gracefully", async () => {
-    const { Pool } = await import("pg");
-    const mockPool = new Pool();
     // getMigrationStatus will fail to connect since DATABASE_URL is fake
     // but it should not throw — it should return empty applied list
     const result = await getMigrationStatus("postgresql://localhost:5432/nonexistent").catch(() => ({

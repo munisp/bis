@@ -3592,7 +3592,12 @@
 - [x] Remediate Recharts 3 type compatibility; Recharts 3.10.1 type-check passes in the PR #47 dependency set
 - [x] Remediate React Day Picker 10 class-name compatibility; TypeScript passes against v9 and the PR #46 v10 dependency set
 - [x] Remediate Google Maps Heatmap typing compatibility; TypeScript passes against the PR #41 development dependency set
-- [ ] Align the production JavaScript target with Esbuild 0.28 before merging Dependabot PR #41
+- [x] Align the production JavaScript target with Esbuild 0.28; refreshed Dependabot PR #41 passed CI and CodeQL
+- [x] Complete Vite 7 tooling alignment; production build and full regression suite pass
+- [x] Upgrade Vitest to a Vite 7-compatible runtime; 51 test files and 1,395 tests pass
+- [x] Update the ORM migration-status test mock for Vitest 4 constructor semantics
+- [ ] Plan and validate a separate Vite 8 and Rolldown plugin migration before merging Dependabot PR #44 (plugin-react 6 requires Vite 8)
+- [x] Disable nonessential Vite compressed-size reporting and release development-server memory before constrained production builds
 - [ ] Merge only validated Dependabot pull requests after required checks pass
 - [x] Verify GitHub main and remaining pull-request state (47 open Dependabot PRs; 0 report checks)
 
