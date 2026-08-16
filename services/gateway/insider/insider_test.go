@@ -70,7 +70,7 @@ func TestAnomalousIPBlock_RespectsXForwardedFor(t *testing.T) {
 	mw := newMW(cfg)
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/admin/users", nil)
-	req.RemoteAddr = "127.0.0.1:9999" // trusted proxy
+	req.RemoteAddr = "127.0.0.1:9999"            // trusted proxy
 	req.Header.Set("X-Forwarded-For", "1.2.3.4") // real client IP
 	rr := httptest.NewRecorder()
 	mw.AnomalousIPBlock(http.HandlerFunc(okHandler)).ServeHTTP(rr, req)
@@ -112,7 +112,7 @@ func TestPrivilegedAccess_BlocksPrivilegedWithoutToken(t *testing.T) {
 
 func TestPrivilegedAccess_AllowsPrivilegedWithToken(t *testing.T) {
 	cfg := insider.DefaultConfig()
-	cfg.BreakGlassSecret = "test-secret"
+	cfg.BreakGlassSecret = "some-valid-token"
 	cfg.DualControlPaths = []string{} // no dual-control paths for this test
 	mw := newMW(cfg)
 
@@ -145,7 +145,8 @@ func TestPrivilegedAccess_DualControlRequired(t *testing.T) {
 
 func TestPrivilegedAccess_DualControlPasses(t *testing.T) {
 	cfg := insider.DefaultConfig()
-	cfg.BreakGlassSecret = "test-secret"
+	cfg.BreakGlassSecret = "some-valid-token"
+	cfg.ApproverSecret = "approver-token"
 	cfg.DualControlPaths = []string{"/v1/admin/export-all"}
 	mw := newMW(cfg)
 
@@ -164,15 +165,15 @@ func TestPrivilegedAccess_DualControlPasses(t *testing.T) {
 
 func TestExfilTracker_DoesNotBlockBelowLimit(t *testing.T) {
 	tracker := insider.NewExfilTracker(60, 1024*1024) // 1 MB limit
-	exceeded, _ := tracker.Record("user1", 512*1024) // 512 KB
+	exceeded, _ := tracker.Record("user1", 512*1024)  // 512 KB
 	if exceeded {
 		t.Fatal("expected not exceeded for 512 KB below 1 MB limit")
 	}
 }
 
 func TestExfilTracker_BlocksAboveLimit(t *testing.T) {
-	tracker := insider.NewExfilTracker(60, 1024*1024) // 1 MB limit
-	tracker.Record("user2", 900*1024)                  // 900 KB
+	tracker := insider.NewExfilTracker(60, 1024*1024)    // 1 MB limit
+	tracker.Record("user2", 900*1024)                    // 900 KB
 	exceeded, total := tracker.Record("user2", 200*1024) // +200 KB = 1.1 MB
 	if !exceeded {
 		t.Fatalf("expected exceeded for %d bytes above 1 MB limit", total)

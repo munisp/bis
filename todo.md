@@ -3599,6 +3599,7 @@
 - [ ] Plan and validate a separate Vite 8 and Rolldown plugin migration before merging Dependabot PR #44 (plugin-react 6 requires Vite 8)
 - [x] Disable nonessential Vite compressed-size reporting and release development-server memory before constrained production builds
 - [ ] Merge only validated Dependabot pull requests after required checks pass
+- [x] Reconcile the Go gateway Insider middleware implementation with its existing regression tests; full gateway Go suite passes
 - [x] Verify GitHub main and remaining pull-request state (47 open Dependabot PRs; 0 report checks)
 
 ## Production Deployment Recovery (Aug 15 2026)
