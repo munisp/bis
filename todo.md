@@ -3590,6 +3590,7 @@
 - [x] Publish CodeQL static analysis for JavaScript/TypeScript, Python, Go, and Rust (run 31912750627 passed)
 - [ ] Trigger and review the new CI and CodeQL checks for each Dependabot pull request
 - [x] Remediate Recharts 3 type compatibility; Recharts 3.10.1 type-check passes in the PR #47 dependency set
+- [x] Remediate React Day Picker 10 class-name compatibility; TypeScript passes against v9 and the PR #46 v10 dependency set
 - [ ] Merge only validated Dependabot pull requests after required checks pass
 - [x] Verify GitHub main and remaining pull-request state (47 open Dependabot PRs; 0 report checks)
 
