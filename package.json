@@ -80,7 +80,7 @@
     "framer-motion": "^12.23.22",
     "helmet": "^8.3.0",
     "input-otp": "^1.4.2",
-    "ioredis": "^5.10.1",
+    "ioredis": "^6.0.0",
     "jose": "6.2.8",
     "js-yaml": "^4.1.1",
     "lucide-react": "^0.453.0",
