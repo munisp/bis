@@ -3581,6 +3581,7 @@
 - [x] Repair the production Workbox precache-size build failure and validate a deployable production build
 - [x] Restore GitHub Actions CI workflow files or document the missing-workflow permission blocker (GitHub rejected the valid workflow because the current GitHub App lacks `workflows` permission)
 - [x] Synchronize all completed workspace changes to GitHub main (commit 986ad64)
+- [x] Rebase, locally validate, and merge 42 compatible Dependabot updates with required CI and CodeQL checks; close 2 superseded or incompatible update branches
 - [ ] Merge only pull requests with compatible, validated changes
 - [x] Verify GitHub main at a50623d and document external blockers: CI workflow absent and 47 Dependabot PRs have no reported checks
 
@@ -3597,10 +3598,14 @@
 - [x] Upgrade Vitest to a Vite 7-compatible runtime; 51 test files and 1,395 tests pass
 - [x] Update the ORM migration-status test mock for Vitest 4 constructor semantics
 - [ ] Plan and validate a separate Vite 8 and Rolldown plugin migration before merging Dependabot PR #44 (plugin-react 6 requires Vite 8)
+- [x] Validate MediaPipe 1.0 with the current biometric-engine InsightFace baseline; biometric tests and required CI checks passed before merging PR #26
+- [x] Close Dependabot PR #44 because plugin-react 6 requires a separate Vite 8 and Rolldown migration
+- [ ] Validate PostgreSQL 18, Redis 8, and Prometheus 3 in the staging Compose stack before merging Dependabot PRs #4, #3, and #2 (no Docker runtime is available in the current sandbox)
 - [x] Disable nonessential Vite compressed-size reporting and release development-server memory before constrained production builds
 - [ ] Merge only validated Dependabot pull requests after required checks pass
 - [x] Reconcile the Go gateway Insider middleware implementation with its existing regression tests; full gateway Go suite passes
 - [x] Verify GitHub main and remaining pull-request state (47 open Dependabot PRs; 0 report checks)
+- [ ] Validate the remaining PostgreSQL 18, Redis 8, and Prometheus 3 Docker Compose upgrades in a Docker-capable staging environment before merge
 
 ## Production Deployment Recovery (Aug 15 2026)
 - [x] Recover production session signing with a strong purpose-separated root and validate startup secret requirements
