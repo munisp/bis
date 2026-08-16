@@ -701,7 +701,17 @@ export default function FieldVisitMapPage() {
     if (clustererRef.current) { clustererRef.current.clearMarkers(); clustererRef.current = null; }
     markersRef.current.forEach(m => { m.map = null; });
     markersRef.current = [];
-    if (heatmapRef.current) { heatmapRef.current.setMap(null); heatmapRef.current = null; }
+    if (heatmapRef.current) {
+      // Current Google Maps runtime layers retain setMap, while newer typings
+      // omit it with the deprecated visualization library declaration.
+      const layer = heatmapRef.current as unknown as {
+        setMap?: (map: google.maps.Map | null) => void;
+        set?: (key: string, value: unknown) => void;
+      };
+      if (typeof layer.setMap === "function") layer.setMap(null);
+      else layer.set?.("map", null);
+      heatmapRef.current = null;
+    }
 
     const validPoints = points.filter(p => p.checkInLat != null && p.checkInLng != null);
 
