@@ -214,6 +214,11 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
+    // Esbuild 0.28 no longer downlevels some generated PWA destructuring paths
+    // to the legacy baseline target. BIS supports modern evergreen browsers, so
+    // an explicit ES2022 target keeps both application and Workbox transforms
+    // deterministic.
+    target: "es2022",
     chunkSizeWarningLimit: 600,
     rollupOptions: {
       output: {

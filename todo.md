@@ -3592,6 +3592,7 @@
 - [x] Remediate Recharts 3 type compatibility; Recharts 3.10.1 type-check passes in the PR #47 dependency set
 - [x] Remediate React Day Picker 10 class-name compatibility; TypeScript passes against v9 and the PR #46 v10 dependency set
 - [x] Remediate Google Maps Heatmap typing compatibility; TypeScript passes against the PR #41 development dependency set
+- [ ] Align the production JavaScript target with Esbuild 0.28 before merging Dependabot PR #41
 - [ ] Merge only validated Dependabot pull requests after required checks pass
 - [x] Verify GitHub main and remaining pull-request state (47 open Dependabot PRs; 0 report checks)
 
