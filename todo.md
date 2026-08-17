@@ -3566,6 +3566,8 @@
 - [x] Deploy the expiry callback and provision the project Heartbeat job (2urXuYAg4pSm9vT4XBS7cp); paused after confirming production has no reachable PostgreSQL schema
 - [x] Verify the first authenticated production execution of the Force Credit expiry Heartbeat; cron authentication succeeded and failed closed at the unavailable database boundary
 - [ ] Configure managed PostgreSQL, resume the paused expiry Heartbeat, and verify a successful idempotent execution
+- [x] Re-test the live expiry callback after successful deployment; it rejects unauthenticated callers with HTTP 403
+- [ ] Replace the stale paused Heartbeat entry (last execution Aug 15 23:04 UTC) and observe a fresh successful production run after managed PostgreSQL is configured
 - [x] Add a security audit view for failed Force Credit MFA authorization attempts
 - [x] Validate, checkpoint, and push all code to GitHub main (commits 967bbcd and a7c02b0)
 
@@ -3597,7 +3599,11 @@
 - [x] Complete Vite 7 tooling alignment; production build and full regression suite pass
 - [x] Upgrade Vitest to a Vite 7-compatible runtime; 51 test files and 1,395 tests pass
 - [x] Update the ORM migration-status test mock for Vitest 4 constructor semantics
-- [ ] Plan and validate a separate Vite 8 and Rolldown plugin migration before merging Dependabot PR #44 (plugin-react 6 requires Vite 8)
+- [x] Plan and validate the Vite 8 and Rolldown plugin migration; plugin-react 6 is now deployed through the verified toolchain upgrade
+- [x] Inventory Vite 8 peers: plugin-react 6 requires Vite 8; Vitest 4.1, vite-plugin-pwa 1.2, and Tailwind Vite support Vite 8
+- [x] Complete the Vite 8 toolchain migration; strict TypeScript, all 1,395 tests, and the production build pass
+- [x] Align the pnpm Vite override with Vite 8; a regenerated lockfile passes frozen installation validation
+- [x] Replace the Vite 7 manualChunks configuration with supported Vite 8 Rolldown code-splitting groups; production build emits no legacy manualChunks warning
 - [x] Validate MediaPipe 1.0 with the current biometric-engine InsightFace baseline; biometric tests and required CI checks passed before merging PR #26
 - [x] Close Dependabot PR #44 because plugin-react 6 requires a separate Vite 8 and Rolldown migration
 - [ ] Validate PostgreSQL 18, Redis 8, and Prometheus 3 in the staging Compose stack before merging Dependabot PRs #4, #3, and #2 (no Docker runtime is available in the current sandbox)
