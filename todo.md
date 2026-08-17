@@ -3584,6 +3584,7 @@
 - [x] Restore GitHub Actions CI workflow files or document the missing-workflow permission blocker (GitHub rejected the valid workflow because the current GitHub App lacks `workflows` permission)
 - [x] Synchronize all completed workspace changes to GitHub main (commit 986ad64)
 - [x] Rebase, locally validate, and merge 42 compatible Dependabot updates with required CI and CodeQL checks; close 2 superseded or incompatible update branches
+- [x] Publish the Vite 8 migration to GitHub main (commit 6debcfa); PostgreSQL-backed CI and JavaScript/TypeScript, Rust, Go, and Python CodeQL all passed
 - [ ] Merge only pull requests with compatible, validated changes
 - [x] Verify GitHub main at a50623d and document external blockers: CI workflow absent and 47 Dependabot PRs have no reported checks
 
