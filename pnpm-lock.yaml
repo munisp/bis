@@ -231,8 +231,8 @@ importers:
         specifier: ^4.2.1
         version: 4.2.1
       nodemailer:
-        specifier: ^8.0.7
-        version: 8.0.7
+        specifier: ^9.0.5
+        version: 9.0.5
       pdfmake:
         specifier: ^0.3.7
         version: 0.3.7
@@ -679,12 +679,20 @@ packages:
     resolution: {integrity: sha512-qMlSxKbpRlAridDExk92nSobyDdpPijUq2DW6oDnUqd0iOGxmQjyqhMIihI9+zv4LPyZdRje2cavWPbCbWm3eA==}
     engines: {node: '>=6.9.0'}
 
+  '@babel/helper-string-parser@7.29.7':
+    resolution: {integrity: sha512-Pb5ijPrZ89GDH8223L4UP8i6QApWxs04RbPQJTeWDV0/keR2E36MeKnyr6LYmUUvqRRI+Iv87SuF1W6ErINzYw==}
+    engines: {node: '>=6.9.0'}
+
   '@babel/helper-validator-identifier@7.27.1':
     resolution: {integrity: sha512-D2hP9eA+Sqx1kBZgzxZh0y1trbuU+JoDkiEwqhQ36nodYqJwyEIhPSdMNd7lOm/4io72luTPWH20Yda0xOuUow==}
     engines: {node: '>=6.9.0'}
 
   '@babel/helper-validator-identifier@7.28.5':
     resolution: {integrity: sha512-qSs4ifwzKJSV39ucNjsvc6WVHs6b7S03sOh2OcHF9UHfVPqWWALUsNUVzhSBiItjRZoLHx7nIarVjqKVusUZ1Q==}
+    engines: {node: '>=6.9.0'}
+
+  '@babel/helper-validator-identifier@7.29.7':
+    resolution: {integrity: sha512-qehxGkRj55h/ff8EMaJ+cYhyaKlHIxqYDn682wQD7RNp9UujOQsHog2uS0r2vzr4pW+sXf90NeeayjcNaX3fFg==}
     engines: {node: '>=6.9.0'}
 
   '@babel/helper-validator-option@7.27.1':
@@ -706,6 +714,11 @@ packages:
 
   '@babel/parser@7.29.2':
     resolution: {integrity: sha512-4GgRzy/+fsBa72/RZVJmGKPmZu9Byn8o4MoLpmNe1m8ZfYnz5emHLQz3U4gLud6Zwl0RZIcgiLD7Uq7ySFuDLA==}
+    engines: {node: '>=6.0.0'}
+    hasBin: true
+
+  '@babel/parser@7.29.8':
+    resolution: {integrity: sha512-E8lTAYNB1KW+FH+VGJuZM1ioAx2E6oVlvQFRrf5P8ZZmsiJXYAD9vTFV7yyEURNzgh1dFqMZuO6tUwcARbqFCA==}
     engines: {node: '>=6.0.0'}
     hasBin: true
 
@@ -1098,6 +1111,10 @@ packages:
 
   '@babel/types@7.29.0':
     resolution: {integrity: sha512-LwdZHpScM4Qz8Xw2iKSzS+cfglZzJGvofQICy7W7v4caru4EaAmyUuO6BGrbyQ2mYV11W0U8j5mBhd14dd3B0A==}
+    engines: {node: '>=6.9.0'}
+
+  '@babel/types@7.29.8':
+    resolution: {integrity: sha512-Vj1jF3cPfxg7OAfoI7QnVKLoILlm2JF9pnVHrX8qx7AHMiYWT+NDAA7jChlNgRS4WTLc/fD1lXLmPixluj+3Gg==}
     engines: {node: '>=6.9.0'}
 
   '@braintree/sanitize-url@7.1.1':
@@ -4890,8 +4907,8 @@ packages:
   node-releases@2.0.37:
     resolution: {integrity: sha512-1h5gKZCF+pO/o3Iqt5Jp7wc9rH3eJJ0+nh/CIoiRwjRxde/hAHyLPXYN4V3CqKAbiZPSeJFSWHmJsbkicta0Eg==}
 
-  nodemailer@8.0.7:
-    resolution: {integrity: sha512-pkjE4mkBzQjdJT4/UmlKl3pX0rC9fZmjh7c6C9o7lv66Ac6w9WCnzPzhbPNxwZAzlF4mdq4CSWB5+FbK6FWCow==}
+  nodemailer@9.0.5:
+    resolution: {integrity: sha512-wvjiKvjczmsN7U/8006JOdXubgBk2XFAbioDMbT+sM7cPs0QrhJTa6KBRX7P5REGGkDcLUz/EarWidb8G8C1jQ==}
     engines: {node: '>=6.0.0'}
 
   normalize-range@0.1.2:
@@ -6768,9 +6785,15 @@ snapshots:
 
   '@babel/helper-string-parser@7.27.1': {}
 
+  '@babel/helper-string-parser@7.29.7':
+    optional: true
+
   '@babel/helper-validator-identifier@7.27.1': {}
 
   '@babel/helper-validator-identifier@7.28.5': {}
+
+  '@babel/helper-validator-identifier@7.29.7':
+    optional: true
 
   '@babel/helper-validator-option@7.27.1': {}
 
@@ -6794,6 +6817,11 @@ snapshots:
   '@babel/parser@7.29.2':
     dependencies:
       '@babel/types': 7.29.0
+
+  '@babel/parser@7.29.8':
+    dependencies:
+      '@babel/types': 7.29.8
+    optional: true
 
   '@babel/plugin-bugfix-firefox-class-in-computed-class-key@7.28.5(@babel/core@7.28.4)':
     dependencies:
@@ -7295,6 +7323,12 @@ snapshots:
     dependencies:
       '@babel/helper-string-parser': 7.27.1
       '@babel/helper-validator-identifier': 7.28.5
+
+  '@babel/types@7.29.8':
+    dependencies:
+      '@babel/helper-string-parser': 7.29.7
+      '@babel/helper-validator-identifier': 7.29.7
+    optional: true
 
   '@braintree/sanitize-url@7.1.1': {}
 
@@ -8937,8 +8971,8 @@ snapshots:
 
   '@types/babel__core@7.20.5':
     dependencies:
-      '@babel/parser': 7.29.2
-      '@babel/types': 7.29.0
+      '@babel/parser': 7.29.8
+      '@babel/types': 7.29.8
       '@types/babel__generator': 7.27.0
       '@types/babel__template': 7.4.4
       '@types/babel__traverse': 7.28.0
@@ -8946,18 +8980,18 @@ snapshots:
 
   '@types/babel__generator@7.27.0':
     dependencies:
-      '@babel/types': 7.29.0
+      '@babel/types': 7.29.8
     optional: true
 
   '@types/babel__template@7.4.4':
     dependencies:
-      '@babel/parser': 7.29.2
-      '@babel/types': 7.29.0
+      '@babel/parser': 7.29.8
+      '@babel/types': 7.29.8
     optional: true
 
   '@types/babel__traverse@7.28.0':
     dependencies:
-      '@babel/types': 7.29.0
+      '@babel/types': 7.29.8
     optional: true
 
   '@types/body-parser@1.19.6':
@@ -11398,7 +11432,7 @@ snapshots:
 
   node-releases@2.0.37: {}
 
-  nodemailer@8.0.7: {}
+  nodemailer@9.0.5: {}
 
   normalize-range@0.1.2: {}
 
