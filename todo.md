@@ -3620,5 +3620,8 @@
 - [x] Derive a purpose-separated session-signing root from the platform Forge credential when no dedicated secret is supplied
 - [x] Remove unsafe production fallback secrets and localhost-only service defaults; production now resolves them to empty values and validates them explicitly
 - [x] Remove the unconditional local PostgreSQL override from BFF startup and require an explicit production PostgreSQL URL
+- [x] Publish fail-closed production configuration hardening to GitHub main (commits c40bdc3 and f51d798); PostgreSQL-backed CI and all CodeQL languages passed
 - [x] Validate a successful production build and deployment startup
 - [x] Synchronize the recovery changes to GitHub main (commit c22f2ff)
+- [x] Complete local PostgreSQL restoration by adding the missing webhook retry queue schema required by the retry scheduler
+- [x] Add a durable Drizzle migration and schema definition for the webhook retry queue so clean environments include it
