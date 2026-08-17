@@ -3568,6 +3568,7 @@
 - [ ] Configure managed PostgreSQL, resume the paused expiry Heartbeat, and verify a successful idempotent execution
 - [x] Re-test the live expiry callback after successful deployment; it rejects unauthenticated callers with HTTP 403
 - [ ] Replace the stale paused Heartbeat entry (last execution Aug 15 23:04 UTC) and observe a fresh successful production run after managed PostgreSQL is configured
+- [ ] Deploy the locally validated fail-closed environment hardening after a managed PostgreSQL URL is configured
 - [x] Add a security audit view for failed Force Credit MFA authorization attempts
 - [x] Validate, checkpoint, and push all code to GitHub main (commits 967bbcd and a7c02b0)
 
@@ -3618,5 +3619,6 @@
 - [x] Recover production session signing with a strong purpose-separated root and validate startup secret requirements
 - [x] Derive a purpose-separated session-signing root from the platform Forge credential when no dedicated secret is supplied
 - [ ] Remove unsafe production fallback secrets and localhost-only service defaults
+- [ ] Remove the unconditional local PostgreSQL override from BFF startup and require an explicit production PostgreSQL URL
 - [x] Validate a successful production build and deployment startup
 - [x] Synchronize the recovery changes to GitHub main (commit c22f2ff)
