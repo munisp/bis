@@ -132,7 +132,7 @@
     "drizzle-kit": "^0.31.4",
     "esbuild": "0.27.0",
     "mysql2": "^3.22.0",
-    "pnpm": "^10.27.0",
+    "pnpm": "^11.21.0",
     "postcss": "^8.5.10",
     "prettier": "^3.6.2",
     "tailwindcss": "^4.1.14",
