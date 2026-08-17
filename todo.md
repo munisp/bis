@@ -3618,7 +3618,7 @@
 ## Production Deployment Recovery (Aug 15 2026)
 - [x] Recover production session signing with a strong purpose-separated root and validate startup secret requirements
 - [x] Derive a purpose-separated session-signing root from the platform Forge credential when no dedicated secret is supplied
-- [ ] Remove unsafe production fallback secrets and localhost-only service defaults
-- [ ] Remove the unconditional local PostgreSQL override from BFF startup and require an explicit production PostgreSQL URL
+- [x] Remove unsafe production fallback secrets and localhost-only service defaults; production now resolves them to empty values and validates them explicitly
+- [x] Remove the unconditional local PostgreSQL override from BFF startup and require an explicit production PostgreSQL URL
 - [x] Validate a successful production build and deployment startup
 - [x] Synchronize the recovery changes to GitHub main (commit c22f2ff)

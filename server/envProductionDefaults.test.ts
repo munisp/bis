@@ -12,6 +12,7 @@ describe("production environment defaults", () => {
     const production = { NODE_ENV: "production" };
     expect(resolveEnvironmentValue("RISK_ENGINE_URL", "http://localhost:8082", production)).toBe("");
     expect(resolveEnvironmentValue("BIS_GATEWAY_KEY", "dev-gateway-key-change-in-prod", production)).toBe("");
+    expect(resolveEnvironmentValue("AT_USERNAME", "sandbox", production)).toBe("");
   });
 
   it("preserves explicitly supplied production configuration", () => {

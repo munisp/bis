@@ -119,7 +119,7 @@ export const ENV = {
   permifyApiKey: process.env.PERMIFY_API_KEY ?? "",
   permifyTenantId: process.env.PERMIFY_TENANT_ID ?? "t1",
   // Africa's Talking SMS gateway
-  atUsername: process.env.AT_USERNAME ?? "sandbox",
+  atUsername: resolveEnvironmentValue("AT_USERNAME", "sandbox"),
   atApiKey: process.env.AT_API_KEY ?? "",
   // Termii SMS gateway (fallback)
   termiiApiKey: process.env.TERMII_API_KEY ?? "",
