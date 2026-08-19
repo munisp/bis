@@ -6,7 +6,7 @@ require (
 	github.com/coreos/go-oidc/v3 v3.20.0
 	github.com/lib/pq v1.12.3
 	github.com/redis/go-redis/v9 v9.22.0
-	github.com/segmentio/kafka-go v0.4.47
+	github.com/segmentio/kafka-go v0.4.51
 	github.com/stretchr/testify v1.10.0
 	go.temporal.io/sdk v1.47.0
 	go.uber.org/zap v1.28.0
