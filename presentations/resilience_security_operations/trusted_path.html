@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    * { box-sizing: border-box; margin: 0; }
+    .slide-container { width: 1280px; min-height: 720px; background: #E0E0EB; color: #1A1A3A; font-family: "Courier New", monospace; display: grid; grid-template-columns: repeat(12, 1fr); grid-template-rows: 118px 360px 242px; }
+    .header { grid-column: 1 / 13; background: #FFFFFF; border-bottom: 1px solid #1A1A3A; display: flex; align-items: end; justify-content: space-between; padding-left: 44px; padding-right: 44px; padding-top: 28px; }
+    h1 { font-size: 40px; margin-bottom: 25px; letter-spacing: -1.5px; }
+    .index { color: #FF5A00; margin-bottom: 28px; font-size: 18px; }
+    .lane { grid-column: 1 / 13; display: grid; grid-template-columns: 1.15fr .35fr 1.15fr .35fr 1.7fr .35fr 1.15fr .35fr 1.25fr; align-items: center; padding-left: 42px; padding-right: 42px; }
+    .node { min-height: 150px; background: #FFFFFF; border: 1px solid #1A1A3A; display: flex; flex-direction: column; justify-content: center; padding-left: 18px; padding-right: 18px; }
+    .node.bff { background: #1A1A3A; color: #FFFFFF; border-color: #1A1A3A; }
+    .node .tag { color: #FF5A00; font-size: 14px; margin-bottom: 14px; }
+    .node h2 { font-size: 22px; line-height: 1.08; margin-bottom: 12px; }
+    .node p { font-size: 14px; line-height: 1.35; }
+    .arrow { text-align: center; color: #FF5A00; font-size: 34px; }
+    .notes { grid-column: 1 / 13; border-top: 1px solid #1A1A3A; background: #FFFFFF; display: grid; grid-template-columns: 1fr 1fr; }
+    .note { padding-left: 44px; padding-right: 38px; padding-top: 36px; }
+    .note:first-child { border-right: 1px solid #1A1A3A; }
+    .note h3 { color: #FF5A00; font-size: 16px; margin-bottom: 14px; letter-spacing: 1px; }
+    .note p { font-size: 18px; line-height: 1.4; }
+  </style>
+</head>
+<body>
+  <div class="slide-container">
+    <header class="header"><h1>ONE TRUSTED PATH GOVERNS SESSION RECOVERY</h1><div class="index">[03]</div></header>
+    <section class="lane">
+      <div class="node"><div class="tag">[ BROWSER ]</div><h2>HttpOnly<br>BIS cookie</h2><p>No refresh token, verifier, or provider access token is stored in JavaScript.</p></div>
+      <div class="arrow">→</div>
+      <div class="node"><div class="tag">[ EDGE ]</div><h2>Nginx /<br>Ingress</h2><p>TLS boundary, trusted forwarded headers, path and rate controls.</p></div>
+      <div class="arrow">→</div>
+      <div class="node bff"><div class="tag">[ AUTHORITY ]</div><h2>BFF</h2><p>PKCE, callback state, issuer checks, encrypted refresh storage, lease claim, session issuance.</p></div>
+      <div class="arrow">→</div>
+      <div class="node"><div class="tag">[ PROVIDER ]</div><h2>Keycloak</h2><p>OIDC login, code exchange, token refresh, logout, roles and JWKS.</p></div>
+      <div class="arrow">↘</div>
+      <div class="node"><div class="tag">[ EVIDENCE ]</div><h2>PostgreSQL<br>+ KMS</h2><p>AEAD ciphertext, CAS lease, revocation state, audit events, key references.</p></div>
+    </section>
+    <section class="notes">
+      <div class="note"><h3>TRUST BOUNDARY [A]</h3><p>Only the BFF traverses the provider and persistence boundaries. The browser speaks to one origin with cookies and CSRF protection.</p></div>
+      <div class="note"><h3>TRUST BOUNDARY [B]</h3><p>Metrics and logs receive safe outcomes and correlation identifiers only. Credentials never cross into telemetry, incident artifacts, or browser storage.</p></div>
+    </section>
+  </div>
+</body>
+</html>
