@@ -1,0 +1,135 @@
+{
+  "project_info": {
+    "title": "Identity Resilience & Security Operations",
+    "created": 1787076506.699,
+    "last_updated": 1787076715.199,
+    "total_slides": 12
+  },
+  "slides": [
+    {
+      "id": "cover",
+      "state": "edited",
+      "pageNum": 1
+    },
+    {
+      "id": "operating_objective",
+      "state": "edited",
+      "pageNum": 2
+    },
+    {
+      "id": "trusted_path",
+      "state": "edited",
+      "pageNum": 3
+    },
+    {
+      "id": "outage_drill",
+      "state": "edited",
+      "pageNum": 4
+    },
+    {
+      "id": "chaos_guardrails",
+      "state": "edited",
+      "pageNum": 5
+    },
+    {
+      "id": "observability",
+      "state": "edited",
+      "pageNum": 6
+    },
+    {
+      "id": "stride",
+      "state": "edited",
+      "pageNum": 7
+    },
+    {
+      "id": "migration",
+      "state": "edited",
+      "pageNum": 8
+    },
+    {
+      "id": "cicd",
+      "state": "edited",
+      "pageNum": 9
+    },
+    {
+      "id": "incident_response",
+      "state": "edited",
+      "pageNum": 10
+    },
+    {
+      "id": "readiness",
+      "state": "edited",
+      "pageNum": 11
+    },
+    {
+      "id": "next_decision",
+      "state": "edited",
+      "pageNum": 12
+    }
+  ],
+  "outline": [
+    {
+      "id": "cover",
+      "title": "Identity Resilience & Security Operations",
+      "summary": "Cover slide introducing Keycloak outage recovery, safe delivery, and refresh-session defense."
+    },
+    {
+      "id": "operating_objective",
+      "title": "Fail closed, recover predictably",
+      "summary": "Defines the operating objective: server-owned refresh tokens, bounded local-session behavior, and serialized refresh transactions."
+    },
+    {
+      "id": "trusted_path",
+      "title": "One trusted path governs session recovery",
+      "summary": "Shows browser, proxy, BFF, Keycloak, PostgreSQL, KMS, and observability trust boundaries."
+    },
+    {
+      "id": "outage_drill",
+      "title": "The Keycloak outage drill proves the real user contract",
+      "summary": "Explains the staging-only directed partition, expected user behavior, and recovery evidence."
+    },
+    {
+      "id": "chaos_guardrails",
+      "title": "Chaos must be bounded by policy",
+      "summary": "Compares safe Chaos Mesh and Litmus operating controls and mandatory abort conditions."
+    },
+    {
+      "id": "observability",
+      "title": "Observability shows user pain and containment",
+      "summary": "Summarizes bounded metrics, alerting, and safe label design for refresh and BFF health.",
+      "image_plan": "/home/ubuntu/upload/search_images/QGg88C0FaNys.jpg - IT disaster recovery dashboard showing metrics and health status"
+    },
+    {
+      "id": "stride",
+      "title": "STRIDE focuses defenses on refresh trust boundaries",
+      "summary": "Highlights principal STRIDE threats and the controls that reduce spoofing, tampering, disclosure, DoS, and privilege escalation.",
+      "image_plan": "/home/ubuntu/upload/search_images/8UwtaQSUq8up.png - Kubernetes security illustration representing STRIDE defenses and trust boundaries"
+    },
+    {
+      "id": "migration",
+      "title": "Deploy schema change as an expand–contract program",
+      "summary": "Explains zero-downtime refresh-lease migration phases and compatibility gates."
+    },
+    {
+      "id": "cicd",
+      "title": "CI/CD separates reversible rollout from data change",
+      "summary": "Shows CI gates, OIDC deployment identity, Helm rollout, and data-phase controls."
+    },
+    {
+      "id": "incident_response",
+      "title": "Contain refresh-token compromise at the smallest safe scope",
+      "summary": "Summarizes targeted and global invalidation workflow and evidence preservation."
+    },
+    {
+      "id": "readiness",
+      "title": "Operational readiness is a chain of verifiable gates",
+      "summary": "Lists the evidence gates for chaos, security, and production promotion readiness.",
+      "image_plan": "/home/ubuntu/upload/search_images/gKrvFDUbQ6kb.jpg - Disaster management dashboard showing risk consequences and metrics"
+    },
+    {
+      "id": "next_decision",
+      "title": "Make resilience executable in staging",
+      "summary": "Closing slide setting the next required staging enablement and controlled drill decision."
+    }
+  ]
+}

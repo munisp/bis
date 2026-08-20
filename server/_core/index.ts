@@ -1,13 +1,18 @@
 import "dotenv/config";
-import { configurePostgresDatabaseUrl } from "../productionDatabaseConfig";
-
-configurePostgresDatabaseUrl();
-
 import { getDb } from '../db';
 
 import "../sentry.server.config";
 
+// BIS platform requires PostgreSQL. Override the platform-injected MySQL/TiDB URL
+// with the local PostgreSQL instance.
+const _dbUrl = process.env.DATABASE_URL ?? "";
+if (!_dbUrl.startsWith("postgresql") && !_dbUrl.startsWith("postgres")) {
+  process.env.DATABASE_URL = "postgresql://bis_user:bis_secure_2026@localhost:5432/bis_db";
+  console.log("[BIS] Overriding DATABASE_URL → local PostgreSQL (bis_db)");
+}
+
 import express, { type Request, type Response, type NextFunction } from "express";
+import { sql } from "drizzle-orm";
 import { createServer } from "http";
 import net from "net";
 import helmet from "helmet";
@@ -42,6 +47,7 @@ import { startBroadcastScheduler } from "../broadcastScheduler";
 import { validateEnv } from "../envValidation";
 import { ENV } from "./env";
 import { startWebhookRetryScheduler } from "../webhookRetry";
+import { createBreakGlassAuditHandler } from "../breakGlassAuditRoute";
 
 // ── Structured logger ─────────────────────────────────────────────────────────
 function log(level: "info" | "warn" | "error", msg: string, meta?: Record<string, unknown>) {
@@ -488,7 +494,16 @@ async function startServer() {
     }
   });
 
-  // JSON body parser (after Paystack raw handler)
+  // Gateway break-glass evidence. This endpoint is internal-only by topology and
+  // independently HMAC-authenticated. The gateway fails the originating action
+  // closed unless this immutable event is accepted first.
+  app.post("/api/internal/break-glass-audit", express.raw({ type: "application/json", limit: "32kb" }), createBreakGlassAuditHandler({
+    gatewayKey: ENV.bisGatewayKey,
+    getDb,
+    logError: (message, meta) => log("error", message, meta),
+  }));
+
+  // JSON body parser (after raw-body webhook and internal audit handlers)
   // Limit to 4mb for normal API calls; file uploads use base64 in JSON which is larger
   app.use(express.json({ limit: "4mb" }));
   app.use(express.urlencoded({ limit: "4mb", extended: true }));
@@ -888,6 +903,27 @@ async function startServer() {
         context: { url: req.originalUrl },
         timestamp: new Date().toISOString(),
       });
+    }
+  });
+
+  // ── Scheduled task endpoint — break-glass evidence recovery ────────────────
+  // A project Heartbeat calls this deployed endpoint. It never marks an action
+  // complete without evidence; stale queue records become durable recovery tasks.
+  app.post("/api/scheduled/break-glass-recovery", async (req: Request, res: Response) => {
+    try {
+      const { sdk } = await import("./sdk");
+      const user = await sdk.authenticateRequest(req);
+      if (!user.isCron || !user.taskUid) return res.status(403).json({ error: "cron-only" });
+      const db = await getDb();
+      if (!db) return res.status(503).json({ error: "audit database unavailable" });
+      const { reconcileQueuedBreakGlassExecutions } = await import("../breakGlassRecovery");
+      const result = await reconcileQueuedBreakGlassExecutions(db);
+      if (result.recoveryRequired > 0) {
+        await notifyOwner({ title: "Break-glass evidence recovery required", content: `${result.recoveryRequired} privileged gateway action(s) require security-operations review before their completion evidence can be confirmed.` });
+      }
+      return res.json({ ok: true, ...result, taskUid: user.taskUid });
+    } catch (error) {
+      return res.status(500).json({ error: error instanceof Error ? error.message : "break-glass recovery failed", context: { url: req.originalUrl }, timestamp: new Date().toISOString() });
     }
   });
 
