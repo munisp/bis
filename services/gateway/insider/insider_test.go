@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"sync"
 	"testing"
 
@@ -259,6 +260,23 @@ func TestPrivilegedAccess_DeniesMissingReasonAndNonIndependentApproverBeforeTheP
 			if called { t.Fatal("protected privileged handler ran despite invalid break-glass attributes") }
 		})
 	}
+}
+
+func TestPrivilegedAccess_CrossComponentAuditSink(t *testing.T) {
+	if os.Getenv("BIS_CROSS_COMPONENT_TEST") != "1" { t.Skip("cross-component harness not enabled") }
+	cfg := insider.DefaultConfig()
+	cfg.BreakGlassSecret = "cross-component-break-glass"
+	cfg.OPAURL = os.Getenv("BIS_CROSS_OPA_URL")
+	cfg.BreakGlassAuditURL = os.Getenv("BIS_CROSS_AUDIT_URL")
+	cfg.GatewayAuditKey = os.Getenv("BIS_CROSS_AUDIT_KEY")
+	if cfg.OPAURL == "" || cfg.BreakGlassAuditURL == "" || cfg.GatewayAuditKey == "" { t.Fatal("cross-component harness URLs and audit key are required") }
+	mw := newMW(cfg)
+	req := httptest.NewRequest(http.MethodPost, "/v1/admin/delete", nil)
+	req.Header.Set("X-BIS-BreakGlass", cfg.BreakGlassSecret)
+	addBreakGlassAttributes(req)
+	rr := httptest.NewRecorder()
+	mw.PrivilegedAccess(http.HandlerFunc(okHandler)).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK { t.Fatalf("expected successful privileged handler through BFF audit sink, got %d", rr.Code) }
 }
 
 // ─── ExfilTracker ─────────────────────────────────────────────────────────────

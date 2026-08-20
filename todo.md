@@ -21,7 +21,7 @@
 - [x] Add real gateway privileged-route integration tests for missing MFA/reason/independent approver denial and persisted authorization/execution evidence
 - [x] Implement a PostgreSQL-backed reconciliation worker for queued gateway break-glass completion evidence
 - [x] Add gateway denial regression coverage for missing break-glass reason and non-independent approver attributes
-- [ ] Add a cross-component integration test proving all three gateway audit events persist through the BFF audit sink
+- [x] Add a cross-component integration test proving all three gateway audit events persist through the BFF audit sink
 - [x] Document Grafana trace/span alerting and a synthetic-session high-concurrency k6 refresh load test
 - [x] Document OTLP Collector/exporter configuration and a multi-tab refresh-race trace-correlation integration test
 - [x] Document distributed tracing and correlation IDs for refresh races plus Nginx/Ingress hardening checklist
