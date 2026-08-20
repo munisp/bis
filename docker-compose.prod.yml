@@ -115,8 +115,7 @@ services:
 
   apisix:
     <<: [*restart, *logging]
-    ports:
-      - "443:9443"   # HTTPS only in production
+    ports: []
     deploy:
       resources:
         limits:
@@ -341,25 +340,41 @@ services:
           cpus: "0.5"
           memory: 512M
 
-  # ── Nginx reverse proxy (production entry point) ──────────────────────────
-
-  nginx:
-    image: nginx:1.27-alpine
-    container_name: bis-nginx
-    restart: always
-    <<: *logging
+  caddy:
+    <<: [*restart, *logging]
+    profiles: []
     ports:
       - "80:80"
       - "443:443"
-    volumes:
-      - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./infra/nginx/ssl:/etc/nginx/ssl:ro
-    networks: [bis-net]
-    depends_on:
-      - bff
-      - apisix
+    environment:
+      CADDY_ACME_EMAIL: ${CADDY_ACME_EMAIL}
+      CADDY_ACME_CA: ${CADDY_ACME_CA:-https://acme-v02.api.letsencrypt.org/directory}
+      BIS_EDGE_TOKEN_SECRET: ${BIS_EDGE_TOKEN_SECRET}
     deploy:
       resources:
         limits:
           cpus: "1"
+          memory: 512M
+
+  open-appsec:
+    <<: [*restart, *logging]
+    profiles: []
+    ports: []
+    environment:
+      OPEN_APPSEC_MODE: ${OPEN_APPSEC_MODE:-prevent}
+      BIS_EDGE_TOKEN_SECRET: ${BIS_EDGE_TOKEN_SECRET}
+      autoPolicyLoad: "true"
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1G
+
+  opa:
+    <<: [*restart, *logging]
+    ports: []
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
           memory: 256M

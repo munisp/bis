@@ -13,6 +13,13 @@
  */
 
 import { ENV } from "./_core/env";
+import crypto from "node:crypto";
+import { TRPCError } from "@trpc/server";
+import { eq, sql } from "drizzle-orm";
+import { getDb } from "./db";
+import { userTotpSecrets, users } from "../drizzle/schema";
+import { decryptTotpSecret, validateTotp } from "./platform";
+import { assertPrivilegedPolicy } from "./opaPolicy";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -315,8 +322,8 @@ export const caddyRouter = router({
    * Used during AML/fraud incidents to tighten rate limits at the edge.
    */
   updateRateLimit: adminProcedure
-    .input(
-      z.object({
+        .input(
+          z.object({
         name: z.enum([
           "api_global",
           "api_auth",
@@ -325,18 +332,44 @@ export const caddyRouter = router({
           "api_aml",
           "api_billing",
         ]),
-        maxEvents: z.number().int().min(1).max(10000),
-        window: z.string().regex(/^\d+[smh]$/).default("1m"),
-      })
-    )
-    .mutation(async ({ input }) => {
+            maxEvents: z.number().int().min(1).max(10000),
+            window: z.string().regex(/^\d+[smh]$/).default("1m"),
+            reason: z.string().min(10, "Break-glass reason must be at least 10 characters"),
+            approverId: z.number().int().positive(),
+            totpCode: z.string().length(6).regex(/^\d{6}$/),
+          })
+        )
+    .mutation(async ({ input, ctx }) => {
+      if (input.approverId === ctx.user.id) throw new TRPCError({ code: "FORBIDDEN", message: "Break-glass requires an independent approver" });
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      const [approver] = await db.select({ role: users.role }).from(users).where(eq(users.id, input.approverId)).limit(1);
+      if (!approver || approver.role !== "admin") throw new TRPCError({ code: "FORBIDDEN", message: "Break-glass approver must be an administrator" });
+      const [totp] = await db.select({ secret: userTotpSecrets.secret }).from(userTotpSecrets).where(eq(userTotpSecrets.userId, ctx.user.id)).limit(1);
+      if (!totp || !validateTotp(decryptTotpSecret(totp.secret), input.totpCode)) throw new TRPCError({ code: "FORBIDDEN", message: "Valid TOTP step-up is required" });
+      const policyDecision = await assertPrivilegedPolicy({ actorId: ctx.user.id, role: ctx.user.role, action: "caddy_rate_limit_override", mfaPassed: true, approverId: input.approverId, reason: input.reason });
+      const auditId = crypto.randomUUID();
+      await db.execute(sql`
+        INSERT INTO event_log ("eventType", "aggregateId", "actorId", "payload", "source", "createdAt")
+        VALUES ('break_glass_authorized', ${auditId}, ${ctx.user.id}, CAST(${JSON.stringify({
+          approverId: input.approverId, reason: input.reason, action: "caddy_rate_limit_override", zone: input.name,
+          maxEvents: input.maxEvents, window: input.window, policyDecision,
+        })} AS json), 'caddy_admin', NOW())
+      `);
       await updateCaddyRateLimit({
         name: input.name,
         key: "{remote_host}",
         window: input.window,
         maxEvents: input.maxEvents,
       });
-      return { success: true, zone: input.name, maxEvents: input.maxEvents };
+      await db.execute(sql`
+        INSERT INTO event_log ("eventType", "aggregateId", "actorId", "payload", "source", "createdAt")
+        VALUES ('break_glass_executed', ${auditId}, ${ctx.user.id}, CAST(${JSON.stringify({
+          approverId: input.approverId, action: "caddy_rate_limit_override", zone: input.name,
+          maxEvents: input.maxEvents, window: input.window, policyDecision,
+        })} AS json), 'caddy_admin', NOW())
+      `);
+      return { success: true, zone: input.name, maxEvents: input.maxEvents, auditId };
     }),
 
   /**
