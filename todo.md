@@ -1,5 +1,39 @@
 # BIS Platform TODO
 
+## Authentication and Onboarding Audit
+- [x] Audit the deployed ingress and compose topology for Caddy, APISIX, Keycloak, OpenAppSec, OPA, MFA, and policy controls
+- [x] Add hardened Caddy edge configuration with TLS, security headers, request limits, trusted-proxy rules, and API-only upstream routing
+- [x] Add APISIX gateway security policies for rate limiting, request validation, IP reputation/allowlists, body-size limits, and protected administrative routes
+- [x] Add OpenAppSec WAF configuration and a documented detection-to-prevention rollout gate
+- [x] Enforce Keycloak MFA, restricted direct grants, brute-force protection, and administrator-session controls in the realm configuration
+- [x] Add OPA policy-as-code and a policy decision point for privileged BFF and gateway actions
+- [x] Implement PBAC policy bindings and immutable audit evidence for Force Credit, Caddy rate-limit overrides, and gateway break-glass actions
+- [ ] Add denial-of-service resilience tests and an executable security-control verification suite
+- [x] Document deployment prerequisites and residual limitations without claiming absolute invulnerability
+- [ ] Deploy the Caddy, OpenAppSec, APISIX, OPA, and Keycloak production topology and capture live enforcement evidence
+- [ ] Run an authorized staging DDoS and WAF validation exercise against the deployed edge controls
+- [x] Bind break-glass actions to OPA with required reason, independent approver, and immutable decision metadata
+- [x] Add deny-and-audit regression coverage for attribute-based privileged and break-glass policy decisions
+- [x] Wire live Go gateway privileged routes to OPA and the durable BFF break-glass audit sink before execution
+- [x] Add endpoint-level signed-ingestion, replay-rejection, and invalid-signature coverage for the BFF break-glass audit sink
+- [x] Guarantee durable execution evidence before a gateway privileged side effect completes, with an explicit retryable recovery path
+- [x] Add real gateway privileged-route integration tests for missing MFA/reason/independent approver denial and persisted authorization/execution evidence
+- [x] Implement a PostgreSQL-backed reconciliation worker for queued gateway break-glass completion evidence
+- [x] Add gateway denial regression coverage for missing break-glass reason and non-independent approver attributes
+- [ ] Add a cross-component integration test proving all three gateway audit events persist through the BFF audit sink
+- [x] Document Grafana trace/span alerting and a synthetic-session high-concurrency k6 refresh load test
+- [x] Document OTLP Collector/exporter configuration and a multi-tab refresh-race trace-correlation integration test
+- [x] Document distributed tracing and correlation IDs for refresh races plus Nginx/Ingress hardening checklist
+- [x] Document a staging-only Keycloak latency/loss Chaos Mesh manifest and identity incident PIR/RCA framework
+- [x] Document staging-only Chaos Mesh/Litmus Keycloak outage experiments and STRIDE analysis for refresh/session persistence
+- [x] Generate a slide deck summarizing disaster recovery, CI/CD, and security incident response controls
+- [x] Document a Keycloak-outage drill, migration-safe CI/CD/Helm pipeline, and compromised refresh-token security incident playbook
+- [x] Document Prometheus metrics, Grafana alerts, disaster recovery, and zero-downtime refresh-lease migration strategy
+- [x] Document cross-tab and cross-replica BFF refresh coordination plus Kubernetes Helm and Ingress configuration
+- [x] Document secure BFF-held refresh-token rotation, browser session recovery, and production Docker/Nginx configuration
+- [x] Document copy-ready Vitest PKCE callback and token-expiration tests plus React Keycloak sign-in components
+- [x] Document exact PKCE state-verification and Keycloak callback code with token-expiry and interrupted-onboarding test coverage
+
 ## Frontend (React PWA)
 - [x] 24 fully functional pages with dark/light theme toggle
 - [x] Dashboard with KPI cards, risk trend chart, live ticker strip
@@ -3568,7 +3602,6 @@
 - [ ] Configure managed PostgreSQL, resume the paused expiry Heartbeat, and verify a successful idempotent execution
 - [x] Re-test the live expiry callback after successful deployment; it rejects unauthenticated callers with HTTP 403
 - [ ] Replace the stale paused Heartbeat entry (last execution Aug 15 23:04 UTC) and observe a fresh successful production run after managed PostgreSQL is configured
-- [ ] Deploy the locally validated fail-closed environment hardening after a managed PostgreSQL URL is configured
 - [x] Add a security audit view for failed Force Credit MFA authorization attempts
 - [x] Validate, checkpoint, and push all code to GitHub main (commits 967bbcd and a7c02b0)
 
@@ -3618,10 +3651,6 @@
 ## Production Deployment Recovery (Aug 15 2026)
 - [x] Recover production session signing with a strong purpose-separated root and validate startup secret requirements
 - [x] Derive a purpose-separated session-signing root from the platform Forge credential when no dedicated secret is supplied
-- [x] Remove unsafe production fallback secrets and localhost-only service defaults; production now resolves them to empty values and validates them explicitly
-- [x] Remove the unconditional local PostgreSQL override from BFF startup and require an explicit production PostgreSQL URL
-- [x] Publish fail-closed production configuration hardening to GitHub main (commits c40bdc3 and f51d798); PostgreSQL-backed CI and all CodeQL languages passed
+- [ ] Remove unsafe production fallback secrets and localhost-only service defaults
 - [x] Validate a successful production build and deployment startup
 - [x] Synchronize the recovery changes to GitHub main (commit c22f2ff)
-- [x] Complete local PostgreSQL restoration by adding the missing webhook retry queue schema required by the retry scheduler
-- [x] Add a durable Drizzle migration and schema definition for the webhook retry queue so clean environments include it

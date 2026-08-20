@@ -2,21 +2,6 @@ import { createHmac } from "node:crypto";
 
 type SessionSecretSource = Record<string, string | undefined>;
 
-/**
- * Development may use the local Compose topology. Production must receive an
- * explicit endpoint or secret rather than silently routing to localhost or a
- * known development credential.
- */
-export function resolveEnvironmentValue(
-  key: string,
-  developmentDefault = "",
-  source: SessionSecretSource = process.env,
-): string {
-  const configured = source[key];
-  if (configured) return configured;
-  return source.NODE_ENV === "production" ? "" : developmentDefault;
-}
-
 export function resolveSessionSigningSource(source: SessionSecretSource = process.env): string {
   return source.BIS_SESSION_SIGNING_SECRET ?? source.BUILT_IN_FORGE_API_KEY ?? source.JWT_SECRET ?? "";
 }
@@ -44,7 +29,7 @@ export const ENV = {
   // built-in JWT_SECRET. This value signs BFF session cookies and derives the
   // purpose-separated authenticator-seed encryption key.
   cookieSecret: sessionSigningSecret,
-  databaseUrl: process.env.BIS_DATABASE_URL ?? process.env.DATABASE_URL ?? "",
+  databaseUrl: process.env.DATABASE_URL ?? "",
   oAuthServerUrl: process.env.OAUTH_SERVER_URL ?? "",
   ownerOpenId: process.env.OWNER_OPEN_ID ?? "",
   ownerName: process.env.OWNER_NAME ?? "",
@@ -56,43 +41,43 @@ export const ENV = {
   forgeApiKey: process.env.BUILT_IN_FORGE_API_KEY ?? "",
 
   // Internal service-to-service gateway key
-  bisGatewayKey: resolveEnvironmentValue("BIS_GATEWAY_KEY", "dev-gateway-key-change-in-prod"),
+  bisGatewayKey: process.env.BIS_GATEWAY_KEY ?? "dev-gateway-key-change-in-prod",
   // AML / risk engine sidecar URLs
-  bisAmlEngineUrl: resolveEnvironmentValue("BIS_AML_ENGINE_URL", "http://localhost:8095"),
-  riskEngineUrl: resolveEnvironmentValue("RISK_ENGINE_URL", "http://localhost:8082"),
-  mlEnrichmentUrl: resolveEnvironmentValue("ML_ENRICHMENT_URL", "http://localhost:8083"),
+  bisAmlEngineUrl: process.env.BIS_AML_ENGINE_URL ?? "http://localhost:8095",
+  riskEngineUrl: process.env.RISK_ENGINE_URL ?? "http://localhost:8082",
+  mlEnrichmentUrl: process.env.ML_ENRICHMENT_URL ?? "http://localhost:8083",
   // Lakehouse writer (Python Delta Lake + DuckDB)
-  lakehouseUrl: resolveEnvironmentValue("LAKEHOUSE_URL", "http://localhost:8085"),
+  lakehouseUrl: process.env.LAKEHOUSE_URL ?? "http://localhost:8085",
   // Ollama local LLM (optional — used by OpenClaw skill engine)
-  ollamaUrl: resolveEnvironmentValue("OLLAMA_URL", "http://localhost:11434"),
+  ollamaUrl: process.env.OLLAMA_URL ?? "http://localhost:11434",
   // Biometric engine (Go sidecar)
-  biometricEngineUrl: resolveEnvironmentValue("BIOMETRIC_ENGINE_URL", "http://localhost:8084"),
+  biometricEngineUrl: process.env.BIOMETRIC_ENGINE_URL ?? "http://localhost:8084",
   // Event processor (Rust sidecar)
-  eventProcessorUrl: resolveEnvironmentValue("EVENT_PROCESSOR_URL", "http://localhost:8083"),
+  eventProcessorUrl: process.env.EVENT_PROCESSOR_URL ?? "http://localhost:8083",
   // BIS API gateway (Go)
-  bisGatewayUrl: resolveEnvironmentValue("BIS_GATEWAY_URL", "http://localhost:8081"),
+  bisGatewayUrl: process.env.BIS_GATEWAY_URL ?? "http://localhost:8081",
   // TigerBeetle ledger HTTP proxy
   tigerBeetleUrl: process.env.TIGERBEETLE_URL ?? "",
-  tigerBeetleHttpUrl: resolveEnvironmentValue("TIGERBEETLE_HTTP_URL", "http://localhost:3001"),
+  tigerBeetleHttpUrl: process.env.TIGERBEETLE_HTTP_URL ?? "http://localhost:3001",
   // TigerBeetle ledger service (Rust) — full double-entry CQRS ledger
-  tigerbeetleLedgerUrl: resolveEnvironmentValue("TIGERBEETLE_LEDGER_URL", "http://localhost:8097"),
+  tigerbeetleLedgerUrl: process.env.TIGERBEETLE_LEDGER_URL ?? "http://localhost:8097",
   // Risk stream processor (Rust) — real-time Fluvio/Kafka risk event consumer
-  riskStreamProcessorUrl: resolveEnvironmentValue("RISK_STREAM_PROCESSOR_URL", "http://localhost:8098"),
+  riskStreamProcessorUrl: process.env.RISK_STREAM_PROCESSOR_URL ?? "http://localhost:8098",
   // Compliance reporter (Python) — SAR/goAML XML generation and risk profiles
-  complianceReporterUrl: resolveEnvironmentValue("COMPLIANCE_REPORTER_URL", "http://localhost:8094"),
+  complianceReporterUrl: process.env.COMPLIANCE_REPORTER_URL ?? "http://localhost:8094",
   // OpenAppSec reporter (Go) — WAF event ingestion and incident management
-  openappsecReporterUrl: resolveEnvironmentValue("OPENAPPSEC_REPORTER_URL", "http://localhost:8095"),
+  openappsecReporterUrl: process.env.OPENAPPSEC_REPORTER_URL ?? "http://localhost:8095",
   // Compliance worker (Go/Temporal) — SAR, goAML, KYC expiry Temporal workflows
-  complianceWorkerUrl: resolveEnvironmentValue("COMPLIANCE_WORKER_URL", "http://localhost:8096"),
+  complianceWorkerUrl: process.env.COMPLIANCE_WORKER_URL ?? "http://localhost:8096",
   // WAF shared key for OpenAppSec reporter auth
-  bisWafKey: resolveEnvironmentValue("BIS_WAF_KEY", "dev-waf-key-change-in-prod"),
+  bisWafKey: process.env.BIS_WAF_KEY ?? "dev-waf-key-change-in-prod",
   // Caddy edge gateway admin API URL (internal only — never expose publicly)
-  caddyAdminUrl: resolveEnvironmentValue("CADDY_ADMIN_URL", "http://caddy:2019"),
+  caddyAdminUrl: process.env.CADDY_ADMIN_URL ?? "http://caddy:2019",
   // Caddy edge token secret — shared with OpenAppSec and APISIX for WAF bypass detection
-  bisEdgeTokenSecret: resolveEnvironmentValue("BIS_EDGE_TOKEN_SECRET", "bis-edge-dev-secret-change-in-prod"),
+  bisEdgeTokenSecret: process.env.BIS_EDGE_TOKEN_SECRET ?? "bis-edge-dev-secret-change-in-prod",
   // Caddy domain (used for redirect URIs and CORS)
-  bisDomain: resolveEnvironmentValue("BIS_DOMAIN", "bis.localhost"),
-  keycloakDomain: resolveEnvironmentValue("KEYCLOAK_DOMAIN", "auth.bis.localhost"),
+  bisDomain: process.env.BIS_DOMAIN ?? "bis.localhost",
+  keycloakDomain: process.env.KEYCLOAK_DOMAIN ?? "auth.bis.localhost",
   // Paystack payment gateway
   paystackSecretKey: process.env.PAYSTACK_SECRET_KEY ?? "",
   // CORS allowed origins (comma-separated)
@@ -102,7 +87,7 @@ export const ENV = {
   // SMS provider
   smsProvider: process.env.SMS_PROVIDER ?? "africas_talking",
   // DB SSL strict mode
-  dbSslStrict: (process.env.DB_SSL_STRICT ?? (process.env.NODE_ENV === "production" ? "true" : "false")) === "true",
+  dbSslStrict: (process.env.DB_SSL_STRICT ?? "false") === "true",
   // Server port
   port: parseInt(process.env.PORT ?? "3000", 10),
   // Session TTL (seconds)
@@ -111,30 +96,33 @@ export const ENV = {
   rateLimitMaxRequests: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS ?? "300", 10),
   rateLimitWindowSeconds: parseInt(process.env.RATE_LIMIT_WINDOW_SECONDS ?? "900", 10),
   // Grafana webhook secret
-  grafanaWebhookSecret: resolveEnvironmentValue("GRAFANA_WEBHOOK_SECRET", "bis-grafana-webhook-dev"),
+  grafanaWebhookSecret: process.env.GRAFANA_WEBHOOK_SECRET ?? "bis-grafana-webhook-dev",
   // Redis Sentinel HA
   redisSentinelPassword: process.env.REDIS_SENTINEL_PASSWORD ?? "",
   // Permify authorization engine
-  permifyUrl: resolveEnvironmentValue("PERMIFY_URL", "http://localhost:3476"),
+  permifyUrl: process.env.PERMIFY_URL ?? "http://localhost:3476",
   permifyApiKey: process.env.PERMIFY_API_KEY ?? "",
   permifyTenantId: process.env.PERMIFY_TENANT_ID ?? "t1",
+  // OPA policy decision point. Production privileged actions fail closed when
+  // this endpoint is missing or unavailable.
+  opaUrl: process.env.OPA_URL ?? "",
   // Africa's Talking SMS gateway
-  atUsername: resolveEnvironmentValue("AT_USERNAME", "sandbox"),
+  atUsername: process.env.AT_USERNAME ?? "sandbox",
   atApiKey: process.env.AT_API_KEY ?? "",
   // Termii SMS gateway (fallback)
   termiiApiKey: process.env.TERMII_API_KEY ?? "",
   // Keycloak admin credentials (for admin API calls)
-  keycloakAdminUser: resolveEnvironmentValue("KEYCLOAK_ADMIN_USER", "admin"),
+  keycloakAdminUser: process.env.KEYCLOAK_ADMIN_USER ?? "admin",
   keycloakAdminPassword: process.env.KEYCLOAK_ADMIN_PASSWORD ?? "",
   // Additional BIS service aliases (some files use different env var names)
-  bisKycServiceUrl: resolveEnvironmentValue("BIS_KYC_SERVICE_URL", "http://localhost:8089"),
-  bisVerifierUrl: resolveEnvironmentValue("BIS_VERIFIER_URL", "http://localhost:8090"),
-  bisLexIntakeUrl: resolveEnvironmentValue("BIS_LEX_INTAKE_URL", "http://localhost:8087"),
-  ollamaAdapterUrl: resolveEnvironmentValue("OLLAMA_ADAPTER_URL", "http://localhost:8086"),
-  gatewayUrl: resolveEnvironmentValue("GATEWAY_URL", "http://localhost:8081"),
+  bisKycServiceUrl: process.env.BIS_KYC_SERVICE_URL ?? "http://localhost:8089",
+  bisVerifierUrl: process.env.BIS_VERIFIER_URL ?? "http://localhost:8090",
+  bisLexIntakeUrl: process.env.BIS_LEX_INTAKE_URL ?? "http://localhost:8087",
+  ollamaAdapterUrl: process.env.OLLAMA_ADAPTER_URL ?? "http://localhost:8086",
+  gatewayUrl: process.env.GATEWAY_URL ?? "http://localhost:8081",
 
   // Audit HMAC secret (falls back to JWT_SECRET for dev convenience)
-  auditHmacSecret: process.env.AUDIT_HMAC_SECRET || sessionSigningSecret || resolveEnvironmentValue("AUDIT_HMAC_SECRET", "bis-audit-hmac-dev"),
+  auditHmacSecret: process.env.AUDIT_HMAC_SECRET ?? sessionSigningSecret ?? "bis-audit-hmac-dev",
   // LLM/Forge URL (alias for forgeApiUrl, used in health checks)
   llmUrl: process.env.BUILT_IN_FORGE_API_URL ?? "",
   // Gateway / verification engine
@@ -155,24 +143,24 @@ export const ENV = {
   youverifyBaseUrl: process.env.YOUVERIFY_BASE_URL ?? "https://api.youverify.co/v2",
 
   // Keycloak IDP
-  keycloakUrl: resolveEnvironmentValue("KEYCLOAK_URL", "http://keycloak:8080"),
-  keycloakRealm: resolveEnvironmentValue("KEYCLOAK_REALM", "bis-platform"),
-  keycloakClientId: resolveEnvironmentValue("KEYCLOAK_CLIENT_ID", "bis-platform"),
+  keycloakUrl: process.env.KEYCLOAK_URL ?? "http://keycloak:8080",
+  keycloakRealm: process.env.KEYCLOAK_REALM ?? "bis-platform",
+  keycloakClientId: process.env.KEYCLOAK_CLIENT_ID ?? "bis-platform",
   keycloakClientSecret: process.env.KEYCLOAK_CLIENT_SECRET ?? "",
 
   // Temporal workflow engine
-  temporalHost: resolveEnvironmentValue("TEMPORAL_HOST", "temporal:7233"),
+  temporalHost: process.env.TEMPORAL_HOST ?? "temporal:7233",
   temporalNamespace: process.env.TEMPORAL_NAMESPACE ?? "default",
 
   // Redis cache / session store
   // Single-node: REDIS_URL=redis://host:6379
   // Sentinel HA: REDIS_SENTINELS=host1:26379,host2:26379 + REDIS_SENTINEL_NAME=mymaster
-  redisUrl: resolveEnvironmentValue("REDIS_URL", "redis://redis:6379"),
+  redisUrl: process.env.REDIS_URL ?? "redis://redis:6379",
   redisSentinels: process.env.REDIS_SENTINELS ?? "",
   redisSentinelName: process.env.REDIS_SENTINEL_NAME ?? "mymaster",
 
   // ClickHouse OLAP warm-tier
-  clickhouseUrl: resolveEnvironmentValue("CLICKHOUSE_URL", "http://localhost:8123"),
+  clickhouseUrl: process.env.CLICKHOUSE_URL ?? "http://localhost:8123",
   clickhouseDatabase: process.env.CLICKHOUSE_DATABASE ?? "bis_warehouse",
   clickhouseUser: process.env.CLICKHOUSE_USER ?? "default",
   clickhousePassword: process.env.CLICKHOUSE_PASSWORD ?? "",
@@ -190,7 +178,7 @@ export const ENV = {
   vapidPrivateKey: process.env.VAPID_PRIVATE_KEY ?? "",
   vapidSubject: process.env.VAPID_SUBJECT ?? "mailto:admin@bis-platform.com",
   // Sanctions webhook shared secret (HMAC-SHA256)
-  sanctionsWebhookSecret: resolveEnvironmentValue("SANCTIONS_WEBHOOK_SECRET", "bis-sanctions-webhook-dev"),
+  sanctionsWebhookSecret: process.env.SANCTIONS_WEBHOOK_SECRET ?? "bis-sanctions-webhook-dev",
   // Notifications
   slackWebhookUrl: process.env.SLACK_WEBHOOK_URL ?? "",
   smtpHost: process.env.SMTP_HOST ?? "smtp.sendgrid.net",
@@ -237,6 +225,7 @@ export function validateEnv(): void {
     ["BIS_WAF_KEY", ENV.bisWafKey, "WAF key uses insecure dev default — change before production"],
     ["CADDY_ADMIN_URL", ENV.caddyAdminUrl, "Caddy admin API defaults to caddy:2019 — dynamic config updates unavailable"],
     ["BIS_EDGE_TOKEN_SECRET", ENV.bisEdgeTokenSecret, "Caddy edge token uses insecure dev default — change before production"],
+    ["OPA_URL", ENV.opaUrl, "Privileged policy decisions fail closed in production"],
   ];
 
   const missing = required.filter(([, v]) => !v).map(([k]) => k);
