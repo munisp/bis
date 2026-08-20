@@ -160,6 +160,12 @@ routes:
     plugins:
       jwt-auth:
         header: Authorization
+      opa:
+        host: "http://opa:8181"
+        policy: "bis/authz"
+        timeout: 1000
+        keepalive: true
+        with_route: true
       limit-count:
         count: 60
         time_window: 60
@@ -188,6 +194,36 @@ routes:
         buffer_duration: 60
         max_retry_count: 3
         retry_delay: 1
+
+  - id: privileged-gateway-admin
+    name: "Privileged Gateway Administration"
+    uri: /v1/admin/*
+    methods: [GET, POST, PATCH, PUT, DELETE]
+    upstream_id: go-gateway
+    plugins:
+      openid-connect:
+        bearer_only: true
+        realm: bis
+        client_id: bis-gateway
+        discovery: "${KEYCLOAK_URL}/realms/bis/.well-known/openid-configuration"
+      opa:
+        host: "http://opa:8181"
+        policy: "bis/authz"
+        timeout: 1000
+        keepalive: true
+        with_route: true
+      limit-conn:
+        conn: 5
+        burst: 0
+        default_conn_delay: 0.1
+      limit-req:
+        rate: 5
+        burst: 2
+        key: remote_addr
+        rejected_code: 429
+      request-id:
+        header_name: X-BIS-Request-ID
+        include_in_response: true
 
   # ── Python Risk Engine ────────────────────────────────────────────────────────
   - id: py-risk
