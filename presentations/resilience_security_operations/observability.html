@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    * { box-sizing: border-box; margin: 0; }
+    .slide-container { width: 1280px; min-height: 720px; background: #FFFFFF; color: #1A1A3A; font-family: "Courier New", monospace; display: grid; grid-template-columns: repeat(12, 1fr); grid-template-rows: 116px 494px 110px; }
+    .header { grid-column: 1 / 13; border-bottom: 1px solid #1A1A3A; display: flex; align-items: end; justify-content: space-between; padding-left: 44px; padding-right: 44px; padding-top: 28px; }
+    h1 { font-size: 39px; letter-spacing: -1.7px; margin-bottom: 24px; }
+    .index { color: #FF5A00; font-size: 18px; margin-bottom: 28px; }
+    .visual { grid-column: 1 / 6; grid-row: 2; border-right: 1px solid #1A1A3A; background: #E0E0EB; display: flex; flex-direction: column; justify-content: center; align-items: center; padding-top: 24px; }
+    .visual img { width: 460px; height: 260px; object-fit: contain; border: 1px solid #1A1A3A; background: #FFFFFF; }
+    .caption { width: 460px; font-size: 14px; line-height: 1.35; padding-top: 18px; color: #40405D; }
+    .caption span { color: #FF5A00; }
+    .lanes { grid-column: 6 / 13; grid-row: 2; display: grid; grid-template-rows: repeat(3, 1fr); }
+    .lane { border-bottom: 1px solid #1A1A3A; display: grid; grid-template-columns: 110px 1fr; }
+    .lane:last-child { border-bottom: 0; }
+    .lane-index { background: #1A1A3A; color: #FF5A00; font-size: 19px; display: flex; align-items: center; justify-content: center; }
+    .lane-copy { padding-left: 28px; padding-right: 34px; padding-top: 31px; }
+    .lane-copy h2 { font-size: 24px; margin-bottom: 12px; }
+    .lane-copy p { font-size: 17px; line-height: 1.37; color: #40405D; }
+    .footer { grid-column: 1 / 13; grid-row: 3; border-top: 1px solid #1A1A3A; background: #1A1A3A; color: #FFFFFF; display: grid; grid-template-columns: 255px 1fr; }
+    .footer-label { color: #FF5A00; border-right: 1px solid #E0E0EB; display: flex; align-items: center; justify-content: center; font-size: 16px; }
+    .footer-copy { display: flex; align-items: center; padding-left: 32px; padding-right: 32px; font-size: 18px; line-height: 1.35; }
+  </style>
+</head>
+<body>
+  <div class="slide-container">
+    <header class="header"><h1>OBSERVABILITY SHOWS USER PAIN AND CONTAINMENT</h1><div class="index">[06]</div></header>
+    <section class="visual">
+      <img src="/home/ubuntu/upload/search_images/QGg88C0FaNys.jpg" alt="Disaster recovery dashboard visual reference" />
+      <div class="caption"><span>[CONTEXT]</span> Operational dashboards should support investigation; alert decisions remain tied to the BFF’s bounded refresh and health signals.</div>
+    </section>
+    <section class="lanes">
+      <div class="lane"><div class="lane-index">[01]</div><div class="lane-copy"><h2>USER-IMPACT SIGNALS</h2><p>Track refresh outcome, refresh duration, provider-unavailable count, lease contention, BFF readiness, and PostgreSQL health. Measure the contract that users experience—not only pod liveness.</p></div></div>
+      <div class="lane"><div class="lane-index">[02]</div><div class="lane-copy"><h2>ALERT ON SUSTAINED FAILURE</h2><p>Page when user-visible refresh failures remain above the approved threshold for the configured duration. Warn earlier on rising contention, circuit-open state, and scrape degradation.</p></div></div>
+      <div class="lane"><div class="lane-index">[03]</div><div class="lane-copy"><h2>KEEP LABELS SAFE</h2><p>Use bounded labels such as outcome and provider category. Never emit user ID, session ID, token, email, authorization code, PKCE verifier, or raw provider error text.</p></div></div>
+    </section>
+    <footer class="footer"><div class="footer-label">TELEMETRY RULE</div><div class="footer-copy">Metrics prove containment and recovery. Logs preserve a redacted correlation trail. Neither becomes a second token store.</div></footer>
+  </div>
+</body>
+</html>
