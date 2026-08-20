@@ -4,12 +4,14 @@
   "enabled": true,
   "sslRequired": "external",
   "registrationAllowed": false,
+  "registrationEmailAsUsername": true,
   "loginWithEmailAllowed": true,
   "duplicateEmailsAllowed": false,
+  "verifyEmail": true,
   "resetPasswordAllowed": true,
   "editUsernameAllowed": false,
   "bruteForceProtected": true,
-  "permanentLockout": false,
+  "permanentLockout": true,
   "maxFailureWaitSeconds": 900,
   "minimumQuickLoginWaitSeconds": 60,
   "waitIncrementSeconds": 60,
@@ -18,8 +20,24 @@
   "failureFactor": 5,
   "accessTokenLifespan": 300,
   "accessTokenLifespanForImplicitFlow": 900,
-  "ssoSessionIdleTimeout": 1800,
-  "ssoSessionMaxLifespan": 36000,
+  "accessCodeLifespan": 60,
+  "ssoSessionIdleTimeout": 900,
+  "ssoSessionMaxLifespan": 28800,
+  "offlineSessionIdleTimeout": 2592000,
+  "offlineSessionMaxLifespanEnabled": true,
+  "offlineSessionMaxLifespan": 7776000,
+  "revokeRefreshToken": true,
+  "refreshTokenMaxReuse": 0,
+  "otpPolicyType": "totp",
+  "otpPolicyAlgorithm": "HmacSHA256",
+  "otpPolicyDigits": 6,
+  "otpPolicyPeriod": 30,
+  "otpPolicyLookAheadWindow": 1,
+  "browserFlow": "browser-mfa",
+  "eventsEnabled": true,
+  "eventsListeners": ["jboss-logging"],
+  "adminEventsEnabled": true,
+  "adminEventsDetailsEnabled": true,
   "roles": {
     "realm": [
       {
@@ -56,11 +74,11 @@
       "authorizationServicesEnabled": false,
       "redirectUris": [
         "http://localhost:3000/*",
-        "https://*.manus.space/*"
+        "https://bisintelsys-nignptxr.manus.space/*"
       ],
       "webOrigins": [
         "http://localhost:3000",
-        "https://*.manus.space"
+        "https://bisintelsys-nignptxr.manus.space"
       ],
       "protocol": "openid-connect",
       "defaultClientScopes": [
@@ -165,25 +183,48 @@
       ]
     }
   ],
-  "users": [
+  "requiredActions": [
     {
-      "username": "admin@bis.ng",
-      "email": "admin@bis.ng",
-      "firstName": "BIS",
-      "lastName": "Admin",
+      "alias": "CONFIGURE_TOTP",
+      "name": "Configure OTP",
+      "providerId": "CONFIGURE_TOTP",
       "enabled": true,
-      "emailVerified": true,
-      "credentials": [
-        {
-          "type": "password",
-          "value": "admin_dev_password",
-          "temporary": true
-        }
-      ],
-      "realmRoles": [
-        "bis-admin"
+      "defaultAction": true,
+      "priority": 10
+    },
+    {
+      "alias": "VERIFY_EMAIL",
+      "name": "Verify Email",
+      "providerId": "VERIFY_EMAIL",
+      "enabled": true,
+      "defaultAction": true,
+      "priority": 20
+    }
+  ],
+  "authenticationFlows": [
+    {
+      "alias": "browser-mfa",
+      "description": "Password and TOTP browser flow for BIS",
+      "providerId": "basic-flow",
+      "topLevel": true,
+      "builtIn": false,
+      "authenticationExecutions": [
+        { "authenticator": "auth-cookie", "requirement": "ALTERNATIVE", "priority": 10, "authenticatorFlow": false, "userSetupAllowed": false },
+        { "authenticator": "identity-provider-redirector", "requirement": "ALTERNATIVE", "priority": 20, "authenticatorFlow": false, "userSetupAllowed": false },
+        { "authenticator": "forms", "requirement": "REQUIRED", "priority": 30, "authenticatorFlow": true, "flowAlias": "forms-mfa", "userSetupAllowed": false }
+      ]
+    },
+    {
+      "alias": "forms-mfa",
+      "description": "Username/password and required TOTP",
+      "providerId": "basic-flow",
+      "topLevel": false,
+      "builtIn": false,
+      "authenticationExecutions": [
+        { "authenticator": "auth-username-password-form", "requirement": "REQUIRED", "priority": 10, "authenticatorFlow": false, "userSetupAllowed": false },
+        { "authenticator": "auth-otp-form", "requirement": "REQUIRED", "priority": 20, "authenticatorFlow": false, "userSetupAllowed": false }
       ]
     }
   ],
-  "passwordPolicy": ""
+  "passwordPolicy": "length(14) and digits(1) and lowerCase(1) and upperCase(1) and specialChars(1) and passwordHistory(12)"
 }
