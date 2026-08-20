@@ -3,9 +3,7 @@ import { resolveEnvironmentValue } from "./_core/env";
 
 describe("production environment defaults", () => {
   it("retains local service defaults only in development", () => {
-    expect(resolveEnvironmentValue("RISK_ENGINE_URL", "http://localhost:8082", { NODE_ENV: "development" })).toBe(
-      "http://localhost:8082",
-    );
+    expect(resolveEnvironmentValue("RISK_ENGINE_URL", "http://localhost:8082", { NODE_ENV: "development" })).toBe("http://localhost:8082");
   });
 
   it("does not synthesize localhost endpoints or development secrets in production", () => {
@@ -16,11 +14,6 @@ describe("production environment defaults", () => {
   });
 
   it("preserves explicitly supplied production configuration", () => {
-    expect(
-      resolveEnvironmentValue("RISK_ENGINE_URL", "http://localhost:8082", {
-        NODE_ENV: "production",
-        RISK_ENGINE_URL: "https://risk.internal.example",
-      }),
-    ).toBe("https://risk.internal.example");
+    expect(resolveEnvironmentValue("RISK_ENGINE_URL", "http://localhost:8082", { NODE_ENV: "production", RISK_ENGINE_URL: "https://risk.internal.example" })).toBe("https://risk.internal.example");
   });
 });
