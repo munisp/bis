@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    * { box-sizing: border-box; margin: 0; }
+    .slide-container { width: 1280px; min-height: 720px; background: #FFFFFF; color: #1A1A3A; font-family: "Courier New", monospace; display: grid; grid-template-columns: repeat(12, 1fr); grid-template-rows: 116px 404px 200px; }
+    .header { grid-column: 1 / 13; border-bottom: 1px solid #1A1A3A; display: flex; align-items: end; justify-content: space-between; padding-left: 44px; padding-right: 44px; padding-top: 28px; }
+    h1 { font-size: 39px; letter-spacing: -1.8px; margin-bottom: 24px; }
+    .index { color: #FF5A00; font-size: 18px; margin-bottom: 27px; }
+    .timeline { grid-column: 1 / 13; display: grid; grid-template-columns: repeat(4, 1fr); padding-left: 42px; padding-right: 42px; padding-top: 44px; }
+    .phase { border: 1px solid #1A1A3A; border-right: 0; min-height: 290px; padding-left: 23px; padding-right: 21px; padding-top: 24px; position: relative; }
+    .phase:last-child { border-right: 1px solid #1A1A3A; }
+    .phase.active { background: #1A1A3A; color: #FFFFFF; }
+    .num { color: #FF5A00; font-size: 17px; margin-bottom: 34px; }
+    h2 { font-size: 25px; line-height: 1.04; margin-bottom: 20px; }
+    .copy { font-size: 15px; line-height: 1.38; color: #40405D; }
+    .active .copy { color: #E0E0EB; }
+    .gate { border-top: 1px solid #1A1A3A; background: #E0E0EB; grid-column: 1 / 13; display: grid; grid-template-columns: 3fr 1fr; }
+    .gate-copy { padding-left: 44px; padding-right: 30px; padding-top: 42px; }
+    .gate-copy h3 { font-size: 23px; margin-bottom: 14px; }
+    .gate-copy p { font-size: 18px; line-height: 1.35; }
+    .gate-mark { background: #FF5A00; color: #1A1A3A; border-left: 1px solid #1A1A3A; display: flex; align-items: center; justify-content: center; text-align: center; padding-left: 26px; padding-right: 26px; font-size: 22px; font-weight: bold; line-height: 1.2; }
+  </style>
+</head>
+<body>
+  <div class="slide-container">
+    <header class="header"><h1>DEPLOY SCHEMA CHANGE AS AN EXPAND–CONTRACT PROGRAM</h1><div class="index">[08]</div></header>
+    <section class="timeline">
+      <article class="phase"><div class="num">[01]</div><h2>EXPAND</h2><p class="copy">Add nullable lease, version, epoch, and revocation fields. Build non-blocking indexes concurrently. Old replicas remain valid.</p></article>
+      <article class="phase"><div class="num">[02]</div><h2>BACKFILL</h2><p class="copy">Populate new fields in small, idempotent batches. Monitor lag, lock waits, invalid indexes, and batch error ratio.</p></article>
+      <article class="phase active"><div class="num">[03]</div><h2>ACTIVATE</h2><p class="copy">Deploy dual-compatible BFF replicas. Canary the lease feature flag. Compare refresh outcomes before requiring new fields.</p></article>
+      <article class="phase"><div class="num">[04]</div><h2>CONTRACT</h2><p class="copy">Remove legacy behavior only after zero legacy traffic, restore rehearsal, synthetic checks, audit review, and rollback window expiry.</p></article>
+    </section>
+    <section class="gate">
+      <div class="gate-copy"><h3>THE GATE IS EVIDENCE, NOT TIME</h3><p>Each phase advances only when the previous state is reversible, observed, and compatible with every live BFF replica and active session family.</p></div>
+      <div class="gate-mark">NO<br>DESTRUCTIVE<br>DDL IN THE<br>HOT PATH</div>
+    </section>
+  </div>
+</body>
+</html>

@@ -1,0 +1,14 @@
+# Refresh Operations Research Notes
+
+- Keycloak's persistent user session feature stores sessions in its database and can load a session from the database when it is absent from memory; token refresh and logout increase database activity and latency sensitivity. Source: https://www.keycloak.org/2024/06/persistent-user-sessions-in-preview
+- GitHub Actions can obtain short-lived cloud credentials through OIDC after a cloud trust relationship is configured, avoiding long-lived cloud deployment credentials stored as workflow secrets. Source: https://docs.github.com/en/actions/concepts/security/openid-connect
+- Prometheus metric labels must avoid high-cardinality values such as user IDs and email addresses. Source: https://prometheus.io/docs/practices/naming/
+- Alerting should emphasize actionable, user-impacting symptoms. Source: https://prometheus.io/docs/practices/alerting/
+- PostgreSQL `CREATE INDEX CONCURRENTLY` permits concurrent writers but cannot run inside a transaction block and may leave an invalid index on failure. Source: https://www.postgresql.org/docs/current/sql-createindex.html
+- Chaos Mesh `NetworkChaos` supports directed partition, network emulation, and bandwidth faults selected by Kubernetes labels and namespaces. Source: https://chaos-mesh.org/docs/simulate-network-chaos-on-kubernetes/
+- Litmus network latency experiments support destination host/IP targeting and note that network degradation may not make a pod unhealthy without an application-appropriate probe; alerts should therefore validate user-visible impact. Source: https://litmuschaos.github.io/litmus/experiments/categories/pods/pod-network-latency/
+- Google SRE's example postmortem records a summary, impact, root causes, trigger, resolution, detection, action items, lessons learned, a UTC timeline, and supporting evidence. Source: https://sre.google/sre-book/example-postmortem/
+- OpenTelemetry context propagation carries context across service and execution boundaries, and SDKs can correlate logs with trace/span IDs; W3C TraceContext is the default propagator. Source: https://opentelemetry.io/docs/concepts/context-propagation/
+- The ingress-nginx hardening guide calls out controller trust boundaries, TLS, hiding server information, rejecting or customizing error handling, restricted annotation use, and careful timeout/keepalive configuration. Source: https://kubernetes.github.io/ingress-nginx/deploy/hardening-guide/
+- The OpenTelemetry Collector composes receivers, processors, exporters, extensions, and pipelines; the standard OTLP receiver exposes gRPC 4317 and HTTP 4318, while health check and exporter queue settings are configured as explicit components. Source: https://opentelemetry.io/docs/collector/configuration/
+- Grafana Tempo's span metrics processor derives request, error, and duration RED metrics from ingested tracing data for metrics-based alerting. Source: https://grafana.com/docs/tempo/latest/metrics-from-traces/span-metrics/
