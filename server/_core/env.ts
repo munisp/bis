@@ -2,6 +2,20 @@ import { createHmac } from "node:crypto";
 
 type SessionSecretSource = Record<string, string | undefined>;
 
+/**
+ * Retains explicit configuration everywhere, permits local defaults only during
+ * development, and fails closed for absent production service endpoints/secrets.
+ */
+export function resolveEnvironmentValue(
+  name: string,
+  developmentDefault: string,
+  source: SessionSecretSource = process.env,
+): string {
+  const explicit = source[name];
+  if (explicit) return explicit;
+  return source.NODE_ENV === "production" ? "" : developmentDefault;
+}
+
 export function resolveSessionSigningSource(source: SessionSecretSource = process.env): string {
   return source.BIS_SESSION_SIGNING_SECRET ?? source.BUILT_IN_FORGE_API_KEY ?? source.JWT_SECRET ?? "";
 }
@@ -41,21 +55,21 @@ export const ENV = {
   forgeApiKey: process.env.BUILT_IN_FORGE_API_KEY ?? "",
 
   // Internal service-to-service gateway key
-  bisGatewayKey: process.env.BIS_GATEWAY_KEY ?? "dev-gateway-key-change-in-prod",
+  bisGatewayKey: resolveEnvironmentValue("BIS_GATEWAY_KEY", "dev-gateway-key-change-in-prod"),
   // AML / risk engine sidecar URLs
-  bisAmlEngineUrl: process.env.BIS_AML_ENGINE_URL ?? "http://localhost:8095",
-  riskEngineUrl: process.env.RISK_ENGINE_URL ?? "http://localhost:8082",
-  mlEnrichmentUrl: process.env.ML_ENRICHMENT_URL ?? "http://localhost:8083",
+  bisAmlEngineUrl: resolveEnvironmentValue("BIS_AML_ENGINE_URL", "http://localhost:8095"),
+  riskEngineUrl: resolveEnvironmentValue("RISK_ENGINE_URL", "http://localhost:8082"),
+  mlEnrichmentUrl: resolveEnvironmentValue("ML_ENRICHMENT_URL", "http://localhost:8083"),
   // Lakehouse writer (Python Delta Lake + DuckDB)
-  lakehouseUrl: process.env.LAKEHOUSE_URL ?? "http://localhost:8085",
+  lakehouseUrl: resolveEnvironmentValue("LAKEHOUSE_URL", "http://localhost:8085"),
   // Ollama local LLM (optional — used by OpenClaw skill engine)
-  ollamaUrl: process.env.OLLAMA_URL ?? "http://localhost:11434",
+  ollamaUrl: resolveEnvironmentValue("OLLAMA_URL", "http://localhost:11434"),
   // Biometric engine (Go sidecar)
-  biometricEngineUrl: process.env.BIOMETRIC_ENGINE_URL ?? "http://localhost:8084",
+  biometricEngineUrl: resolveEnvironmentValue("BIOMETRIC_ENGINE_URL", "http://localhost:8084"),
   // Event processor (Rust sidecar)
-  eventProcessorUrl: process.env.EVENT_PROCESSOR_URL ?? "http://localhost:8083",
+  eventProcessorUrl: resolveEnvironmentValue("EVENT_PROCESSOR_URL", "http://localhost:8083"),
   // BIS API gateway (Go)
-  bisGatewayUrl: process.env.BIS_GATEWAY_URL ?? "http://localhost:8081",
+  bisGatewayUrl: resolveEnvironmentValue("BIS_GATEWAY_URL", "http://localhost:8081"),
   // TigerBeetle ledger HTTP proxy
   tigerBeetleUrl: process.env.TIGERBEETLE_URL ?? "",
   tigerBeetleHttpUrl: process.env.TIGERBEETLE_HTTP_URL ?? "http://localhost:3001",
@@ -70,11 +84,11 @@ export const ENV = {
   // Compliance worker (Go/Temporal) — SAR, goAML, KYC expiry Temporal workflows
   complianceWorkerUrl: process.env.COMPLIANCE_WORKER_URL ?? "http://localhost:8096",
   // WAF shared key for OpenAppSec reporter auth
-  bisWafKey: process.env.BIS_WAF_KEY ?? "dev-waf-key-change-in-prod",
+  bisWafKey: resolveEnvironmentValue("BIS_WAF_KEY", "dev-waf-key-change-in-prod"),
   // Caddy edge gateway admin API URL (internal only — never expose publicly)
-  caddyAdminUrl: process.env.CADDY_ADMIN_URL ?? "http://caddy:2019",
+  caddyAdminUrl: resolveEnvironmentValue("CADDY_ADMIN_URL", "http://caddy:2019"),
   // Caddy edge token secret — shared with OpenAppSec and APISIX for WAF bypass detection
-  bisEdgeTokenSecret: process.env.BIS_EDGE_TOKEN_SECRET ?? "bis-edge-dev-secret-change-in-prod",
+  bisEdgeTokenSecret: resolveEnvironmentValue("BIS_EDGE_TOKEN_SECRET", "bis-edge-dev-secret-change-in-prod"),
   // Caddy domain (used for redirect URIs and CORS)
   bisDomain: process.env.BIS_DOMAIN ?? "bis.localhost",
   keycloakDomain: process.env.KEYCLOAK_DOMAIN ?? "auth.bis.localhost",
@@ -107,7 +121,7 @@ export const ENV = {
   // this endpoint is missing or unavailable.
   opaUrl: process.env.OPA_URL ?? "",
   // Africa's Talking SMS gateway
-  atUsername: process.env.AT_USERNAME ?? "sandbox",
+  atUsername: resolveEnvironmentValue("AT_USERNAME", "sandbox"),
   atApiKey: process.env.AT_API_KEY ?? "",
   // Termii SMS gateway (fallback)
   termiiApiKey: process.env.TERMII_API_KEY ?? "",
