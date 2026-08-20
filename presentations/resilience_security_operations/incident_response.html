@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    * { box-sizing: border-box; margin: 0; }
+    .slide-container { width: 1280px; min-height: 720px; background: #FFFFFF; color: #1A1A3A; font-family: "Courier New", monospace; display: grid; grid-template-columns: repeat(12, 1fr); grid-template-rows: 116px 508px 96px; }
+    .header { grid-column: 1 / 13; border-bottom: 1px solid #1A1A3A; display: flex; align-items: end; justify-content: space-between; padding-left: 44px; padding-right: 44px; padding-top: 28px; }
+    h1 { font-size: 37px; letter-spacing: -1.55px; margin-bottom: 25px; }
+    .index { color: #FF5A00; font-size: 18px; margin-bottom: 28px; }
+    .ladder { grid-column: 1 / 9; grid-row: 2; display: grid; grid-template-rows: repeat(3, 1fr); border-right: 1px solid #1A1A3A; }
+    .step { display: grid; grid-template-columns: 120px 1fr 190px; border-bottom: 1px solid #1A1A3A; }
+    .step:last-child { border-bottom: 0; }
+    .step-id { background: #1A1A3A; color: #FF5A00; display: flex; align-items: center; justify-content: center; font-size: 23px; }
+    .step-copy { padding-left: 28px; padding-right: 25px; padding-top: 27px; }
+    .step-copy h2 { font-size: 23px; margin-bottom: 12px; }
+    .step-copy p { font-size: 16px; line-height: 1.34; color: #40405D; }
+    .scope { border-left: 1px solid #1A1A3A; padding-left: 18px; padding-right: 16px; padding-top: 30px; }
+    .scope .label { color: #FF5A00; font-size: 14px; margin-bottom: 12px; letter-spacing: 1px; }
+    .scope .value { font-size: 15px; line-height: 1.3; }
+    .evidence { grid-column: 9 / 13; grid-row: 2; background: #E0E0EB; display: flex; flex-direction: column; padding-left: 28px; padding-right: 28px; padding-top: 38px; }
+    .evidence h2 { font-size: 25px; line-height: 1.08; margin-bottom: 28px; }
+    .evidence .tag { color: #FF5A00; font-size: 15px; margin-bottom: 16px; letter-spacing: 1px; }
+    .evidence p { font-size: 16px; line-height: 1.37; color: #40405D; border-top: 1px solid #1A1A3A; padding-top: 17px; margin-top: 16px; }
+    .footer { grid-column: 1 / 13; grid-row: 3; border-top: 1px solid #1A1A3A; background: #1A1A3A; color: #FFFFFF; display: flex; align-items: center; padding-left: 44px; padding-right: 44px; font-size: 18px; line-height: 1.35; }
+    .footer span { color: #FF5A00; margin-right: 16px; }
+  </style>
+</head>
+<body>
+  <div class="slide-container">
+    <header class="header"><h1>CONTAIN REFRESH-TOKEN COMPROMISE AT THE SMALLEST SAFE SCOPE</h1><div class="index">[10]</div></header>
+    <section class="ladder">
+      <article class="step"><div class="step-id">[01]</div><div class="step-copy"><h2>REVOKE ONE SESSION FAMILY</h2><p>Clear the lease, increment version, mark the row revoked, terminate the matching Keycloak session, and expire the browser cookie. Preserve the account while scope is known.</p></div><div class="scope"><div class="label">SCOPE</div><div class="value">One user<br>one device chain<br>one provider session</div></div></article>
+      <article class="step"><div class="step-id">[02]</div><div class="step-copy"><h2>FREEZE REFRESH WHEN SCOPE IS UNCERTAIN</h2><p>Temporarily stop refresh issuance for the affected cohort. Do not repeat ambiguous provider calls, delete evidence, or expand to global logout before triage confirms necessity.</p></div><div class="scope"><div class="label">SCOPE</div><div class="value">Targeted cohort<br>bounded window<br>incident-controlled</div></div></article>
+      <article class="step"><div class="step-id">[03]</div><div class="step-copy"><h2>EXECUTE GLOBAL CONTAINMENT</h2><p>For key exposure or broad replay, increment the global session epoch, revoke active rows, rotate signing and encryption roots, terminate provider sessions, and force reauthentication.</p></div><div class="scope"><div class="label">SCOPE</div><div class="value">All sessions<br>dual approval<br>executive incident</div></div></article>
+    </section>
+    <aside class="evidence"><div class="tag">[ PRESERVE EVIDENCE ]</div><h2>CONTAINMENT MUST NOT DESTROY THE INVESTIGATION</h2><p>Capture immutable audit events, correlation IDs, affected session-family identifiers, deployment revision, policy decision, and operator approval chain.</p><p>Never copy token values, PKCE material, ciphertext, KMS output, or raw provider responses into tickets, chat, dashboards, or drill artifacts.</p></aside>
+    <footer class="footer"><span>OPERATING RULE:</span> Revoke narrowly when evidence supports it. Escalate globally only through documented authority, immutable audit, and a customer communication plan.</footer>
+  </div>
+</body>
+</html>

@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    * { box-sizing: border-box; margin: 0; }
+    .slide-container { width: 1280px; min-height: 720px; background: #FFFFFF; color: #1A1A3A; font-family: "Courier New", monospace; display: grid; grid-template-columns: repeat(12, 1fr); grid-template-rows: 126px 1fr 114px; }
+    .header { grid-column: 1 / 13; border-bottom: 1px solid #1A1A3A; display: flex; align-items: end; justify-content: space-between; padding-left: 44px; padding-right: 44px; padding-top: 32px; }
+    h1 { font-size: 40px; letter-spacing: -1.8px; margin-bottom: 26px; }
+    .index { color: #FF5A00; font-size: 18px; margin-bottom: 30px; }
+    .grid { grid-column: 1 / 13; display: grid; grid-template-columns: repeat(3, 1fr); }
+    .principle { border-right: 1px solid #1A1A3A; padding-left: 42px; padding-right: 34px; padding-top: 54px; }
+    .principle:last-child { border-right: 0; }
+    .num { color: #FF5A00; font-size: 20px; margin-bottom: 42px; }
+    h2 { font-size: 30px; line-height: 1.05; margin-bottom: 26px; }
+    p { font-size: 19px; line-height: 1.42; color: #40405D; }
+    .summary { grid-column: 1 / 13; border-top: 1px solid #1A1A3A; background: #1A1A3A; color: #FFFFFF; display: flex; align-items: center; padding-left: 44px; padding-right: 44px; font-size: 25px; line-height: 1.25; }
+    .summary span { color: #FF5A00; margin-right: 18px; }
+  </style>
+</head>
+<body>
+  <div class="slide-container">
+    <header class="header"><h1>THE OPERATING OBJECTIVE: FAIL CLOSED, RECOVER PREDICTABLY</h1><div class="index">[02]</div></header>
+    <main class="grid">
+      <section class="principle"><div class="num">[01]</div><h2>SERVER-OWNED<br>TOKENS</h2><p>The browser holds only a short-lived, hardened BIS cookie. Refresh tokens, PKCE verifiers, and provider exchanges remain inside the BFF.</p></section>
+      <section class="principle"><div class="num">[02]</div><h2>EXPLICIT<br>OUTAGE POLICY</h2><p>Only approved local-session routes may continue during provider loss. New login, refresh, and fresh-assurance actions return bounded availability errors.</p></section>
+      <section class="principle"><div class="num">[03]</div><h2>SERIALIZED<br>REFRESH</h2><p>Every rotation is a database-coordinated lease transaction. Multiple tabs and replicas cannot replay or race a single token chain.</p></section>
+    </main>
+    <footer class="summary"><span>BOUNDARY:</span> A session is never extended because a browser retried; it is extended only after the BFF verifies, leases, rotates, and records the event.</footer>
+  </div>
+</body>
+</html>

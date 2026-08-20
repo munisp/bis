@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    * { box-sizing: border-box; margin: 0; }
+    .slide-container { width: 1280px; min-height: 720px; background: #FFFFFF; color: #1A1A3A; font-family: "Courier New", monospace; display: grid; grid-template-columns: 455px 1fr; grid-template-rows: 116px 500px 104px; }
+    .header { grid-column: 1 / 3; border-bottom: 1px solid #1A1A3A; display: flex; align-items: end; justify-content: space-between; padding-left: 42px; padding-right: 42px; padding-top: 26px; }
+    h1 { font-size: 38px; letter-spacing: -1.5px; margin-bottom: 25px; }
+    .index { color: #FF5A00; font-size: 18px; margin-bottom: 28px; }
+    .visual { grid-column: 1; grid-row: 2; background: #E0E0EB; border-right: 1px solid #1A1A3A; display: flex; flex-direction: column; align-items: center; justify-content: center; padding-top: 22px; }
+    .visual img { width: 390px; height: 220px; object-fit: contain; border: 1px solid #1A1A3A; background: #FFFFFF; }
+    .visual p { width: 390px; padding-top: 18px; font-size: 14px; line-height: 1.35; color: #40405D; }
+    .visual p span { color: #FF5A00; }
+    .gates { grid-column: 2; grid-row: 2; display: grid; grid-template-rows: repeat(3, 1fr); }
+    .gate { display: grid; grid-template-columns: 118px 1fr 155px; border-bottom: 1px solid #1A1A3A; }
+    .gate:last-child { border-bottom: 0; }
+    .gate-id { background: #1A1A3A; color: #FF5A00; display: flex; justify-content: center; align-items: center; font-size: 20px; }
+    .gate-copy { padding-left: 28px; padding-right: 22px; padding-top: 30px; }
+    .gate-copy h2 { font-size: 25px; margin-bottom: 12px; }
+    .gate-copy p { font-size: 16px; line-height: 1.37; color: #40405D; }
+    .evidence { border-left: 1px solid #1A1A3A; display: flex; align-items: center; justify-content: center; text-align: center; padding-left: 15px; padding-right: 15px; font-size: 14px; line-height: 1.3; color: #1A1A3A; }
+    .evidence strong { color: #FF5A00; }
+    .footer { grid-column: 1 / 3; grid-row: 3; border-top: 1px solid #1A1A3A; background: #1A1A3A; color: #FFFFFF; display: flex; align-items: center; padding-left: 42px; padding-right: 42px; font-size: 19px; line-height: 1.35; }
+    .footer span { color: #FF5A00; margin-right: 16px; }
+  </style>
+</head>
+<body>
+  <div class="slide-container">
+    <header class="header"><h1>OPERATIONAL READINESS IS A CHAIN OF VERIFIABLE GATES</h1><div class="index">[11]</div></header>
+    <section class="visual">
+      <img src="/home/ubuntu/upload/search_images/gKrvFDUbQ6kb.jpg" alt="Disaster management dashboard visual reference" />
+      <p><span>[OPERATIONS VIEW]</span> Dashboards organize evidence; they do not replace the synthetic checks, approvals, and recovery proofs behind each gate.</p>
+    </section>
+    <section class="gates">
+      <article class="gate"><div class="gate-id">[01]</div><div class="gate-copy"><h2>CHAOS READINESS</h2><p>Staging scope, finite fault expiry, synthetic users, alert receiver, abort criteria, lease cleanup, and post-fault login recovery are all proven.</p></div><div class="evidence"><strong>PROOF</strong><br>Bounded outage drill evidence</div></article>
+      <article class="gate"><div class="gate-id">[02]</div><div class="gate-copy"><h2>SECURITY READINESS</h2><p>Targeted and global invalidation drills produce immutable audit events, preserve evidence, avoid credential leakage, and respect dual-control policy.</p></div><div class="evidence"><strong>PROOF</strong><br>Revocation + audit trail</div></article>
+      <article class="gate"><div class="gate-id">[03]</div><div class="gate-copy"><h2>PROMOTION READINESS</h2><p>Backups, restore rehearsal, OIDC trust validation, migration phase evidence, rollout health, and accountable communications owners are approved.</p></div><div class="evidence"><strong>PROOF</strong><br>Signed release checklist</div></article>
+    </section>
+    <footer class="footer"><span>RELEASE RULE:</span> A control is production-ready only when its preventive mechanism, negative test, observable signal, rollback action, and accountable owner are all present.</footer>
+  </div>
+</body>
+</html>
