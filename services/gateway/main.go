@@ -1256,6 +1256,7 @@ func handleNIPNameEnquiry(w http.ResponseWriter, r *http.Request) {
 
 func newRouter() http.Handler {
 	mux := http.NewServeMux()
+	privilegedControls := insiderpkg.New(insiderpkg.DefaultConfig())
 
 	protected := func(h http.HandlerFunc) http.HandlerFunc {
 		return chain(h, corsMiddleware, loggingMiddleware, authMiddleware)
@@ -1330,7 +1331,10 @@ func newRouter() http.Handler {
 		mux.HandleFunc("/dapr/subscribe/payment-events", daprpkg.HandlePaymentEvent)
 	// Insider Threat — Dapr subscription handler
 	mux.HandleFunc("/dapr/subscribe/insider-events", insiderpkg.HandleInsiderEvent)
-	return mux
+	// Enforcement is intentionally wrapped around the live router rather than
+	// only exported as a library. The middleware is a no-op for non-privileged
+	// paths but fails closed for /v1/admin and /v1/force-credit requests.
+	return privilegedControls.AnomalousIPBlock(privilegedControls.PrivilegedAccess(mux))
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
