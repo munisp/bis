@@ -23,7 +23,7 @@ redis           = { version = "1.5", features = ["tokio-comp", "connection-manag
 tower-http      = { version = "0.6", features = ["cors", "trace"] }
 thiserror       = "1"
 anyhow          = "1"
-prometheus      = { version = "0.13", features = ["process"] }
+prometheus      = { version = "0.14", features = ["process"] }
 axum-prometheus = "0.7"
 base64          = "0.23"
 hmac            = "0.12"
