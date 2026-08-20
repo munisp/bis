@@ -1,7 +1,7 @@
 fastapi==0.141.1
 uvicorn[standard]==0.32.1
 pydantic==2.10.3
-numpy==1.26.4
+numpy==2.5.2
 opencv-python-headless==4.10.0.84
 mediapipe==1.0.0
 insightface==1.0.1
