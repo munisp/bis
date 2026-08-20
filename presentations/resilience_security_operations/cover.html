@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    * { box-sizing: border-box; margin: 0; }
+    .slide-container { width: 1280px; min-height: 720px; background: #1A1A3A; color: #FFFFFF; font-family: "Courier New", monospace; display: grid; grid-template-columns: repeat(12, 1fr); grid-template-rows: 88px 1fr 88px; }
+    .topline { grid-column: 1 / 13; border-bottom: 1px solid #E0E0EB; display: flex; align-items: center; justify-content: space-between; padding-left: 42px; padding-right: 42px; font-size: 16px; letter-spacing: 1.5px; }
+    .accent { color: #FF5A00; }
+    .hero { grid-column: 1 / 9; grid-row: 2; border-right: 1px solid #E0E0EB; display: flex; flex-direction: column; justify-content: center; padding-left: 64px; padding-right: 52px; }
+    .eyebrow { color: #FF5A00; font-size: 20px; letter-spacing: 2px; margin-bottom: 22px; }
+    h1 { font-size: 65px; line-height: 0.98; letter-spacing: -3px; max-width: 690px; }
+    .subtitle { margin-top: 28px; font-size: 22px; line-height: 1.35; color: #E0E0EB; max-width: 625px; }
+    .side { grid-column: 9 / 13; grid-row: 2; display: grid; grid-template-rows: 1fr 1fr 1fr; }
+    .side-block { border-bottom: 1px solid #E0E0EB; padding-left: 28px; padding-right: 28px; display: flex; flex-direction: column; justify-content: center; }
+    .side-block:last-child { border-bottom: 0; }
+    .label { color: #FF5A00; font-size: 14px; letter-spacing: 1.4px; margin-bottom: 10px; }
+    .value { font-size: 20px; line-height: 1.25; }
+    .footer { grid-column: 1 / 13; grid-row: 3; border-top: 1px solid #E0E0EB; display: flex; align-items: center; justify-content: space-between; padding-left: 42px; padding-right: 42px; font-size: 16px; color: #E0E0EB; }
+  </style>
+</head>
+<body>
+  <div class="slide-container">
+    <div class="topline"><span>BIS / OPERATIONS BRIEF</span><span class="accent">[01]</span></div>
+    <section class="hero">
+      <div class="eyebrow">IDENTITY RESILIENCE &amp; SECURITY OPERATIONS</div>
+      <h1>FAIL CLOSED.<br>RECOVER<br>PREDICTABLY.</h1>
+      <p class="subtitle">Keycloak outage recovery, safe delivery, and refresh-session defense for the BIS platform.</p>
+    </section>
+    <aside class="side">
+      <div class="side-block"><div class="label">SCOPE</div><div class="value">Identity outage<br>refresh containment</div></div>
+      <div class="side-block"><div class="label">OPERATING MODEL</div><div class="value">BFF-owned tokens<br>staging-only chaos</div></div>
+      <div class="side-block"><div class="label">PREPARED</div><div class="value">Manus AI<br>August 2026</div></div>
+    </aside>
+    <div class="footer"><span>DRILLS / CI-CD / INCIDENT RESPONSE</span><span>INTERNAL OPERATIONS REFERENCE</span></div>
+  </div>
+</body>
+</html>

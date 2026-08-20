@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    * { box-sizing: border-box; margin: 0; }
+    .slide-container { width: 1280px; min-height: 720px; background: #1A1A3A; color: #FFFFFF; font-family: "Courier New", monospace; display: grid; grid-template-columns: repeat(12, 1fr); grid-template-rows: 100px 1fr 156px; }
+    .top { grid-column: 1 / 13; border-bottom: 1px solid #E0E0EB; display: flex; justify-content: space-between; align-items: center; padding-left: 44px; padding-right: 44px; font-size: 16px; letter-spacing: 1.4px; }
+    .index { color: #FF5A00; }
+    .main { grid-column: 2 / 12; grid-row: 2; display: flex; flex-direction: column; justify-content: center; }
+    .eyebrow { color: #FF5A00; font-size: 19px; letter-spacing: 1.5px; margin-bottom: 25px; }
+    h1 { font-size: 58px; line-height: 0.98; letter-spacing: -2.8px; max-width: 900px; }
+    .sub { margin-top: 28px; color: #E0E0EB; font-size: 21px; line-height: 1.38; max-width: 800px; }
+    .rail { grid-column: 1 / 13; grid-row: 3; border-top: 1px solid #E0E0EB; display: grid; grid-template-columns: repeat(3, 1fr); }
+    .rail-item { border-right: 1px solid #E0E0EB; padding-left: 32px; padding-right: 26px; padding-top: 29px; }
+    .rail-item:last-child { border-right: 0; }
+    .num { color: #FF5A00; font-size: 15px; margin-bottom: 11px; }
+    .rail-item p { font-size: 16px; line-height: 1.35; }
+  </style>
+</head>
+<body>
+  <div class="slide-container">
+    <div class="top"><span>BIS / RESILIENCE DECISION</span><span class="index">[12]</span></div>
+    <main class="main">
+      <div class="eyebrow">NEXT DECISION</div>
+      <h1>MAKE RESILIENCE<br>EXECUTABLE<br>IN STAGING.</h1>
+      <p class="sub">Approve a scoped Kubernetes staging environment, implement the BFF-owned identity controls, then run one finite Keycloak partition drill with automated success and abort evidence.</p>
+    </main>
+    <footer class="rail">
+      <div class="rail-item"><div class="num">[01 / ENVIRONMENT]</div><p>Dedicated staging namespace, synthetic realm users, scoped chaos controller, and verified rollback owner.</p></div>
+      <div class="rail-item"><div class="num">[02 / CONTROLS]</div><p>PKCE, encrypted refresh storage, serialized lease, bounded telemetry, audit trail, and migration phase gates.</p></div>
+      <div class="rail-item"><div class="num">[03 / PROOF]</div><p>One finite outage drill: contract behavior, alert delivery, fault cleanup, lease cleanup, and new-session recovery.</p></div>
+    </footer>
+  </div>
+</body>
+</html>
