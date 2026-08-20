@@ -35,6 +35,7 @@ import { paymentRailsRouter } from "./paymentRails";
 import { documentVaultRouter } from "./documentVault";
 import { riskDashboardRouter } from "./riskDashboard";
 import { insiderThreatRouter } from "./insiderThreat";
+import { assertPrivilegedPolicy } from "./opaPolicy";
 import { stablecoinRouter } from "./stablecoin";
 import { ngScreeningRouter } from "./ngScreening";
 import { ngScreeningExtRouter } from "./ngScreeningWebhooks";
@@ -7245,6 +7246,7 @@ export const appRouter = router({
           auditNote: z.string().min(10, "Audit note must be at least 10 characters"),
         }))
         .mutation(async ({ input, ctx }) => {
+          const policyDecision = await assertPrivilegedPolicy({ actorId: ctx.user!.id, role: ctx.user!.role, action: "force_credit_request", reference: input.reference, amountKobo: input.amountKobo });
           const db = await getDb();
           if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
           const thresholdKobo = await getConfiguredForceCreditThresholdKobo(db);
@@ -7294,6 +7296,7 @@ export const appRouter = router({
               auditNote: input.auditNote,
               thresholdKobo,
               expiresAt,
+              policyDecision,
             })} AS json), 'admin_reconciliation', NOW())
           `);
           await db.insert(notifications).values(designatedApprovers.map((approver) => ({
@@ -7389,6 +7392,7 @@ export const appRouter = router({
             `);
             throw error;
           }
+          const policyDecision = await assertPrivilegedPolicy({ actorId: ctx.user!.id, role: ctx.user!.role, action: "force_credit_approve", mfaPassed: true, reference: mfaApproval?.reference });
           const claim = await db.execute(sql`
             UPDATE force_credit_approvals
             SET "status" = 'executing', "approverId" = ${ctx.user!.id}, "approvalNote" = ${input.approvalNote},
@@ -7441,6 +7445,7 @@ export const appRouter = router({
               approverId: ctx.user!.id,
               approvalNote: input.approvalNote,
               mfaMethod: "totp",
+              policyDecision,
               tigerBeetleTransferId: result.transferId,
             })} AS json), 'admin_reconciliation', NOW())
           `);
@@ -7450,6 +7455,7 @@ export const appRouter = router({
       rejectForceCredit: adminProcedure
         .input(z.object({ approvalId: z.number().int().positive(), rejectionNote: z.string().min(10, "Rejection note must be at least 10 characters") }))
         .mutation(async ({ input, ctx }) => {
+          const policyDecision = await assertPrivilegedPolicy({ actorId: ctx.user!.id, role: ctx.user!.role, action: "force_credit_reject" });
           const db = await getDb();
           if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
           await assertDesignatedForceCreditApprover(db, ctx.user!.id);
@@ -7469,6 +7475,7 @@ export const appRouter = router({
               tenantId: rejected.tenantId,
               amountKobo: Number(rejected.amountKobo),
               rejectionNote: input.rejectionNote,
+              policyDecision,
             })} AS json), 'admin_reconciliation', NOW())
           `);
           return { status: "rejected" as const };

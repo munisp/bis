@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    * { box-sizing: border-box; margin: 0; }
+    .slide-container { width: 1280px; min-height: 720px; background: #FFFFFF; color: #1A1A3A; font-family: "Courier New", monospace; display: grid; grid-template-columns: repeat(12, 1fr); grid-template-rows: 120px 390px 210px; }
+    .header { grid-column: 1 / 13; border-bottom: 1px solid #1A1A3A; display: flex; justify-content: space-between; align-items: end; padding-left: 44px; padding-right: 44px; padding-top: 26px; }
+    h1 { font-size: 37px; letter-spacing: -1.5px; margin-bottom: 25px; }
+    .index { font-size: 18px; color: #FF5A00; margin-bottom: 28px; }
+    .timeline { grid-column: 1 / 13; display: grid; grid-template-columns: 1fr 1fr 1fr; }
+    .phase { border-right: 1px solid #1A1A3A; padding-left: 42px; padding-right: 36px; padding-top: 42px; }
+    .phase:last-child { border-right: 0; }
+    .phase .tag { font-size: 16px; color: #FF5A00; margin-bottom: 32px; }
+    .phase h2 { font-size: 29px; line-height: 1.06; margin-bottom: 24px; }
+    .phase p { font-size: 17px; line-height: 1.4; color: #40405D; }
+    .fault { margin-top: 34px; border-top: 6px solid #FF5A00; padding-top: 16px; font-size: 16px; color: #1A1A3A; }
+    .evidence { grid-column: 1 / 13; border-top: 1px solid #1A1A3A; background: #1A1A3A; color: #FFFFFF; display: grid; grid-template-columns: 1.3fr 1fr 1fr 1fr; }
+    .evidence > div { border-right: 1px solid #E0E0EB; padding-left: 24px; padding-right: 20px; padding-top: 30px; }
+    .evidence > div:last-child { border-right: 0; }
+    .evidence .label { color: #FF5A00; font-size: 14px; margin-bottom: 12px; }
+    .evidence .value { font-size: 16px; line-height: 1.35; }
+  </style>
+</head>
+<body>
+  <div class="slide-container">
+    <header class="header"><h1>THE KEYCLOAK OUTAGE DRILL PROVES THE REAL USER CONTRACT</h1><div class="index">[04]</div></header>
+    <section class="timeline">
+      <article class="phase"><div class="tag">[ 01 / PRE-FLIGHT ]</div><h2>START FROM A KNOWN-GOOD STATE</h2><p>Use only synthetic realm users. Confirm BFF replicas, PostgreSQL, Keycloak readiness, alert routing, baseline login, and no active chaos resource.</p><div class="fault">EVIDENCE: baseline synthetic sign-in + lease-clean check</div></article>
+      <article class="phase"><div class="tag">[ 02 / FAULT ]</div><h2>PARTITION BFF → KEYCLOAK</h2><p>Apply a finite, directed staging-only network partition. The controller selects BFF labels and only the Keycloak service boundary.</p><div class="fault">FAULT: 5-minute egress partition; no production namespace</div></article>
+      <article class="phase"><div class="tag">[ 03 / RECOVERY ]</div><h2>REMOVE FAULT, PROVE A NEW TRANSACTION</h2><p>Delete the fault, run a brand-new refresh and login, then prove expired leases are absent. A timed-out provider request is never replayed.</p><div class="fault">EVIDENCE: post-chaos sign-in + clean lease state</div></article>
+    </section>
+    <footer class="evidence">
+      <div><div class="label">USER CONTRACT</div><div class="value">Existing local sessions follow explicit route policy; no implicit extension.</div></div>
+      <div><div class="label">NEW LOGIN</div><div class="value">Fails boundedly during fault; succeeds after recovery.</div></div>
+      <div><div class="label">FRESH ASSURANCE</div><div class="value">High-risk actions deny while provider freshness is unavailable.</div></div>
+      <div><div class="label">ALERTING</div><div class="value">User-impact and dependency alerts fire and resolve with evidence.</div></div>
+    </footer>
+  </div>
+</body>
+</html>

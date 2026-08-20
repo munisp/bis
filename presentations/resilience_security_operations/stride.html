@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    * { box-sizing: border-box; margin: 0; }
+    .slide-container { width: 1280px; min-height: 720px; background: #FFFFFF; color: #1A1A3A; font-family: "Courier New", monospace; display: grid; grid-template-columns: 300px 1fr 300px; grid-template-rows: 116px 1fr 92px; }
+    .header { grid-column: 1 / 4; border-bottom: 1px solid #1A1A3A; display: flex; align-items: end; justify-content: space-between; padding-left: 42px; padding-right: 42px; padding-top: 27px; }
+    h1 { font-size: 38px; letter-spacing: -1.4px; margin-bottom: 26px; }
+    .index { color: #FF5A00; font-size: 18px; margin-bottom: 28px; }
+    .visual { border-right: 1px solid #1A1A3A; display: flex; flex-direction: column; align-items: center; justify-content: center; padding-left: 12px; padding-right: 12px; padding-top: 12px; }
+    .visual img { width: 240px; height: 140px; object-fit: contain; }
+    .visual p { font-size: 14px; line-height: 1.35; margin-top: 12px; color: #40405D; text-align: center; }
+    .visual strong { color: #FF5A00; }
+    .matrix { display: grid; grid-template-rows: 52px repeat(5, 91px); }
+    .matrix-head { display: grid; grid-template-columns: 165px 1fr; border-bottom: 1px solid #1A1A3A; background: #E0E0EB; font-size: 15px; letter-spacing: 1px; }
+    .matrix-head div { padding-left: 18px; padding-top: 14px; }
+    .row { display: grid; grid-template-columns: 165px 1fr; border-bottom: 1px solid #1A1A3A; }
+    .row:last-child { border-bottom: 0; }
+    .kind { background: #1A1A3A; color: #FFFFFF; padding-left: 18px; padding-top: 12px; font-size: 18px; line-height: 1.1; }
+    .threat { padding-left: 18px; padding-right: 18px; padding-top: 12px; font-size: 16px; line-height: 1.25; }
+    .controls { border-left: 1px solid #1A1A3A; display: grid; grid-template-rows: 52px repeat(5, 91px); }
+    .control-head { background: #FF5A00; color: #FFFFFF; padding-left: 18px; padding-top: 12px; font-size: 15px; letter-spacing: 1px; }
+    .control { border-bottom: 1px solid #1A1A3A; padding-left: 18px; padding-right: 18px; padding-top: 12px; font-size: 15px; line-height: 1.28; }
+    .control:last-child { border-bottom: 0; }
+    .footer { grid-column: 1 / 4; grid-row: 3; border-top: 1px solid #1A1A3A; background: #1A1A3A; color: #FFFFFF; display: flex; align-items: center; padding-left: 42px; padding-right: 42px; font-size: 18px; line-height: 1.35; }
+    .footer span { color: #FF5A00; margin-right: 16px; }
+  </style>
+</head>
+<body>
+  <div class="slide-container">
+    <header class="header"><h1>STRIDE FOCUSES DEFENSES ON REFRESH TRUST BOUNDARIES</h1><div class="index">[07]</div></header>
+    <aside class="visual">
+      <img src="/home/ubuntu/upload/search_images/8UwtaQSUq8up.png" alt="Kubernetes security illustration" />
+      <p><strong>[BOUNDARY]</strong><br>BROWSER → PROXY → BFF → KEYCLOAK / POSTGRESQL / KMS</p>
+    </aside>
+    <section class="matrix">
+      <div class="matrix-head"><div>STRIDE AREA</div><div>REFRESH-SESSION THREAT</div></div>
+      <div class="row"><div class="kind">[S]<br>SPOOFING</div><div class="threat">Forged BIS cookie, callback mix-up, issuer substitution, or subject mismatch.</div></div>
+      <div class="row"><div class="kind">[T]<br>TAMPERING</div><div class="threat">Altered lease/version row, token ciphertext, redirect state, or feature flag.</div></div>
+      <div class="row"><div class="kind">[I]<br>DISCLOSURE</div><div class="threat">Refresh material exposed through browser storage, logs, metrics, traces, or backup access.</div></div>
+      <div class="row"><div class="kind">[D]<br>DENIAL</div><div class="threat">Refresh storm, lease starvation, provider outage, callback flood, or database failover.</div></div>
+      <div class="row"><div class="kind">[E]<br>PRIVILEGE</div><div class="threat">Token subject/role drift permits an unauthorized privileged action after rotation.</div></div>
+    </section>
+    <aside class="controls">
+      <div class="control-head">PRIMARY CONTROL</div>
+      <div class="control">PKCE S256, one-time state/nonce, strict issuer/audience/subject validation, hardened cookie.</div>
+      <div class="control">AEAD encryption, PostgreSQL compare-and-swap lease, least-privilege roles, immutable provenance.</div>
+      <div class="control">No browser refresh token; redaction; bounded metric labels; private telemetry and encrypted backups.</div>
+      <div class="control">Single-flight lease, timeout, circuit breaker, rate limit, HPA/PDB, staging-only fault policy.</div>
+      <div class="control">Subject binding, fresh assurance for sensitive actions, role revalidation, dual control for global invalidation.</div>
+    </aside>
+    <footer class="footer"><span>DECISION RULE:</span> Every identified threat must map to an enforceable BFF control, a negative test, and an observable signal—otherwise it remains an unmanaged risk.</footer>
+  </div>
+</body>
+</html>
