@@ -12,6 +12,6 @@ pytesseract==0.3.13
 Pillow==11.0.0
 redis[asyncio]==5.2.1
 kafka-python==2.0.2
-prometheus-client==0.21.1
+prometheus-client==0.26.0
 python-multipart==0.0.32
 httpx==0.28.1
