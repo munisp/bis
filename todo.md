@@ -12,6 +12,7 @@
 - [x] Document deployment prerequisites and residual limitations without claiming absolute invulnerability
 - [ ] Deploy the Caddy, OpenAppSec, APISIX, OPA, and Keycloak production topology and capture live enforcement evidence
 - [ ] Run an authorized staging DDoS and WAF validation exercise against the deployed edge controls
+- [ ] Execute the bounded authorised edge-resilience k6 scenario against staging and record latency, error-rate, correlation-ID, and rate-limit evidence
 - [x] Bind break-glass actions to OPA with required reason, independent approver, and immutable decision metadata
 - [x] Add deny-and-audit regression coverage for attribute-based privileged and break-glass policy decisions
 - [x] Wire live Go gateway privileged routes to OPA and the durable BFF break-glass audit sink before execution
