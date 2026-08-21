@@ -33,7 +33,6 @@ export const riskTierEnum = pgEnum("risk_tier", ["low", "medium", "high", "criti
 export const alertTypeEnum = pgEnum("alert_type", ["sanctions_hit", "pep_detected", "risk_threshold", "velocity", "adverse_media", "field_report", "system"]);
 export const severityEnum = pgEnum("severity", ["info", "low", "medium", "high", "critical"]);
 export const kycStatusEnum = pgEnum("kyc_status", ["pending", "processing", "passed", "failed", "review"]);
-export const webhookRetryStatusEnum = pgEnum("webhook_retry_status", ["pending", "dead_letter", "completed", "resolved"]);
 export const auditCategoryEnum = pgEnum("audit_category", ["investigation", "kyc", "alert", "report", "user", "system", "api"]);
 export const auditResultEnum = pgEnum("audit_result", ["success", "warning", "failure"]);
 export const taskTypeEnum = pgEnum("task_type", ["address_verification", "biometric_capture", "document_collection", "surveillance", "interview"]);
@@ -2023,28 +2022,27 @@ export const billingTopups = pgTable("billing_topups", {
 export type BillingTopup = typeof billingTopups.$inferSelect;
 export type InsertBillingTopup = typeof billingTopups.$inferInsert;
 
-// ─── Webhook Retry Queue (durable Paystack credit recovery) ───────────────────
-// A reference is unique so a provider retry cannot create multiple retry rows for
-// the same ledger credit. Reconciliation updates can append operator notes to
-// lastError while preserving the original retry and resolution history.
+// ─── Durable Webhook Credit Retry Queue ───────────────────────────────────────
+// One provider reference has one retry state machine. A bounded processing lease
+// protects the ledger from concurrent retry workers after transient failures.
 export const webhookRetryQueue = pgTable("webhook_retry_queue", {
-  id: serial("id").primaryKey(),
+  id: bigint("id", { mode: "number" }).primaryKey().generatedByDefaultAsIdentity(),
   reference: varchar("reference", { length: 256 }).notNull().unique(),
   tenantId: varchar("tenantId", { length: 64 }).notNull(),
   amountKobo: integer("amountKobo").notNull(),
   attempts: integer("attempts").notNull().default(0),
   nextRetryAt: timestamp("nextRetryAt").notNull(),
-  status: webhookRetryStatusEnum("status").notNull().default("pending"),
+  status: varchar("status", { length: 32 }).notNull().default("pending"),
+  leasedAt: timestamp("leasedAt"),
   lastError: text("lastError"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-},
-  (table) => ({
-    webhook_retry_reference_idx: index("webhook_retry_reference_idx").on(table.reference),
-    webhook_retry_due_idx: index("webhook_retry_due_idx").on(table.status, table.nextRetryAt),
-    webhook_retry_tenant_idx: index("webhook_retry_tenant_idx").on(table.tenantId),
-  }));
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+}, (table) => ({
+  webhook_retry_due_idx: index("webhook_retry_due_idx").on(table.status, table.nextRetryAt),
+  webhook_retry_lease_idx: index("webhook_retry_lease_idx").on(table.status, table.leasedAt),
+  webhook_retry_amount_positive: check("webhook_retry_amount_positive", sql`${table.amountKobo} > 0`),
+}));
 export type WebhookRetryQueueItem = typeof webhookRetryQueue.$inferSelect;
-export type InsertWebhookRetryQueueItem = typeof webhookRetryQueue.$inferInsert;
 
 // ─── Velocity Blocks (Fluvio sliding-window audit) ────────────────────────────
 // One row per blocked transfer attempt. Compliance officers review these in the

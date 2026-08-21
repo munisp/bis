@@ -77,6 +77,10 @@ function mapStatus(s: string): TransferStatus {
   return map[s] ?? "pending";
 }
 
+function tenantCondition(tenantId: number | null) {
+  return tenantId === null ? undefined : eq(transactions.tenantId, tenantId);
+}
+
 // ── Router ─────────────────────────────────────────────────────────────────────
 
 export const paymentRailsRouter = router({
@@ -108,7 +112,7 @@ export const paymentRailsRouter = router({
       // ── Idempotency: if a transaction with this reference already exists, return it ──
       if (input.reference) {
         const [existing] = await db.select().from(transactions)
-          .where(eq(transactions.txRef, input.reference)).limit(1);
+          .where(and(eq(transactions.txRef, input.reference), tenantCondition(ctx.tenantId))).limit(1);
         if (existing) {
           return { success: true, txRef: existing.txRef, id: existing.id, status: existing.status as any, rail: getActiveRail(), idempotent: true };
         }
@@ -165,6 +169,7 @@ export const paymentRailsRouter = router({
         .insert(transactions)
         .values({
           txRef,
+          tenantId: ctx.tenantId,
           type: "nip" as const,
           status: dbStatus,
           amount: amountKobo,
@@ -216,7 +221,7 @@ export const paymentRailsRouter = router({
       limit: z.number().min(1).max(200).default(50),
       cursor: z.string().optional(), // last transfer ID for cursor pagination
     }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
 
@@ -245,11 +250,12 @@ export const paymentRailsRouter = router({
         updatedAt: transactions.updatedAt,
       })
         .from(transactions)
-        .where(
+        .where(and(
           dbStatuses
             ? sql`${transactions.status} IN (${sql.join(dbStatuses.map(s => sql`${s}`), sql`, `)})`
-            : undefined
-        )
+            : undefined,
+          tenantCondition(ctx.tenantId),
+        ))
         .orderBy(desc(transactions.createdAt))
         .limit(input.limit + 1); // fetch one extra to determine if there's a next page
 
@@ -272,12 +278,12 @@ export const paymentRailsRouter = router({
    */
   getTransfer: protectedProcedure
     .input(z.object({ txRef: z.string() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
 
       const [row] = await db.select().from(transactions)
-        .where(eq(transactions.txRef, input.txRef))
+        .where(and(eq(transactions.txRef, input.txRef), tenantCondition(ctx.tenantId)))
         .limit(1);
 
       if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Transfer not found" });
@@ -292,7 +298,7 @@ export const paymentRailsRouter = router({
    * Queue and batch statistics for the payment pipeline.
    * Reflects the 1B payments lesson: monitor batch depth and TPS in real time.
    */
-  getQueueStats: protectedProcedure.query(async () => {
+  getQueueStats: protectedProcedure.query(async ({ ctx }) => {
     const db = await getDb();
     if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
 
@@ -302,27 +308,30 @@ export const paymentRailsRouter = router({
 
     const [pendingResult] = await db.select({ count: sql<number>`count(*)` })
       .from(transactions)
-      .where(sql`${transactions.status} IN ('pending', 'under_review', 'flagged')`);
+      .where(and(sql`${transactions.status} IN ('pending', 'under_review', 'flagged')`, tenantCondition(ctx.tenantId)));
 
     const [postedResult] = await db.select({ count: sql<number>`count(*)` })
       .from(transactions)
       .where(and(
         eq(transactions.status, "completed"),
-        gte(transactions.createdAt, last24h)
+        gte(transactions.createdAt, last24h),
+        tenantCondition(ctx.tenantId)
       ));
 
     const [failedResult] = await db.select({ count: sql<number>`count(*)` })
       .from(transactions)
       .where(and(
         eq(transactions.status, "failed"),
-        gte(transactions.createdAt, last24h)
+        gte(transactions.createdAt, last24h),
+        tenantCondition(ctx.tenantId)
       ));
 
     const [reversedResult] = await db.select({ count: sql<number>`count(*)` })
       .from(transactions)
       .where(and(
         eq(transactions.status, "reversed"),
-        gte(transactions.createdAt, last24h)
+        gte(transactions.createdAt, last24h),
+        tenantCondition(ctx.tenantId)
       ));
 
     // TPS estimate: count completed transactions in last 60 seconds
@@ -330,7 +339,8 @@ export const paymentRailsRouter = router({
       .from(transactions)
       .where(and(
         eq(transactions.status, "completed"),
-        gte(transactions.createdAt, last1min)
+        gte(transactions.createdAt, last1min),
+        tenantCondition(ctx.tenantId)
       ));
 
     const pendingCount = Number(pendingResult?.count ?? 0);
@@ -491,7 +501,7 @@ export const paymentRailsRouter = router({
       accountId: z.string().min(1).max(64),
       historyLimit: z.number().min(1).max(200).default(50),
     }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
 
@@ -500,9 +510,9 @@ export const paymentRailsRouter = router({
         postedDebits: sql<number>`coalesce(sum(case when ${transactions.status} = 'completed' then ${transactions.amount} else 0 end), 0)`,
         pendingDebits: sql<number>`coalesce(sum(case when ${transactions.status} in ('pending','under_review','flagged') then ${transactions.amount} else 0 end), 0)`,
         currency: transactions.currency,
-      })
+        })
         .from(transactions)
-        .where(eq(transactions.originatorAccount, input.accountId))
+        .where(and(eq(transactions.originatorAccount, input.accountId), tenantCondition(ctx.tenantId)))
         .groupBy(transactions.originatorName, transactions.currency)
         .limit(1);
 
@@ -511,9 +521,9 @@ export const paymentRailsRouter = router({
         postedCredits: sql<number>`coalesce(sum(case when ${transactions.status} = 'completed' then ${transactions.amount} else 0 end), 0)`,
         pendingCredits: sql<number>`coalesce(sum(case when ${transactions.status} in ('pending','under_review','flagged') then ${transactions.amount} else 0 end), 0)`,
         currency: transactions.currency,
-      })
+        })
         .from(transactions)
-        .where(eq(transactions.beneficiaryAccount, input.accountId))
+        .where(and(eq(transactions.beneficiaryAccount, input.accountId), tenantCondition(ctx.tenantId)))
         .groupBy(transactions.beneficiaryName, transactions.currency)
         .limit(1);
 
@@ -541,9 +551,12 @@ export const paymentRailsRouter = router({
         idempotencyKey: transactions.idempotencyKey,
       })
         .from(transactions)
-        .where(or(
-          eq(transactions.originatorAccount, input.accountId),
-          eq(transactions.beneficiaryAccount, input.accountId),
+        .where(and(
+          or(
+            eq(transactions.originatorAccount, input.accountId),
+            eq(transactions.beneficiaryAccount, input.accountId),
+          ),
+          tenantCondition(ctx.tenantId),
         ))
         .orderBy(desc(transactions.createdAt))
         .limit(input.historyLimit);
@@ -560,7 +573,8 @@ export const paymentRailsRouter = router({
           or(
             eq(transactions.originatorAccount, input.accountId),
             eq(transactions.beneficiaryAccount, input.accountId),
-          )
+          ),
+          tenantCondition(ctx.tenantId)
         ))
         .groupBy(sql`DATE(${transactions.createdAt})`)
         .orderBy(sql`DATE(${transactions.createdAt})`);
@@ -712,11 +726,12 @@ export const paymentRailsRouter = router({
       search: z.string().max(100).optional(),
       accountId: z.string().max(64).optional(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
 
       const conditions: ReturnType<typeof and>[] = [];
+      if (ctx.tenantId !== null) conditions.push(eq(transactions.tenantId, ctx.tenantId) as ReturnType<typeof and>);
       if (input.status !== "all") {
         const statusMap: Record<string, string[]> = {
           pending: ["pending", "under_review", "flagged"],
@@ -820,16 +835,20 @@ export const paymentRailsRouter = router({
     .mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
-      const [tx] = await db.select().from(transactions).where(eq(transactions.txRef, input.txRef)).limit(1);
+      const [tx] = await db.select().from(transactions).where(and(
+        eq(transactions.txRef, input.txRef),
+        tenantCondition(ctx.tenantId),
+      )).limit(1);
       if (!tx) throw new TRPCError({ code: "NOT_FOUND", message: "Transfer not found" });
       if (tx.status !== "completed") throw new TRPCError({ code: "BAD_REQUEST", message: "Only completed transfers can be reversed" });
       const reversalRef = `REV-${input.txRef}-${Date.now()}`;
       await db.transaction(async (trx) => {
         await trx.update(transactions)
           .set({ status: "reversed" as any, updatedAt: new Date() })
-          .where(eq(transactions.txRef, input.txRef));
+          .where(and(eq(transactions.txRef, input.txRef), tenantCondition(ctx.tenantId)));
         await trx.insert(transactions).values({
           txRef: reversalRef,
+          tenantId: tx.tenantId,
           type: tx.type,
           amount: tx.amount,
           currency: tx.currency,
@@ -1212,7 +1231,7 @@ export const paymentRailsRouter = router({
       accountNumber: z.string().min(10).max(10).regex(/^\d{10}$/, 'Must be a 10-digit NUBAN'),
       bankCode: z.string().min(3).max(6).optional(),
     }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: 'SERVICE_UNAVAILABLE', message: 'Database unavailable' });
 
@@ -1220,7 +1239,7 @@ export const paymentRailsRouter = router({
       const asOriginator = await db
         .select({ name: transactions.originatorName })
         .from(transactions)
-        .where(eq(transactions.originatorAccount, input.accountNumber))
+        .where(and(eq(transactions.originatorAccount, input.accountNumber), tenantCondition(ctx.tenantId)))
         .limit(1);
       if (asOriginator.length > 0 && asOriginator[0].name) {
         return { accountNumber: input.accountNumber, accountName: asOriginator[0].name, bankName: 'BIS Member Bank', verified: true };
@@ -1230,7 +1249,7 @@ export const paymentRailsRouter = router({
       const asBeneficiary = await db
         .select({ name: transactions.beneficiaryName })
         .from(transactions)
-        .where(eq(transactions.beneficiaryAccount, input.accountNumber))
+        .where(and(eq(transactions.beneficiaryAccount, input.accountNumber), tenantCondition(ctx.tenantId)))
         .limit(1);
       if (asBeneficiary.length > 0 && asBeneficiary[0].name) {
         return { accountNumber: input.accountNumber, accountName: asBeneficiary[0].name, bankName: 'BIS Member Bank', verified: true };
@@ -1275,7 +1294,7 @@ export const paymentRailsRouter = router({
    */
   getWorkflowStatus: protectedProcedure
     .input(z.object({ txRef: z.string().min(1) }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
 
@@ -1291,9 +1310,9 @@ export const paymentRailsRouter = router({
         tigerBeetleId: transactions.tigerBeetleId,
         createdAt: transactions.createdAt,
         updatedAt: transactions.updatedAt,
-      })
+        })
         .from(transactions)
-        .where(eq(transactions.txRef, input.txRef))
+        .where(and(eq(transactions.txRef, input.txRef), tenantCondition(ctx.tenantId)))
         .limit(1);
 
       if (!row) throw new TRPCError({ code: 'NOT_FOUND', message: 'Transfer not found' });
@@ -1338,13 +1357,13 @@ export const paymentRailsRouter = router({
    */
   cancelWorkflow: writeProcedure
     .input(z.object({ txRef: z.string().min(1) }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
 
       const [row] = await db.select({ id: transactions.id, status: transactions.status })
         .from(transactions)
-        .where(eq(transactions.txRef, input.txRef))
+        .where(and(eq(transactions.txRef, input.txRef), tenantCondition(ctx.tenantId)))
         .limit(1);
 
       if (!row) throw new TRPCError({ code: 'NOT_FOUND', message: 'Transfer not found' });

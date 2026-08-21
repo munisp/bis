@@ -6,6 +6,7 @@
  */
 
 import { z } from "zod";
+import { createHash } from "node:crypto";
 import { router, protectedProcedure, writeProcedure } from "./_core/trpc";
 import { TRPCError } from "@trpc/server";
 import { storagePut } from "./storage";
@@ -21,6 +22,7 @@ const ACCOUNT_TENANT_PREFIX = "10000";
 
 // Ledger codes
 const LEDGER_NGN = 566; // ISO 4217 numeric for NGN
+const PENDING_TOPUP_PREFIX = "pending:";
 
 // Investigation tier pricing in kobo (1 NGN = 100 kobo)
 const TIER_AMOUNTS: Record<string, number> = {
@@ -28,6 +30,40 @@ const TIER_AMOUNTS: Record<string, number> = {
   standard: 150_000, // ₦1,500
   premium: 500_000,  // ₦5,000
 };
+
+function deterministicTopupTransferId(reference: string): string {
+  return createHash("sha256").update(`bis:topup:${reference}`).digest("hex").slice(0, 32);
+}
+
+export function assertVerifiedTopupBinding(input: {
+  expectedReference: string;
+  expectedTenantId: string;
+  verifiedReference: string;
+  verifiedTenantId?: string;
+}): void {
+  if (input.verifiedReference !== input.expectedReference) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Paystack reference mismatch" });
+  }
+  if (input.verifiedTenantId !== input.expectedTenantId) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "The verified payment is not bound to this tenant",
+    });
+  }
+}
+
+export const __billingInternals = {
+  deterministicTopupTransferId,
+  pendingTopupPrefix: PENDING_TOPUP_PREFIX,
+};
+
+export function assertBillingTenantAccess(contextTenantId: number | null, requestedTenantId: string): void {
+  // Platform administrators have an explicit null tenant scope. Every other
+  // principal must use the tenant carried by the authenticated request context.
+  if (contextTenantId !== null && String(contextTenantId) !== requestedTenantId) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Cross-tenant billing access is denied" });
+  }
+}
 
 // ─── HTTP helpers ─────────────────────────────────────────────────────────────
 
@@ -96,7 +132,10 @@ export async function creditTenantAccount(opts: {
   amountKobo: number;
   reference: string;
 }): Promise<{ transferId: string; recorded: boolean }> {
-  const transferId = `${Date.now()}-${crypto.randomUUID().replace(/-/g,'').slice(0,8)}`;
+  // The ledger transfer ID must be stable across webhook delivery, synchronous
+  // verification, reconciliation, and retry attempts. A fresh random ID here
+  // would turn an ambiguous transport failure into a duplicate credit.
+  const transferId = deterministicTopupTransferId(opts.reference);
   if (!TB_URL) {
     console.warn("[Billing] TIGERBEETLE_URL not set — credit not recorded in ledger");
     return { transferId, recorded: false };
@@ -138,7 +177,8 @@ export const billingRouter = router({
         amountKobo: z.number().int().positive().optional(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      assertBillingTenantAccess(ctx.tenantId, input.tenantId);
       const amount = input.amountKobo ?? TIER_AMOUNTS[input.tier] ?? TIER_AMOUNTS.basic;
       const transferId = crypto.randomUUID().replace(/-/g, "").slice(0, 16);
 
@@ -221,7 +261,8 @@ export const billingRouter = router({
    */
   getBalance: protectedProcedure
     .input(z.object({ tenantId: z.string().min(1) }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      assertBillingTenantAccess(ctx.tenantId, input.tenantId);
       if (!TB_URL) {
         return { tenantId: input.tenantId, balanceKobo: 0, balanceNGN: 0, available: false };
       }
@@ -265,7 +306,8 @@ export const billingRouter = router({
         reference: z.string().optional(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      assertBillingTenantAccess(ctx.tenantId, input.tenantId);
       const transferId = crypto.randomUUID().replace(/-/g, "").slice(0, 16);
 
       if (!TB_URL) {
@@ -339,6 +381,7 @@ export const billingRouter = router({
       })
     )
     .mutation(async ({ input, ctx }) => {
+      assertBillingTenantAccess(ctx.tenantId, input.tenantId);
       // Build simulated or real ledger rows
       type LedgerRow = {
         id: string;
@@ -460,6 +503,7 @@ export const billingRouter = router({
       })
     )
     .mutation(async ({ input, ctx }) => {
+      assertBillingTenantAccess(ctx.tenantId, input.tenantId);
       const PAYSTACK_KEY = ENV.paystackSecretKey;
 
       if (!PAYSTACK_KEY) {
@@ -541,7 +585,8 @@ export const billingRouter = router({
         reference: z.string().min(1),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      assertBillingTenantAccess(ctx.tenantId, input.tenantId);
       const PAYSTACK_KEY = ENV.paystackSecretKey;
 
       let amountKobo: number;
@@ -580,11 +625,12 @@ export const billingRouter = router({
 
           const data = (await res.json()) as {
             status: boolean;
-            data: {
-              status: string;
-              amount: number; // kobo
-              channel: string;
-              reference: string;
+      data: {
+            status: string;
+            amount: number; // kobo
+            channel: string;
+            reference: string;
+            metadata?: { tenant_id?: string; user_id?: string | number };
             };
           };
 
@@ -594,6 +640,13 @@ export const billingRouter = router({
               message: `Payment not successful. Status: ${data.data?.status ?? "unknown"}`,
             });
           }
+
+          assertVerifiedTopupBinding({
+            expectedReference: input.reference,
+            expectedTenantId: input.tenantId,
+            verifiedReference: data.data.reference,
+            verifiedTenantId: data.data.metadata?.tenant_id,
+          });
 
           amountKobo = data.data.amount;
           status = data.data.status;
@@ -609,27 +662,64 @@ export const billingRouter = router({
 
       // ── Idempotency guard: prevent double-credit for the same Paystack reference ──
       const db = await getDb();
-      if (db) {
-        const existing = await db.select().from(billingTopups)
-          .where(eq(billingTopups.reference, input.reference)).limit(1);
-        if (existing.length > 0) {
-          // Already processed — return the recorded values without re-crediting
-          return {
-            success: true,
-            amountKobo: existing[0].amountKobo,
-            amountNGN: existing[0].amountKobo / 100,
-            reference: input.reference,
-            channel: existing[0].channel,
-            transferId: existing[0].tbTransferId ?? `idempotent-${input.reference}`,
-            idempotent: true,
-          };
+      if (!db) {
+        throw new TRPCError({
+          code: "SERVICE_UNAVAILABLE",
+          message: "Durable top-up idempotency storage is unavailable; no ledger credit was attempted",
+        });
+      }
+
+      const existing = await db.select().from(billingTopups)
+        .where(eq(billingTopups.reference, input.reference)).limit(1);
+      if (existing.length > 0) {
+        const topup = existing[0];
+        if (topup.tenantId !== input.tenantId || topup.amountKobo !== amountKobo) {
+          throw new TRPCError({ code: "CONFLICT", message: "Payment reference is already bound to different top-up details" });
         }
+        if (topup.tbTransferId?.startsWith(PENDING_TOPUP_PREFIX) || topup.tbTransferId?.startsWith("fallback-")) {
+          throw new TRPCError({
+            code: "SERVICE_UNAVAILABLE",
+            message: "Payment is verified but its ledger posting is pending reconciliation",
+          });
+        }
+        return {
+          success: true,
+          amountKobo: topup.amountKobo,
+          amountNGN: topup.amountKobo / 100,
+          reference: input.reference,
+          channel: topup.channel,
+          transferId: topup.tbTransferId ?? deterministicTopupTransferId(input.reference),
+          idempotent: true,
+        };
+      }
+
+      const transferId = deterministicTopupTransferId(input.reference);
+      // Claim the provider reference before external side effects. The unique
+      // reference constraint is the concurrency boundary between callback and
+      // webhook delivery paths.
+      try {
+        await db.insert(billingTopups).values({
+          tenantId: input.tenantId,
+          reference: input.reference,
+          amountKobo,
+          channel,
+          tbTransferId: `${PENDING_TOPUP_PREFIX}${transferId}`,
+        });
+      } catch (error) {
+        const [claimed] = await db.select().from(billingTopups)
+          .where(eq(billingTopups.reference, input.reference)).limit(1);
+        if (claimed) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "Payment is already being processed; retry after reconciliation completes",
+          });
+        }
+        throw error;
       }
 
       // Credit the TigerBeetle account
       try {
         await ensureAccount(input.tenantId);
-        const transferId = `${Date.now()}-${crypto.randomUUID().replace(/-/g,'').slice(0,8)}`;
         await tbPost("/transfers/create", [
           {
             id: transferId,
@@ -642,16 +732,9 @@ export const billingRouter = router({
             user_data_128: input.reference,
           },
         ]);
-        // Record in billing_topups for idempotency on future retries
-        if (db) {
-          await db.insert(billingTopups).values({
-            tenantId: input.tenantId,
-            reference: input.reference,
-            amountKobo,
-            channel,
-            tbTransferId: transferId,
-          }).onConflictDoNothing();
-        }
+        await db.update(billingTopups)
+          .set({ tbTransferId: transferId })
+          .where(eq(billingTopups.reference, input.reference));
         return {
           success: true,
           amountKobo,
@@ -663,15 +746,13 @@ export const billingRouter = router({
         };
       } catch (err) {
         console.error("[Billing] verifyTopUp TigerBeetle credit error:", err);
-        // Even if TB fails, return success so we don't double-charge
-        return {
-          success: true,
-          amountKobo,
-          amountNGN: amountKobo / 100,
-          reference: input.reference,
-          channel,
-          transferId: `fallback-${Date.now()}`,
-        };
+        // The verified reference remains durably marked as pending. Returning
+        // success here would falsely represent a customer balance that the
+        // ledger did not post and would conceal a loss-of-funds condition.
+        throw new TRPCError({
+          code: "SERVICE_UNAVAILABLE",
+          message: "Payment is verified, but ledger credit is pending reconciliation",
+        });
       }
     }),
 

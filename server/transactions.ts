@@ -66,7 +66,7 @@ export const transactionsRouter = router({
       fromDate: z.string().optional(),
       toDate: z.string().optional(),
     }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
 
@@ -78,6 +78,7 @@ export const transactionsRouter = router({
       if (input.maxAmount !== undefined) conditions.push(lte(transactions.amount, input.maxAmount));
       if (input.fromDate) conditions.push(gte(transactions.valueDate, new Date(input.fromDate)));
       if (input.toDate) conditions.push(lte(transactions.valueDate, new Date(input.toDate)));
+      if (ctx.tenantId !== null) conditions.push(eq(transactions.tenantId, ctx.tenantId));
       if (input.search) {
         conditions.push(or(
           ilike(transactions.txRef, `%${input.search}%`),
@@ -100,10 +101,13 @@ export const transactionsRouter = router({
   // ─── Get Transaction ──────────────────────────────────────────────────────
   get: protectedProcedure
     .input(z.object({ id: z.number() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
-      const [row] = await db.select().from(transactions).where(eq(transactions.id, input.id));
+      const [row] = await db.select().from(transactions).where(and(
+        eq(transactions.id, input.id),
+        ...(ctx.tenantId !== null ? [eq(transactions.tenantId, ctx.tenantId)] : []),
+      ));
       if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Transaction not found" });
       return row;
     }),
@@ -152,6 +156,7 @@ export const transactionsRouter = router({
 
       const [tx] = await db.insert(transactions).values({
         txRef: txRef(),
+        tenantId: ctx.tenantId,
         idempotencyKey: input.idempotencyKey,
         type: input.txType as any,
         amount: input.amount,
@@ -192,26 +197,37 @@ export const transactionsRouter = router({
     }),
 
   // ─── Update Transaction ───────────────────────────────────────────────────
-  update: writeProcedure
+  update: adminProcedure
     .input(z.object({
       id: z.number(),
-      status: z.enum(["pending", "completed", "failed", "reversed", "flagged", "blocked", "under_review"]).optional(),
+      status: z.enum(["pending", "failed", "flagged", "blocked", "under_review"]).optional(),
       narration: z.string().optional(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
       const { id, ...data } = input;
+      const [existing] = await db.select().from(transactions).where(and(
+        eq(transactions.id, id),
+        ...(ctx.tenantId !== null ? [eq(transactions.tenantId, ctx.tenantId)] : []),
+      ));
+      if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "Transaction not found" });
+      if (existing.status === "completed" || existing.status === "reversed") {
+        throw new TRPCError({ code: "CONFLICT", message: "Settled transactions must use the authoritative reversal workflow" });
+      }
       const [tx] = await db.update(transactions)
         .set({ ...data, updatedAt: new Date() })
-        .where(eq(transactions.id, id))
+        .where(and(
+          eq(transactions.id, id),
+          ...(ctx.tenantId !== null ? [eq(transactions.tenantId, ctx.tenantId)] : []),
+        ))
         .returning();
       if (!tx) throw new TRPCError({ code: "NOT_FOUND", message: "Transaction not found" });
       return tx;
     }),
 
   // ─── Flag Transaction ─────────────────────────────────────────────────────
-  flag: writeProcedure
+  flag: adminProcedure
     .input(z.object({
       id: z.number(),
       reason: z.string().min(5),
@@ -227,7 +243,10 @@ export const transactionsRouter = router({
           narration: input.reason,
           updatedAt: new Date(),
         })
-        .where(eq(transactions.id, input.id))
+        .where(and(
+          eq(transactions.id, input.id),
+          ...(ctx.tenantId !== null ? [eq(transactions.tenantId, ctx.tenantId)] : []),
+        ))
         .returning();
       return tx;
     }),
