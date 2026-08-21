@@ -386,7 +386,11 @@ export const paymentRailsRouter = router({
         currency: transactions.currency,
         })
         .from(transactions)
-        .where(and(sql`${transactions.originatorAccount} IS NOT NULL`, tenantCondition(ctx.tenantId)))
+        .where(and(
+          sql`${transactions.originatorAccount} IS NOT NULL`,
+          ...(input.accountIds?.length ? [inArray(transactions.originatorAccount, input.accountIds)] : []),
+          tenantCondition(ctx.tenantId),
+        ))
         .groupBy(transactions.originatorAccount, transactions.originatorName, transactions.currency)
         .limit(input.limit);
 
@@ -400,7 +404,11 @@ export const paymentRailsRouter = router({
         currency: transactions.currency,
         })
         .from(transactions)
-        .where(and(sql`${transactions.beneficiaryAccount} IS NOT NULL`, tenantCondition(ctx.tenantId)))
+        .where(and(
+          sql`${transactions.beneficiaryAccount} IS NOT NULL`,
+          ...(input.accountIds?.length ? [inArray(transactions.beneficiaryAccount, input.accountIds)] : []),
+          tenantCondition(ctx.tenantId),
+        ))
         .groupBy(transactions.beneficiaryAccount, transactions.beneficiaryName, transactions.currency)
         .limit(input.limit);
 
