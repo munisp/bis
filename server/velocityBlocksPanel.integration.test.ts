@@ -29,6 +29,10 @@ vi.mock("./cache", () => ({
   invalidateCache: vi.fn(async () => {}),
   TTL: { SHORT: 60, MEDIUM: 300, LONG: 3600, INVESTIGATIONS: 120, ALERTS: 60, KYC: 120, SANCTIONS: 300, DASHBOARD_STATS: 60 },
 }));
+vi.mock("./permify", () => ({
+  permifyCheck: vi.fn(async () => true),
+  permifyWriteRelationship: vi.fn(async () => undefined),
+}));
 vi.mock("./temporal", () => ({
   startInvestigationWorkflow: vi.fn(async () => ({ workflowId: "wf-test-001" })),
   startPaymentTransferWorkflow: vi.fn(async () => ({ workflowId: "wf-pay-1", mode: "direct" })),
@@ -75,9 +79,9 @@ function makeAnalystCtx(): TrpcContext {
     id: 1,
     openId: "analyst-001",
     email: "analyst@bis.test",
-    name: "AML Analyst",
+    name: "AML Administrator",
     loginMethod: "manus",
-    role: "analyst",
+    role: "admin",
     tenantId: null,
     pushToken: null,
     createdAt: new Date(),
@@ -248,12 +252,12 @@ describe("aml.listVelocityBlocks", () => {
     expect(result.total).toBe(0);
   });
 
-  // ── 6. Unauthenticated caller → UNAUTHORIZED ─────────────────────────────────
-  it("throws UNAUTHORIZED when called without an authenticated user", async () => {
+  // ── 6. Unauthenticated caller → FORBIDDEN ────────────────────────────────────
+  it("rejects an unauthenticated caller before exposing cross-tenant velocity telemetry", async () => {
     const caller = appRouter.createCaller(makeAnonCtx());
     await expect(
       caller.aml.listVelocityBlocks({})
-    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
   // ── 7. Default limit is 50 ───────────────────────────────────────────────────

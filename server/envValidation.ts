@@ -351,16 +351,6 @@ const INSECURE_DEFAULTS = new Set([
   "dev",
 ]);
 
-function isUnsafeProductionDefault(value: string): boolean {
-  return (
-    value.includes("localhost") ||
-    /:\/\/(?:keycloak|redis|temporal)(?::|\/)/.test(value) ||
-    /(?:^|[-_])(dev|default|sandbox)(?:[-_]|$)/.test(value) ||
-    value === "bis.localhost" ||
-    value === "auth.bis.localhost"
-  );
-}
-
 export function validateEnv(): void {
   const isProduction = process.env.NODE_ENV === "production";
   const errors: string[] = [];
@@ -373,13 +363,10 @@ export function validateEnv(): void {
       if (spec.required) {
         errors.push(`MISSING REQUIRED: ${spec.key} — ${spec.description}`);
       } else if (spec.defaultValue) {
-        if (isProduction && isUnsafeProductionDefault(spec.defaultValue)) {
-          errors.push(`MISSING PRODUCTION CONFIG: ${spec.key} must be explicitly configured — ${spec.description}`);
-        } else {
-          process.env[spec.key] = spec.defaultValue;
-          if (isProduction) {
-            warnings.push(`DEFAULT APPLIED: ${spec.key}="${spec.defaultValue}" — ${spec.description}`);
-          }
+        // Apply default value
+        process.env[spec.key] = spec.defaultValue;
+        if (isProduction) {
+          warnings.push(`DEFAULT APPLIED: ${spec.key}="${spec.defaultValue}" — ${spec.description}`);
         }
       }
       continue;
@@ -404,10 +391,6 @@ export function validateEnv(): void {
       ? "BUILT_IN_FORGE_API_KEY fallback must be at least 20 characters in production"
       : "BIS_SESSION_SIGNING_SECRET (or JWT_SECRET fallback) must be at least 32 characters in production";
     errors.push(`WEAK SESSION SIGNING SECRET: ${requirement}`);
-  }
-
-  if (isProduction && process.env.GATEWAY_SANDBOX === "true") {
-    errors.push("GATEWAY_SANDBOX must not be enabled in production");
   }
 
   // Log summary

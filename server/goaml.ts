@@ -5,6 +5,7 @@
  */
 
 import { z } from "zod";
+import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure, writeProcedure, adminProcedure } from "./_core/trpc";
 import { getDb } from "./db";
 import { goamlFilings } from "../drizzle/schema";
@@ -23,7 +24,7 @@ import { startGoAmlFilingWorkflow } from "./temporal";
  * Content-Type: application/xml
  * Response: { referenceNumber: string, status: "accepted" | "rejected", errors?: string[] }
  */
-async function submitToNfiu(xmlPayload: string): Promise<{ referenceNumber: string; accepted: boolean; errors: string[] }> {
+async function submitToNfiu(xmlPayload: string, idempotencyKey: string): Promise<{ referenceNumber: string; accepted: boolean; errors: string[] }> {
   // A compliance filing must never be represented as accepted without NFIU.
   if (!ENV.goamlApiKey || !ENV.goamlInstitutionCode) {
     return {
@@ -42,6 +43,7 @@ async function submitToNfiu(xmlPayload: string): Promise<{ referenceNumber: stri
         "Authorization": `Bearer ${ENV.goamlApiKey}`,
         "X-Institution-Code": ENV.goamlInstitutionCode,
         "X-BIS-Client": "bis-platform/1.0",
+        "X-Idempotency-Key": idempotencyKey,
       },
       body: xmlPayload,
       signal: AbortSignal.timeout(30_000),
@@ -70,6 +72,16 @@ function generateFilingRef(): string {
   const ts = Date.now().toString(36).toUpperCase();
   const rand = crypto.randomUUID().replace(/-/g,'').slice(0,4).toUpperCase();
   return `STR-${ts}-${rand}`;
+}
+
+function requireTenantId(ctx: { tenantId?: number | null }): number {
+  if (ctx.tenantId === null || ctx.tenantId === undefined) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "Tenant context is required for goAML filing operations",
+    });
+  }
+  return ctx.tenantId;
 }
 
 /**
@@ -244,6 +256,7 @@ export const goamlRouter = router({
     .mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new Error("Database unavailable");
+      const tenantId = requireTenantId(ctx);
       const filingRef = generateFilingRef();
       const xml = generateGoamlXml({ filingRef, ...input });
 
@@ -265,7 +278,7 @@ export const goamlRouter = router({
           narrativeDetails: input.narrativeDetails,
           goamlXml: xml,
           status: "draft",
-          tenantId: ctx.tenantId ?? undefined,
+          tenantId,
           createdBy: ctx.user.id,
         })
         .returning();
@@ -291,14 +304,15 @@ export const goamlRouter = router({
         narrativeDetails: z.string().optional(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new Error("Database unavailable");
+      const tenantId = requireTenantId(ctx);
       const { id, ...updates } = input;
       const [existing] = await db
         .select()
         .from(goamlFilings)
-        .where(eq(goamlFilings.id, id))
+        .where(and(eq(goamlFilings.id, id), eq(goamlFilings.tenantId, tenantId)))
         .limit(1);
       if (!existing) throw new Error("Filing not found");
       if (existing.status !== "draft") throw new Error("Only draft filings can be edited");
@@ -310,29 +324,29 @@ export const goamlRouter = router({
       await db
         .update(goamlFilings)
         .set({ ...updates, goamlXml: xml, updatedAt: new Date() })
-        .where(eq(goamlFilings.id, id));
+        .where(and(eq(goamlFilings.id, id), eq(goamlFilings.tenantId, tenantId), eq(goamlFilings.status, "draft")));
 
       return { success: true };
     }),
 
-  /** Submit a draft filing to NFIU (simulated — in production calls goAML API) */
+  /** Submit a claimed draft filing to NFIU using the filing reference as an external idempotency key. */
   submit: writeProcedure
     .input(z.object({ id: z.number() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new Error("Database unavailable");
-      const [filing] = await db
-        .select()
-        .from(goamlFilings)
-        .where(eq(goamlFilings.id, input.id))
-        .limit(1);
-      if (!filing) throw new Error("Filing not found");
-      if (filing.status !== "draft") throw new Error("Only draft filings can be submitted");
+      const tenantId = requireTenantId(ctx);
+      const [filing] = await db.update(goamlFilings)
+        .set({ status: "pending_review", updatedAt: new Date() })
+        .where(and(eq(goamlFilings.id, input.id), eq(goamlFilings.tenantId, tenantId), eq(goamlFilings.status, "draft")))
+        .returning();
+      if (!filing) throw new Error("Only a tenant-owned draft filing can be submitted");
 
-      // Submit to NFIU goAML production API (falls back to simulated ref if GOAML_API_KEY not set)
-      const nfiuResult = await submitToNfiu(filing.goamlXml ?? "");
+      const nfiuResult = await submitToNfiu(filing.goamlXml ?? "", filing.filingRef);
 
       if (!nfiuResult.accepted && nfiuResult.errors.length > 0) {
+        await db.update(goamlFilings).set({ status: "draft", updatedAt: new Date() })
+          .where(and(eq(goamlFilings.id, filing.id), eq(goamlFilings.status, "pending_review")));
         throw new Error(`NFIU rejected filing: ${nfiuResult.errors.join("; ")}`);
       }
 
@@ -344,7 +358,7 @@ export const goamlRouter = router({
           submittedAt: new Date(),
           updatedAt: new Date(),
         })
-        .where(eq(goamlFilings.id, input.id));
+        .where(and(eq(goamlFilings.id, filing.id), eq(goamlFilings.tenantId, tenantId), eq(goamlFilings.status, "pending_review")));
 
       // Trigger goAML filing Temporal workflow and publish Dapr event
       startGoAmlFilingWorkflow({
@@ -353,39 +367,39 @@ export const goamlRouter = router({
         filingType: filing.reportType,
         subjectRef: filing.subjectNin ?? filing.subjectBvn ?? `GOAML-${input.id}`,
       }).catch(e => console.warn("[goAML] Temporal workflow start failed:", e));
-      publishGoamlEvent({eventType: "submitted",  filingId: input.id, filingRef: filing.filingRef, reportType: filing.reportType, status: "submitted", tenantId: filing.tenantId ?? undefined, actorId: 0 }).catch(() => {});
+      publishGoamlEvent({eventType: "submitted", filingId: input.id, filingRef: filing.filingRef, reportType: filing.reportType, status: "submitted", tenantId: filing.tenantId ?? undefined, actorId: ctx.user.id }).catch(() => {});
       return { success: true, goamlReferenceNumber: nfiuResult.referenceNumber };
     }),
 
   /** Delete a draft filing */
   delete: writeProcedure
     .input(z.object({ id: z.number() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new Error("Database unavailable");
+      const tenantId = requireTenantId(ctx);
       const [filing] = await db
         .select()
         .from(goamlFilings)
-        .where(eq(goamlFilings.id, input.id))
+        .where(and(eq(goamlFilings.id, input.id), eq(goamlFilings.tenantId, tenantId)))
         .limit(1);
       if (!filing) throw new Error("Filing not found");
-      if (filing.status === "submitted" || filing.status === "accepted") {
-        throw new Error("Submitted filings cannot be deleted");
-      }
-      await db.delete(goamlFilings).where(eq(goamlFilings.id, input.id));
+      if (filing.status !== "draft") throw new Error("Only draft filings can be deleted");
+      await db.delete(goamlFilings).where(and(eq(goamlFilings.id, input.id), eq(goamlFilings.tenantId, tenantId), eq(goamlFilings.status, "draft")));
       return { success: true };
     }),
 
   /** Download the XML payload for a filing */
   getXml: protectedProcedure
     .input(z.object({ id: z.number() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new Error("Database unavailable");
+      const tenantId = requireTenantId(ctx);
       const [filing] = await db
         .select({ goamlXml: goamlFilings.goamlXml, filingRef: goamlFilings.filingRef })
         .from(goamlFilings)
-        .where(eq(goamlFilings.id, input.id))
+        .where(and(eq(goamlFilings.id, input.id), eq(goamlFilings.tenantId, tenantId)))
         .limit(1);
       if (!filing) throw new Error("Filing not found");
       return { xml: filing.goamlXml, filingRef: filing.filingRef };
@@ -394,14 +408,15 @@ export const goamlRouter = router({
   /** Get draft filings breaching the 72-hour NFIU filing deadline */
   getOverdue: protectedProcedure
     .input(z.object({ limit: z.number().min(1).max(50).default(10) }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) return { count: 0, overdue: [] };
+      const tenantId = requireTenantId(ctx);
       const cutoff = new Date(Date.now() - 72 * 3_600_000);
       const rows = await db
         .select()
         .from(goamlFilings)
-        .where(and(eq(goamlFilings.status, 'draft'), lt(goamlFilings.createdAt, cutoff)))
+        .where(and(eq(goamlFilings.tenantId, tenantId), eq(goamlFilings.status, 'draft'), lt(goamlFilings.createdAt, cutoff)))
         .orderBy(goamlFilings.createdAt)
         .limit(input.limit);
       const now = Date.now();
@@ -429,9 +444,10 @@ export const goamlRouter = router({
         ids: z.array(z.number()).min(1).max(50),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new Error("Database unavailable");
+      const tenantId = requireTenantId(ctx);
 
       const results: Array<{
         id: number;
@@ -446,7 +462,7 @@ export const goamlRouter = router({
           const [filing] = await db
             .select()
             .from(goamlFilings)
-            .where(eq(goamlFilings.id, id))
+            .where(and(eq(goamlFilings.id, id), eq(goamlFilings.tenantId, tenantId)))
             .limit(1);
 
           if (!filing) {
@@ -458,11 +474,23 @@ export const goamlRouter = router({
             continue;
           }
 
+          const [claimed] = await db
+            .update(goamlFilings)
+            .set({ status: "pending_review", updatedAt: new Date() })
+            .where(and(eq(goamlFilings.id, id), eq(goamlFilings.tenantId, tenantId), eq(goamlFilings.status, "draft")))
+            .returning();
+          if (!claimed) {
+            results.push({ id, filingRef: filing.filingRef, status: "skipped", reason: "Filing was claimed by another submission" });
+            continue;
+          }
+
           // Submit to NFIU goAML production API
-          const nfiuResult = await submitToNfiu(filing.goamlXml ?? "");
+          const nfiuResult = await submitToNfiu(claimed.goamlXml ?? "", claimed.filingRef);
 
           if (!nfiuResult.accepted && nfiuResult.errors.length > 0) {
-            results.push({ id, filingRef: filing.filingRef, status: "error", reason: nfiuResult.errors.join("; ") });
+            await db.update(goamlFilings).set({ status: "draft", updatedAt: new Date() })
+              .where(and(eq(goamlFilings.id, id), eq(goamlFilings.status, "pending_review")));
+            results.push({ id, filingRef: claimed.filingRef, status: "error", reason: nfiuResult.errors.join("; ") });
             continue;
           }
 
@@ -474,9 +502,9 @@ export const goamlRouter = router({
               submittedAt: new Date(),
               updatedAt: new Date(),
             })
-            .where(eq(goamlFilings.id, id));
+            .where(and(eq(goamlFilings.id, id), eq(goamlFilings.tenantId, tenantId), eq(goamlFilings.status, "pending_review")));
 
-          results.push({ id, filingRef: filing.filingRef, status: "submitted", goamlReferenceNumber: nfiuResult.referenceNumber });
+          results.push({ id, filingRef: claimed.filingRef, status: "submitted", goamlReferenceNumber: nfiuResult.referenceNumber });
         } catch (err) {
           results.push({ id, filingRef: "", status: "error", reason: String(err) });
         }

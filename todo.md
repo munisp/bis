@@ -1,27 +1,39 @@
 # BIS Platform TODO
 
 ## Authentication and Onboarding Audit
-- [x] Audit the deployed ingress and compose topology for Caddy, APISIX, Keycloak, OpenAppSec, OPA, MFA, and policy controls
-- [x] Add hardened Caddy edge configuration with TLS, security headers, request limits, trusted-proxy rules, and API-only upstream routing
-- [x] Add APISIX gateway security policies for rate limiting, request validation, IP reputation/allowlists, body-size limits, and protected administrative routes
-- [x] Add OpenAppSec WAF configuration and a documented detection-to-prevention rollout gate
-- [x] Enforce Keycloak MFA, restricted direct grants, brute-force protection, and administrator-session controls in the realm configuration
-- [x] Add OPA policy-as-code and a policy decision point for privileged BFF and gateway actions
-- [x] Implement PBAC policy bindings and immutable audit evidence for Force Credit, Caddy rate-limit overrides, and gateway break-glass actions
-- [ ] Add denial-of-service resilience tests and an executable security-control verification suite
-- [x] Document deployment prerequisites and residual limitations without claiming absolute invulnerability
-- [ ] Deploy the Caddy, OpenAppSec, APISIX, OPA, and Keycloak production topology and capture live enforcement evidence
-- [ ] Run an authorized staging DDoS and WAF validation exercise against the deployed edge controls
-- [ ] Execute the bounded authorised edge-resilience k6 scenario against staging and record latency, error-rate, correlation-ID, and rate-limit evidence
-- [x] Bind break-glass actions to OPA with required reason, independent approver, and immutable decision metadata
-- [x] Add deny-and-audit regression coverage for attribute-based privileged and break-glass policy decisions
-- [x] Wire live Go gateway privileged routes to OPA and the durable BFF break-glass audit sink before execution
-- [x] Add endpoint-level signed-ingestion, replay-rejection, and invalid-signature coverage for the BFF break-glass audit sink
-- [x] Guarantee durable execution evidence before a gateway privileged side effect completes, with an explicit retryable recovery path
-- [x] Add real gateway privileged-route integration tests for missing MFA/reason/independent approver denial and persisted authorization/execution evidence
-- [x] Implement a PostgreSQL-backed reconciliation worker for queued gateway break-glass completion evidence
-- [x] Add gateway denial regression coverage for missing break-glass reason and non-independent approver attributes
-- [x] Add a cross-component integration test proving all three gateway audit events persist through the BFF audit sink
+- [x] Remove the production-capable local PostgreSQL bootstrap override so a non-PostgreSQL deployment database fails closed instead of silently using localhost
+- [ ] Restore the missing PostgreSQL-backed Keycloak PKCE transaction, refresh-family, and onboarding-resume implementation with migrations and regression coverage
+- [x] Initialize the empty local PostgreSQL BIS test database from the current typed schema and reviewed incremental migrations
+- [ ] Use the local PostgreSQL database to identify and remediate database-specific SQL, migration, constraint, and concurrency defects
+- [ ] Triage and close all locally reproducible technical debt findings with regression coverage and documented external dependencies
+- [x] Provision or verify local PostgreSQL with the BIS role and database, then apply migrations 0061 through 0064
+- [ ] Run database-backed validation for PKCE sessions, webhook retry leases, payment claims, and financial tenant-isolation migrations
+- [ ] Add database-backed integration coverage for Keycloak BFF begin, callback replay rejection, and HttpOnly refresh-family rotation
+- [ ] Add database-backed validation for payment claims and financial tenant-isolation constraints against local PostgreSQL
+- [ ] Inventory all remaining code-resolvable production gaps and untested financial, authorization, recovery, and validation branches
+- [ ] Close every verified code-only payment, ledger, tenant-isolation, and recovery defect with fail-closed behavior
+- [ ] Convert investigation debit posting to a deterministic, tenant-scoped pre-ledger reconciliation claim that cannot duplicate on retry
+- [ ] Add adversarial regression coverage for authorization boundaries, deterministic idempotency, webhook leasing, and illegal state transitions
+- [x] Upgrade and validate the vulnerable Streamdown/Mermaid/DOMPurify production dependency chain identified by the production audit
+- [x] Upgrade and validate the remaining high-severity Axios, JS-YAML, Nodemailer, Nanoid, fast-xml-builder, form-data, and ip-address production dependency chains
+- [ ] Enforce tenant scope, authorized lifecycle transitions, and replay resistance across AML transactions, alerts, SWIFT, SEPA, and Travel Rule procedures
+- [ ] Enforce tenant isolation, draft-only compare-and-set submission, and scoped XML export/deletion across goAML filing procedures
+- [ ] Enforce tenant scope, authorized lifecycle transitions, and immutable custody controls across trade-finance, evidence, and regulatory banking procedures
+- [ ] Replace manual account-credit random ledger identifiers with a deterministic pre-ledger claim and reconciliation state
+- [ ] Define correspondent-bank ownership semantics and enforce tenant isolation or explicit platform-admin-only access consistently
+- [ ] Enforce tenant-context derivation invariants and standardized fail-closed authorization errors across protected routers
+- [ ] Run code-quality, dependency, security, and full-suite validation; document the highest defensible code-only readiness assessment
+- [x] Inventory all payment, ledger, webhook, reconciliation, authorization, and privileged-operation code paths for a mission-critical audit
+- [x] Audit flow-of-funds atomicity, idempotency, double-credit/double-debit resistance, settlement state transitions, and failure recovery
+- [x] Audit authorization, authentication, input validation, secret handling, SSRF, injection, replay, and rate-limit controls across services
+- [ ] Remediate verified high-severity defects with regression tests and preserve fail-closed behavior
+- [x] Produce an evidence-based production-readiness score and an explicit residual-risk register
+- [x] Replace post-credit billing idempotency with a durable pre-credit claim and deterministic ledger transfer identifier
+- [x] Remove the false-success TigerBeetle failure path and retain top-ups in a reconciliation-required state until authoritative ledger posting
+- [ ] Repair durable Paystack webhook enqueueing, concurrency claiming, and retry reconciliation to prevent loss or duplicate crediting
+- [ ] Enforce tenant isolation and legal state transitions across transfer, transaction, account-balance, and export endpoints
+- [ ] Apply and verify the versioned PostgreSQL migration for webhook retry persistence, lease expiry, and payment-reconciliation claims
+- [ ] Add PostgreSQL-backed concurrent-worker integration coverage for webhook retry lease claim, expiry recovery, and no-double-credit behavior
 - [x] Document Grafana trace/span alerting and a synthetic-session high-concurrency k6 refresh load test
 - [x] Document OTLP Collector/exporter configuration and a multi-tab refresh-race trace-correlation integration test
 - [x] Document distributed tracing and correlation IDs for refresh races plus Nginx/Ingress hardening checklist
@@ -3652,6 +3664,6 @@
 ## Production Deployment Recovery (Aug 15 2026)
 - [x] Recover production session signing with a strong purpose-separated root and validate startup secret requirements
 - [x] Derive a purpose-separated session-signing root from the platform Forge credential when no dedicated secret is supplied
-- [ ] Remove unsafe production fallback secrets and localhost-only service defaults
+- [x] Remove unsafe production fallback secrets and localhost-only service defaults
 - [x] Validate a successful production build and deployment startup
 - [x] Synchronize the recovery changes to GitHub main (commit c22f2ff)

@@ -114,6 +114,19 @@ export function getKeycloakLoginUrl(redirectUri: string): string | null {
   return `${keycloakUrl}/realms/${realm}/protocol/openid-connect/auth?${params}`;
 }
 
+export function getKeycloakAuthorizationUrl(input: { redirectUri: string; state: string; nonce: string; codeChallenge: string }): string | null {
+  const keycloakUrl = ENV.keycloakUrl;
+  const realm = ENV.keycloakRealm;
+  const clientId = ENV.keycloakClientId;
+  if (!keycloakUrl || !realm || !clientId) return null;
+  const params = new URLSearchParams({
+    client_id: clientId, redirect_uri: input.redirectUri, response_type: "code", response_mode: "query",
+    scope: "openid profile email roles", state: input.state, nonce: input.nonce,
+    code_challenge: input.codeChallenge, code_challenge_method: "S256",
+  });
+  return `${keycloakUrl}/realms/${realm}/protocol/openid-connect/auth?${params}`;
+}
+
 /**
  * Exchange an authorization code for tokens (PKCE / confidential client).
  */
@@ -148,6 +161,55 @@ export async function exchangeCode(
     return null;
   }
   return resp.json() as Promise<{ access_token: string; id_token: string; refresh_token: string }>;
+}
+
+export async function exchangeCodeWithPkce(input: { code: string; redirectUri: string; codeVerifier: string }) {
+  const keycloakUrl = ENV.keycloakUrl;
+  const realm = ENV.keycloakRealm;
+  if (!keycloakUrl || !realm) return null;
+  const body = new URLSearchParams({
+    grant_type: "authorization_code", client_id: ENV.keycloakClientId,
+    ...(ENV.keycloakClientSecret ? { client_secret: ENV.keycloakClientSecret } : {}),
+    code: input.code, redirect_uri: input.redirectUri, code_verifier: input.codeVerifier,
+  });
+  try {
+    const response = await fetch(`${keycloakUrl}/realms/${realm}/protocol/openid-connect/token`, {
+      method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body, signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) return null;
+    return response.json() as Promise<{ access_token: string; id_token: string; refresh_token: string; refresh_expires_in?: number }>;
+  } catch {
+    return null;
+  }
+}
+
+export async function exchangeRefreshToken(refreshToken: string) {
+  const keycloakUrl = ENV.keycloakUrl;
+  const realm = ENV.keycloakRealm;
+  if (!keycloakUrl || !realm) return null;
+  const body = new URLSearchParams({
+    grant_type: "refresh_token", client_id: ENV.keycloakClientId,
+    ...(ENV.keycloakClientSecret ? { client_secret: ENV.keycloakClientSecret } : {}), refresh_token: refreshToken,
+  });
+  try {
+    const response = await fetch(`${keycloakUrl}/realms/${realm}/protocol/openid-connect/token`, {
+      method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body, signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) return null;
+    return response.json() as Promise<{ access_token: string; refresh_token: string; refresh_expires_in?: number }>;
+  } catch {
+    return null;
+  }
+}
+
+export async function verifyKeycloakIdToken(idToken: string, nonce: string): Promise<KeycloakClaims | null> {
+  if (!jwks || !issuer) return null;
+  try {
+    const { payload } = await jwtVerify(idToken, jwks, { issuer, audience: ENV.keycloakClientId });
+    return payload.nonce === nonce ? payload as KeycloakClaims : null;
+  } catch {
+    return null;
+  }
 }
 
 // ── Keycloak Sync Logging ─────────────────────────────────────────────────────

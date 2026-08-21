@@ -3,6 +3,7 @@ import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import type { TrpcContext } from "./context";
 import { permifyCheck } from "../permify";
+import { ENV } from "./env";
 
 const t = initTRPC.context<TrpcContext>().create({
   transformer: superjson,
@@ -16,6 +17,13 @@ const requireUser = t.middleware(async opts => {
 
   if (!ctx.user) {
     throw new TRPCError({ code: "UNAUTHORIZED", message: UNAUTHED_ERR_MSG });
+  }
+
+  if (ENV.isProduction && ctx.user.role !== "admin" && ctx.tenantId === null) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "A tenant assignment is required for this account",
+    });
   }
 
   return next({
