@@ -96,19 +96,13 @@ export default function UserProfileDashboard() {
   const handleRefreshSession = async () => {
     setRefreshing(true);
     try {
-      // The refresh token is stored in the client's memory from the initial exchange
-      // In production, this would call POST /api/auth/refresh with the stored refresh token
+      // The browser only carries HttpOnly BFF cookies; Keycloak refresh material
+      // remains encrypted server-side in a leased PostgreSQL refresh family.
       const res = await fetch("/api/auth/refresh", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ refreshToken: localStorage.getItem("bis_refresh_token") || "" }),
         credentials: "include",
       });
       if (res.ok) {
-        const data = await res.json();
-        if (data.newRefreshToken) {
-          localStorage.setItem("bis_refresh_token", data.newRefreshToken);
-        }
         toast.success("Session refreshed successfully");
       } else {
         const err = await res.json().catch(() => ({ error: "Unknown error" }));

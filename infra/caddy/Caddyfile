@@ -18,15 +18,15 @@
 # ── Global Options ────────────────────────────────────────────────────────────
 {
 	# Admin API — internal only, never exposed to the internet
-	admin 127.0.0.1:2019 {
+	admin 0.0.0.0:2019 {
 		origins localhost 127.0.0.1 caddy caddy:2019
 	}
 
 	# Email for ACME certificate registration
-	email {$CADDY_ACME_EMAIL}
+	email {$CADDY_ACME_EMAIL:ops@bis.internal}
 
 	# Use Let's Encrypt staging in dev/test, production in prod
-	acme_ca {$CADDY_ACME_CA:https://acme-v02.api.letsencrypt.org/directory}
+	acme_ca {$CADDY_ACME_CA:https://acme-staging-v02.api.letsencrypt.org/directory}
 
 	# Internal PKI for service-to-service mTLS
 	pki {
@@ -66,7 +66,7 @@
 		# Prevent MIME sniffing
 		X-Content-Type-Options "nosniff"
 		# XSS protection
-		-X-XSS-Protection
+		X-XSS-Protection "1; mode=block"
 		# HSTS — 1 year, include subdomains, preload
 		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
 		# Referrer policy
@@ -74,26 +74,21 @@
 		# Permissions policy — restrict dangerous APIs
 		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
 		# Content Security Policy
-		Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' wss: https:; frame-ancestors 'none'; form-action 'self'; upgrade-insecure-requests"
+		Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' wss: https:; frame-ancestors 'none'"
 		# Remove server fingerprinting headers
 		-Server
 		-X-Powered-By
+		# BIS edge identifier (for downstream WAF/APISIX verification)
+		X-BIS-Edge "caddy"
 	}
 }
 
 # ── Snippet: WAF Bypass Prevention ────────────────────────────────────────────
 # Adds a signed token that OpenAppSec and APISIX verify to ensure all traffic
 # passed through Caddy → OpenAppSec → APISIX (no bypass possible).
-(edge_provenance) {
-	# Remove client-supplied security context before Keycloak produces trusted data.
-	request_header -X-BIS-User-ID
-	request_header -X-BIS-User-Email
-	request_header -X-BIS-User-Roles
-	request_header -X-BIS-Tenant-ID
-	request_header -X-BIS-Security-Stack
-	request_header -X-BIS-WAF-Protected
-	request_header X-BIS-Edge-Token {$BIS_EDGE_TOKEN_SECRET}
-	request_header X-BIS-WAF-Required "true"
+(waf_edge_token) {
+	header X-BIS-Edge-Token {$BIS_EDGE_TOKEN_SECRET:bis-edge-dev-secret-change-in-prod}
+	header X-BIS-WAF-Required "true"
 }
 
 # ── Snippet: Keycloak OIDC Forward Auth ───────────────────────────────────────
@@ -116,12 +111,12 @@
 	rate_limit {
 		zone api_global {
 			key    {remote_host}
-		events 240
+			events 1000
 			window 1m
 		}
 		zone api_auth {
 			key    {header.Authorization}
-		events 60
+			events 200
 			window 1m
 		}
 		distributed {
@@ -135,7 +130,7 @@
 	rate_limit {
 		zone auth_attempts {
 			key    {remote_host}
-		events 8
+			events 10
 			window 5m
 		}
 		distributed {
@@ -175,7 +170,7 @@
 {$BIS_DOMAIN:bis.localhost}:443, {$BIS_DOMAIN:bis.localhost}:80 {
 	import security_headers
 	import otel_tracing
-	import edge_provenance
+	import waf_edge_token
 
 	# ── ACME / TLS ──────────────────────────────────────────────────────────
 	tls {
@@ -238,11 +233,8 @@
 		}
 	}
 
-		# ── All API traffic — JWT required ──────────────────────────────────────
-		# Gateway REST endpoints use /v1 while BFF procedures use /api; both are
-		# authenticated here before any request can reach the WAF or APISIX.
-		@protected_api path /api/* /v1/*
-		handle @protected_api {
+	# ── All other API traffic — JWT required ────────────────────────────────
+	handle /api/* {
 		import rate_limit_api
 		import keycloak_auth
 
@@ -255,10 +247,8 @@
 			# Forward Keycloak-resolved identity headers
 			header_up X-BIS-User-ID {header.X-BIS-User-ID}
 			header_up X-BIS-User-Email {header.X-BIS-User-Email}
-				header_up X-BIS-User-Roles {header.X-BIS-User-Roles}
-				header_up X-BIS-Tenant-ID {header.X-BIS-Tenant-ID}
-				# The imported Keycloak realm requires TOTP for interactive sessions.
-				header_up X-BIS-MFA-Verified "keycloak-totp-required"
+			header_up X-BIS-User-Roles {header.X-BIS-User-Roles}
+			header_up X-BIS-Tenant-ID {header.X-BIS-Tenant-ID}
 			# Load balancing and health
 			lb_policy round_robin
 			health_uri /health

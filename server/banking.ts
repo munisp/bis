@@ -28,6 +28,13 @@ function reportRef(): string {
   return `RPT-${new Date().getFullYear()}-${crypto.randomUUID().replace(/-/g,'').slice(0,8).toUpperCase()}`;
 }
 
+function requireTenantId(ctx: { tenantId?: number | null }): number {
+  if (ctx.tenantId === null || ctx.tenantId === undefined) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Tenant context is required" });
+  }
+  return ctx.tenantId;
+}
+
 // ─── Trade Finance Router ─────────────────────────────────────────────────────
 
 export const tradeFinanceRouter = router({
@@ -39,11 +46,11 @@ export const tradeFinanceRouter = router({
       lcType: z.string().optional(),
       search: z.string().optional(),
     }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
 
-      const conditions = [];
+      const conditions = [eq(lettersOfCredit.tenantId, requireTenantId(ctx))];
       if (input.status) conditions.push(eq(lettersOfCredit.status, input.status as any));
       if (input.lcType) conditions.push(eq(lettersOfCredit.type, input.lcType as any));
       if (input.search) {
@@ -64,10 +71,12 @@ export const tradeFinanceRouter = router({
 
   get: protectedProcedure
     .input(z.object({ id: z.number() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
-      const [row] = await db.select().from(lettersOfCredit).where(eq(lettersOfCredit.id, input.id));
+      const tenantId = requireTenantId(ctx);
+      const [row] = await db.select().from(lettersOfCredit)
+        .where(and(eq(lettersOfCredit.id, input.id), eq(lettersOfCredit.tenantId, tenantId)));
       if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "LC not found" });
       return row;
     }),
@@ -125,12 +134,26 @@ export const tradeFinanceRouter = router({
       status: z.enum(["draft", "issued", "advised", "confirmed", "amended", "presented", "accepted", "paid", "discrepant", "rejected", "expired", "cancelled"]),
       notes: z.string().optional(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
+      const tenantId = requireTenantId(ctx);
+      const [current] = await db.select().from(lettersOfCredit)
+        .where(and(eq(lettersOfCredit.id, input.id), eq(lettersOfCredit.tenantId, tenantId))).limit(1);
+      if (!current) throw new TRPCError({ code: "NOT_FOUND", message: "LC not found" });
+      const legalTransitions: Record<string, readonly string[]> = {
+        draft: ["issued", "cancelled"], issued: ["advised", "cancelled", "expired"],
+        advised: ["confirmed", "presented", "cancelled", "expired"], confirmed: ["presented", "cancelled", "expired"],
+        amended: ["presented", "cancelled", "expired"], presented: ["accepted", "discrepant", "rejected"],
+        accepted: ["paid", "rejected"], discrepant: ["presented", "rejected"],
+        paid: [], rejected: [], expired: [], cancelled: [],
+      };
+      if (!legalTransitions[current.status]?.includes(input.status)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: `Illegal LC transition from ${current.status} to ${input.status}` });
+      }
       const [lc] = await db.update(lettersOfCredit)
         .set({ status: input.status, updatedAt: new Date() })
-        .where(eq(lettersOfCredit.id, input.id))
+        .where(and(eq(lettersOfCredit.id, input.id), eq(lettersOfCredit.tenantId, tenantId), eq(lettersOfCredit.status, current.status)))
         .returning();
       return lc;
     }),
@@ -308,11 +331,11 @@ export const evidenceRouter = router({
       status: z.string().optional(),
       search: z.string().optional(),
     }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
 
-      const conditions = [];
+      const conditions = [eq(evidenceItems.tenantId, requireTenantId(ctx))];
       if (input.caseId) conditions.push(eq(evidenceItems.caseId, input.caseId));
       if (input.investigationId) conditions.push(eq(evidenceItems.investigationId, input.investigationId));
       if (input.type) conditions.push(eq(evidenceItems.type, input.type as any));
@@ -334,10 +357,12 @@ export const evidenceRouter = router({
 
   get: protectedProcedure
     .input(z.object({ id: z.number() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
-      const [row] = await db.select().from(evidenceItems).where(eq(evidenceItems.id, input.id));
+      const tenantId = requireTenantId(ctx);
+      const [row] = await db.select().from(evidenceItems)
+        .where(and(eq(evidenceItems.id, input.id), eq(evidenceItems.tenantId, tenantId)));
       if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Evidence item not found" });
       return row;
     }),
@@ -399,7 +424,9 @@ export const evidenceRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
 
-      const [current] = await db.select().from(evidenceItems).where(eq(evidenceItems.id, input.id));
+      const tenantId = requireTenantId(ctx);
+      const [current] = await db.select().from(evidenceItems)
+        .where(and(eq(evidenceItems.id, input.id), eq(evidenceItems.tenantId, tenantId)));
       if (!current) throw new TRPCError({ code: "NOT_FOUND", message: "Evidence item not found" });
 
       const existingChain = (current.chainOfCustody as any[]) ?? [];
@@ -417,7 +444,7 @@ export const evidenceRouter = router({
           chainOfCustody: [...existingChain, newEntry],
           updatedAt: new Date(),
         })
-        .where(eq(evidenceItems.id, input.id))
+        .where(and(eq(evidenceItems.id, input.id), eq(evidenceItems.tenantId, tenantId), eq(evidenceItems.status, current.status)))
         .returning();
       return updated;
     }),
@@ -431,7 +458,9 @@ export const evidenceRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
 
-      const [item] = await db.select().from(evidenceItems).where(eq(evidenceItems.id, input.id));
+      const tenantId = requireTenantId(ctx);
+      const [item] = await db.select().from(evidenceItems)
+        .where(and(eq(evidenceItems.id, input.id), eq(evidenceItems.tenantId, tenantId)));
       if (!item) throw new TRPCError({ code: "NOT_FOUND", message: "Evidence item not found" });
 
       // If hash provided, verify against stored hash
@@ -444,7 +473,7 @@ export const evidenceRouter = router({
           integrityVerifiedBy: ctx.user.id,
           updatedAt: new Date(),
         })
-        .where(eq(evidenceItems.id, input.id))
+        .where(and(eq(evidenceItems.id, input.id), eq(evidenceItems.tenantId, tenantId)))
         .returning();
 
       return { ...updated, hashMatch };
@@ -481,11 +510,11 @@ export const regulatoryReportsRouter = router({
       status: z.string().optional(),
       search: z.string().optional(),
     }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
 
-      const conditions = [];
+      const conditions = [eq(regulatoryReports.tenantId, requireTenantId(ctx))];
       if (input.type) conditions.push(eq(regulatoryReports.type, input.type as any));
       if (input.status) conditions.push(eq(regulatoryReports.status, input.status as any));
       if (input.search) {
@@ -505,10 +534,12 @@ export const regulatoryReportsRouter = router({
 
   get: protectedProcedure
     .input(z.object({ id: z.number() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
-      const [row] = await db.select().from(regulatoryReports).where(eq(regulatoryReports.id, input.id));
+      const tenantId = requireTenantId(ctx);
+      const [row] = await db.select().from(regulatoryReports)
+        .where(and(eq(regulatoryReports.id, input.id), eq(regulatoryReports.tenantId, tenantId)));
       if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Report not found" });
       return row;
     }),
@@ -542,6 +573,7 @@ export const regulatoryReportsRouter = router({
         regulatorName: input.regulatorName,
         submissionDeadline: deadline,
         metadata: input.metadata ?? {},
+        tenantId: requireTenantId(ctx),
         createdBy: ctx.user.id,
       }).returning();
       return report;
@@ -558,6 +590,17 @@ export const regulatoryReportsRouter = router({
     .mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
+      const tenantId = requireTenantId(ctx);
+      const [current] = await db.select().from(regulatoryReports)
+        .where(and(eq(regulatoryReports.id, input.id), eq(regulatoryReports.tenantId, tenantId)));
+      if (!current) throw new TRPCError({ code: "NOT_FOUND", message: "Report not found" });
+      const legalTransitions: Record<string, readonly string[]> = {
+        draft: ["generated"], generated: ["reviewed"], reviewed: ["submitted"],
+        submitted: ["acknowledged", "rejected"], acknowledged: [], rejected: ["draft"],
+      };
+      if (!legalTransitions[current.status]?.includes(input.status)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: `Illegal report transition from ${current.status} to ${input.status}` });
+      }
 
       const updates: Record<string, unknown> = {
         status: input.status,
@@ -573,7 +616,7 @@ export const regulatoryReportsRouter = router({
 
       const [report] = await db.update(regulatoryReports)
         .set(updates as any)
-        .where(eq(regulatoryReports.id, input.id))
+        .where(and(eq(regulatoryReports.id, input.id), eq(regulatoryReports.tenantId, tenantId), eq(regulatoryReports.status, current.status)))
         .returning();
       return report;
     }),
@@ -583,20 +626,29 @@ export const regulatoryReportsRouter = router({
     .mutation(async ({ input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
-      await db.delete(regulatoryReports).where(eq(regulatoryReports.id, input.id));
+      const [current] = await db.select().from(regulatoryReports)
+        .where(eq(regulatoryReports.id, input.id));
+      if (!current) throw new TRPCError({ code: "NOT_FOUND", message: "Report not found" });
+      if (current.status === "submitted" || current.status === "acknowledged") {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Submitted regulatory reports are retained and cannot be deleted" });
+      }
+      await db.delete(regulatoryReports).where(and(eq(regulatoryReports.id, input.id), eq(regulatoryReports.status, current.status)));
       return { success: true };
     }),
 
-  stats: protectedProcedure.query(async () => {
+  stats: protectedProcedure.query(async ({ ctx }) => {
     const db = await getDb();
     if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
+    const tenantFilter = ctx.user?.role === "admin"
+      ? undefined
+      : eq(regulatoryReports.tenantId, requireTenantId(ctx));
     const [s] = await db.select({
       total: count(),
       draft: sql<number>`count(*) filter (where ${regulatoryReports.status} = 'draft')`,
       submitted: sql<number>`count(*) filter (where ${regulatoryReports.status} = 'submitted')`,
       acknowledged: sql<number>`count(*) filter (where ${regulatoryReports.status} = 'acknowledged')`,
       overdue: sql<number>`count(*) filter (where ${regulatoryReports.submissionDeadline} < NOW() and ${regulatoryReports.status} not in ('submitted', 'acknowledged'))`,
-    }).from(regulatoryReports);
+    }).from(regulatoryReports).where(tenantFilter);
     return {
       total: Number(s.total),
       draft: Number(s.draft),
