@@ -12,10 +12,10 @@ This review found material flow-of-funds defects in the payment-credit path. The
 | Flow-of-funds correctness | 25 | 16 | Deterministic ledger identifiers, pre-credit claims, reconciliation-only failures, and retry leases are implemented; a live ledger/database exercise remains unavailable. |
 | Authorization and insider controls | 20 | 14 | Permify, OPA/PBAC, MFA, dual-control, break-glass evidence, billing and core transaction tenant checks, and core payment-rail tenant isolation are implemented; proof against a live database remains unavailable. |
 | Persistence and recovery | 20 | 11 | Retry queue, lease expiry, and recovery contract are versioned; migration application is blocked by unavailable PostgreSQL and Drizzle snapshot collisions. |
-| Test and build evidence | 15 | 10 | Strict type checking, 53 Vitest files / 1,403 tests, targeted payment regressions, and production build pass locally. No live-provider or production database proof exists. |
-| Operational security and resilience | 15 | 5 | Caddy, APISIX, OpenAppSec, OPA, Keycloak MFA, canary, and bounded k6 scenarios are code-complete. The deployed site is still degraded and the authorized staging exercise has not run. |
+| Test and build evidence | 15 | 10 | Strict type checking, 55 Vitest files / 1,409 tests, targeted payment regressions, and production build pass locally. No live-provider or production database proof exists. |
+| Operational security and resilience | 15 | 6 | Caddy, APISIX, OpenAppSec, OPA, Keycloak MFA, canary, bounded k6 scenarios, and fail-closed production configuration are code-complete. The deployed site is still degraded and the authorized staging exercise has not run. |
 | Published service availability | 5 | 0 | The published service and its database/dependency stack are not healthy enough for attested financial operations. |
-| **Overall** | **100** | **56 / 100** | The source is materially safer than before the audit but cannot be represented as production-ready for flow-of-funds. |
+| **Overall** | **100** | **57 / 100** | The source is materially safer than before the audit but cannot be represented as production-ready for flow-of-funds. |
 
 ## Verified Findings and Remediation
 
@@ -30,6 +30,7 @@ This review found material flow-of-funds defects in the payment-credit path. The
 | AUTH-01 | High | Billing procedures accepted a caller-supplied tenant ID without consistently comparing it to the authenticated context tenant. | Tenant-scoped identities are now denied cross-tenant billing access; only explicit platform-admin context retains global scope. | `server/billing.ts`; `server/billing.flowFundsGuard.test.ts` |
 | AUTH-02 | High | The generic transaction mutation allowed a non-admin caller to set `completed` or `reversed`, which could misrepresent settlement outside the authoritative ledger workflow. | The generic transaction update is now admin-gated, excludes settled states, rejects changes to settled records, and scopes read/update/flag operations to tenant context. | `server/transactions.ts`; `server/transactions.securityGuard.test.ts` |
 | AUTH-03 | High | Payment-rail transfer reads, workflow status checks, local account-name enrichment, account details, exports, and reversal selection could resolve another tenant’s transaction by globally unique reference or account identifier. | These core paths now add tenant predicates for tenant-scoped contexts; platform administrators retain intentionally global access. | `server/paymentRails.ts` |
+| CFG-01 | High | Development gateway, WAF, edge, audit, and localhost service defaults could be inherited by a production process. | Production defaults now resolve to empty values, and startup requires explicit gateway, ledger, authorization, identity, cache, WAF, edge, audit, and monitoring configuration. | `server/_core/env.ts`; `server/envProductionDefaults.test.ts` |
 
 ## Validation Evidence
 
@@ -40,7 +41,7 @@ The following validations passed after the final code changes.
 | Strict TypeScript | Passed locally with `pnpm check --noEmit` |
 | Payment binding, deterministic ledger ID, tenant access | 5 targeted tests passed |
 | Webhook durability and concurrent lease guard | 3 targeted tests passed |
-| Full Vitest suite | 54 files, 1,405 tests passed |
+| Full Vitest suite | 55 files, 1,409 tests passed |
 | Production bundle | `pnpm build` passed; bundle-size warnings remain non-blocking |
 | GitHub main validation and CodeQL | Passed for the previously synchronized hardening changes; the audit remediation requires a subsequent checkpoint and CI run |
 
