@@ -176,6 +176,7 @@ export const ENV = {
   keycloakRealm: process.env.KEYCLOAK_REALM ?? "bis-platform",
   keycloakClientId: process.env.KEYCLOAK_CLIENT_ID ?? "bis-platform",
   keycloakClientSecret: process.env.KEYCLOAK_CLIENT_SECRET ?? "",
+  keycloakPublicOrigin: process.env.KEYCLOAK_PUBLIC_ORIGIN ?? "",
 
   // Temporal workflow engine
   temporalHost: process.env.TEMPORAL_HOST ?? "temporal:7233",

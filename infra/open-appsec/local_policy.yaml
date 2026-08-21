@@ -1,153 +1,358 @@
-apiVersion: v1beta2
+# ─── open-appsec Local Enforcement Policy ────────────────────────────────────
+# This file defines the local (offline) enforcement policy for open-appsec.
+# It is used when the open-appsec cloud management is not available.
+# Reference: https://docs.openappsec.io/local-policy
+
+version: v1beta2
 
 policies:
+  # ─── Default Policy (all routes not explicitly matched) ───────────────────
   default:
     mode: prevent-learn
-    threatPreventionPractices: [bis-default-threat-prevention]
-    accessControlPractices: [bis-api-rate-limits]
-    triggers: [bis-security-log]
-    customResponse: bis-security-block
-  specificRules:
-    - host: "*/api/auth/*"
-      mode: prevent-learn
-      threatPreventionPractices: [bis-auth-threat-prevention]
-      accessControlPractices: [bis-auth-rate-limits]
-      triggers: [bis-security-log]
-      customResponse: bis-security-block
-    - host: "*/v1/admin/*"
-      mode: prevent-learn
-      threatPreventionPractices: [bis-privileged-threat-prevention]
-      accessControlPractices: [bis-privileged-rate-limits]
-      triggers: [bis-security-log]
-      customResponse: bis-security-block
-    - host: "*/api/v1/*"
-      mode: prevent-learn
-      threatPreventionPractices: [bis-api-threat-prevention]
-      accessControlPractices: [bis-api-rate-limits]
-      triggers: [bis-security-log]
-      customResponse: bis-security-block
+    practices:
+      - name: BIS-Default-Practice
+        web-attacks:
+          minimum-confidence: high
+          max-object-depth: 40
+          max-url-size-bytes: 32768
+          max-body-size-kb: 1024
+          max-header-size-bytes: 102400
+        anti-bot:
+          injected-source: all
+          non-browser-source: all
+    triggers:
+      - name: BIS-Default-Log
+        log:
+          verbosity: extended
+          response-body: false
+          request-body: true
+          log-to-agent: true
+          format: json
 
-threatPreventionPractices:
-  - name: bis-default-threat-prevention
-    practiceMode: inherited
-    webAttacks:
-      overrideMode: inherited
-      minimumConfidence: high
-      maxUrlSizeBytes: 16384
-      maxHeaderSizeBytes: 32768
-      maxBodySizeKb: 1024
-      maxObjectDepth: 32
-      protections:
-        csrfProtection: prevent
-        errorDisclosure: prevent
-        openRedirect: prevent
-        nonValidHttpMethods: true
-  - name: bis-auth-threat-prevention
-    practiceMode: inherited
-    webAttacks:
-      overrideMode: inherited
-      minimumConfidence: medium
-      maxUrlSizeBytes: 4096
-      maxHeaderSizeBytes: 16384
-      maxBodySizeKb: 64
-      maxObjectDepth: 10
-      protections:
-        csrfProtection: prevent
-        errorDisclosure: prevent
-        openRedirect: prevent
-        nonValidHttpMethods: true
-  - name: bis-privileged-threat-prevention
-    practiceMode: inherited
-    webAttacks:
-      overrideMode: inherited
-      minimumConfidence: high
-      maxUrlSizeBytes: 8192
-      maxHeaderSizeBytes: 16384
-      maxBodySizeKb: 256
-      maxObjectDepth: 20
-      protections:
-        csrfProtection: prevent
-        errorDisclosure: prevent
-        openRedirect: prevent
-        nonValidHttpMethods: true
-  - name: bis-api-threat-prevention
-    practiceMode: inherited
-    webAttacks:
-      overrideMode: inherited
-      minimumConfidence: high
-      maxUrlSizeBytes: 16384
-      maxHeaderSizeBytes: 32768
-      maxBodySizeKb: 512
-      maxObjectDepth: 30
-      protections:
-        csrfProtection: prevent
-        errorDisclosure: prevent
-        openRedirect: prevent
-        nonValidHttpMethods: true
+  # ─── Specific Asset Policies ──────────────────────────────────────────────
+  specific-assets:
+    - asset: lex-submit
+      url: /api/trpc/lex.submitIncident
+      mode: prevent
+      practices:
+        - name: LEX-Submit-Practice
+          web-attacks:
+            minimum-confidence: medium
+            max-body-size-kb: 256
+          anti-bot:
+            injected-source: all
+            non-browser-source: all
+            browser-control: all
 
-accessControlPractices:
-  - name: bis-api-rate-limits
-    practiceMode: inherited
-    rateLimit:
-      overrideMode: inherited
-      rules:
-        - uri: "/api/v1/*"
-          limit: 60
-          unit: minute
-          action: prevent
-          comment: "Protect provider-facing APIs from volumetric and automated abuse"
-        - uri: "/api/trpc/*"
-          limit: 240
-          unit: minute
-          action: prevent
-          comment: "Secondary per-source guard behind Caddy and APISIX limits"
-  - name: bis-auth-rate-limits
-    practiceMode: inherited
-    rateLimit:
-      overrideMode: inherited
-      rules:
-        - uri: "/api/auth/*"
-          limit: 8
-          unit: minute
-          action: prevent
-          comment: "Brute-force and credential-stuffing resistance"
-  - name: bis-privileged-rate-limits
-    practiceMode: inherited
-    rateLimit:
-      overrideMode: inherited
-      rules:
-        - uri: "/v1/admin/*"
-          limit: 5
-          unit: minute
-          action: prevent
-          comment: "Restrict privileged administrative automation and blast radius"
+    - asset: api-v1
+      url: /api/v1/*
+      mode: prevent
+      practices:
+        - name: API-V1-Practice
+          web-attacks:
+            minimum-confidence: high
+            max-body-size-kb: 512
+          schema-validation:
+            override-mode: prevent
+            filename: /etc/cp/conf/assets/openapi.yaml
 
-customResponses:
-  - name: bis-security-block
-    mode: response-code-only
-    httpResponseCode: 403
+    - asset: auth-endpoints
+      url: /api/oauth/*
+      mode: prevent
+      practices:
+        - name: Auth-Practice
+          web-attacks:
+            minimum-confidence: medium
+            max-body-size-kb: 64
+          anti-bot:
+            injected-source: all
+            non-browser-source: all
+            browser-control: all
 
-logTriggers:
-  - name: bis-security-log
-    accessControlLogging:
-      allowEvents: false
-      dropEvents: true
-    appsecLogging:
-      detectEvents: true
-      preventEvents: true
-      allWebRequests: false
-    extendedLogging:
-      urlPath: true
-      urlQuery: false
-      httpHeaders: false
-      requestBody: false
-    additionalSuspiciousEventsLogging:
-      enabled: true
-      minSeverity: high
-      responseBody: false
-      responseCode: true
-    logDestination:
-      cloud: false
-      logToAgent: true
-      stdout:
-        format: json
+    - asset: admin-endpoints
+      url: /api/trpc/admin.*
+      mode: prevent
+      practices:
+        - name: Admin-Practice
+          web-attacks:
+            minimum-confidence: low
+            max-body-size-kb: 256
+
+    - asset: biometric-upload
+      url: /api/trpc/biometric.*
+      mode: prevent
+      practices:
+        - name: Biometric-Practice
+          web-attacks:
+            minimum-confidence: high
+            max-body-size-kb: 10240
+
+practices:
+  - name: BIS-Default-Practice
+    type: WebApplication
+    web-attacks:
+      override-mode: prevent
+      minimum-confidence: high
+      advanced-setting:
+        body-size: 1024
+        url-size: 32768
+        header-size: 102400
+        max-object-depth: 40
+        illegal-http-methods: true
+    anti-bot:
+      injected-source: all
+      non-browser-source: all
+
+  - name: LEX-Submit-Practice
+    type: WebApplication
+    web-attacks:
+      override-mode: prevent
+      minimum-confidence: medium
+      advanced-setting:
+        body-size: 256
+        url-size: 8192
+        header-size: 16384
+        max-object-depth: 20
+        illegal-http-methods: true
+    anti-bot:
+      injected-source: all
+      non-browser-source: all
+      browser-control: all
+
+  - name: API-V1-Practice
+    type: WebApplication
+    web-attacks:
+      override-mode: prevent
+      minimum-confidence: high
+      advanced-setting:
+        body-size: 512
+        url-size: 16384
+        header-size: 32768
+        max-object-depth: 30
+        illegal-http-methods: true
+
+  - name: Auth-Practice
+    type: WebApplication
+    web-attacks:
+      override-mode: prevent
+      minimum-confidence: medium
+      advanced-setting:
+        body-size: 64
+        url-size: 4096
+        header-size: 16384
+        max-object-depth: 10
+        illegal-http-methods: true
+    anti-bot:
+      injected-source: all
+      non-browser-source: all
+      browser-control: all
+
+  - name: Admin-Practice
+    type: WebApplication
+    web-attacks:
+      override-mode: prevent
+      minimum-confidence: low
+      advanced-setting:
+        body-size: 256
+        url-size: 8192
+        header-size: 32768
+        max-object-depth: 20
+        illegal-http-methods: true
+
+  - name: Biometric-Practice
+    type: WebApplication
+    web-attacks:
+      override-mode: prevent
+      minimum-confidence: high
+      advanced-setting:
+        body-size: 10240
+        url-size: 4096
+        header-size: 16384
+        max-object-depth: 5
+        illegal-http-methods: true
+
+triggers:
+  - name: BIS-Default-Log
+    type: log
+    verbosity: extended
+    response-body: false
+    request-body: true
+    url-body: true
+    log-to-agent: true
+    log-to-server: false
+    format: json
+    cef-severity: 3
+
+    # ── Criminal Records (P0 — high sensitivity, prevent mode) ───────────────
+    - asset: criminal-records-submit
+      url: /v1/criminal-records/request
+      mode: prevent
+      practices:
+        - name: Criminal-Records-Submit-Practice
+      triggers:
+        - name: BIS-Default-Log
+    - asset: criminal-records-ingest
+      url: /v1/criminal-records/ingest
+      mode: prevent
+      practices:
+        - name: Criminal-Records-Ingest-Practice
+      triggers:
+        - name: BIS-Default-Log
+    - asset: criminal-records-list
+      url: /v1/criminal-records/requests
+      mode: prevent
+      practices:
+        - name: Criminal-Records-Read-Practice
+      triggers:
+        - name: BIS-Default-Log
+
+    # ── Corporate Check (P0 — prevent mode, body size limit) ─────────────────
+    - asset: corporate-check-run
+      url: /v1/corporate/check
+      mode: prevent
+      practices:
+        - name: Corporate-Check-Practice
+      triggers:
+        - name: BIS-Default-Log
+    - asset: corporate-profiles
+      url: /v1/corporate/profiles
+      mode: prevent
+      practices:
+        - name: Corporate-Check-Practice
+      triggers:
+        - name: BIS-Default-Log
+
+    # ── Mojaloop Compliance (P1 — strict, financial-grade) ────────────────────
+    - asset: mojaloop-compliance-individual
+      url: /v1/mojaloop/compliance/individual
+      mode: prevent
+      practices:
+        - name: Mojaloop-Compliance-Practice
+      triggers:
+        - name: BIS-Default-Log
+    - asset: mojaloop-compliance-corporate
+      url: /v1/mojaloop/compliance/corporate
+      mode: prevent
+      practices:
+        - name: Mojaloop-Compliance-Practice
+      triggers:
+        - name: BIS-Default-Log
+
+    # ── AI Screening Summary (P2 — rate-sensitive, prevent mode) ─────────────
+    - asset: ai-screening-generate
+      url: /v1/screening/summary/generate
+      mode: prevent
+      practices:
+        - name: AI-Screening-Practice
+      triggers:
+        - name: BIS-Default-Log
+
+    # ── Field Visit (P1 — mobile agent endpoints, larger body) ───────────────
+    - asset: field-visit-submit
+      url: /v1/field-tasks/submit
+      mode: prevent
+      practices:
+        - name: Field-Visit-Practice
+      triggers:
+        - name: BIS-Default-Log
+    - asset: field-visit-checkin
+      url: /v1/field-tasks/checkin
+      mode: prevent
+      practices:
+        - name: Field-Visit-Practice
+      triggers:
+        - name: BIS-Default-Log
+
+    # ── Thin-File (P2 — standard prevent) ────────────────────────────────────
+    - asset: thin-file-flag
+      url: /v1/investigations/thin-file/flag
+      mode: prevent
+      practices:
+        - name: BIS-Default-Practice
+      triggers:
+        - name: BIS-Default-Log
+
+practices:
+  - name: Criminal-Records-Submit-Practice
+    type: WebApplication
+    web-attacks:
+      override-mode: prevent
+      minimum-confidence: medium
+      advanced-setting:
+        body-size: 256
+        url-size: 4096
+        header-size: 16384
+        max-object-depth: 10
+        illegal-http-methods: true
+
+  - name: Criminal-Records-Ingest-Practice
+    type: WebApplication
+    web-attacks:
+      override-mode: prevent
+      minimum-confidence: medium
+      advanced-setting:
+        body-size: 1024
+        url-size: 4096
+        header-size: 16384
+        max-object-depth: 15
+        illegal-http-methods: true
+
+  - name: Criminal-Records-Read-Practice
+    type: WebApplication
+    web-attacks:
+      override-mode: prevent
+      minimum-confidence: high
+      advanced-setting:
+        body-size: 64
+        url-size: 8192
+        header-size: 16384
+        max-object-depth: 5
+        illegal-http-methods: true
+
+  - name: Corporate-Check-Practice
+    type: WebApplication
+    web-attacks:
+      override-mode: prevent
+      minimum-confidence: medium
+      advanced-setting:
+        body-size: 512
+        url-size: 8192
+        header-size: 16384
+        max-object-depth: 10
+        illegal-http-methods: true
+
+  - name: Mojaloop-Compliance-Practice
+    type: WebApplication
+    web-attacks:
+      override-mode: prevent
+      minimum-confidence: medium
+      advanced-setting:
+        body-size: 256
+        url-size: 4096
+        header-size: 16384
+        max-object-depth: 8
+        illegal-http-methods: true
+
+  - name: AI-Screening-Practice
+    type: WebApplication
+    web-attacks:
+      override-mode: prevent
+      minimum-confidence: high
+      advanced-setting:
+        body-size: 128
+        url-size: 4096
+        header-size: 16384
+        max-object-depth: 5
+        illegal-http-methods: true
+
+  - name: Field-Visit-Practice
+    type: WebApplication
+    web-attacks:
+      override-mode: prevent
+      minimum-confidence: medium
+      advanced-setting:
+        body-size: 10240
+        url-size: 4096
+        header-size: 16384
+        max-object-depth: 8
+        illegal-http-methods: true

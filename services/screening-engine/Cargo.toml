@@ -9,7 +9,7 @@ name = "screening-engine"
 path = "src/main.rs"
 
 [dependencies]
-axum            = { version = "0.8", features = ["macros"] }
+axum            = { version = "0.7", features = ["macros"] }
 tokio           = { version = "1", features = ["full"] }
 serde           = { version = "1", features = ["derive"] }
 serde_json      = "1"
@@ -19,15 +19,15 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 uuid            = { version = "1", features = ["v4"] }
 chrono          = { version = "0.4", features = ["serde"] }
 rdkafka         = { version = "0.36", features = ["cmake-build"] }
-redis           = { version = "1.5", features = ["tokio-comp", "connection-manager"] }
-tower-http      = { version = "0.6", features = ["cors", "trace"] }
+redis           = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
+tower-http      = { version = "0.5", features = ["cors", "trace"] }
 thiserror       = "1"
 anyhow          = "1"
-prometheus      = { version = "0.14", features = ["process"] }
+prometheus      = { version = "0.13", features = ["process"] }
 axum-prometheus = "0.7"
-base64          = "0.23"
+base64          = "0.22"
 hmac            = "0.12"
-sha2            = "0.11"
+sha2            = "0.10"
 hex             = "0.4"
 
 # PostgreSQL async client — for persisting screening results
