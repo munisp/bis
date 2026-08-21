@@ -372,7 +372,7 @@ export const paymentRailsRouter = router({
       accountIds: z.array(z.string()).max(50).optional(),
       limit: z.number().min(1).max(100).default(20),
     }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
 
@@ -384,9 +384,9 @@ export const paymentRailsRouter = router({
         pendingDebits: sql<number>`sum(case when ${transactions.status} in ('pending','under_review','flagged') then ${transactions.amount} else 0 end)`,
         postedDebits: sql<number>`sum(case when ${transactions.status} = 'completed' then ${transactions.amount} else 0 end)`,
         currency: transactions.currency,
-      })
+        })
         .from(transactions)
-        .where(sql`${transactions.originatorAccount} IS NOT NULL`)
+        .where(and(sql`${transactions.originatorAccount} IS NOT NULL`, tenantCondition(ctx.tenantId)))
         .groupBy(transactions.originatorAccount, transactions.originatorName, transactions.currency)
         .limit(input.limit);
 
@@ -398,9 +398,9 @@ export const paymentRailsRouter = router({
         pendingCredits: sql<number>`sum(case when ${transactions.status} in ('pending','under_review','flagged') then ${transactions.amount} else 0 end)`,
         postedCredits: sql<number>`sum(case when ${transactions.status} = 'completed' then ${transactions.amount} else 0 end)`,
         currency: transactions.currency,
-      })
+        })
         .from(transactions)
-        .where(sql`${transactions.beneficiaryAccount} IS NOT NULL`)
+        .where(and(sql`${transactions.beneficiaryAccount} IS NOT NULL`, tenantCondition(ctx.tenantId)))
         .groupBy(transactions.beneficiaryAccount, transactions.beneficiaryName, transactions.currency)
         .limit(input.limit);
 
@@ -457,7 +457,7 @@ export const paymentRailsRouter = router({
       query: z.string().min(1).max(128),
       limit: z.number().min(1).max(50).default(30),
     }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
       const q = `%${input.query}%`;
@@ -475,14 +475,17 @@ export const paymentRailsRouter = router({
         tigerBeetleId: transactions.tigerBeetleId,
         createdAt: transactions.createdAt,
         updatedAt: transactions.updatedAt,
-      })
+        })
         .from(transactions)
-        .where(or(
-          ilike(transactions.txRef, q),
-          ilike(transactions.originatorName, q),
-          ilike(transactions.beneficiaryName, q),
-          ilike(transactions.originatorAccount, q),
-          ilike(transactions.beneficiaryAccount, q),
+        .where(and(
+          or(
+            ilike(transactions.txRef, q),
+            ilike(transactions.originatorName, q),
+            ilike(transactions.beneficiaryName, q),
+            ilike(transactions.originatorAccount, q),
+            ilike(transactions.beneficiaryAccount, q),
+          ),
+          tenantCondition(ctx.tenantId),
         ))
         .orderBy(desc(transactions.createdAt))
         .limit(input.limit);
