@@ -794,8 +794,7 @@ export default function BISLayout({ children, title, subtitle, actions }: BISLay
                 size="sm"
                 className="h-7 text-[11px] font-mono border-primary/40 text-primary hover:bg-primary/10"
                 onClick={() => {
-                  const loginUrl = `${keycloakStatus.issuer?.replace('/realms/', '/realms/')}/protocol/openid-connect/auth?client_id=${keycloakStatus.clientId}&response_type=code&scope=openid+profile+email&redirect_uri=${encodeURIComponent(window.location.origin + '/api/oauth/callback')}`;
-                  window.location.href = loginUrl;
+                  window.location.assign(`/api/auth/keycloak/begin?returnTo=${encodeURIComponent(window.location.pathname)}`);
                 }}
                 title="Sign in with Keycloak SSO"
               >
