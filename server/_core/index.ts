@@ -724,19 +724,26 @@ async function startServer() {
     });
   });
 
-  app.get("/api/ready", async (req, res) => {
-    const target = `${req.protocol}://${req.get("host")}/api/health`;
+  app.get("/api/ready", async (_req, res) => {
+    const startedAt = Date.now();
     try {
-      const health = await fetch(target, { signal: AbortSignal.timeout(10_000) });
-      const body = await health.json() as { checks?: Record<string, { status?: string }> };
-      const databaseReady = body.checks?.db?.status === "ok";
-      res.status(databaseReady ? 200 : 503).json({
-        status: databaseReady ? "ready" : "not_ready",
-        databaseReady,
-        checks: body.checks ?? {},
+      const db = await getDb();
+      if (!db) {
+        res.status(503).json({ status: "not_ready", databaseReady: false });
+        return;
+      }
+      await db.execute("SELECT 1" as any);
+      res.status(200).json({
+        status: "ready",
+        databaseReady: true,
+        databaseLatencyMs: Date.now() - startedAt,
       });
     } catch {
-      res.status(503).json({ status: "not_ready", databaseReady: false });
+      res.status(503).json({
+        status: "not_ready",
+        databaseReady: false,
+        databaseLatencyMs: Date.now() - startedAt,
+      });
     }
   });
 

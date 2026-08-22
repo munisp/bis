@@ -1,6 +1,7 @@
 # BIS Platform TODO
 
 ## Authentication and Onboarding Audit
+- [ ] Remove the CodeQL-reported readiness-endpoint self-request SSRF pattern by sharing dependency-check logic directly
 - [ ] Separate process liveness from dependency readiness so optional middleware outages do not make the hosted BFF appear unreachable
 - [ ] Reconcile the mission-critical audit report with local PostgreSQL-backed PKCE and webhook lease evidence and current validation totals
 - [ ] Validate the BIS_DATABASE_URL override with local PostgreSQL; published production remains blocked until a network-reachable managed PostgreSQL service is supplied
