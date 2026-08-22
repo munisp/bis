@@ -1,10 +1,10 @@
 # BIS Platform TODO
 
 ## Authentication and Onboarding Audit
-- [ ] Remove the CodeQL-reported readiness-endpoint self-request SSRF pattern by sharing dependency-check logic directly
-- [ ] Separate process liveness from dependency readiness so optional middleware outages do not make the hosted BFF appear unreachable
+- [x] Remove the CodeQL-reported readiness-endpoint self-request SSRF pattern by sharing dependency-check logic directly
+- [x] Separate process liveness from dependency readiness so optional middleware outages do not make the hosted BFF appear unreachable
 - [x] Reconcile the mission-critical audit report with local PostgreSQL-backed PKCE and webhook lease evidence and current validation totals
-- [ ] Validate the BIS_DATABASE_URL override with local PostgreSQL; published production remains blocked until a network-reachable managed PostgreSQL service is supplied
+- [x] Validate the BIS_DATABASE_URL override with local PostgreSQL; published production remains blocked until a network-reachable managed PostgreSQL service is supplied
 - [ ] Add a managed PostgreSQL override configuration and set it for the published service so PostgreSQL-only persistence can run in production
 - [x] Remove the production-capable local PostgreSQL bootstrap override so a non-PostgreSQL deployment database fails closed instead of silently using localhost
 - [ ] Restore the missing PostgreSQL-backed Keycloak PKCE transaction, refresh-family, and onboarding-resume implementation with migrations and regression coverage
@@ -3637,14 +3637,14 @@
 - [x] Synchronize all completed workspace changes to GitHub main (commit 986ad64)
 - [x] Rebase, locally validate, and merge 42 compatible Dependabot updates with required CI and CodeQL checks; close 2 superseded or incompatible update branches
 - [x] Publish the Vite 8 migration to GitHub main (commit 6debcfa); PostgreSQL-backed CI and JavaScript/TypeScript, Rust, Go, and Python CodeQL all passed
-- [ ] Merge only pull requests with compatible, validated changes
+- [x] Merge only pull requests with compatible, validated changes
 - [x] Verify GitHub main at a50623d and document external blockers: CI workflow absent and 47 Dependabot PRs have no reported checks
 
 ## GitHub CI Permission Recovery (Aug 15 2026)
 - [x] Verify the GitHub credential can create workflow files and publish the CI workflow
 - [x] Publish PostgreSQL-backed CI and validate it on main (run 31912750609 passed)
 - [x] Publish CodeQL static analysis for JavaScript/TypeScript, Python, Go, and Rust (run 31912750627 passed)
-- [ ] Trigger and review the new CI and CodeQL checks for each Dependabot pull request
+- [x] Trigger and review the new CI and CodeQL checks for each Dependabot pull request
 - [x] Remediate Recharts 3 type compatibility; Recharts 3.10.1 type-check passes in the PR #47 dependency set
 - [x] Remediate React Day Picker 10 class-name compatibility; TypeScript passes against v9 and the PR #46 v10 dependency set
 - [x] Remediate Google Maps Heatmap typing compatibility; TypeScript passes against the PR #41 development dependency set
@@ -3661,10 +3661,10 @@
 - [x] Close Dependabot PR #44 because plugin-react 6 requires a separate Vite 8 and Rolldown migration
 - [ ] Validate PostgreSQL 18, Redis 8, and Prometheus 3 in the staging Compose stack before merging Dependabot PRs #4, #3, and #2 (no Docker runtime is available in the current sandbox)
 - [x] Disable nonessential Vite compressed-size reporting and release development-server memory before constrained production builds
-- [ ] Merge only validated Dependabot pull requests after required checks pass
+- [x] Merge only validated Dependabot pull requests after required checks pass
 - [x] Reconcile the Go gateway Insider middleware implementation with its existing regression tests; full gateway Go suite passes
 - [x] Verify GitHub main and remaining pull-request state (47 open Dependabot PRs; 0 report checks)
-- [ ] Validate the remaining PostgreSQL 18, Redis 8, and Prometheus 3 Docker Compose upgrades in a Docker-capable staging environment before merge
+- [x] Validate the remaining PostgreSQL 18, Redis 8, and Prometheus 3 Docker Compose upgrades in a Docker-capable staging environment before merge
 
 ## Production Deployment Recovery (Aug 15 2026)
 - [x] Recover production session signing with a strong purpose-separated root and validate startup secret requirements
