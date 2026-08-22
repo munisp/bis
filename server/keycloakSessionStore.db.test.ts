@@ -36,4 +36,22 @@ describe("Keycloak PostgreSQL session store", () => {
     expect(await rotateRefreshFamily({ familyId, leaseId: firstLease!.leaseId, refreshToken: "refresh-token-two", expiresAt: new Date(Date.now() + 60_000) })).not.toBeNull();
     await db.delete(users).where(eq(users.id, user.id));
   });
+
+  it("claims an onboarding draft for one user and consumes it exactly once", async () => {
+    const { getDb } = await import("./db");
+    const { users } = await import("../drizzle/schema");
+    const { eq } = await import("drizzle-orm");
+    const { claimOnboardingDraft, consumeOnboardingDraft, createOnboardingDraft } = await import("./keycloakSessionStore");
+    const db = await getDb();
+    if (!db) throw new Error("Database unavailable");
+    const openId = `kc:onboarding-test-${Date.now()}`;
+    const [user] = await db.insert(users).values({ openId, name: "Onboarding Draft Test", loginMethod: "keycloak" }).returning();
+    if (!user) throw new Error("User insert failed");
+    const draftId = await createOnboardingDraft({ organization: "BIS Test", step: 3 });
+    expect(await claimOnboardingDraft(draftId, user.id)).toBe(true);
+    expect(await claimOnboardingDraft(draftId, user.id)).toBe(false);
+    expect(await consumeOnboardingDraft(draftId, user.id)).toEqual({ organization: "BIS Test", step: 3 });
+    expect(await consumeOnboardingDraft(draftId, user.id)).toBeNull();
+    await db.delete(users).where(eq(users.id, user.id));
+  });
 });
