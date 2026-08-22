@@ -6932,7 +6932,8 @@ export const appRouter = router({
             .where(
               or(
                 isNull(billingTopups.tbTransferId),
-                like(billingTopups.tbTransferId, "fallback-%")
+                like(billingTopups.tbTransferId, "fallback-%"),
+                like(billingTopups.tbTransferId, "pending:%")
               )
             )
             .orderBy(desc(billingTopups.verifiedAt))
@@ -6957,6 +6958,18 @@ export const appRouter = router({
           amountKobo: z.number().int().positive(),
         }))
         .mutation(async ({ input }) => {
+          const db = await getDb();
+          if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+          const [topup] = await db.select().from(billingTopups)
+            .where(and(
+              eq(billingTopups.reference, input.reference),
+              eq(billingTopups.tenantId, input.tenantId),
+              eq(billingTopups.amountKobo, input.amountKobo),
+            ))
+            .limit(1);
+          if (!topup || (topup.tbTransferId && !topup.tbTransferId.startsWith("pending:") && !topup.tbTransferId.startsWith("fallback-"))) {
+            throw new TRPCError({ code: "CONFLICT", message: "Top-up is not eligible for reconciliation retry" });
+          }
           const { creditTenantAccount } = await import("./billing");
           const result = await creditTenantAccount({
             tenantId: input.tenantId,
@@ -6965,12 +6978,9 @@ export const appRouter = router({
           });
           // Update the billing_topups record with the new transfer ID if successful
           if (result.recorded) {
-            const db = await getDb();
-            if (db) {
-              await db.update(billingTopups)
-                .set({ tbTransferId: result.transferId })
-                .where(eq(billingTopups.reference, input.reference));
-            }
+            await db.update(billingTopups)
+              .set({ tbTransferId: result.transferId })
+              .where(eq(billingTopups.reference, input.reference));
           }
           return result;
         }),

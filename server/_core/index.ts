@@ -3,12 +3,17 @@ import { getDb } from '../db';
 
 import "../sentry.server.config";
 
-// BIS platform requires PostgreSQL. Override the platform-injected MySQL/TiDB URL
-// with the local PostgreSQL instance.
+// BIS platform prefers PostgreSQL. When a non-PostgreSQL URL is injected (e.g. managed TiDB),
+// log a warning and continue — the ORM layer handles both dialects. In local dev, override
+// to the local PostgreSQL instance for full schema fidelity.
 const _dbUrl = process.env.DATABASE_URL ?? "";
 if (!_dbUrl.startsWith("postgresql") && !_dbUrl.startsWith("postgres")) {
-  process.env.DATABASE_URL = "postgresql://bis_user:bis_secure_2026@localhost:5432/bis_db";
-  console.log("[BIS] Overriding DATABASE_URL → local PostgreSQL (bis_db)");
+  if (process.env.NODE_ENV === "production" || process.env.NODE_ENV === "staging") {
+    console.warn("[BIS] DATABASE_URL is not PostgreSQL — some features (PKCE sessions, retry leases) require PostgreSQL and will degrade gracefully.");
+  } else {
+    process.env.DATABASE_URL = "postgresql://bis_user:bis_secure_2026@localhost:5432/bis_db";
+    console.log("[BIS] Overriding DATABASE_URL → local PostgreSQL (bis_db)");
+  }
 }
 
 import express, { type Request, type Response, type NextFunction } from "express";
@@ -713,6 +718,7 @@ async function startServer() {
   registerOAuthRoutes(app);
 
   // Keycloak Bearer → session cookie exchange
+  registerKeycloakBffRoutes(app);
   registerSessionExchangeRoute(app);
   // PostgreSQL-backed user notification stream for immediate in-app alerts
   registerNotificationStream(app);
@@ -1349,4 +1355,5 @@ function gracefulShutdown(signal: string) {
 process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
 process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 import { registerSessionExchangeRoute } from "./sessionExchange";
+import { registerKeycloakBffRoutes } from "../keycloakBff";
 import { registerNotificationStream } from "./notificationStream";

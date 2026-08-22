@@ -1392,6 +1392,7 @@ export const swiftMessageStatusEnum = pgEnum("swift_message_status", [
 
 export const swiftMessages = pgTable("swift_messages", {
   id: serial("id").primaryKey(),
+  tenantId: integer("tenantId"),
   uetr: varchar("uetr", { length: 64 }).notNull().unique(),
   messageType: swiftMessageTypeEnum("messageType").notNull(),
   status: swiftMessageStatusEnum("status").notNull().default("received"),
@@ -1410,7 +1411,10 @@ export const swiftMessages = pgTable("swift_messages", {
   transactionId: integer("transactionId").references(() => transactions.id),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
-});
+},
+  (table) => ({
+    swift_messages_tenant_created_idx: index("swift_messages_tenant_created_idx").on(table.tenantId, table.createdAt),
+  }));
 export type SwiftMessage = typeof swiftMessages.$inferSelect;
 
 // ─── SEPA Payments ────────────────────────────────────────────────────────────
@@ -1421,6 +1425,7 @@ export const sepaPaymentStatusEnum = pgEnum("sepa_payment_status", [
 
 export const sepaPayments = pgTable("sepa_payments", {
   id: serial("id").primaryKey(),
+  tenantId: integer("tenantId"),
   endToEndId: varchar("endToEndId", { length: 64 }).notNull().unique(),
   paymentType: sepaPaymentTypeEnum("paymentType").notNull(),
   status: sepaPaymentStatusEnum("status").notNull().default("pending"),
@@ -1438,7 +1443,10 @@ export const sepaPayments = pgTable("sepa_payments", {
   rejectReason: varchar("rejectReason", { length: 255 }),
   transactionId: integer("transactionId").references(() => transactions.id),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
+},
+  (table) => ({
+    sepa_payments_tenant_created_idx: index("sepa_payments_tenant_created_idx").on(table.tenantId, table.createdAt),
+  }));
 export type SepaPayment = typeof sepaPayments.$inferSelect;
 
 // ─── FATF Travel Rule ─────────────────────────────────────────────────────────
@@ -1448,6 +1456,7 @@ export const travelRuleStatusEnum = pgEnum("travel_rule_status", [
 
 export const travelRuleRecords = pgTable("travel_rule_records", {
   id: serial("id").primaryKey(),
+  tenantId: integer("tenantId"),
   recordRef: varchar("recordRef", { length: 64 }).notNull().unique(),
   transactionId: integer("transactionId").references(() => transactions.id),
   status: travelRuleStatusEnum("status").notNull().default("pending"),
@@ -1468,7 +1477,10 @@ export const travelRuleRecords = pgTable("travel_rule_records", {
   acknowledgedAt: timestamp("acknowledgedAt"),
   rejectionReason: text("rejectionReason"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
+},
+  (table) => ({
+    travel_rule_records_tenant_created_idx: index("travel_rule_records_tenant_created_idx").on(table.tenantId, table.createdAt),
+  }));
 export type TravelRuleRecord = typeof travelRuleRecords.$inferSelect;
 
 // ─── SAR (Suspicious Activity Reports) ───────────────────────────────────────
@@ -1557,6 +1569,7 @@ export const lettersOfCredit = pgTable("letters_of_credit", {
   amendments: jsonb("amendments"),
   discrepancies: jsonb("discrepancies"),
   investigationId: integer("investigationId").references(() => investigations.id),
+  tenantId: integer("tenantId").references(() => tenants.id),
   createdBy: integer("createdBy").references(() => users.id),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
@@ -1616,6 +1629,7 @@ export const evidenceItems = pgTable("evidence_items", {
   evidenceRef: varchar("evidenceRef", { length: 32 }).notNull().unique(),
   caseId: integer("caseId").references(() => cases.id),
   investigationId: integer("investigationId").references(() => investigations.id),
+  tenantId: integer("tenantId").references(() => tenants.id),
   type: evidenceTypeEnum("type").notNull(),
   status: evidenceStatusEnum("status").notNull().default("collected"),
   title: varchar("title", { length: 255 }).notNull(),
@@ -1662,12 +1676,14 @@ export const regulatoryReports = pgTable("regulatory_reports", {
   acknowledgementRef: varchar("acknowledgementRef", { length: 64 }),
   rejectionReason: text("rejectionReason"),
   metadata: jsonb("metadata"),
+  tenantId: integer("tenantId").references(() => tenants.id),
   createdBy: integer("createdBy").references(() => users.id),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
 },
   (table) => ({
     regulatory_reports_status_idx: index("regulatory_reports_status_idx").on(table.status),
+    regulatory_reports_tenant_idx: index("regulatory_reports_tenant_idx").on(table.tenantId),
     regulatory_reports_created_at_idx: index("regulatory_reports_created_at_idx").on(table.createdAt),
     regulatory_reports_type_idx: index("regulatory_reports_type_idx").on(table.type),
   }));
@@ -2021,6 +2037,28 @@ export const billingTopups = pgTable("billing_topups", {
   }));
 export type BillingTopup = typeof billingTopups.$inferSelect;
 export type InsertBillingTopup = typeof billingTopups.$inferInsert;
+
+// ─── Durable Webhook Credit Retry Queue ───────────────────────────────────────
+// One provider reference has one retry state machine. A bounded processing lease
+// protects the ledger from concurrent retry workers after transient failures.
+export const webhookRetryQueue = pgTable("webhook_retry_queue", {
+  id: bigint("id", { mode: "number" }).primaryKey().generatedByDefaultAsIdentity(),
+  reference: varchar("reference", { length: 256 }).notNull().unique(),
+  tenantId: varchar("tenantId", { length: 64 }).notNull(),
+  amountKobo: integer("amountKobo").notNull(),
+  attempts: integer("attempts").notNull().default(0),
+  nextRetryAt: timestamp("nextRetryAt").notNull(),
+  status: varchar("status", { length: 32 }).notNull().default("pending"),
+  leasedAt: timestamp("leasedAt"),
+  lastError: text("lastError"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+}, (table) => ({
+  webhook_retry_due_idx: index("webhook_retry_due_idx").on(table.status, table.nextRetryAt),
+  webhook_retry_lease_idx: index("webhook_retry_lease_idx").on(table.status, table.leasedAt),
+  webhook_retry_amount_positive: check("webhook_retry_amount_positive", sql`${table.amountKobo} > 0`),
+}));
+export type WebhookRetryQueueItem = typeof webhookRetryQueue.$inferSelect;
 
 // ─── Velocity Blocks (Fluvio sliding-window audit) ────────────────────────────
 // One row per blocked transfer attempt. Compliance officers review these in the
@@ -3140,6 +3178,50 @@ export const keycloakSyncLog = pgTable("keycloak_sync_log", {
 }));
 export type KeycloakSyncLog = typeof keycloakSyncLog.$inferSelect;
 export type InsertKeycloakSyncLog = typeof keycloakSyncLog.$inferInsert;
+
+// ── Durable Keycloak BFF session state ──────────────────────────────────────
+// Browser clients never receive PKCE verifiers or Keycloak refresh tokens.
+export const keycloakAuthTransactions = pgTable("keycloak_auth_transactions", {
+  id: serial("id").primaryKey(),
+  state: varchar("state", { length: 128 }).notNull().unique(),
+  nonce: varchar("nonce", { length: 128 }).notNull(),
+  codeVerifierEncrypted: text("codeVerifierEncrypted").notNull(),
+  redirectUri: text("redirectUri").notNull(),
+  returnTo: text("returnTo").notNull(),
+  expiresAt: timestamp("expiresAt").notNull(),
+  consumedAt: timestamp("consumedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  expiresIdx: index("keycloak_auth_transactions_expires_idx").on(t.expiresAt),
+}));
+
+export const keycloakRefreshSessions = pgTable("keycloak_refresh_sessions", {
+  familyId: varchar("familyId", { length: 128 }).primaryKey(),
+  userId: integer("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+  refreshTokenEncrypted: text("refreshTokenEncrypted").notNull(),
+  generation: integer("generation").notNull().default(0),
+  leaseId: varchar("leaseId", { length: 128 }),
+  leaseExpiresAt: timestamp("leaseExpiresAt"),
+  expiresAt: timestamp("expiresAt").notNull(),
+  revokedAt: timestamp("revokedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+}, (t) => ({
+  userIdx: index("keycloak_refresh_sessions_user_idx").on(t.userId),
+  leaseIdx: index("keycloak_refresh_sessions_lease_idx").on(t.leaseExpiresAt),
+}));
+
+export const keycloakOnboardingDrafts = pgTable("keycloak_onboarding_drafts", {
+  id: varchar("id", { length: 128 }).primaryKey(),
+  payloadEncrypted: text("payloadEncrypted").notNull(),
+  claimedByUserId: integer("claimedByUserId").references(() => users.id, { onDelete: "set null" }),
+  claimedAt: timestamp("claimedAt"),
+  consumedAt: timestamp("consumedAt"),
+  expiresAt: timestamp("expiresAt").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (t) => ({
+  expiresIdx: index("keycloak_onboarding_drafts_expires_idx").on(t.expiresAt),
+}));
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // MISSING DOMAIN TABLES — Added in polyglot integration pass

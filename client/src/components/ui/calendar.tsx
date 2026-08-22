@@ -22,6 +22,7 @@ function Calendar({
   buttonVariant?: React.ComponentProps<typeof Button>["variant"];
 }) {
   const defaultClassNames = getDefaultClassNames();
+  const defaultClassNameLookup = defaultClassNames as Record<string, string | undefined>;
 
   return (
     <DayPicker
@@ -82,7 +83,10 @@ function Calendar({
             : "rounded-md pl-2 pr-1 flex items-center gap-1 text-sm h-8 [&>svg]:text-muted-foreground [&>svg]:size-3.5",
           defaultClassNames.caption_label
         ),
-        table: "w-full border-collapse",
+        // React Day Picker 9 calls this table; v10 calls it month_grid. Keeping
+        // both keys preserves the calendar layout through the dependency upgrade.
+        table: cn("w-full border-collapse", defaultClassNameLookup.table),
+        month_grid: cn("w-full border-collapse", defaultClassNameLookup.month_grid),
         weekdays: cn("flex", defaultClassNames.weekdays),
         weekday: cn(
           "text-muted-foreground rounded-md flex-1 font-normal text-[0.8rem] select-none",
@@ -121,7 +125,7 @@ function Calendar({
         ),
         hidden: cn("invisible", defaultClassNames.hidden),
         ...classNames,
-      }}
+      } as React.ComponentProps<typeof DayPicker>["classNames"]}
       components={{
         Root: ({ className, rootRef, ...props }) => {
           return (

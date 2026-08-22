@@ -1244,12 +1244,22 @@ describe("goaml.get", () => {
 
 describe("goaml.bulkSubmit", () => {
   it("returns submittedCount and skippedCount for non-existent ids", async () => {
-    const caller = appRouter.createCaller(createUserCtx());
+    const ctx = createUserCtx();
+    ctx.tenantId = 1;
+    ctx.user!.tenantId = 1;
+    const caller = appRouter.createCaller(ctx);
     // ids must have min(1) — use a non-existent id
     const result = await caller.goaml.bulkSubmit({ ids: [999999] });
     expect(result).toHaveProperty("submittedCount");
     expect(result).toHaveProperty("skippedCount");
     expect(result.submittedCount + result.skippedCount + (result.errorCount ?? 0)).toBeGreaterThanOrEqual(0);
+  });
+
+  it("fails closed when an authenticated caller has no tenant context", async () => {
+    const caller = appRouter.createCaller(createUserCtx());
+    await expect(caller.goaml.bulkSubmit({ ids: [999999] })).rejects.toThrow(
+      "Tenant context is required"
+    );
   });
 
   it("unauthenticated user is rejected", async () => {

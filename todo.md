@@ -1,5 +1,52 @@
 # BIS Platform TODO
 
+## Authentication and Onboarding Audit
+- [x] Remove the production-capable local PostgreSQL bootstrap override so a non-PostgreSQL deployment database fails closed instead of silently using localhost
+- [ ] Restore the missing PostgreSQL-backed Keycloak PKCE transaction, refresh-family, and onboarding-resume implementation with migrations and regression coverage
+- [x] Initialize the empty local PostgreSQL BIS test database from the current typed schema and reviewed incremental migrations
+- [ ] Use the local PostgreSQL database to identify and remediate database-specific SQL, migration, constraint, and concurrency defects
+- [ ] Triage and close all locally reproducible technical debt findings with regression coverage and documented external dependencies
+- [x] Provision or verify local PostgreSQL with the BIS role and database, then apply migrations 0061 through 0064
+- [ ] Run database-backed validation for PKCE sessions, webhook retry leases, payment claims, and financial tenant-isolation migrations
+- [ ] Add database-backed integration coverage for Keycloak BFF begin, callback replay rejection, and HttpOnly refresh-family rotation
+- [ ] Add database-backed validation for payment claims and financial tenant-isolation constraints against local PostgreSQL
+- [ ] Inventory all remaining code-resolvable production gaps and untested financial, authorization, recovery, and validation branches
+- [ ] Close every verified code-only payment, ledger, tenant-isolation, and recovery defect with fail-closed behavior
+- [ ] Convert investigation debit posting to a deterministic, tenant-scoped pre-ledger reconciliation claim that cannot duplicate on retry
+- [ ] Add adversarial regression coverage for authorization boundaries, deterministic idempotency, webhook leasing, and illegal state transitions
+- [x] Upgrade and validate the vulnerable Streamdown/Mermaid/DOMPurify production dependency chain identified by the production audit
+- [x] Upgrade and validate the remaining high-severity Axios, JS-YAML, Nodemailer, Nanoid, fast-xml-builder, form-data, and ip-address production dependency chains
+- [ ] Enforce tenant scope, authorized lifecycle transitions, and replay resistance across AML transactions, alerts, SWIFT, SEPA, and Travel Rule procedures
+- [ ] Enforce tenant isolation, draft-only compare-and-set submission, and scoped XML export/deletion across goAML filing procedures
+- [ ] Enforce tenant scope, authorized lifecycle transitions, and immutable custody controls across trade-finance, evidence, and regulatory banking procedures
+- [ ] Replace manual account-credit random ledger identifiers with a deterministic pre-ledger claim and reconciliation state
+- [ ] Define correspondent-bank ownership semantics and enforce tenant isolation or explicit platform-admin-only access consistently
+- [ ] Enforce tenant-context derivation invariants and standardized fail-closed authorization errors across protected routers
+- [ ] Run code-quality, dependency, security, and full-suite validation; document the highest defensible code-only readiness assessment
+- [x] Inventory all payment, ledger, webhook, reconciliation, authorization, and privileged-operation code paths for a mission-critical audit
+- [x] Audit flow-of-funds atomicity, idempotency, double-credit/double-debit resistance, settlement state transitions, and failure recovery
+- [x] Audit authorization, authentication, input validation, secret handling, SSRF, injection, replay, and rate-limit controls across services
+- [ ] Remediate verified high-severity defects with regression tests and preserve fail-closed behavior
+- [x] Produce an evidence-based production-readiness score and an explicit residual-risk register
+- [x] Replace post-credit billing idempotency with a durable pre-credit claim and deterministic ledger transfer identifier
+- [x] Remove the false-success TigerBeetle failure path and retain top-ups in a reconciliation-required state until authoritative ledger posting
+- [ ] Repair durable Paystack webhook enqueueing, concurrency claiming, and retry reconciliation to prevent loss or duplicate crediting
+- [ ] Enforce tenant isolation and legal state transitions across transfer, transaction, account-balance, and export endpoints
+- [ ] Apply and verify the versioned PostgreSQL migration for webhook retry persistence, lease expiry, and payment-reconciliation claims
+- [ ] Add PostgreSQL-backed concurrent-worker integration coverage for webhook retry lease claim, expiry recovery, and no-double-credit behavior
+- [x] Document Grafana trace/span alerting and a synthetic-session high-concurrency k6 refresh load test
+- [x] Document OTLP Collector/exporter configuration and a multi-tab refresh-race trace-correlation integration test
+- [x] Document distributed tracing and correlation IDs for refresh races plus Nginx/Ingress hardening checklist
+- [x] Document a staging-only Keycloak latency/loss Chaos Mesh manifest and identity incident PIR/RCA framework
+- [x] Document staging-only Chaos Mesh/Litmus Keycloak outage experiments and STRIDE analysis for refresh/session persistence
+- [x] Generate a slide deck summarizing disaster recovery, CI/CD, and security incident response controls
+- [x] Document a Keycloak-outage drill, migration-safe CI/CD/Helm pipeline, and compromised refresh-token security incident playbook
+- [x] Document Prometheus metrics, Grafana alerts, disaster recovery, and zero-downtime refresh-lease migration strategy
+- [x] Document cross-tab and cross-replica BFF refresh coordination plus Kubernetes Helm and Ingress configuration
+- [x] Document secure BFF-held refresh-token rotation, browser session recovery, and production Docker/Nginx configuration
+- [x] Document copy-ready Vitest PKCE callback and token-expiration tests plus React Keycloak sign-in components
+- [x] Document exact PKCE state-verification and Keycloak callback code with token-expiry and interrupted-onboarding test coverage
+
 ## Frontend (React PWA)
 - [x] 24 fully functional pages with dark/light theme toggle
 - [x] Dashboard with KPI cards, risk trend chart, live ticker strip
@@ -3566,6 +3613,8 @@
 - [x] Deploy the expiry callback and provision the project Heartbeat job (2urXuYAg4pSm9vT4XBS7cp); paused after confirming production has no reachable PostgreSQL schema
 - [x] Verify the first authenticated production execution of the Force Credit expiry Heartbeat; cron authentication succeeded and failed closed at the unavailable database boundary
 - [ ] Configure managed PostgreSQL, resume the paused expiry Heartbeat, and verify a successful idempotent execution
+- [x] Re-test the live expiry callback after successful deployment; it rejects unauthenticated callers with HTTP 403
+- [ ] Replace the stale paused Heartbeat entry (last execution Aug 15 23:04 UTC) and observe a fresh successful production run after managed PostgreSQL is configured
 - [x] Add a security audit view for failed Force Credit MFA authorization attempts
 - [x] Validate, checkpoint, and push all code to GitHub main (commits 967bbcd and a7c02b0)
 
@@ -3581,6 +3630,8 @@
 - [x] Repair the production Workbox precache-size build failure and validate a deployable production build
 - [x] Restore GitHub Actions CI workflow files or document the missing-workflow permission blocker (GitHub rejected the valid workflow because the current GitHub App lacks `workflows` permission)
 - [x] Synchronize all completed workspace changes to GitHub main (commit 986ad64)
+- [x] Rebase, locally validate, and merge 42 compatible Dependabot updates with required CI and CodeQL checks; close 2 superseded or incompatible update branches
+- [x] Publish the Vite 8 migration to GitHub main (commit 6debcfa); PostgreSQL-backed CI and JavaScript/TypeScript, Rust, Go, and Python CodeQL all passed
 - [ ] Merge only pull requests with compatible, validated changes
 - [x] Verify GitHub main at a50623d and document external blockers: CI workflow absent and 47 Dependabot PRs have no reported checks
 
@@ -3589,12 +3640,30 @@
 - [x] Publish PostgreSQL-backed CI and validate it on main (run 31912750609 passed)
 - [x] Publish CodeQL static analysis for JavaScript/TypeScript, Python, Go, and Rust (run 31912750627 passed)
 - [ ] Trigger and review the new CI and CodeQL checks for each Dependabot pull request
+- [x] Remediate Recharts 3 type compatibility; Recharts 3.10.1 type-check passes in the PR #47 dependency set
+- [x] Remediate React Day Picker 10 class-name compatibility; TypeScript passes against v9 and the PR #46 v10 dependency set
+- [x] Remediate Google Maps Heatmap typing compatibility; TypeScript passes against the PR #41 development dependency set
+- [x] Align the production JavaScript target with Esbuild 0.28; refreshed Dependabot PR #41 passed CI and CodeQL
+- [x] Complete Vite 7 tooling alignment; production build and full regression suite pass
+- [x] Upgrade Vitest to a Vite 7-compatible runtime; 51 test files and 1,395 tests pass
+- [x] Update the ORM migration-status test mock for Vitest 4 constructor semantics
+- [x] Plan and validate the Vite 8 and Rolldown plugin migration; plugin-react 6 is now deployed through the verified toolchain upgrade
+- [x] Inventory Vite 8 peers: plugin-react 6 requires Vite 8; Vitest 4.1, vite-plugin-pwa 1.2, and Tailwind Vite support Vite 8
+- [x] Complete the Vite 8 toolchain migration; strict TypeScript, all 1,395 tests, and the production build pass
+- [x] Align the pnpm Vite override with Vite 8; a regenerated lockfile passes frozen installation validation
+- [x] Replace the Vite 7 manualChunks configuration with supported Vite 8 Rolldown code-splitting groups; production build emits no legacy manualChunks warning
+- [x] Validate MediaPipe 1.0 with the current biometric-engine InsightFace baseline; biometric tests and required CI checks passed before merging PR #26
+- [x] Close Dependabot PR #44 because plugin-react 6 requires a separate Vite 8 and Rolldown migration
+- [ ] Validate PostgreSQL 18, Redis 8, and Prometheus 3 in the staging Compose stack before merging Dependabot PRs #4, #3, and #2 (no Docker runtime is available in the current sandbox)
+- [x] Disable nonessential Vite compressed-size reporting and release development-server memory before constrained production builds
 - [ ] Merge only validated Dependabot pull requests after required checks pass
+- [x] Reconcile the Go gateway Insider middleware implementation with its existing regression tests; full gateway Go suite passes
 - [x] Verify GitHub main and remaining pull-request state (47 open Dependabot PRs; 0 report checks)
+- [ ] Validate the remaining PostgreSQL 18, Redis 8, and Prometheus 3 Docker Compose upgrades in a Docker-capable staging environment before merge
 
 ## Production Deployment Recovery (Aug 15 2026)
 - [x] Recover production session signing with a strong purpose-separated root and validate startup secret requirements
 - [x] Derive a purpose-separated session-signing root from the platform Forge credential when no dedicated secret is supplied
-- [ ] Remove unsafe production fallback secrets and localhost-only service defaults
+- [x] Remove unsafe production fallback secrets and localhost-only service defaults
 - [x] Validate a successful production build and deployment startup
 - [x] Synchronize the recovery changes to GitHub main (commit c22f2ff)

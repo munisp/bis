@@ -214,41 +214,30 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
+    // Esbuild 0.28 no longer downlevels some generated PWA destructuring paths
+    // to the legacy baseline target. BIS supports modern evergreen browsers, so
+    // an explicit ES2022 target keeps both application and Workbox transforms
+    // deterministic.
+    target: "es2022",
+    // CI and constrained deployment builders do not need per-asset gzip estimates;
+    // disabling them avoids a second full in-memory pass over the generated chunks.
+    reportCompressedSize: false,
     chunkSizeWarningLimit: 600,
-    rollupOptions: {
+    rolldownOptions: {
       output: {
-        manualChunks: (id) => {
-          // Vendor: React core
-          if (id.includes('node_modules/react/') || id.includes('node_modules/react-dom/')) {
-            return 'vendor-react';
-          }
-          // Vendor: tRPC + React Query
-          if (id.includes('@trpc') || id.includes('@tanstack/react-query')) {
-            return 'vendor-trpc';
-          }
-          // Vendor: Radix UI + shadcn components
-          if (id.includes('@radix-ui') || id.includes('/cmdk/') || id.includes('/vaul/')) {
-            return 'vendor-ui';
-          }
-          // Vendor: Charts (recharts is large)
-          if (id.includes('/recharts/') || id.includes('/d3-') || id.includes('/victory/')) {
-            return 'vendor-charts';
-          }
-          // Vendor: Date utilities
-          if (id.includes('/date-fns/') || id.includes('/dayjs/') || id.includes('/luxon/')) {
-            return 'vendor-date';
-          }
-          // Vendor: Markdown / streaming
-          if (id.includes('/streamdown/') || id.includes('/marked/') || id.includes('/remark/')) {
-            return 'vendor-markdown';
-          }
-          // Vendor: Lucide icons (large)
-          if (id.includes('/lucide-react/')) {
-            return 'vendor-icons';
-          }
-          // Leave all remaining dependencies to Rollup's import graph. Grouping
-          // every package into one catch-all chunk previously produced a 12.5 MB
-          // asset that Workbox could not precache and that was expensive to render.
+        codeSplitting: {
+          // Rolldown replaces Rollup's manualChunks callback with named groups.
+          // Leave unmatched dependencies to automatic chunking: a catch-all
+          // vendor group previously produced a 12.5 MB Workbox-ineligible asset.
+          groups: [
+            { name: "vendor-react", test: /node_modules\/(?:react|react-dom)\// },
+            { name: "vendor-trpc", test: /node_modules\/(?:@trpc|@tanstack\/react-query)\// },
+            { name: "vendor-ui", test: /node_modules\/(?:@radix-ui|cmdk|vaul)\// },
+            { name: "vendor-charts", test: /node_modules\/(?:recharts|d3-|victory)\// },
+            { name: "vendor-date", test: /node_modules\/(?:date-fns|dayjs|luxon)\// },
+            { name: "vendor-markdown", test: /node_modules\/(?:streamdown|marked|remark)\// },
+            { name: "vendor-icons", test: /node_modules\/lucide-react\// },
+          ],
         },
       },
     },

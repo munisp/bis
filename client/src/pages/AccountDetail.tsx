@@ -131,7 +131,7 @@ function BalanceChart({ series }: { series: DaySeries[] }) {
         <Tooltip
           contentStyle={{ backgroundColor: "var(--color-muted-bg)", border: "1px solid var(--color-muted-bg)", borderRadius: 6, fontSize: 11 }}
           labelStyle={{ color: "var(--color-slate-400)" }}
-          formatter={(value: number, name: string) => [formatTooltip(value), name]}
+          formatter={(value, name) => [formatTooltip(Number(value ?? 0)), String(name ?? "")]}
         />
         <Legend wrapperStyle={{ fontSize: 10, color: "var(--color-slate-400)" }} />
         <Area type="monotone" dataKey="Credits" stroke="var(--risk-low)" strokeWidth={1.5} fill="url(#creditsGrad)" dot={false} />

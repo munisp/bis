@@ -219,7 +219,7 @@ export default function TransferAnalyticsDashboard() {
                       <Tooltip
                         contentStyle={{ background: "var(--color-slate-700)", border: "1px solid var(--color-slate-700)", borderRadius: 8 }}
                         labelStyle={{ color: "var(--color-slate-200)" }}
-                        formatter={(v: number) => [`₦${v.toFixed(3)}M`, "Volume"]}
+                        formatter={v => [`₦${Number(v ?? 0).toFixed(3)}M`, "Volume"]}
                       />
                       <Area type="monotone" dataKey="volumeM" stroke="var(--risk-none)" fill="url(#volGrad)" strokeWidth={2} />
                     </AreaChart>
@@ -275,7 +275,7 @@ export default function TransferAnalyticsDashboard() {
                       <Tooltip
                         contentStyle={{ background: "var(--color-slate-700)", border: "1px solid var(--color-slate-700)", borderRadius: 8 }}
                         labelStyle={{ color: "var(--color-slate-200)" }}
-                        formatter={(v: number) => [`${v}/100`, "Avg Risk"]}
+                        formatter={v => [`${Number(v ?? 0)}/100`, "Avg Risk"]}
                       />
                       <Line type="monotone" dataKey="avgRisk" stroke="var(--chart-violet)" strokeWidth={2} dot={{ r: 3 }} />
                     </LineChart>
@@ -312,7 +312,7 @@ export default function TransferAnalyticsDashboard() {
                         </Pie>
                         <Tooltip
                           contentStyle={{ background: "var(--color-slate-700)", border: "1px solid var(--color-slate-700)", borderRadius: 8 }}
-                          formatter={(v: number) => [formatNGN(v), "Volume"]}
+                          formatter={v => [formatNGN(Number(v ?? 0)), "Volume"]}
                         />
                       </PieChart>
                     </ResponsiveContainer>
