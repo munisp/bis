@@ -279,7 +279,7 @@ export const correspondentBankingRouter = router({
       return bank;
     }),
 
-  addNostroAccount: writeProcedure
+  addNostroAccount: adminProcedure
     .input(z.object({
       correspondentBankId: z.number(),
       accountNumber: z.string().min(1),
@@ -300,7 +300,7 @@ export const correspondentBankingRouter = router({
       return account;
     }),
 
-  stats: protectedProcedure.query(async () => {
+  stats: adminProcedure.query(async () => {
     const db = await getDb();
     if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
     const [s] = await db.select({
