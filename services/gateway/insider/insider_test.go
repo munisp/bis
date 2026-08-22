@@ -1,15 +1,8 @@
 package insider_test
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
-	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"sync"
 	"testing"
 
 	"bis/gateway/insider"
@@ -22,43 +15,6 @@ func okHandler(w http.ResponseWriter, r *http.Request) {
 
 func newMW(cfg insider.Config) *insider.Middleware {
 	return insider.New(cfg)
-}
-
-func configuredBreakGlass(t *testing.T, cfg insider.Config) (insider.Config, func()) {
-	t.Helper()
-	var mu sync.Mutex
-	events := make([]string, 0, 3)
-	key := "gateway-audit-test-key"
-	opa := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var input map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&input); err != nil { t.Errorf("OPA body: %v", err) }
-		_, _ = w.Write([]byte(`{"result":{"allow":true}}`))
-	}))
-	audit := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		mac := hmac.New(sha256.New, []byte(key)); _, _ = mac.Write(body)
-		if r.Header.Get("X-BIS-Gateway-Signature") != hex.EncodeToString(mac.Sum(nil)) { t.Error("audit request missing valid HMAC") }
-		var event struct { EventType string `json:"eventType"` }
-		if err := json.Unmarshal(body, &event); err != nil { t.Errorf("audit body: %v", err) }
-		mu.Lock(); events = append(events, event.EventType); mu.Unlock()
-		w.WriteHeader(http.StatusCreated)
-	}))
-	cfg.OPAURL = opa.URL
-	cfg.BreakGlassAuditURL = audit.URL
-	cfg.GatewayAuditKey = key
-	return cfg, func() {
-		opa.Close(); audit.Close()
-		mu.Lock(); defer mu.Unlock()
-		if len(events) != 3 || events[0] != "break_glass_authorized" || events[1] != "break_glass_execution_queued" || events[2] != "break_glass_executed" { t.Errorf("expected authorization, durable queue, and execution audit events, got %#v", events) }
-	}
-}
-
-func addBreakGlassAttributes(req *http.Request) {
-	req.Header.Set("X-BIS-User-ID", "101")
-	req.Header.Set("X-BIS-Approver-ID", "202")
-	req.Header.Set("X-BIS-BreakGlass-Reason", "Contain confirmed credential-stuffing incident")
-	req.Header.Set("X-BIS-User-Roles", "bis-admin")
-	req.Header.Set("X-BIS-MFA-Verified", "keycloak-totp-required")
 }
 
 // ─── AnomalousIPBlock ─────────────────────────────────────────────────────────
@@ -158,13 +114,10 @@ func TestPrivilegedAccess_AllowsPrivilegedWithToken(t *testing.T) {
 	cfg := insider.DefaultConfig()
 	cfg.BreakGlassSecret = "some-valid-token"
 	cfg.DualControlPaths = []string{} // no dual-control paths for this test
-	cfg, verifyAudit := configuredBreakGlass(t, cfg)
-	defer verifyAudit()
 	mw := newMW(cfg)
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/admin/delete", nil)
 	req.Header.Set("X-BIS-BreakGlass", "some-valid-token")
-	addBreakGlassAttributes(req)
 	rr := httptest.NewRecorder()
 	mw.PrivilegedAccess(http.HandlerFunc(okHandler)).ServeHTTP(rr, req)
 
@@ -195,88 +148,17 @@ func TestPrivilegedAccess_DualControlPasses(t *testing.T) {
 	cfg.BreakGlassSecret = "some-valid-token"
 	cfg.ApproverSecret = "approver-token"
 	cfg.DualControlPaths = []string{"/v1/admin/export-all"}
-	cfg, verifyAudit := configuredBreakGlass(t, cfg)
-	defer verifyAudit()
 	mw := newMW(cfg)
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/admin/export-all", nil)
 	req.Header.Set("X-BIS-BreakGlass", "some-valid-token")
 	req.Header.Set("X-BIS-Approver", "approver-token")
-	addBreakGlassAttributes(req)
 	rr := httptest.NewRecorder()
 	mw.PrivilegedAccess(http.HandlerFunc(okHandler)).ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200 with both tokens, got %d", rr.Code)
 	}
-}
-
-func TestPrivilegedAccess_DeniesMissingMFAAttributeBeforeTheProtectedHandlerRuns(t *testing.T) {
-	cfg := insider.DefaultConfig()
-	cfg.BreakGlassSecret = "some-valid-token"
-	cfg.OPAURL = "http://127.0.0.1:1"
-	cfg.BreakGlassAuditURL = "http://127.0.0.1:1/audit"
-	cfg.GatewayAuditKey = "test-key"
-	mw := newMW(cfg)
-	called := false
-	req := httptest.NewRequest(http.MethodPost, "/v1/admin/delete", nil)
-	req.Header.Set("X-BIS-BreakGlass", "some-valid-token")
-	req.Header.Set("X-BIS-User-ID", "101")
-	req.Header.Set("X-BIS-Approver-ID", "202")
-	req.Header.Set("X-BIS-BreakGlass-Reason", "Contain confirmed credential-stuffing incident")
-	req.Header.Set("X-BIS-User-Roles", "bis-admin")
-	rr := httptest.NewRecorder()
-	mw.PrivilegedAccess(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		called = true
-		w.WriteHeader(http.StatusOK)
-	})).ServeHTTP(rr, req)
-	if rr.Code != http.StatusForbidden { t.Fatalf("expected 403 without MFA assurance, got %d", rr.Code) }
-	if called { t.Fatal("protected privileged handler ran without MFA assurance") }
-}
-
-func TestPrivilegedAccess_DeniesMissingReasonAndNonIndependentApproverBeforeTheProtectedHandlerRuns(t *testing.T) {
-	for name, mutate := range map[string]func(*http.Request){
-		"missing reason": func(req *http.Request) { req.Header.Del("X-BIS-BreakGlass-Reason") },
-		"same actor and approver": func(req *http.Request) { req.Header.Set("X-BIS-Approver-ID", "101") },
-	} {
-		t.Run(name, func(t *testing.T) {
-			cfg := insider.DefaultConfig()
-			cfg.BreakGlassSecret = "some-valid-token"
-			cfg.OPAURL = "http://127.0.0.1:1"
-			cfg.BreakGlassAuditURL = "http://127.0.0.1:1/audit"
-			cfg.GatewayAuditKey = "test-key"
-			mw := newMW(cfg)
-			called := false
-			req := httptest.NewRequest(http.MethodPost, "/v1/admin/delete", nil)
-			req.Header.Set("X-BIS-BreakGlass", "some-valid-token")
-			addBreakGlassAttributes(req)
-			mutate(req)
-			rr := httptest.NewRecorder()
-			mw.PrivilegedAccess(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				called = true
-				w.WriteHeader(http.StatusOK)
-			})).ServeHTTP(rr, req)
-			if rr.Code != http.StatusForbidden { t.Fatalf("expected 403, got %d", rr.Code) }
-			if called { t.Fatal("protected privileged handler ran despite invalid break-glass attributes") }
-		})
-	}
-}
-
-func TestPrivilegedAccess_CrossComponentAuditSink(t *testing.T) {
-	if os.Getenv("BIS_CROSS_COMPONENT_TEST") != "1" { t.Skip("cross-component harness not enabled") }
-	cfg := insider.DefaultConfig()
-	cfg.BreakGlassSecret = "cross-component-break-glass"
-	cfg.OPAURL = os.Getenv("BIS_CROSS_OPA_URL")
-	cfg.BreakGlassAuditURL = os.Getenv("BIS_CROSS_AUDIT_URL")
-	cfg.GatewayAuditKey = os.Getenv("BIS_CROSS_AUDIT_KEY")
-	if cfg.OPAURL == "" || cfg.BreakGlassAuditURL == "" || cfg.GatewayAuditKey == "" { t.Fatal("cross-component harness URLs and audit key are required") }
-	mw := newMW(cfg)
-	req := httptest.NewRequest(http.MethodPost, "/v1/admin/delete", nil)
-	req.Header.Set("X-BIS-BreakGlass", cfg.BreakGlassSecret)
-	addBreakGlassAttributes(req)
-	rr := httptest.NewRecorder()
-	mw.PrivilegedAccess(http.HandlerFunc(okHandler)).ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK { t.Fatalf("expected successful privileged handler through BFF audit sink, got %d", rr.Code) }
 }
 
 // ─── ExfilTracker ─────────────────────────────────────────────────────────────

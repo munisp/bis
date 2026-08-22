@@ -1,6 +1,6 @@
 {
-  "id": "f002b441-6d93-475f-801b-04e045c8bd49",
-  "prevId": "472cec31-2942-46b9-84f6-409a02332660",
+  "id": "c92f0d01-543e-4940-80f2-9bc92c068cad",
+  "prevId": "78fcaf4f-4dd9-4b8a-8baf-896145a8fcbc",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -85,7 +85,7 @@
         },
         "permifyChanges": {
           "name": "permifyChanges",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
@@ -749,6 +749,18 @@
           "notNull": true,
           "default": false
         },
+        "deletedAt": {
+          "name": "deletedAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deletedBy": {
+          "name": "deletedBy",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
         "createdAt": {
           "name": "createdAt",
           "type": "timestamp",
@@ -960,6 +972,18 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "deletedAt": {
+          "name": "deletedAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deletedBy": {
+          "name": "deletedBy",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
         },
         "updatedAt": {
           "name": "updatedAt",
@@ -1248,10 +1272,10 @@
         },
         "permissions": {
           "name": "permissions",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false,
-          "default": "'[]'::json"
+          "default": "'[]'::jsonb"
         },
         "lastUsedAt": {
           "name": "lastUsedAt",
@@ -1325,10 +1349,10 @@
         },
         "scopes": {
           "name": "scopes",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": true,
-          "default": "'[]'::json"
+          "default": "'[]'::jsonb"
         },
         "rateLimit": {
           "name": "rateLimit",
@@ -1413,6 +1437,207 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.apisix_audit_log": {
+      "name": "apisix_audit_log",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "requestId": {
+          "name": "requestId",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "routeId": {
+          "name": "routeId",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "clientIp": {
+          "name": "clientIp",
+          "type": "varchar(45)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "method": {
+          "name": "method",
+          "type": "varchar(10)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "uri": {
+          "name": "uri",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "statusCode": {
+          "name": "statusCode",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "latencyMs": {
+          "name": "latencyMs",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "wafStatus": {
+          "name": "wafStatus",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "wafAttackType": {
+          "name": "wafAttackType",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "tenantId": {
+          "name": "tenantId",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "userId": {
+          "name": "userId",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "rawLog": {
+          "name": "rawLog",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "loggedAt": {
+          "name": "loggedAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "aal_ip_idx": {
+          "name": "aal_ip_idx",
+          "columns": [
+            {
+              "expression": "clientIp",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "aal_route_idx": {
+          "name": "aal_route_idx",
+          "columns": [
+            {
+              "expression": "routeId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "aal_status_idx": {
+          "name": "aal_status_idx",
+          "columns": [
+            {
+              "expression": "statusCode",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "aal_ts_idx": {
+          "name": "aal_ts_idx",
+          "columns": [
+            {
+              "expression": "loggedAt",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "aal_tenant_idx": {
+          "name": "aal_tenant_idx",
+          "columns": [
+            {
+              "expression": "tenantId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "apisix_audit_log_tenantId_tenants_id_fk": {
+          "name": "apisix_audit_log_tenantId_tenants_id_fk",
+          "tableFrom": "apisix_audit_log",
+          "tableTo": "tenants",
+          "columnsFrom": [
+            "tenantId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "apisix_audit_log_userId_users_id_fk": {
+          "name": "apisix_audit_log_userId_users_id_fk",
+          "tableFrom": "apisix_audit_log",
+          "tableTo": "users",
+          "columnsFrom": [
+            "userId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.audit_log": {
       "name": "audit_log",
       "schema": "",
@@ -1476,7 +1701,7 @@
         },
         "detail": {
           "name": "detail",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
@@ -2120,6 +2345,155 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.biometric_templates": {
+      "name": "biometric_templates",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "subjectRef": {
+          "name": "subjectRef",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tenantId": {
+          "name": "tenantId",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "modality": {
+          "name": "modality",
+          "type": "biometric_modality",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "templateData": {
+          "name": "templateData",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "quality": {
+          "name": "quality",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deviceId": {
+          "name": "deviceId",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "enrolledBy": {
+          "name": "enrolledBy",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "enrolledAt": {
+          "name": "enrolledAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updatedAt": {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "bt_subject_idx": {
+          "name": "bt_subject_idx",
+          "columns": [
+            {
+              "expression": "subjectRef",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "bt_tenant_idx": {
+          "name": "bt_tenant_idx",
+          "columns": [
+            {
+              "expression": "tenantId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "bt_modality_idx": {
+          "name": "bt_modality_idx",
+          "columns": [
+            {
+              "expression": "modality",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "biometric_templates_tenantId_tenants_id_fk": {
+          "name": "biometric_templates_tenantId_tenants_id_fk",
+          "tableFrom": "biometric_templates",
+          "tableTo": "tenants",
+          "columnsFrom": [
+            "tenantId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "biometric_templates_enrolledBy_users_id_fk": {
+          "name": "biometric_templates_enrolledBy_users_id_fk",
+          "tableFrom": "biometric_templates",
+          "tableTo": "users",
+          "columnsFrom": [
+            "enrolledBy"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.candidate_consents": {
       "name": "candidate_consents",
       "schema": "",
@@ -2408,10 +2782,10 @@
         },
         "addressHistory": {
           "name": "addressHistory",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false,
-          "default": "'[]'::json"
+          "default": "'[]'::jsonb"
         },
         "passportNumber": {
           "name": "passportNumber",
@@ -2626,10 +3000,10 @@
         },
         "attachmentUrls": {
           "name": "attachmentUrls",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false,
-          "default": "'[]'::json"
+          "default": "'[]'::jsonb"
         },
         "reviewedBy": {
           "name": "reviewedBy",
@@ -3214,7 +3588,7 @@
         },
         "detail": {
           "name": "detail",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
@@ -3350,17 +3724,17 @@
         },
         "investigationRefs": {
           "name": "investigationRefs",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false,
-          "default": "'[]'::json"
+          "default": "'[]'::jsonb"
         },
         "tags": {
           "name": "tags",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false,
-          "default": "'[]'::json"
+          "default": "'[]'::jsonb"
         },
         "dueAt": {
           "name": "dueAt",
@@ -3398,6 +3772,18 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "deletedAt": {
+          "name": "deletedAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deletedBy": {
+          "name": "deletedBy",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
         },
         "updatedAt": {
           "name": "updatedAt",
@@ -3467,6 +3853,66 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "cases_created_by_idx": {
+          "name": "cases_created_by_idx",
+          "columns": [
+            {
+              "expression": "createdBy",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "cases_tenant_idx": {
+          "name": "cases_tenant_idx",
+          "columns": [
+            {
+              "expression": "tenantId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "cases_deleted_at_idx": {
+          "name": "cases_deleted_at_idx",
+          "columns": [
+            {
+              "expression": "deletedAt",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "cases_search_idx": {
+          "name": "cases_search_idx",
+          "columns": [
+            {
+              "expression": "to_tsvector('english', coalesce(\"title\", '') || ' ' || coalesce(\"ref\", '') || ' ' || coalesce(\"summary\", ''))",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "gin",
+          "with": {}
         }
       },
       "foreignKeys": {},
@@ -3480,6 +3926,363 @@
           ]
         }
       },
+      "policies": {},
+      "checkConstraints": {
+        "cases_risk_score_check": {
+          "name": "cases_risk_score_check",
+          "value": "\"riskScore\" IS NULL OR (\"riskScore\" >= 0 AND \"riskScore\" <= 100)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.collection_sites": {
+      "name": "collection_sites",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "tenantId": {
+          "name": "tenantId",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "name": {
+          "name": "name",
+          "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "address": {
+          "name": "address",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "city": {
+          "name": "city",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "state": {
+          "name": "state",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "phone": {
+          "name": "phone",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "email": {
+          "name": "email",
+          "type": "varchar(320)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "lat": {
+          "name": "lat",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "lng": {
+          "name": "lng",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "labPartner": {
+          "name": "labPartner",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "panelTypes": {
+          "name": "panelTypes",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::json"
+        },
+        "turnaround": {
+          "name": "turnaround",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "collection_site_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'active'"
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updatedAt": {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "site_state_idx": {
+          "name": "site_state_idx",
+          "columns": [
+            {
+              "expression": "state",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "site_status_idx": {
+          "name": "site_status_idx",
+          "columns": [
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "collection_sites_tenantId_tenants_id_fk": {
+          "name": "collection_sites_tenantId_tenants_id_fk",
+          "tableFrom": "collection_sites",
+          "tableTo": "tenants",
+          "columnsFrom": [
+            "tenantId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.compliance_reports": {
+      "name": "compliance_reports",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "tenantId": {
+          "name": "tenantId",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reportType": {
+          "name": "reportType",
+          "type": "compliance_report_type",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "compliance_report_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'generating'"
+        },
+        "title": {
+          "name": "title",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "periodStart": {
+          "name": "periodStart",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "periodEnd": {
+          "name": "periodEnd",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "xmlPayload": {
+          "name": "xmlPayload",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pdfUrl": {
+          "name": "pdfUrl",
+          "type": "varchar(512)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "submittedTo": {
+          "name": "submittedTo",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "submittedAt": {
+          "name": "submittedAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "referenceNumber": {
+          "name": "referenceNumber",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "errorMessage": {
+          "name": "errorMessage",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "metadata": {
+          "name": "metadata",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "generatedBy": {
+          "name": "generatedBy",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updatedAt": {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "cr_tenant_idx": {
+          "name": "cr_tenant_idx",
+          "columns": [
+            {
+              "expression": "tenantId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "cr_type_idx": {
+          "name": "cr_type_idx",
+          "columns": [
+            {
+              "expression": "reportType",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "cr_status_idx": {
+          "name": "cr_status_idx",
+          "columns": [
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "compliance_reports_tenantId_tenants_id_fk": {
+          "name": "compliance_reports_tenantId_tenants_id_fk",
+          "tableFrom": "compliance_reports",
+          "tableTo": "tenants",
+          "columnsFrom": [
+            "tenantId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "compliance_reports_generatedBy_users_id_fk": {
+          "name": "compliance_reports_generatedBy_users_id_fk",
+          "tableFrom": "compliance_reports",
+          "tableTo": "users",
+          "columnsFrom": [
+            "generatedBy"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -3514,10 +4317,10 @@
         },
         "screeningTypes": {
           "name": "screeningTypes",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": true,
-          "default": "'[]'::json"
+          "default": "'[]'::jsonb"
         },
         "frequency": {
           "name": "frequency",
@@ -3769,25 +4572,25 @@
         },
         "cacResult": {
           "name": "cacResult",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
         "firsResult": {
           "name": "firsResult",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
         "directorsResult": {
           "name": "directorsResult",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
         "sanctionsResult": {
           "name": "sanctionsResult",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
@@ -3982,13 +4785,13 @@
         },
         "services": {
           "name": "services",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
         "currencies": {
           "name": "currencies",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
@@ -4253,7 +5056,7 @@
         },
         "details": {
           "name": "details",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
@@ -4460,10 +5263,10 @@
         },
         "requestedChecks": {
           "name": "requestedChecks",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false,
-          "default": "'[]'::json"
+          "default": "'[]'::jsonb"
         },
         "submittedAt": {
           "name": "submittedAt",
@@ -4744,10 +5547,10 @@
         },
         "aliases": {
           "name": "aliases",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false,
-          "default": "'[]'::json"
+          "default": "'[]'::jsonb"
         },
         "offenceCategory": {
           "name": "offenceCategory",
@@ -4900,7 +5703,7 @@
         },
         "rawPayload": {
           "name": "rawPayload",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
@@ -5070,6 +5873,151 @@
           ]
         }
       },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.dapr_event_log": {
+      "name": "dapr_event_log",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "topic": {
+          "name": "topic",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "pubsubName": {
+          "name": "pubsubName",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'bis-pubsub'"
+        },
+        "payload": {
+          "name": "payload",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'published'"
+        },
+        "tenantId": {
+          "name": "tenantId",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "entityRef": {
+          "name": "entityRef",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "publishedAt": {
+          "name": "publishedAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "failReason": {
+          "name": "failReason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "del_topic_idx": {
+          "name": "del_topic_idx",
+          "columns": [
+            {
+              "expression": "topic",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "del_entity_idx": {
+          "name": "del_entity_idx",
+          "columns": [
+            {
+              "expression": "entityRef",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "del_tenant_idx": {
+          "name": "del_tenant_idx",
+          "columns": [
+            {
+              "expression": "tenantId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "del_ts_idx": {
+          "name": "del_ts_idx",
+          "columns": [
+            {
+              "expression": "publishedAt",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "dapr_event_log_tenantId_tenants_id_fk": {
+          "name": "dapr_event_log_tenantId_tenants_id_fk",
+          "tableFrom": "dapr_event_log",
+          "tableTo": "tenants",
+          "columnsFrom": [
+            "tenantId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -5288,7 +6236,7 @@
         },
         "config": {
           "name": "config",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
@@ -5325,6 +6273,253 @@
           ]
         }
       },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.document_vault": {
+      "name": "document_vault",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "tenantId": {
+          "name": "tenantId",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ownerId": {
+          "name": "ownerId",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ownerRef": {
+          "name": "ownerRef",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "documentType": {
+          "name": "documentType",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "documentName": {
+          "name": "documentName",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "storageKey": {
+          "name": "storageKey",
+          "type": "varchar(512)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "mimeType": {
+          "name": "mimeType",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sizeBytes": {
+          "name": "sizeBytes",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "checksum": {
+          "name": "checksum",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "document_vault_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "expiresAt": {
+          "name": "expiresAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "verifiedBy": {
+          "name": "verifiedBy",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "verifiedAt": {
+          "name": "verifiedAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "tags": {
+          "name": "tags",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "metadata": {
+          "name": "metadata",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deletedAt": {
+          "name": "deletedAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updatedAt": {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "dv_owner_idx": {
+          "name": "dv_owner_idx",
+          "columns": [
+            {
+              "expression": "ownerId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "dv_ref_idx": {
+          "name": "dv_ref_idx",
+          "columns": [
+            {
+              "expression": "ownerRef",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "dv_tenant_idx": {
+          "name": "dv_tenant_idx",
+          "columns": [
+            {
+              "expression": "tenantId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "dv_type_idx": {
+          "name": "dv_type_idx",
+          "columns": [
+            {
+              "expression": "documentType",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "dv_deleted_idx": {
+          "name": "dv_deleted_idx",
+          "columns": [
+            {
+              "expression": "deletedAt",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "document_vault_tenantId_tenants_id_fk": {
+          "name": "document_vault_tenantId_tenants_id_fk",
+          "tableFrom": "document_vault",
+          "tableTo": "tenants",
+          "columnsFrom": [
+            "tenantId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "document_vault_ownerId_users_id_fk": {
+          "name": "document_vault_ownerId_users_id_fk",
+          "tableFrom": "document_vault",
+          "tableTo": "users",
+          "columnsFrom": [
+            "ownerId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "document_vault_verifiedBy_users_id_fk": {
+          "name": "document_vault_verifiedBy_users_id_fk",
+          "tableFrom": "document_vault",
+          "tableTo": "users",
+          "columnsFrom": [
+            "verifiedBy"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -5462,6 +6657,162 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.event_log": {
+      "name": "event_log",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "eventType": {
+          "name": "eventType",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "aggregateId": {
+          "name": "aggregateId",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "tenantId": {
+          "name": "tenantId",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "actorId": {
+          "name": "actorId",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "payload": {
+          "name": "payload",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "source": {
+          "name": "source",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "traceId": {
+          "name": "traceId",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "el_type_idx": {
+          "name": "el_type_idx",
+          "columns": [
+            {
+              "expression": "eventType",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "el_aggregate_idx": {
+          "name": "el_aggregate_idx",
+          "columns": [
+            {
+              "expression": "aggregateId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "el_tenant_idx": {
+          "name": "el_tenant_idx",
+          "columns": [
+            {
+              "expression": "tenantId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "el_created_idx": {
+          "name": "el_created_idx",
+          "columns": [
+            {
+              "expression": "createdAt",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "event_log_tenantId_tenants_id_fk": {
+          "name": "event_log_tenantId_tenants_id_fk",
+          "tableFrom": "event_log",
+          "tableTo": "tenants",
+          "columnsFrom": [
+            "tenantId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "event_log_actorId_users_id_fk": {
+          "name": "event_log_actorId_users_id_fk",
+          "tableFrom": "event_log",
+          "tableTo": "users",
+          "columnsFrom": [
+            "actorId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.evidence_items": {
       "name": "evidence_items",
       "schema": "",
@@ -5562,7 +6913,7 @@
         },
         "chainOfCustody": {
           "name": "chainOfCustody",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
@@ -5706,7 +7057,7 @@
         },
         "filters": {
           "name": "filters",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
@@ -5954,10 +7305,10 @@
         },
         "specializations": {
           "name": "specializations",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false,
-          "default": "'[]'::json"
+          "default": "'[]'::jsonb"
         },
         "tasksCompleted": {
           "name": "tasksCompleted",
@@ -6016,6 +7367,18 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "deletedAt": {
+          "name": "deletedAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deletedBy": {
+          "name": "deletedBy",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
         },
         "updatedAt": {
           "name": "updatedAt",
@@ -6201,7 +7564,7 @@
         },
         "result": {
           "name": "result",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
@@ -6217,6 +7580,18 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "deletedAt": {
+          "name": "deletedAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deletedBy": {
+          "name": "deletedBy",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
         },
         "updatedAt": {
           "name": "updatedAt",
@@ -6426,16 +7801,16 @@
         },
         "structuredFindings": {
           "name": "structuredFindings",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
         "photoUrls": {
           "name": "photoUrls",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false,
-          "default": "'[]'::json"
+          "default": "'[]'::jsonb"
         },
         "dataCompleteness": {
           "name": "dataCompleteness",
@@ -6445,24 +7820,24 @@
         },
         "sourcesChecked": {
           "name": "sourcesChecked",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false,
-          "default": "'[]'::json"
+          "default": "'[]'::jsonb"
         },
         "sourcesReturned": {
           "name": "sourcesReturned",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false,
-          "default": "'[]'::json"
+          "default": "'[]'::jsonb"
         },
         "recommendedNextSteps": {
           "name": "recommendedNextSteps",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false,
-          "default": "'[]'::json"
+          "default": "'[]'::jsonb"
         },
         "outcome": {
           "name": "outcome",
@@ -6566,6 +7941,381 @@
           "nullsNotDistinct": false,
           "columns": [
             "visitRef"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.field_visit_schedules": {
+      "name": "field_visit_schedules",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "tenantId": {
+          "name": "tenantId",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "investigationId": {
+          "name": "investigationId",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "caseId": {
+          "name": "caseId",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "agentId": {
+          "name": "agentId",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "subjectName": {
+          "name": "subjectName",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "subjectAddress": {
+          "name": "subjectAddress",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "visitType": {
+          "name": "visitType",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'residential'"
+        },
+        "status": {
+          "name": "status",
+          "type": "field_visit_schedule_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'scheduled'"
+        },
+        "scheduledAt": {
+          "name": "scheduledAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "confirmedAt": {
+          "name": "confirmedAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "completedAt": {
+          "name": "completedAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cancelledAt": {
+          "name": "cancelledAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cancellationReason": {
+          "name": "cancellationReason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "notes": {
+          "name": "notes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "coordinates": {
+          "name": "coordinates",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "metadata": {
+          "name": "metadata",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "createdBy": {
+          "name": "createdBy",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updatedAt": {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "fvs_agent_idx": {
+          "name": "fvs_agent_idx",
+          "columns": [
+            {
+              "expression": "agentId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "fvs_inv_idx": {
+          "name": "fvs_inv_idx",
+          "columns": [
+            {
+              "expression": "investigationId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "fvs_sched_idx": {
+          "name": "fvs_sched_idx",
+          "columns": [
+            {
+              "expression": "scheduledAt",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "fvs_status_idx": {
+          "name": "fvs_status_idx",
+          "columns": [
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "field_visit_schedules_tenantId_tenants_id_fk": {
+          "name": "field_visit_schedules_tenantId_tenants_id_fk",
+          "tableFrom": "field_visit_schedules",
+          "tableTo": "tenants",
+          "columnsFrom": [
+            "tenantId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "field_visit_schedules_investigationId_investigations_id_fk": {
+          "name": "field_visit_schedules_investigationId_investigations_id_fk",
+          "tableFrom": "field_visit_schedules",
+          "tableTo": "investigations",
+          "columnsFrom": [
+            "investigationId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "field_visit_schedules_caseId_cases_id_fk": {
+          "name": "field_visit_schedules_caseId_cases_id_fk",
+          "tableFrom": "field_visit_schedules",
+          "tableTo": "cases",
+          "columnsFrom": [
+            "caseId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "field_visit_schedules_agentId_field_agents_id_fk": {
+          "name": "field_visit_schedules_agentId_field_agents_id_fk",
+          "tableFrom": "field_visit_schedules",
+          "tableTo": "field_agents",
+          "columnsFrom": [
+            "agentId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "field_visit_schedules_createdBy_users_id_fk": {
+          "name": "field_visit_schedules_createdBy_users_id_fk",
+          "tableFrom": "field_visit_schedules",
+          "tableTo": "users",
+          "columnsFrom": [
+            "createdBy"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.fluvio_topic_registry": {
+      "name": "fluvio_topic_registry",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "topicName": {
+          "name": "topicName",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "partitions": {
+          "name": "partitions",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "default": 1
+        },
+        "replication": {
+          "name": "replication",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "default": 1
+        },
+        "retentionMs": {
+          "name": "retentionMs",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false,
+          "default": 604800000
+        },
+        "isActive": {
+          "name": "isActive",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false,
+          "default": true
+        },
+        "lastMessageAt": {
+          "name": "lastMessageAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "messageCount": {
+          "name": "messageCount",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false,
+          "default": 0
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updatedAt": {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "ftr_topic_idx": {
+          "name": "ftr_topic_idx",
+          "columns": [
+            {
+              "expression": "topicName",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "fluvio_topic_registry_topicName_unique": {
+          "name": "fluvio_topic_registry_topicName_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "topicName"
           ]
         }
       },
@@ -7248,7 +8998,7 @@
         },
         "evidence": {
           "name": "evidence",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
@@ -7627,19 +9377,19 @@
         },
         "dataSources": {
           "name": "dataSources",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
         "gatewayResults": {
           "name": "gatewayResults",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
         "riskFactors": {
           "name": "riskFactors",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
@@ -7661,6 +9411,18 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "deletedAt": {
+          "name": "deletedAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deletedBy": {
+          "name": "deletedBy",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
         },
         "updatedAt": {
           "name": "updatedAt",
@@ -7811,6 +9573,57 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "investigations_tenant_status_idx": {
+          "name": "investigations_tenant_status_idx",
+          "columns": [
+            {
+              "expression": "tenantId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "ref",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "investigations_deleted_at_idx": {
+          "name": "investigations_deleted_at_idx",
+          "columns": [
+            {
+              "expression": "deletedAt",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "investigations_search_idx": {
+          "name": "investigations_search_idx",
+          "columns": [
+            {
+              "expression": "to_tsvector('english', coalesce(\"subjectName\", '') || ' ' || coalesce(\"ref\", '') || ' ' || coalesce(\"nin\", '') || ' ' || coalesce(\"bvn\", ''))",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "gin",
+          "with": {}
         }
       },
       "foreignKeys": {},
@@ -7824,6 +9637,133 @@
           ]
         }
       },
+      "policies": {},
+      "checkConstraints": {
+        "investigations_risk_score_check": {
+          "name": "investigations_risk_score_check",
+          "value": "\"riskScore\" IS NULL OR (\"riskScore\" >= 0 AND \"riskScore\" <= 100)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.keycloak_sync_log": {
+      "name": "keycloak_sync_log",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "keycloakId": {
+          "name": "keycloakId",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "bisUserId": {
+          "name": "bisUserId",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "operation": {
+          "name": "operation",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "varchar(16)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "detail": {
+          "name": "detail",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "errorMessage": {
+          "name": "errorMessage",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "syncedAt": {
+          "name": "syncedAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "ksl_keycloak_idx": {
+          "name": "ksl_keycloak_idx",
+          "columns": [
+            {
+              "expression": "keycloakId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "ksl_user_idx": {
+          "name": "ksl_user_idx",
+          "columns": [
+            {
+              "expression": "bisUserId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "ksl_op_idx": {
+          "name": "ksl_op_idx",
+          "columns": [
+            {
+              "expression": "operation",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "keycloak_sync_log_bisUserId_users_id_fk": {
+          "name": "keycloak_sync_log_bisUserId_users_id_fk",
+          "tableFrom": "keycloak_sync_log",
+          "tableTo": "users",
+          "columnsFrom": [
+            "bisUserId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -7926,7 +9866,7 @@
         },
         "previousOcrData": {
           "name": "previousOcrData",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
@@ -8237,31 +10177,31 @@
         },
         "ninResult": {
           "name": "ninResult",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
         "bvnResult": {
           "name": "bvnResult",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
         "sanctionsResult": {
           "name": "sanctionsResult",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
         "pepResult": {
           "name": "pepResult",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
         "creditResult": {
           "name": "creditResult",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
@@ -8292,7 +10232,7 @@
         },
         "documentOcrData": {
           "name": "documentOcrData",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
@@ -8308,6 +10248,18 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "deletedAt": {
+          "name": "deletedAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deletedBy": {
+          "name": "deletedBy",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
         },
         "updatedAt": {
           "name": "updatedAt",
@@ -8422,13 +10374,33 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "kyc_records_search_idx": {
+          "name": "kyc_records_search_idx",
+          "columns": [
+            {
+              "expression": "to_tsvector('english', coalesce(\"subjectName\", '') || ' ' || coalesce(\"nin\", '') || ' ' || coalesce(\"bvn\", ''))",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "gin",
+          "with": {}
         }
       },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "kyc_records_risk_score_check": {
+          "name": "kyc_records_risk_score_check",
+          "value": "\"riskScore\" IS NULL OR (\"riskScore\" >= 0 AND \"riskScore\" <= 100)"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.kyc_scheduled_reruns": {
@@ -8737,19 +10709,19 @@
         },
         "documents": {
           "name": "documents",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
         "amendments": {
           "name": "amendments",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
         "discrepancies": {
           "name": "discrepancies",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
@@ -9077,10 +11049,10 @@
         },
         "documents": {
           "name": "documents",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false,
-          "default": "'[]'::json"
+          "default": "'[]'::jsonb"
         },
         "status": {
           "name": "status",
@@ -9098,7 +11070,7 @@
         },
         "validationNotes": {
           "name": "validationNotes",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
@@ -9132,6 +11104,18 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "deletedAt": {
+          "name": "deletedAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deletedBy": {
+          "name": "deletedBy",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
         },
         "updatedAt": {
           "name": "updatedAt",
@@ -9492,6 +11476,404 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.ml_model_versions": {
+      "name": "ml_model_versions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "modelName": {
+          "name": "modelName",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "version": {
+          "name": "version",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "modelType": {
+          "name": "modelType",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "ml_model_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'staging'"
+        },
+        "artifactPath": {
+          "name": "artifactPath",
+          "type": "varchar(512)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "metrics": {
+          "name": "metrics",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "hyperparams": {
+          "name": "hyperparams",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "trainedOn": {
+          "name": "trainedOn",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "promotedAt": {
+          "name": "promotedAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deprecatedAt": {
+          "name": "deprecatedAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "promotedBy": {
+          "name": "promotedBy",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updatedAt": {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "mlm_name_idx": {
+          "name": "mlm_name_idx",
+          "columns": [
+            {
+              "expression": "modelName",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "mlm_status_idx": {
+          "name": "mlm_status_idx",
+          "columns": [
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "mlm_version_uniq": {
+          "name": "mlm_version_uniq",
+          "columns": [
+            {
+              "expression": "modelName",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "version",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "ml_model_versions_promotedBy_users_id_fk": {
+          "name": "ml_model_versions_promotedBy_users_id_fk",
+          "tableFrom": "ml_model_versions",
+          "tableTo": "users",
+          "columnsFrom": [
+            "promotedBy"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.mojaloop_transfers": {
+      "name": "mojaloop_transfers",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "tenantId": {
+          "name": "tenantId",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "txRef": {
+          "name": "txRef",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "externalRef": {
+          "name": "externalRef",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "rail": {
+          "name": "rail",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'mojaloop'"
+        },
+        "originatorAccount": {
+          "name": "originatorAccount",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "originatorName": {
+          "name": "originatorName",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "beneficiaryAccount": {
+          "name": "beneficiaryAccount",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "beneficiaryName": {
+          "name": "beneficiaryName",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "beneficiaryBankCode": {
+          "name": "beneficiaryBankCode",
+          "type": "varchar(16)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "amountKobo": {
+          "name": "amountKobo",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "currency": {
+          "name": "currency",
+          "type": "varchar(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'NGN'"
+        },
+        "narration": {
+          "name": "narration",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "mojaloop_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'initiated'"
+        },
+        "failureReason": {
+          "name": "failureReason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "metadata": {
+          "name": "metadata",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "completedAt": {
+          "name": "completedAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "initiatedBy": {
+          "name": "initiatedBy",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updatedAt": {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "mjl_txref_idx": {
+          "name": "mjl_txref_idx",
+          "columns": [
+            {
+              "expression": "txRef",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "mjl_tenant_idx": {
+          "name": "mjl_tenant_idx",
+          "columns": [
+            {
+              "expression": "tenantId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "mjl_status_idx": {
+          "name": "mjl_status_idx",
+          "columns": [
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "mojaloop_transfers_tenantId_tenants_id_fk": {
+          "name": "mojaloop_transfers_tenantId_tenants_id_fk",
+          "tableFrom": "mojaloop_transfers",
+          "tableTo": "tenants",
+          "columnsFrom": [
+            "tenantId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "mojaloop_transfers_initiatedBy_users_id_fk": {
+          "name": "mojaloop_transfers_initiatedBy_users_id_fk",
+          "tableFrom": "mojaloop_transfers",
+          "tableTo": "users",
+          "columnsFrom": [
+            "initiatedBy"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "mojaloop_transfers_txRef_unique": {
+          "name": "mojaloop_transfers_txRef_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "txRef"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "mjl_amount_check": {
+          "name": "mjl_amount_check",
+          "value": "\"amountKobo\" > 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
     "public.monitors": {
       "name": "monitors",
       "schema": "",
@@ -9581,7 +11963,7 @@
         },
         "config": {
           "name": "config",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
@@ -9754,7 +12136,7 @@
         },
         "rawData": {
           "name": "rawData",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
@@ -9922,7 +12304,7 @@
         },
         "rawData": {
           "name": "rawData",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
@@ -10063,13 +12445,13 @@
         },
         "selectedSources": {
           "name": "selectedSources",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": true
         },
         "results": {
           "name": "results",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": true
         },
@@ -10440,10 +12822,10 @@
         },
         "useCase": {
           "name": "useCase",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false,
-          "default": "'[]'::json"
+          "default": "'[]'::jsonb"
         },
         "isDefault": {
           "name": "isDefault",
@@ -10600,17 +12982,17 @@
         },
         "stakeholders": {
           "name": "stakeholders",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false,
-          "default": "'[]'::json"
+          "default": "'[]'::jsonb"
         },
         "documentUrls": {
           "name": "documentUrls",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false,
-          "default": "'[]'::json"
+          "default": "'[]'::jsonb"
         },
         "createdBy": {
           "name": "createdBy",
@@ -10626,10 +13008,10 @@
         },
         "reviewerLog": {
           "name": "reviewerLog",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false,
-          "default": "'[]'::json"
+          "default": "'[]'::jsonb"
         },
         "slaDeadline": {
           "name": "slaDeadline",
@@ -10706,6 +13088,354 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.payment_rails_log": {
+      "name": "payment_rails_log",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "tenantId": {
+          "name": "tenantId",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "txRef": {
+          "name": "txRef",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "rail": {
+          "name": "rail",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "direction": {
+          "name": "direction",
+          "type": "varchar(8)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'outbound'"
+        },
+        "amountKobo": {
+          "name": "amountKobo",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "currency": {
+          "name": "currency",
+          "type": "varchar(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "'NGN'"
+        },
+        "status": {
+          "name": "status",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "requestBody": {
+          "name": "requestBody",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "responseBody": {
+          "name": "responseBody",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "errorMessage": {
+          "name": "errorMessage",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "latencyMs": {
+          "name": "latencyMs",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "initiatedBy": {
+          "name": "initiatedBy",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "prl_txref_idx": {
+          "name": "prl_txref_idx",
+          "columns": [
+            {
+              "expression": "txRef",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "prl_log_tenant_idx": {
+          "name": "prl_log_tenant_idx",
+          "columns": [
+            {
+              "expression": "tenantId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "prl_rail_idx": {
+          "name": "prl_rail_idx",
+          "columns": [
+            {
+              "expression": "rail",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "prl_time_idx": {
+          "name": "prl_time_idx",
+          "columns": [
+            {
+              "expression": "createdAt",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "payment_rails_log_tenantId_tenants_id_fk": {
+          "name": "payment_rails_log_tenantId_tenants_id_fk",
+          "tableFrom": "payment_rails_log",
+          "tableTo": "tenants",
+          "columnsFrom": [
+            "tenantId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "payment_rails_log_initiatedBy_users_id_fk": {
+          "name": "payment_rails_log_initiatedBy_users_id_fk",
+          "tableFrom": "payment_rails_log",
+          "tableTo": "users",
+          "columnsFrom": [
+            "initiatedBy"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.permify_relationship_log": {
+      "name": "permify_relationship_log",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "entity": {
+          "name": "entity",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "entityId": {
+          "name": "entityId",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "relation": {
+          "name": "relation",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "subject": {
+          "name": "subject",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "subjectId": {
+          "name": "subjectId",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "operation": {
+          "name": "operation",
+          "type": "varchar(16)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'write'"
+        },
+        "tenantId": {
+          "name": "tenantId",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "actorId": {
+          "name": "actorId",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "prl_entity_idx": {
+          "name": "prl_entity_idx",
+          "columns": [
+            {
+              "expression": "entity",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "entityId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "prl_subject_idx": {
+          "name": "prl_subject_idx",
+          "columns": [
+            {
+              "expression": "subject",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "subjectId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "prl_tenant_idx": {
+          "name": "prl_tenant_idx",
+          "columns": [
+            {
+              "expression": "tenantId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "permify_relationship_log_tenantId_tenants_id_fk": {
+          "name": "permify_relationship_log_tenantId_tenants_id_fk",
+          "tableFrom": "permify_relationship_log",
+          "tableTo": "tenants",
+          "columnsFrom": [
+            "tenantId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "permify_relationship_log_actorId_users_id_fk": {
+          "name": "permify_relationship_log_actorId_users_id_fk",
+          "tableFrom": "permify_relationship_log",
+          "tableTo": "users",
+          "columnsFrom": [
+            "actorId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.platform_settings": {
       "name": "platform_settings",
       "schema": "",
@@ -10731,7 +13461,7 @@
         },
         "value": {
           "name": "value",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
@@ -11110,7 +13840,7 @@
         },
         "metadata": {
           "name": "metadata",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
@@ -11357,7 +14087,7 @@
         },
         "sections": {
           "name": "sections",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
@@ -11373,6 +14103,18 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "deletedAt": {
+          "name": "deletedAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deletedBy": {
+          "name": "deletedBy",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
         },
         "updatedAt": {
           "name": "updatedAt",
@@ -11457,6 +14199,274 @@
       },
       "policies": {},
       "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.risk_profiles": {
+      "name": "risk_profiles",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "tenantId": {
+          "name": "tenantId",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "subjectRef": {
+          "name": "subjectRef",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "subjectName": {
+          "name": "subjectName",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "subjectType": {
+          "name": "subjectType",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'individual'"
+        },
+        "overallScore": {
+          "name": "overallScore",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "amlScore": {
+          "name": "amlScore",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "kycScore": {
+          "name": "kycScore",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sanctionsScore": {
+          "name": "sanctionsScore",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "fraudScore": {
+          "name": "fraudScore",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pepExposure": {
+          "name": "pepExposure",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false,
+          "default": false
+        },
+        "sanctionsHit": {
+          "name": "sanctionsHit",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false,
+          "default": false
+        },
+        "adverseMedia": {
+          "name": "adverseMedia",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false,
+          "default": false
+        },
+        "riskBand": {
+          "name": "riskBand",
+          "type": "varchar(16)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'medium'"
+        },
+        "status": {
+          "name": "status",
+          "type": "risk_profile_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'active'"
+        },
+        "mlModelVersion": {
+          "name": "mlModelVersion",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "factors": {
+          "name": "factors",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "lastScoredAt": {
+          "name": "lastScoredAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "nextReviewAt": {
+          "name": "nextReviewAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "createdBy": {
+          "name": "createdBy",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updatedAt": {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "rp_subject_idx": {
+          "name": "rp_subject_idx",
+          "columns": [
+            {
+              "expression": "subjectRef",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "rp_tenant_idx": {
+          "name": "rp_tenant_idx",
+          "columns": [
+            {
+              "expression": "tenantId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "rp_band_idx": {
+          "name": "rp_band_idx",
+          "columns": [
+            {
+              "expression": "riskBand",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "rp_score_idx": {
+          "name": "rp_score_idx",
+          "columns": [
+            {
+              "expression": "overallScore",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "rp_subject_uniq": {
+          "name": "rp_subject_uniq",
+          "columns": [
+            {
+              "expression": "tenantId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "subjectRef",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "risk_profiles_tenantId_tenants_id_fk": {
+          "name": "risk_profiles_tenantId_tenants_id_fk",
+          "tableFrom": "risk_profiles",
+          "tableTo": "tenants",
+          "columnsFrom": [
+            "tenantId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "risk_profiles_createdBy_users_id_fk": {
+          "name": "risk_profiles_createdBy_users_id_fk",
+          "tableFrom": "risk_profiles",
+          "tableTo": "users",
+          "columnsFrom": [
+            "createdBy"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "rp_score_check": {
+          "name": "rp_score_check",
+          "value": "\"overallScore\" IS NULL OR (\"overallScore\" >= 0 AND \"overallScore\" <= 100)"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.rule_evaluations": {
@@ -11595,6 +14605,353 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.sanctions_lists": {
+      "name": "sanctions_lists",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "listType": {
+          "name": "listType",
+          "type": "sanctions_list_type",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "listName": {
+          "name": "listName",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source": {
+          "name": "source",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "version": {
+          "name": "version",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "entryCount": {
+          "name": "entryCount",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "default": 0
+        },
+        "isActive": {
+          "name": "isActive",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false,
+          "default": true
+        },
+        "lastSyncAt": {
+          "name": "lastSyncAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "nextSyncAt": {
+          "name": "nextSyncAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "metadata": {
+          "name": "metadata",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updatedAt": {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "sl_type_idx": {
+          "name": "sl_type_idx",
+          "columns": [
+            {
+              "expression": "listType",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "sl_active_idx": {
+          "name": "sl_active_idx",
+          "columns": [
+            {
+              "expression": "isActive",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.sanctions_matches": {
+      "name": "sanctions_matches",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "tenantId": {
+          "name": "tenantId",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "listId": {
+          "name": "listId",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "subjectRef": {
+          "name": "subjectRef",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "subjectName": {
+          "name": "subjectName",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "matchedName": {
+          "name": "matchedName",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "matchScore": {
+          "name": "matchScore",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "matchType": {
+          "name": "matchType",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "sanctions_match_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending_review'"
+        },
+        "reviewedBy": {
+          "name": "reviewedBy",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reviewedAt": {
+          "name": "reviewedAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reviewNotes": {
+          "name": "reviewNotes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "linkedAlertId": {
+          "name": "linkedAlertId",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "metadata": {
+          "name": "metadata",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "detectedAt": {
+          "name": "detectedAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updatedAt": {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "sm_subject_idx": {
+          "name": "sm_subject_idx",
+          "columns": [
+            {
+              "expression": "subjectRef",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "sm_tenant_idx": {
+          "name": "sm_tenant_idx",
+          "columns": [
+            {
+              "expression": "tenantId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "sm_status_idx": {
+          "name": "sm_status_idx",
+          "columns": [
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "sm_score_idx": {
+          "name": "sm_score_idx",
+          "columns": [
+            {
+              "expression": "matchScore",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "sanctions_matches_tenantId_tenants_id_fk": {
+          "name": "sanctions_matches_tenantId_tenants_id_fk",
+          "tableFrom": "sanctions_matches",
+          "tableTo": "tenants",
+          "columnsFrom": [
+            "tenantId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "sanctions_matches_listId_sanctions_lists_id_fk": {
+          "name": "sanctions_matches_listId_sanctions_lists_id_fk",
+          "tableFrom": "sanctions_matches",
+          "tableTo": "sanctions_lists",
+          "columnsFrom": [
+            "listId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "sanctions_matches_reviewedBy_users_id_fk": {
+          "name": "sanctions_matches_reviewedBy_users_id_fk",
+          "tableFrom": "sanctions_matches",
+          "tableTo": "users",
+          "columnsFrom": [
+            "reviewedBy"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "sm_score_check": {
+          "name": "sm_score_check",
+          "value": "\"matchScore\" IS NULL OR (\"matchScore\" >= 0 AND \"matchScore\" <= 100)"
+        }
+      },
+      "isRLSEnabled": false
+    },
     "public.sar_filings": {
       "name": "sar_filings",
       "schema": "",
@@ -11707,7 +15064,7 @@
         },
         "relatedTransactions": {
           "name": "relatedTransactions",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
@@ -11790,6 +15147,18 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "deletedAt": {
+          "name": "deletedAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deletedBy": {
+          "name": "deletedBy",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
         },
         "updatedAt": {
           "name": "updatedAt",
@@ -12113,10 +15482,10 @@
         },
         "orderRefs": {
           "name": "orderRefs",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": true,
-          "default": "'[]'::json"
+          "default": "'[]'::jsonb"
         },
         "overallRisk": {
           "name": "overallRisk",
@@ -12132,24 +15501,24 @@
         },
         "keyFindings": {
           "name": "keyFindings",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": true,
-          "default": "'[]'::json"
+          "default": "'[]'::jsonb"
         },
         "redFlags": {
           "name": "redFlags",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": true,
-          "default": "'[]'::json"
+          "default": "'[]'::jsonb"
         },
         "recommendations": {
           "name": "recommendations",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": true,
-          "default": "'[]'::json"
+          "default": "'[]'::jsonb"
         },
         "fullNarrative": {
           "name": "fullNarrative",
@@ -12268,19 +15637,19 @@
         },
         "clearConditions": {
           "name": "clearConditions",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
         "considerConditions": {
           "name": "considerConditions",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
         "adverseConditions": {
           "name": "adverseConditions",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
@@ -12419,10 +15788,10 @@
         },
         "excludedOffences": {
           "name": "excludedOffences",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false,
-          "default": "'[]'::json"
+          "default": "'[]'::jsonb"
         },
         "requiresConsent": {
           "name": "requiresConsent",
@@ -12566,10 +15935,10 @@
         },
         "screeningTypes": {
           "name": "screeningTypes",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": true,
-          "default": "'[]'::json"
+          "default": "'[]'::jsonb"
         },
         "etaAt": {
           "name": "etaAt",
@@ -12585,10 +15954,10 @@
         },
         "tags": {
           "name": "tags",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false,
-          "default": "'[]'::json"
+          "default": "'[]'::jsonb"
         },
         "temporalRunId": {
           "name": "temporalRunId",
@@ -12623,6 +15992,18 @@
         },
         "createdBy": {
           "name": "createdBy",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deletedAt": {
+          "name": "deletedAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deletedBy": {
+          "name": "deletedBy",
           "type": "integer",
           "primaryKey": false,
           "notNull": false
@@ -12829,10 +16210,10 @@
         },
         "screeningTypes": {
           "name": "screeningTypes",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": true,
-          "default": "'[]'::json"
+          "default": "'[]'::jsonb"
         },
         "priceNgn": {
           "name": "priceNgn",
@@ -12864,7 +16245,7 @@
         },
         "config": {
           "name": "config",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
@@ -13005,13 +16386,13 @@
         },
         "geoRules": {
           "name": "geoRules",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
         "assessRules": {
           "name": "assessRules",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
@@ -13176,13 +16557,13 @@
         },
         "requestData": {
           "name": "requestData",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
         "result": {
           "name": "result",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
@@ -13333,7 +16714,7 @@
         },
         "rawResult": {
           "name": "rawResult",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
@@ -13600,6 +16981,102 @@
           ]
         }
       },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.service_health_history": {
+      "name": "service_health_history",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "service": {
+          "name": "service",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "varchar(16)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "latencyMs": {
+          "name": "latencyMs",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "detail": {
+          "name": "detail",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "checkedAt": {
+          "name": "checkedAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "shh_service_idx": {
+          "name": "shh_service_idx",
+          "columns": [
+            {
+              "expression": "service",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "shh_ts_idx": {
+          "name": "shh_ts_idx",
+          "columns": [
+            {
+              "expression": "checkedAt",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "shh_status_idx": {
+          "name": "shh_status_idx",
+          "columns": [
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -13883,6 +17360,228 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.stablecoin_transactions": {
+      "name": "stablecoin_transactions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "tenantId": {
+          "name": "tenantId",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "txRef": {
+          "name": "txRef",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "txHash": {
+          "name": "txHash",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "network": {
+          "name": "network",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "currency": {
+          "name": "currency",
+          "type": "varchar(16)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "fromAddress": {
+          "name": "fromAddress",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "toAddress": {
+          "name": "toAddress",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "amountUnits": {
+          "name": "amountUnits",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "stablecoin_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "blockNumber": {
+          "name": "blockNumber",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "gasUsed": {
+          "name": "gasUsed",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sandbox": {
+          "name": "sandbox",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false,
+          "default": false
+        },
+        "metadata": {
+          "name": "metadata",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "confirmedAt": {
+          "name": "confirmedAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "initiatedBy": {
+          "name": "initiatedBy",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updatedAt": {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "sc_txref_idx": {
+          "name": "sc_txref_idx",
+          "columns": [
+            {
+              "expression": "txRef",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "sc_txhash_idx": {
+          "name": "sc_txhash_idx",
+          "columns": [
+            {
+              "expression": "txHash",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "sc_tenant_idx": {
+          "name": "sc_tenant_idx",
+          "columns": [
+            {
+              "expression": "tenantId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "sc_status_idx": {
+          "name": "sc_status_idx",
+          "columns": [
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "stablecoin_transactions_tenantId_tenants_id_fk": {
+          "name": "stablecoin_transactions_tenantId_tenants_id_fk",
+          "tableFrom": "stablecoin_transactions",
+          "tableTo": "tenants",
+          "columnsFrom": [
+            "tenantId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "stablecoin_transactions_initiatedBy_users_id_fk": {
+          "name": "stablecoin_transactions_initiatedBy_users_id_fk",
+          "tableFrom": "stablecoin_transactions",
+          "tableTo": "users",
+          "columnsFrom": [
+            "initiatedBy"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "stablecoin_transactions_txRef_unique": {
+          "name": "stablecoin_transactions_txRef_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "txRef"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.swift_messages": {
       "name": "swift_messages",
       "schema": "",
@@ -13970,7 +17669,7 @@
         },
         "parsedFields": {
           "name": "parsedFields",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
@@ -14036,6 +17735,361 @@
       },
       "policies": {},
       "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.temporal_workflow_state": {
+      "name": "temporal_workflow_state",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "workflowId": {
+          "name": "workflowId",
+          "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "runId": {
+          "name": "runId",
+          "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "workflowType": {
+          "name": "workflowType",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "namespace": {
+          "name": "namespace",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'bis'"
+        },
+        "status": {
+          "name": "status",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'running'"
+        },
+        "input": {
+          "name": "input",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "result": {
+          "name": "result",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "errorMessage": {
+          "name": "errorMessage",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "tenantId": {
+          "name": "tenantId",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "initiatedBy": {
+          "name": "initiatedBy",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "entityRef": {
+          "name": "entityRef",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "entityType": {
+          "name": "entityType",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "startedAt": {
+          "name": "startedAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "completedAt": {
+          "name": "completedAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updatedAt": {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "tws_entity_idx": {
+          "name": "tws_entity_idx",
+          "columns": [
+            {
+              "expression": "entityRef",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "entityType",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "tws_status_idx": {
+          "name": "tws_status_idx",
+          "columns": [
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "tws_tenant_idx": {
+          "name": "tws_tenant_idx",
+          "columns": [
+            {
+              "expression": "tenantId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "tws_type_idx": {
+          "name": "tws_type_idx",
+          "columns": [
+            {
+              "expression": "workflowType",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "temporal_workflow_state_tenantId_tenants_id_fk": {
+          "name": "temporal_workflow_state_tenantId_tenants_id_fk",
+          "tableFrom": "temporal_workflow_state",
+          "tableTo": "tenants",
+          "columnsFrom": [
+            "tenantId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "temporal_workflow_state_initiatedBy_users_id_fk": {
+          "name": "temporal_workflow_state_initiatedBy_users_id_fk",
+          "tableFrom": "temporal_workflow_state",
+          "tableTo": "users",
+          "columnsFrom": [
+            "initiatedBy"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "temporal_workflow_state_workflowId_unique": {
+          "name": "temporal_workflow_state_workflowId_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "workflowId"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.tenant_billing_accounts": {
+      "name": "tenant_billing_accounts",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "tenantId": {
+          "name": "tenantId",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tigerbeetleAccountId": {
+          "name": "tigerbeetleAccountId",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "currency": {
+          "name": "currency",
+          "type": "varchar(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'NGN'"
+        },
+        "balanceKobo": {
+          "name": "balanceKobo",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "creditLimitKobo": {
+          "name": "creditLimitKobo",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false,
+          "default": 0
+        },
+        "billingEmail": {
+          "name": "billingEmail",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "billingCycle": {
+          "name": "billingCycle",
+          "type": "varchar(16)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'monthly'"
+        },
+        "nextBillingAt": {
+          "name": "nextBillingAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "lastBilledAt": {
+          "name": "lastBilledAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "metadata": {
+          "name": "metadata",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updatedAt": {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "tba_tenant_idx": {
+          "name": "tba_tenant_idx",
+          "columns": [
+            {
+              "expression": "tenantId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "tenant_billing_accounts_tenantId_tenants_id_fk": {
+          "name": "tenant_billing_accounts_tenantId_tenants_id_fk",
+          "tableFrom": "tenant_billing_accounts",
+          "tableTo": "tenants",
+          "columnsFrom": [
+            "tenantId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "tenant_billing_accounts_tenantId_unique": {
+          "name": "tenant_billing_accounts_tenantId_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenantId"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "tba_balance_check": {
+          "name": "tba_balance_check",
+          "value": "\"balanceKobo\" >= 0"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.tenants": {
@@ -14163,6 +18217,337 @@
           "nullsNotDistinct": false,
           "columns": [
             "slug"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.tigerbeetle_accounts": {
+      "name": "tigerbeetle_accounts",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "accountId": {
+          "name": "accountId",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tenantId": {
+          "name": "tenantId",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ledger": {
+          "name": "ledger",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "code": {
+          "name": "code",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 700
+        },
+        "creditsPending": {
+          "name": "creditsPending",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false,
+          "default": 0
+        },
+        "creditsPosted": {
+          "name": "creditsPosted",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false,
+          "default": 0
+        },
+        "debitsPending": {
+          "name": "debitsPending",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false,
+          "default": 0
+        },
+        "debitsPosted": {
+          "name": "debitsPosted",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false,
+          "default": 0
+        },
+        "flags": {
+          "name": "flags",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "default": 0
+        },
+        "lastReconciledAt": {
+          "name": "lastReconciledAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updatedAt": {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "tb_tenant_idx": {
+          "name": "tb_tenant_idx",
+          "columns": [
+            {
+              "expression": "tenantId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "tb_account_idx": {
+          "name": "tb_account_idx",
+          "columns": [
+            {
+              "expression": "accountId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "tigerbeetle_accounts_tenantId_tenants_id_fk": {
+          "name": "tigerbeetle_accounts_tenantId_tenants_id_fk",
+          "tableFrom": "tigerbeetle_accounts",
+          "tableTo": "tenants",
+          "columnsFrom": [
+            "tenantId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "tigerbeetle_accounts_accountId_unique": {
+          "name": "tigerbeetle_accounts_accountId_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "accountId"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.tigerbeetle_transfers": {
+      "name": "tigerbeetle_transfers",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "transferId": {
+          "name": "transferId",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "debitAccountId": {
+          "name": "debitAccountId",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "creditAccountId": {
+          "name": "creditAccountId",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "amount": {
+          "name": "amount",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ledger": {
+          "name": "ledger",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "code": {
+          "name": "code",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "flags": {
+          "name": "flags",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "default": 0
+        },
+        "userData": {
+          "name": "userData",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "tenantId": {
+          "name": "tenantId",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "txRef": {
+          "name": "txRef",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reconciledAt": {
+          "name": "reconciledAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "tbt_debit_idx": {
+          "name": "tbt_debit_idx",
+          "columns": [
+            {
+              "expression": "debitAccountId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "tbt_credit_idx": {
+          "name": "tbt_credit_idx",
+          "columns": [
+            {
+              "expression": "creditAccountId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "tbt_tenant_idx": {
+          "name": "tbt_tenant_idx",
+          "columns": [
+            {
+              "expression": "tenantId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "tbt_txref_idx": {
+          "name": "tbt_txref_idx",
+          "columns": [
+            {
+              "expression": "txRef",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "tigerbeetle_transfers_tenantId_tenants_id_fk": {
+          "name": "tigerbeetle_transfers_tenantId_tenants_id_fk",
+          "tableFrom": "tigerbeetle_transfers",
+          "tableTo": "tenants",
+          "columnsFrom": [
+            "tenantId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "tigerbeetle_transfers_transferId_unique": {
+          "name": "tigerbeetle_transfers_transferId_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "transferId"
           ]
         }
       },
@@ -14394,7 +18779,7 @@
         },
         "amlFlags": {
           "name": "amlFlags",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
@@ -14446,6 +18831,18 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "deletedAt": {
+          "name": "deletedAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deletedBy": {
+          "name": "deletedBy",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
         },
         "updatedAt": {
           "name": "updatedAt",
@@ -14828,13 +19225,13 @@
         },
         "hourHistogram": {
           "name": "hourHistogram",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
         "dayHistogram": {
           "name": "dayHistogram",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
@@ -15115,10 +19512,10 @@
         },
         "backupCodes": {
           "name": "backupCodes",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false,
-          "default": "'[]'::json"
+          "default": "'[]'::jsonb"
         },
         "enabledAt": {
           "name": "enabledAt",
@@ -15248,7 +19645,21 @@
         }
       },
       "indexes": {},
-      "foreignKeys": {},
+      "foreignKeys": {
+        "users_tenantId_tenants_id_fk": {
+          "name": "users_tenantId_tenants_id_fk",
+          "tableFrom": "users",
+          "tableTo": "tenants",
+          "columnsFrom": [
+            "tenantId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "users_openId_unique": {
@@ -15422,6 +19833,232 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.waf_incidents": {
+      "name": "waf_incidents",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "tenantId": {
+          "name": "tenantId",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sourceIp": {
+          "name": "sourceIp",
+          "type": "varchar(45)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "method": {
+          "name": "method",
+          "type": "varchar(10)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "uri": {
+          "name": "uri",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "attackType": {
+          "name": "attackType",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "severity": {
+          "name": "severity",
+          "type": "waf_severity",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'medium'"
+        },
+        "blocked": {
+          "name": "blocked",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "ruleId": {
+          "name": "ruleId",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "userAgent": {
+          "name": "userAgent",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "requestBody": {
+          "name": "requestBody",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "responseCode": {
+          "name": "responseCode",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "country": {
+          "name": "country",
+          "type": "varchar(3)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "apisixRouteId": {
+          "name": "apisixRouteId",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "openappsecEventId": {
+          "name": "openappsecEventId",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "metadata": {
+          "name": "metadata",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "resolvedAt": {
+          "name": "resolvedAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "resolvedBy": {
+          "name": "resolvedBy",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "occurredAt": {
+          "name": "occurredAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "waf_ip_idx": {
+          "name": "waf_ip_idx",
+          "columns": [
+            {
+              "expression": "sourceIp",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "waf_sev_idx": {
+          "name": "waf_sev_idx",
+          "columns": [
+            {
+              "expression": "severity",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "waf_time_idx": {
+          "name": "waf_time_idx",
+          "columns": [
+            {
+              "expression": "occurredAt",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "waf_tenant_idx": {
+          "name": "waf_tenant_idx",
+          "columns": [
+            {
+              "expression": "tenantId",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "waf_incidents_tenantId_tenants_id_fk": {
+          "name": "waf_incidents_tenantId_tenants_id_fk",
+          "tableFrom": "waf_incidents",
+          "tableTo": "tenants",
+          "columnsFrom": [
+            "tenantId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "waf_incidents_resolvedBy_users_id_fk": {
+          "name": "waf_incidents_resolvedBy_users_id_fk",
+          "tableFrom": "waf_incidents",
+          "tableTo": "users",
+          "columnsFrom": [
+            "resolvedBy"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.webhooks": {
       "name": "webhooks",
       "schema": "",
@@ -15454,10 +20091,10 @@
         },
         "events": {
           "name": "events",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false,
-          "default": "'[]'::json"
+          "default": "'[]'::jsonb"
         },
         "secret": {
           "name": "secret",
@@ -15576,7 +20213,7 @@
         },
         "verificationData": {
           "name": "verificationData",
-          "type": "json",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
@@ -15939,6 +20576,16 @@
         "failure"
       ]
     },
+    "public.biometric_modality": {
+      "name": "biometric_modality",
+      "schema": "public",
+      "values": [
+        "fingerprint",
+        "face",
+        "iris",
+        "voice"
+      ]
+    },
     "public.candidate_status": {
       "name": "candidate_status",
       "schema": "public",
@@ -16050,6 +20697,39 @@
         "email"
       ]
     },
+    "public.collection_site_status": {
+      "name": "collection_site_status",
+      "schema": "public",
+      "values": [
+        "active",
+        "inactive",
+        "suspended"
+      ]
+    },
+    "public.compliance_report_status": {
+      "name": "compliance_report_status",
+      "schema": "public",
+      "values": [
+        "generating",
+        "ready",
+        "submitted",
+        "failed"
+      ]
+    },
+    "public.compliance_report_type": {
+      "name": "compliance_report_type",
+      "schema": "public",
+      "values": [
+        "sar_xml",
+        "goaml_str",
+        "goaml_ctr",
+        "cbn_monthly",
+        "cbn_quarterly",
+        "fatf_risk",
+        "nfiu_annual",
+        "custom"
+      ]
+    },
     "public.consent_purpose": {
       "name": "consent_purpose",
       "schema": "public",
@@ -16136,6 +20816,16 @@
         "maintenance"
       ]
     },
+    "public.document_vault_status": {
+      "name": "document_vault_status",
+      "schema": "public",
+      "values": [
+        "pending",
+        "verified",
+        "rejected",
+        "expired"
+      ]
+    },
     "public.duplicate_check_status": {
       "name": "duplicate_check_status",
       "schema": "public",
@@ -16173,6 +20863,18 @@
         "financial_record",
         "communication_log",
         "other"
+      ]
+    },
+    "public.field_visit_schedule_status": {
+      "name": "field_visit_schedule_status",
+      "schema": "public",
+      "values": [
+        "scheduled",
+        "confirmed",
+        "in_progress",
+        "completed",
+        "cancelled",
+        "rescheduled"
       ]
     },
     "public.hosted_link_status": {
@@ -16399,6 +21101,29 @@
         "critical"
       ]
     },
+    "public.ml_model_status": {
+      "name": "ml_model_status",
+      "schema": "public",
+      "values": [
+        "training",
+        "staging",
+        "production",
+        "deprecated",
+        "failed"
+      ]
+    },
+    "public.mojaloop_status": {
+      "name": "mojaloop_status",
+      "schema": "public",
+      "values": [
+        "initiated",
+        "pending",
+        "completed",
+        "failed",
+        "reversed",
+        "expired"
+      ]
+    },
     "public.monitor_status": {
       "name": "monitor_status",
       "schema": "public",
@@ -16605,6 +21330,16 @@
         "failed"
       ]
     },
+    "public.risk_profile_status": {
+      "name": "risk_profile_status",
+      "schema": "public",
+      "values": [
+        "active",
+        "under_review",
+        "escalated",
+        "archived"
+      ]
+    },
     "public.risk_tier": {
       "name": "risk_tier",
       "schema": "public",
@@ -16613,6 +21348,30 @@
         "medium",
         "high",
         "critical"
+      ]
+    },
+    "public.sanctions_list_type": {
+      "name": "sanctions_list_type",
+      "schema": "public",
+      "values": [
+        "un_sc",
+        "ofac_sdn",
+        "eu_consolidated",
+        "uk_hmt",
+        "cbn_watchlist",
+        "nfiu_watchlist",
+        "interpol_red",
+        "custom"
+      ]
+    },
+    "public.sanctions_match_status": {
+      "name": "sanctions_match_status",
+      "schema": "public",
+      "values": [
+        "pending_review",
+        "confirmed_hit",
+        "false_positive",
+        "escalated"
       ]
     },
     "public.sar_category": {
@@ -16754,6 +21513,16 @@
         "deepfake",
         "high_quality_photo",
         "unknown"
+      ]
+    },
+    "public.stablecoin_status": {
+      "name": "stablecoin_status",
+      "schema": "public",
+      "values": [
+        "pending",
+        "confirmed",
+        "failed",
+        "reversed"
       ]
     },
     "public.str_status": {
@@ -16909,6 +21678,16 @@
         "supervisor",
         "auditor",
         "readonly"
+      ]
+    },
+    "public.waf_severity": {
+      "name": "waf_severity",
+      "schema": "public",
+      "values": [
+        "low",
+        "medium",
+        "high",
+        "critical"
       ]
     },
     "public.webhook_status": {
