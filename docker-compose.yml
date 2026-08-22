@@ -572,7 +572,7 @@ services:
 
   # ─── Observability: Prometheus ────────────────────────────────────────────────
   prometheus:
-    image: prom/prometheus:v2.51.2
+    image: prom/prometheus:v3.13.2
     container_name: bis-prometheus
     restart: unless-stopped
     command:
