@@ -9,13 +9,13 @@ This review found material flow-of-funds defects in the payment-credit path. The
 
 | Domain | Weight | Evidence-based score | Rationale |
 |---|---:|---:|---|
-| Flow-of-funds correctness | 25 | 16 | Deterministic ledger identifiers, pre-credit claims, reconciliation-only failures, and retry leases are implemented; a live ledger/database exercise remains unavailable. |
-| Authorization and insider controls | 20 | 14 | Permify, OPA/PBAC, MFA, dual-control, break-glass evidence, billing and core transaction tenant checks, and core payment-rail tenant isolation are implemented; proof against a live database remains unavailable. |
-| Persistence and recovery | 20 | 11 | Retry queue, lease expiry, and recovery contract are versioned; migration application is blocked by unavailable PostgreSQL and Drizzle snapshot collisions. |
-| Test and build evidence | 15 | 10 | Strict type checking, 55 Vitest files / 1,409 tests, targeted payment regressions, and production build pass locally. No live-provider or production database proof exists. |
-| Operational security and resilience | 15 | 6 | Caddy, APISIX, OpenAppSec, OPA, Keycloak MFA, canary, bounded k6 scenarios, and fail-closed production configuration are code-complete. The deployed site is still degraded and the authorized staging exercise has not run. |
-| Published service availability | 5 | 0 | The published service and its database/dependency stack are not healthy enough for attested financial operations. |
-| **Overall** | **100** | **57 / 100** | The source is materially safer than before the audit but cannot be represented as production-ready for flow-of-funds. |
+| Flow-of-funds correctness | 25 | 19 | Deterministic ledger identifiers, pre-credit claims, reconciliation-only failures, and retry leases are implemented and exercised against local PostgreSQL; a live ledger/provider failure exercise remains unavailable. |
+| Authorization and insider controls | 20 | 17 | Permify, OPA/PBAC, MFA, dual-control, break-glass evidence, billing, transaction, payment-rail, AML, goAML, and banking tenant checks are implemented; proof against production data remains unavailable. |
+| Persistence and recovery | 20 | 16 | Local PostgreSQL is initialized from the typed schema with migrations 0061–0064 applied; PKCE transaction replay, refresh-family leases, and webhook lease recovery are database-tested. Managed production PostgreSQL remains unavailable. |
+| Test and build evidence | 15 | 12 | Strict type checking, 61 Vitest files / 1,425 tests, database-backed authentication and retry regressions, and production builds pass locally. No live-provider or production database proof exists. |
+| Operational security and resilience | 15 | 7 | Caddy, APISIX, OpenAppSec, OPA, Keycloak MFA, canary, bounded k6 scenarios, fail-closed production configuration, and explicit liveness/readiness contracts are code-complete. The authorized staging exercise has not run. |
+| Published service availability | 5 | 2 | The published BFF now serves liveness and detailed degraded health responses, but readiness correctly fails while its database and dependent production services are unavailable. |
+| **Overall** | **100** | **73 / 100** | The code and local database evidence are materially stronger, but the platform cannot be represented as production-ready for money movement without managed PostgreSQL and live-provider validation. |
 
 ## Verified Findings and Remediation
 
@@ -44,9 +44,10 @@ The following validations passed after the final code changes.
 | Strict TypeScript | Passed locally with `pnpm check --noEmit` |
 | Payment binding, deterministic ledger ID, tenant access | 5 targeted tests passed |
 | Webhook durability and concurrent lease guard | 3 targeted tests passed |
-| Full Vitest suite | 55 files, 1,409 tests passed |
+| Full Vitest suite | 61 files, 1,425 tests passed |
 | Production bundle | `pnpm build` passed; bundle-size warnings remain non-blocking |
-| GitHub main validation and CodeQL | Passed for the previously synchronized hardening changes; the audit remediation requires a subsequent checkpoint and CI run |
+| Local PostgreSQL persistence | Current typed schema initialized locally; migrations 0061–0064 applied and verified. PKCE replay, refresh-family lease rotation, and webhook lease recovery have database-backed regression coverage. |
+| GitHub main validation and CodeQL | PR #92 passed BIS Validation and JavaScript/TypeScript, Python, Go, and Rust CodeQL before merge to main `862bb2a`. |
 | Coverage baseline | V8 coverage is measured at 22.48% lines overall because the test target includes the full PWA and all provider adapters. Critical payment modules remain the prioritization target: billing 9.94%, payment rails 13.48%, transactions 3.12%, and webhook retry 42.85% before the new initiation-guard tests. |
 | Markdown-rendering security chain | The production graph resolves Streamdown 2.5.0, Mermaid 11.17.0, and DOMPurify 3.4.14. Strict TypeScript, the full 61-file / 1,425-test suite, and the production build pass. The production audit reports zero high and zero critical advisories; one low and one moderate advisory remain. |
 
@@ -54,11 +55,11 @@ The following validations passed after the final code changes.
 
 | Risk | Release gate | Current state |
 |---|---|---|
-| Managed PostgreSQL unavailable | Configure the PostgreSQL connection, apply migrations 0061 and 0062, and verify tables, constraints, and leases using the BFF database identity. | Blocked |
+| Managed PostgreSQL unavailable | Configure a network-reachable PostgreSQL connection using `BIS_DATABASE_URL`, apply migrations 0061–0064, and verify tables, constraints, and leases using the published BFF identity. | Blocked |
 | Migration generator collision | Repair `drizzle/meta` parent-snapshot collision, regenerate and review migration state, then retain the reviewed migration history. | Blocked |
 | Live provider and ledger ambiguity | Run an authorized staging test that simulates accepted-but-timeout TigerBeetle responses and proves a retry observes the deterministic transfer rather than double-crediting. | Not run |
 | Payment-rail reporting completeness | Extend explicit tenant-scope regression coverage to every payment-rail analytics and scheduling endpoint, then execute it against a real PostgreSQL dataset. | Open |
-| Retry queue deployment | Apply migration 0062 before enabling retry workers; do not start them against an unverified schema. | Blocked |
+| Retry queue deployment | Apply migration 0062 to managed PostgreSQL before enabling production retry workers; the local validation schema is verified. | Blocked |
 | Production edge validation | Execute the authorized WAF/rate-limit/k6 staging scenario and capture error-rate, latency, rate-limit, and correlation-ID evidence. | Not run |
 
 ## Release Decision
