@@ -1,6 +1,11 @@
 # BIS Platform TODO
 
 ## Authentication and Onboarding Audit
+- [ ] Remove the CodeQL-reported readiness-endpoint self-request SSRF pattern by sharing dependency-check logic directly
+- [ ] Separate process liveness from dependency readiness so optional middleware outages do not make the hosted BFF appear unreachable
+- [ ] Reconcile the mission-critical audit report with local PostgreSQL-backed PKCE and webhook lease evidence and current validation totals
+- [ ] Validate the BIS_DATABASE_URL override with local PostgreSQL; published production remains blocked until a network-reachable managed PostgreSQL service is supplied
+- [ ] Add a managed PostgreSQL override configuration and set it for the published service so PostgreSQL-only persistence can run in production
 - [x] Remove the production-capable local PostgreSQL bootstrap override so a non-PostgreSQL deployment database fails closed instead of silently using localhost
 - [ ] Restore the missing PostgreSQL-backed Keycloak PKCE transaction, refresh-family, and onboarding-resume implementation with migrations and regression coverage
 - [x] Initialize the empty local PostgreSQL BIS test database from the current typed schema and reviewed incremental migrations

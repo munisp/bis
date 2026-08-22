@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { configuredOrDevelopmentDefault, missingProductionConfig } from "./_core/env";
+import { configuredOrDevelopmentDefault, missingProductionConfig, resolveDatabaseUrl } from "./_core/env";
 
 describe("production environment defaults", () => {
   it("retains a local development default outside production", () => {
@@ -29,6 +29,25 @@ describe("production environment defaults", () => {
       "http://localhost:8081",
       { NODE_ENV: "production", BIS_GATEWAY_URL: "https://gateway.internal.example" },
     )).toBe("https://gateway.internal.example");
+  });
+
+  it("selects local PostgreSQL for development when the platform injects TiDB", () => {
+    expect(resolveDatabaseUrl({
+      NODE_ENV: "development",
+      DATABASE_URL: "mysql://platform-injected.example/bis",
+    })).toBe("postgresql://bis_user:bis_secure_2026@localhost:5432/bis_db");
+  });
+
+  it("accepts only an explicit PostgreSQL override over injected TiDB in production", () => {
+    expect(resolveDatabaseUrl({
+      NODE_ENV: "production",
+      DATABASE_URL: "mysql://platform-injected.example/bis",
+    })).toBe("mysql://platform-injected.example/bis");
+    expect(resolveDatabaseUrl({
+      NODE_ENV: "production",
+      DATABASE_URL: "mysql://platform-injected.example/bis",
+      BIS_DATABASE_URL: "postgresql://managed.example/bis",
+    })).toBe("postgresql://managed.example/bis");
   });
 
   it("identifies every mandatory production secret or service endpoint that is absent", () => {

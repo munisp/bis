@@ -26,9 +26,9 @@ let _db: ReturnType<typeof drizzle> | null = null;
 
 // Lazily create the drizzle instance so local tooling can run without a DB.
 export async function getDb() {
-  if (!_db && process.env.DATABASE_URL) {
+  if (!_db && ENV.databaseUrl) {
     try {
-      const dbUrl = process.env.DATABASE_URL ?? "";
+      const dbUrl = ENV.databaseUrl;
       const isLocal = dbUrl.includes("localhost") || dbUrl.includes("127.0.0.1");
       // Enforce SSL for all non-local connections; allow self-signed certs for managed DBs
       const sslConfig = isLocal ? undefined : { ssl: { rejectUnauthorized: ENV.dbSslStrict } };

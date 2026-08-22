@@ -50,6 +50,18 @@ const productionCriticalConfigKeys = [
   "GRAFANA_WEBHOOK_SECRET",
 ] as const;
 
+export function resolveDatabaseUrl(source: SessionSecretSource = process.env): string {
+  const explicitPostgres = source.BIS_DATABASE_URL;
+  if (explicitPostgres) return explicitPostgres;
+
+  const injected = source.DATABASE_URL ?? "";
+  const isPostgres = injected.startsWith("postgresql:") || injected.startsWith("postgres:");
+  if (source.NODE_ENV !== "production" && !isPostgres) {
+    return "postgresql://bis_user:bis_secure_2026@localhost:5432/bis_db";
+  }
+  return injected;
+}
+
 export function missingProductionConfig(values: Record<string, string>): string[] {
   return productionCriticalConfigKeys.filter((key) => !values[key]);
 }
@@ -61,7 +73,10 @@ export const ENV = {
   // built-in JWT_SECRET. This value signs BFF session cookies and derives the
   // purpose-separated authenticator-seed encryption key.
   cookieSecret: sessionSigningSecret,
-  databaseUrl: process.env.DATABASE_URL ?? "",
+  // The managed platform may inject a TiDB DATABASE_URL. PostgreSQL-only BIS
+  // deployments set BIS_DATABASE_URL explicitly. Development uses local PostgreSQL
+  // before module initialization so static imports cannot bind the injected TiDB URL.
+  databaseUrl: resolveDatabaseUrl(),
   oAuthServerUrl: process.env.OAUTH_SERVER_URL ?? "",
   ownerOpenId: process.env.OWNER_OPEN_ID ?? "",
   ownerName: process.env.OWNER_NAME ?? "",
