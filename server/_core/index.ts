@@ -6,7 +6,7 @@ import "../sentry.server.config";
 // BIS platform prefers PostgreSQL. When a non-PostgreSQL URL is injected (e.g. managed TiDB),
 // log a warning and continue — the ORM layer handles both dialects. In local dev, override
 // to the local PostgreSQL instance for full schema fidelity.
-const _dbUrl = process.env.DATABASE_URL ?? "";
+const _dbUrl = process.env.BIS_DATABASE_URL ?? process.env.DATABASE_URL ?? "";
 if (!_dbUrl.startsWith("postgresql") && !_dbUrl.startsWith("postgres")) {
   if (process.env.NODE_ENV === "production" || process.env.NODE_ENV === "staging") {
     console.warn("[BIS] DATABASE_URL is not PostgreSQL — some features (PKCE sessions, retry leases) require PostgreSQL and will degrade gracefully.");
@@ -517,7 +517,20 @@ async function startServer() {
     res.json({ csrfToken: token });
   });
 
-  // ── Health endpoint ────────────────────────────────────────────────────────────────
+  // ── Health endpoints ────────────────────────────────────────────────────────────────
+  // Liveness proves that the BFF event loop is able to serve traffic. Readiness performs
+  // the expensive dependency checks and is the endpoint operators should gate critical
+  // workflows on. Keeping these contracts separate prevents an optional middleware
+  // outage from causing the platform process itself to be treated as unreachable.
+  app.get("/api/live", (_req, res) => {
+    res.status(200).json({
+      status: "ok",
+      version: process.env.npm_package_version ?? "1.0.0",
+      uptime: Math.floor(process.uptime()),
+      ts: new Date().toISOString(),
+    });
+  });
+
   // Returns JSON with DB, S3, and LLM checks for load balancer / monitoring.
   app.get("/api/health", async (_req, res) => {
     const checks: Record<string, { status: "ok" | "degraded" | "down"; latencyMs?: number }> = {};
@@ -702,13 +715,29 @@ async function startServer() {
     const anyDown = Object.values(checks).some(c => c.status === "down");
     const overall = allOk ? "ok" : anyDown ? "degraded" : "degraded";
 
-    res.status(anyDown ? 503 : 200).json({
+    res.status(200).json({
       status: overall,
       version: process.env.npm_package_version ?? "1.0.0",
       uptime: Math.floor(process.uptime()),
       ts: new Date().toISOString(),
       checks,
     });
+  });
+
+  app.get("/api/ready", async (req, res) => {
+    const target = `${req.protocol}://${req.get("host")}/api/health`;
+    try {
+      const health = await fetch(target, { signal: AbortSignal.timeout(10_000) });
+      const body = await health.json() as { checks?: Record<string, { status?: string }> };
+      const databaseReady = body.checks?.db?.status === "ok";
+      res.status(databaseReady ? 200 : 503).json({
+        status: databaseReady ? "ready" : "not_ready",
+        databaseReady,
+        checks: body.checks ?? {},
+      });
+    } catch {
+      res.status(503).json({ status: "not_ready", databaseReady: false });
+    }
   });
 
   // Storage proxy: serves /manus-storage/* paths via signed URLs
