@@ -14,7 +14,7 @@
  * Supports document upload, director invitations, and real-time status tracking.
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { trpc } from '@/lib/trpc';
 import { toast } from 'sonner';
@@ -202,6 +202,31 @@ function StakeholderOnboardingWizardInner() {
       gender: ''
     }
   });
+
+  useEffect(() => {
+    const draftId = new URLSearchParams(window.location.search).get('onboardingDraft');
+    if (!draftId) return;
+    let cancelled = false;
+    fetch(`/api/auth/onboarding-draft/${encodeURIComponent(draftId)}`, { credentials: 'include' })
+      .then(async (response) => ({ response, body: await response.json() as { payload?: Partial<OnboardingForm> & { stakeholders?: Stakeholder[]; step?: number } } }))
+      .then(({ response, body }) => {
+        if (cancelled || !response.ok || !body.payload) return;
+        const payload = body.payload;
+        (Object.keys(payload) as Array<keyof OnboardingForm>).forEach((key) => {
+          if (key in payload) setValue(key, payload[key] as never);
+        });
+        if (Array.isArray(payload.stakeholders)) setStakeholders(payload.stakeholders);
+        if (typeof payload.step === 'number') setStep(Math.max(0, Math.min(STEPS.length - 1, payload.step)));
+        if (payload.entityType) {
+          setEntityType(payload.entityType);
+          setDocuments(DOCUMENT_REQUIREMENTS[payload.entityType].map((document) => ({ ...document })));
+        }
+        window.history.replaceState({}, '', window.location.pathname);
+        toast.success('Your secure onboarding draft has been restored');
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [setValue]);
 
   const watchedEntityType = watch('entityType');
 
