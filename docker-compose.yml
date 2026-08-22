@@ -238,6 +238,8 @@ services:
     ports:
       - "80:80"       # HTTP (redirects to HTTPS)
       - "443:443"     # HTTPS + HTTP/3 (public edge)
+      - "8443:8443"   # Internal mTLS service mesh
+      - "2019:2019"   # Admin API (internal only — do NOT expose publicly in prod)
     volumes:
       - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - ./infra/caddy/caddy.json:/etc/caddy/caddy.json:ro
@@ -283,6 +285,8 @@ services:
     container_name: bis-open-appsec
     restart: unless-stopped
     ports:
+      - "8080:8080"     # WAF ingress (internal — behind Caddy, not exposed publicly)
+      - "8090:8090"     # open-appsec management/metrics (internal only)
     volumes:
       - ./infra/open-appsec/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./infra/open-appsec/open-appsec.yaml:/etc/cp/conf/open-appsec.yaml:ro
@@ -306,21 +310,6 @@ services:
       start_period: 30s
     profiles: [waf]   # Only starts with: docker compose --profile waf up -d
 
-  # ─── Open Policy Agent — policy decision point for gateway authorization ────
-  opa:
-    image: openpolicyagent/opa:0.68.0-static
-    container_name: bis-opa
-    restart: unless-stopped
-    command: ["run", "--server", "--addr=0.0.0.0:8181", "--set=decision_logs.console=true", "/policies/bis.rego"]
-    volumes:
-      - ./infra/opa/bis.rego:/policies/bis.rego:ro
-    networks: [bis-net]
-    healthcheck:
-      test: ["CMD", "opa", "eval", "--format=raw", "--data", "/policies/bis.rego", "data.bis.authz.allow"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-
   # ─── APISix — API Gateway / Single Ingress ────────────────────────────────────
   apisix:
     image: apache/apisix:3.9.0-debian
@@ -335,13 +324,15 @@ services:
       APISIX_VIEWER_KEY: ${APISIX_VIEWER_KEY:-bis-apisix-viewer-dev}
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
     ports:
+      - "9080:9080"   # HTTP ingress (public)
+      - "9180:9180"   # Admin API (internal)
+      - "9091:9091"   # Prometheus metrics
     networks: [bis-net]
     depends_on:
       - bff
       - gateway
       - risk-engine
       - event-processor
-      - opa
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9080/health"]
       interval: 15s
@@ -413,8 +404,6 @@ services:
     environment:
       GATEWAY_PORT: "8081"
       BIS_GATEWAY_KEY: ${BIS_GATEWAY_KEY:-dev-gateway-key-change-in-prod}
-      OPA_URL: http://opa:8181
-      BIS_BREAK_GLASS_AUDIT_URL: http://bff:3000/api/internal/break-glass-audit
       KAFKA_BROKERS: kafka:9092
       REDIS_URL: redis:6379
       REDIS_PASSWORD: ${REDIS_PASSWORD:-bis_redis_dev}

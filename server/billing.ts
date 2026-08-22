@@ -6,12 +6,13 @@
  */
 
 import { z } from "zod";
+import { createHash } from "node:crypto";
 import { router, protectedProcedure, writeProcedure } from "./_core/trpc";
 import { TRPCError } from "@trpc/server";
 import { storagePut } from "./storage";
 import { ENV } from "./_core/env";
 import { getDb } from "./db";
-import { billingTopups } from "../drizzle/schema";
+import { billingTopups, tigerbeetleTransfers } from "../drizzle/schema";
 import { eq } from "drizzle-orm";
 import { withCircuitBreaker } from "./circuitBreaker";
 
@@ -21,13 +22,78 @@ const ACCOUNT_TENANT_PREFIX = "10000";
 
 // Ledger codes
 const LEDGER_NGN = 566; // ISO 4217 numeric for NGN
+const PENDING_TOPUP_PREFIX = "pending:";
 
 // Investigation tier pricing in kobo (1 NGN = 100 kobo)
 const TIER_AMOUNTS: Record<string, number> = {
-  basic: 50_000,    // ₦500
+  basic: 50_000, // ₦500
   standard: 150_000, // ₦1,500
-  premium: 500_000,  // ₦5,000
+  premium: 500_000, // ₦5,000
 };
+
+function deterministicTopupTransferId(reference: string): string {
+  return createHash("sha256")
+    .update(`bis:topup:${reference}`)
+    .digest("hex")
+    .slice(0, 32);
+}
+
+function deterministicDebitTransferId(input: {
+  tenantId: string;
+  investigationId: string;
+  tier: string;
+  amountKobo: number;
+}): string {
+  return createHash("sha256")
+    .update(
+      `bis:debit:${input.tenantId}:${input.investigationId}:${input.tier}:${input.amountKobo}`
+    )
+    .digest("hex")
+    .slice(0, 32);
+}
+
+export function assertVerifiedTopupBinding(input: {
+  expectedReference: string;
+  expectedTenantId: string;
+  verifiedReference: string;
+  verifiedTenantId?: string;
+}): void {
+  if (input.verifiedReference !== input.expectedReference) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Paystack reference mismatch",
+    });
+  }
+  if (input.verifiedTenantId !== input.expectedTenantId) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "The verified payment is not bound to this tenant",
+    });
+  }
+}
+
+export const __billingInternals = {
+  deterministicTopupTransferId,
+  deterministicDebitTransferId,
+  pendingTopupPrefix: PENDING_TOPUP_PREFIX,
+};
+
+export function assertBillingTenantAccess(
+  contextTenantId: number | null,
+  requestedTenantId: string
+): void {
+  // Platform administrators have an explicit null tenant scope. Every other
+  // principal must use the tenant carried by the authenticated request context.
+  if (
+    contextTenantId !== null &&
+    String(contextTenantId) !== requestedTenantId
+  ) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "Cross-tenant billing access is denied",
+    });
+  }
+}
 
 // ─── HTTP helpers ─────────────────────────────────────────────────────────────
 
@@ -96,9 +162,14 @@ export async function creditTenantAccount(opts: {
   amountKobo: number;
   reference: string;
 }): Promise<{ transferId: string; recorded: boolean }> {
-  const transferId = `${Date.now()}-${crypto.randomUUID().replace(/-/g,'').slice(0,8)}`;
+  // The ledger transfer ID must be stable across webhook delivery, synchronous
+  // verification, reconciliation, and retry attempts. A fresh random ID here
+  // would turn an ambiguous transport failure into a duplicate credit.
+  const transferId = deterministicTopupTransferId(opts.reference);
   if (!TB_URL) {
-    console.warn("[Billing] TIGERBEETLE_URL not set — credit not recorded in ledger");
+    console.warn(
+      "[Billing] TIGERBEETLE_URL not set — credit not recorded in ledger"
+    );
     return { transferId, recorded: false };
   }
   try {
@@ -138,9 +209,16 @@ export const billingRouter = router({
         amountKobo: z.number().int().positive().optional(),
       })
     )
-    .mutation(async ({ input }) => {
-      const amount = input.amountKobo ?? TIER_AMOUNTS[input.tier] ?? TIER_AMOUNTS.basic;
-      const transferId = crypto.randomUUID().replace(/-/g, "").slice(0, 16);
+    .mutation(async ({ input, ctx }) => {
+      assertBillingTenantAccess(ctx.tenantId, input.tenantId);
+      const amount =
+        input.amountKobo ?? TIER_AMOUNTS[input.tier] ?? TIER_AMOUNTS.basic;
+      const transferId = deterministicDebitTransferId({
+        tenantId: input.tenantId,
+        investigationId: input.investigationId,
+        tier: input.tier,
+        amountKobo: amount,
+      });
 
       if (!TB_URL) {
         console.log(
@@ -159,9 +237,63 @@ export const billingRouter = router({
         };
       }
 
+      const db = await getDb();
+      if (!db) {
+        throw new TRPCError({
+          code: "SERVICE_UNAVAILABLE",
+          message: "Ledger reconciliation store unavailable",
+        });
+      }
+
+      const [claimed] = await db
+        .insert(tigerbeetleTransfers)
+        .values({
+          transferId,
+          debitAccountId: ACCOUNT_TENANT_PREFIX + input.tenantId,
+          creditAccountId: ACCOUNT_REVENUE,
+          amount,
+          ledger: LEDGER_NGN,
+          code: 1,
+          tenantId: ctx.tenantId,
+          userData: {
+            investigationId: input.investigationId,
+            tier: input.tier,
+          },
+          txRef: input.investigationId,
+        })
+        .onConflictDoNothing()
+        .returning();
+
+      if (!claimed) {
+        const [existing] = await db
+          .select()
+          .from(tigerbeetleTransfers)
+          .where(eq(tigerbeetleTransfers.transferId, transferId));
+        if (existing) {
+          return {
+            transferId,
+            tenantId: input.tenantId,
+            investigationId: input.investigationId,
+            tier: input.tier,
+            amountKobo: amount,
+            amountNGN: amount / 100,
+            recorded: Boolean(existing.reconciledAt),
+            idempotent: true,
+            pendingReconciliation: !existing.reconciledAt,
+          };
+        }
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: "Ledger debit claim is unavailable",
+        });
+      }
+
       try {
         // Ensure both accounts exist (idempotent)
-        await Promise.all([ensureRevenueAccount(), ensureAccount(input.tenantId)]);
+        await Promise.all([
+          ensureRevenueAccount(),
+          ensureAccount(input.tenantId),
+        ]);
 
         await tbPost("/transfers/create", [
           {
@@ -178,25 +310,24 @@ export const billingRouter = router({
           },
         ]);
 
-        // Reconciliation: write transfer to PostgreSQL for reporting
+        // A ledger-accepted debit is complete only when its pre-created durable
+        // claim is marked reconciled. Fail closed if that completion marker cannot
+        // be written, leaving the claim available for an explicit reconciler.
         try {
-          const { getDb } = await import("./db");
-          const { tigerbeetleTransfers } = await import("../drizzle/schema");
-          const db = await getDb();
-          if (db) {
-            await db.insert(tigerbeetleTransfers).values({
-              transferId,
-              debitAccountId: ACCOUNT_TENANT_PREFIX + input.tenantId,
-              creditAccountId: ACCOUNT_REVENUE,
-              amount,
-              ledger: LEDGER_NGN,
-              code: 1,
-              userData: { investigationId: input.investigationId, tier: input.tier },
-              txRef: input.investigationId,
-            }).onConflictDoNothing();
-          }
+          await db
+            .update(tigerbeetleTransfers)
+            .set({ reconciledAt: new Date() })
+            .where(eq(tigerbeetleTransfers.transferId, transferId));
         } catch (reconcileErr) {
-          console.warn("[TigerBeetle] Reconciliation write failed (non-fatal):", reconcileErr);
+          console.error(
+            "[TigerBeetle] Ledger accepted debit but reconciliation update failed:",
+            reconcileErr
+          );
+          throw new TRPCError({
+            code: "SERVICE_UNAVAILABLE",
+            message:
+              "Ledger debit pending reconciliation; do not resubmit the investigation",
+          });
         }
         return {
           transferId,
@@ -221,9 +352,15 @@ export const billingRouter = router({
    */
   getBalance: protectedProcedure
     .input(z.object({ tenantId: z.string().min(1) }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      assertBillingTenantAccess(ctx.tenantId, input.tenantId);
       if (!TB_URL) {
-        return { tenantId: input.tenantId, balanceKobo: 0, balanceNGN: 0, available: false };
+        return {
+          tenantId: input.tenantId,
+          balanceKobo: 0,
+          balanceNGN: 0,
+          available: false,
+        };
       }
 
       try {
@@ -235,7 +372,12 @@ export const billingRouter = router({
         } | null;
 
         if (!account) {
-          return { tenantId: input.tenantId, balanceKobo: 0, balanceNGN: 0, available: true };
+          return {
+            tenantId: input.tenantId,
+            balanceKobo: 0,
+            balanceNGN: 0,
+            available: true,
+          };
         }
 
         const creditsPosted = account.credits_posted ?? 0;
@@ -250,7 +392,12 @@ export const billingRouter = router({
         };
       } catch (err) {
         console.error("[TigerBeetle] getBalance error:", err);
-        return { tenantId: input.tenantId, balanceKobo: 0, balanceNGN: 0, available: false };
+        return {
+          tenantId: input.tenantId,
+          balanceKobo: 0,
+          balanceNGN: 0,
+          available: false,
+        };
       }
     }),
 
@@ -262,11 +409,14 @@ export const billingRouter = router({
       z.object({
         tenantId: z.string().min(1),
         amountKobo: z.number().int().positive(),
-        reference: z.string().optional(),
+        reference: z.string().min(1).max(255),
       })
     )
-    .mutation(async ({ input }) => {
-      const transferId = crypto.randomUUID().replace(/-/g, "").slice(0, 16);
+    .mutation(async ({ input, ctx }) => {
+      assertBillingTenantAccess(ctx.tenantId, input.tenantId);
+      const transferId = deterministicTopupTransferId(
+        `manual-credit:${input.tenantId}:${input.reference}`
+      );
 
       if (!TB_URL) {
         return {
@@ -279,7 +429,10 @@ export const billingRouter = router({
       }
 
       try {
-        await Promise.all([ensureRevenueAccount(), ensureAccount(input.tenantId)]);
+        await Promise.all([
+          ensureRevenueAccount(),
+          ensureAccount(input.tenantId),
+        ]);
 
         // Credit top-up: revenue → tenant (reverse direction)
         await tbPost("/transfers/create", [
@@ -288,7 +441,7 @@ export const billingRouter = router({
             debit_account_id: ACCOUNT_REVENUE,
             credit_account_id: ACCOUNT_TENANT_PREFIX + input.tenantId,
             amount: input.amountKobo,
-            user_data_128: input.reference ?? "",
+            user_data_128: input.reference,
             user_data_32: Math.floor(Date.now() / 1000),
             ledger: LEDGER_NGN,
             code: 2, // top-up credit
@@ -334,11 +487,12 @@ export const billingRouter = router({
       z.object({
         tenantId: z.string().min(1),
         fromTimestamp: z.number().int().optional(), // Unix ms
-        toTimestamp: z.number().int().optional(),   // Unix ms
+        toTimestamp: z.number().int().optional(), // Unix ms
         type: z.enum(["all", "debit", "credit"]).default("all"),
       })
     )
     .mutation(async ({ input, ctx }) => {
+      assertBillingTenantAccess(ctx.tenantId, input.tenantId);
       // Build simulated or real ledger rows
       type LedgerRow = {
         id: string;
@@ -372,21 +526,27 @@ export const billingRouter = router({
           }> | null;
 
           if (transfers) {
-            const tierNames: Record<number, string> = { 1: "basic", 2: "standard", 3: "premium" };
+            const tierNames: Record<number, string> = {
+              1: "basic",
+              2: "standard",
+              3: "premium",
+            };
             rows = transfers
-              .filter((t) => {
+              .filter(t => {
                 if (input.type === "debit" && t.code !== 1) return false;
                 if (input.type === "credit" && t.code !== 2) return false;
                 const ts = (t.user_data_32 ?? 0) * 1000;
-                if (input.fromTimestamp && ts < input.fromTimestamp) return false;
+                if (input.fromTimestamp && ts < input.fromTimestamp)
+                  return false;
                 if (input.toTimestamp && ts > input.toTimestamp) return false;
                 return true;
               })
-              .map((t) => ({
+              .map(t => ({
                 id: t.id,
                 timestamp: (t.user_data_32 ?? 0) * 1000,
                 type: t.code === 2 ? "credit" : "debit",
-                description: t.code === 2 ? "Account top-up" : "Investigation debit",
+                description:
+                  t.code === 2 ? "Account top-up" : "Investigation debit",
                 amountNGN: t.amount / 100,
                 reference: t.user_data_128 ?? "",
                 tier: tierNames[t.user_data_64 ?? 0] ?? "",
@@ -402,8 +562,9 @@ export const billingRouter = router({
       }
 
       // Build CSV
-      const header = "ID,Timestamp,Type,Description,Amount (NGN),Reference,Tier\n";
-      const csvRows = rows.map((r) =>
+      const header =
+        "ID,Timestamp,Type,Description,Amount (NGN),Reference,Tier\n";
+      const csvRows = rows.map(r =>
         [
           r.id,
           new Date(r.timestamp).toISOString(),
@@ -418,7 +579,7 @@ export const billingRouter = router({
 
       // Upload to S3
       const dateStr = new Date().toISOString().slice(0, 10);
-      const suffix = crypto.randomUUID().replace(/-/g,'').slice(0,8);
+      const suffix = crypto.randomUUID().replace(/-/g, "").slice(0, 8);
       const fileKey = `billing-exports/${input.tenantId}/${dateStr}-ledger-${suffix}.csv`;
 
       try {
@@ -460,12 +621,14 @@ export const billingRouter = router({
       })
     )
     .mutation(async ({ input, ctx }) => {
+      assertBillingTenantAccess(ctx.tenantId, input.tenantId);
       const PAYSTACK_KEY = ENV.paystackSecretKey;
 
       if (!PAYSTACK_KEY) {
         throw new TRPCError({
           code: "SERVICE_UNAVAILABLE",
-          message: "Paystack is not configured. A top-up session cannot be created.",
+          message:
+            "Paystack is not configured. A top-up session cannot be created.",
         });
       }
 
@@ -484,15 +647,18 @@ export const billingRouter = router({
           channels: ["card", "bank", "ussd", "bank_transfer"],
         };
 
-        const res = await fetch("https://api.paystack.co/transaction/initialize", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${PAYSTACK_KEY}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(payload),
-          signal: AbortSignal.timeout(10_000),
-        });
+        const res = await fetch(
+          "https://api.paystack.co/transaction/initialize",
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${PAYSTACK_KEY}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(payload),
+            signal: AbortSignal.timeout(10_000),
+          }
+        );
 
         if (!res.ok) {
           const errText = await res.text();
@@ -505,7 +671,11 @@ export const billingRouter = router({
         const data = (await res.json()) as {
           status: boolean;
           message: string;
-          data: { authorization_url: string; access_code: string; reference: string };
+          data: {
+            authorization_url: string;
+            access_code: string;
+            reference: string;
+          };
         };
 
         if (!data.status) {
@@ -541,7 +711,8 @@ export const billingRouter = router({
         reference: z.string().min(1),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      assertBillingTenantAccess(ctx.tenantId, input.tenantId);
       const PAYSTACK_KEY = ENV.paystackSecretKey;
 
       let amountKobo: number;
@@ -551,13 +722,15 @@ export const billingRouter = router({
       if (!PAYSTACK_KEY) {
         throw new TRPCError({
           code: "SERVICE_UNAVAILABLE",
-          message: "Paystack is not configured. A payment cannot be verified or credited.",
+          message:
+            "Paystack is not configured. A payment cannot be verified or credited.",
         });
       }
       if (input.reference.startsWith("BIS-SIM-")) {
         throw new TRPCError({
           code: "BAD_REQUEST",
-          message: "Simulated payment references are not valid for tenant crediting.",
+          message:
+            "Simulated payment references are not valid for tenant crediting.",
         });
       }
       {
@@ -585,6 +758,7 @@ export const billingRouter = router({
               amount: number; // kobo
               channel: string;
               reference: string;
+              metadata?: { tenant_id?: string; user_id?: string | number };
             };
           };
 
@@ -594,6 +768,13 @@ export const billingRouter = router({
               message: `Payment not successful. Status: ${data.data?.status ?? "unknown"}`,
             });
           }
+
+          assertVerifiedTopupBinding({
+            expectedReference: input.reference,
+            expectedTenantId: input.tenantId,
+            verifiedReference: data.data.reference,
+            verifiedTenantId: data.data.metadata?.tenant_id,
+          });
 
           amountKobo = data.data.amount;
           status = data.data.status;
@@ -609,27 +790,84 @@ export const billingRouter = router({
 
       // ── Idempotency guard: prevent double-credit for the same Paystack reference ──
       const db = await getDb();
-      if (db) {
-        const existing = await db.select().from(billingTopups)
-          .where(eq(billingTopups.reference, input.reference)).limit(1);
-        if (existing.length > 0) {
-          // Already processed — return the recorded values without re-crediting
-          return {
-            success: true,
-            amountKobo: existing[0].amountKobo,
-            amountNGN: existing[0].amountKobo / 100,
-            reference: input.reference,
-            channel: existing[0].channel,
-            transferId: existing[0].tbTransferId ?? `idempotent-${input.reference}`,
-            idempotent: true,
-          };
+      if (!db) {
+        throw new TRPCError({
+          code: "SERVICE_UNAVAILABLE",
+          message:
+            "Durable top-up idempotency storage is unavailable; no ledger credit was attempted",
+        });
+      }
+
+      const existing = await db
+        .select()
+        .from(billingTopups)
+        .where(eq(billingTopups.reference, input.reference))
+        .limit(1);
+      if (existing.length > 0) {
+        const topup = existing[0];
+        if (
+          topup.tenantId !== input.tenantId ||
+          topup.amountKobo !== amountKobo
+        ) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message:
+              "Payment reference is already bound to different top-up details",
+          });
         }
+        if (
+          topup.tbTransferId?.startsWith(PENDING_TOPUP_PREFIX) ||
+          topup.tbTransferId?.startsWith("fallback-")
+        ) {
+          throw new TRPCError({
+            code: "SERVICE_UNAVAILABLE",
+            message:
+              "Payment is verified but its ledger posting is pending reconciliation",
+          });
+        }
+        return {
+          success: true,
+          amountKobo: topup.amountKobo,
+          amountNGN: topup.amountKobo / 100,
+          reference: input.reference,
+          channel: topup.channel,
+          transferId:
+            topup.tbTransferId ?? deterministicTopupTransferId(input.reference),
+          idempotent: true,
+        };
+      }
+
+      const transferId = deterministicTopupTransferId(input.reference);
+      // Claim the provider reference before external side effects. The unique
+      // reference constraint is the concurrency boundary between callback and
+      // webhook delivery paths.
+      try {
+        await db.insert(billingTopups).values({
+          tenantId: input.tenantId,
+          reference: input.reference,
+          amountKobo,
+          channel,
+          tbTransferId: `${PENDING_TOPUP_PREFIX}${transferId}`,
+        });
+      } catch (error) {
+        const [claimed] = await db
+          .select()
+          .from(billingTopups)
+          .where(eq(billingTopups.reference, input.reference))
+          .limit(1);
+        if (claimed) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message:
+              "Payment is already being processed; retry after reconciliation completes",
+          });
+        }
+        throw error;
       }
 
       // Credit the TigerBeetle account
       try {
         await ensureAccount(input.tenantId);
-        const transferId = `${Date.now()}-${crypto.randomUUID().replace(/-/g,'').slice(0,8)}`;
         await tbPost("/transfers/create", [
           {
             id: transferId,
@@ -642,16 +880,10 @@ export const billingRouter = router({
             user_data_128: input.reference,
           },
         ]);
-        // Record in billing_topups for idempotency on future retries
-        if (db) {
-          await db.insert(billingTopups).values({
-            tenantId: input.tenantId,
-            reference: input.reference,
-            amountKobo,
-            channel,
-            tbTransferId: transferId,
-          }).onConflictDoNothing();
-        }
+        await db
+          .update(billingTopups)
+          .set({ tbTransferId: transferId })
+          .where(eq(billingTopups.reference, input.reference));
         return {
           success: true,
           amountKobo,
@@ -663,15 +895,14 @@ export const billingRouter = router({
         };
       } catch (err) {
         console.error("[Billing] verifyTopUp TigerBeetle credit error:", err);
-        // Even if TB fails, return success so we don't double-charge
-        return {
-          success: true,
-          amountKobo,
-          amountNGN: amountKobo / 100,
-          reference: input.reference,
-          channel,
-          transferId: `fallback-${Date.now()}`,
-        };
+        // The verified reference remains durably marked as pending. Returning
+        // success here would falsely represent a customer balance that the
+        // ledger did not post and would conceal a loss-of-funds condition.
+        throw new TRPCError({
+          code: "SERVICE_UNAVAILABLE",
+          message:
+            "Payment is verified, but ledger credit is pending reconciliation",
+        });
       }
     }),
 
@@ -696,16 +927,26 @@ export const billingRouter = router({
           const entries = transfers
             .map((t: any) => ({
               id: String(t.id),
-              type: t.credit_account_id?.startsWith("tenant-") ? "credit" : "debit",
+              type: t.credit_account_id?.startsWith("tenant-")
+                ? "credit"
+                : "debit",
               amountKobo: Number(t.amount),
-              description: t.user_data_128 ? `Ref: ${t.user_data_128}` : `Transfer ${t.id}`,
+              description: t.user_data_128
+                ? `Ref: ${t.user_data_128}`
+                : `Transfer ${t.id}`,
               investigationRef: t.code === 1 ? t.user_data_128 : undefined,
               tier: t.code === 1 ? "standard" : undefined,
-              timestamp: t.timestamp ? new Date(Number(t.timestamp) / 1_000_000) : new Date(),
+              timestamp: t.timestamp
+                ? new Date(Number(t.timestamp) / 1_000_000)
+                : new Date(),
               status: "posted" as const,
             }))
             .filter((e: any) => input.type === "all" || e.type === input.type);
-          return { entries, total: entries.length, source: "tigerbeetle" as const };
+          return {
+            entries,
+            total: entries.length,
+            source: "tigerbeetle" as const,
+          };
         }
       } catch (_) {
         // TigerBeetle unavailable — fall through to DB audit log
@@ -718,9 +959,10 @@ export const billingRouter = router({
       const db = await getDb();
       if (!db) return { entries: [], total: 0, source: "unavailable" as const };
       // Use system category with billing action prefix as fallback storage
-      const whereExpr = input.type !== "all"
-        ? drizzleSql`${auditLog.category} = 'system' AND ${auditLog.action} LIKE ${'billing_' + input.type + '%'}`
-        : drizzleSql`${auditLog.category} = 'system' AND ${auditLog.action} LIKE ${'billing_%'}`;
+      const whereExpr =
+        input.type !== "all"
+          ? drizzleSql`${auditLog.category} = 'system' AND ${auditLog.action} LIKE ${"billing_" + input.type + "%"}`
+          : drizzleSql`${auditLog.category} = 'system' AND ${auditLog.action} LIKE ${"billing_%"}`;
       const rows = await db
         .select()
         .from(auditLog)
@@ -728,14 +970,23 @@ export const billingRouter = router({
         .orderBy(desc(auditLog.createdAt))
         .limit(input.limit);
 
-      const entries = rows.map((r: typeof rows[number]) => ({
+      const entries = rows.map((r: (typeof rows)[number]) => ({
         id: String(r.id),
-        type: (r.action === "credit" ? "credit" : "debit") as "debit" | "credit",
+        type: (r.action === "credit" ? "credit" : "debit") as
+          | "debit"
+          | "credit",
         amountKobo: r.detail ? Number((r.detail as any).amountKobo ?? 0) : 0,
-        description: r.detail ? String((r.detail as any).description ?? r.action) : r.action,
-        investigationRef: r.detail ? String((r.detail as any).investigationRef ?? "") || undefined : undefined,
-        tier: r.detail ? String((r.detail as any).tier ?? "") || undefined : undefined,
-        timestamp: r.createdAt instanceof Date ? r.createdAt : new Date(r.createdAt),
+        description: r.detail
+          ? String((r.detail as any).description ?? r.action)
+          : r.action,
+        investigationRef: r.detail
+          ? String((r.detail as any).investigationRef ?? "") || undefined
+          : undefined,
+        tier: r.detail
+          ? String((r.detail as any).tier ?? "") || undefined
+          : undefined,
+        timestamp:
+          r.createdAt instanceof Date ? r.createdAt : new Date(r.createdAt),
         status: "posted" as const,
       }));
 

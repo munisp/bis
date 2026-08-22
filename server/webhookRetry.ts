@@ -21,6 +21,7 @@ const MAX_ATTEMPTS = 7;
 const BASE_DELAY_MS = 1_000;
 const MAX_DELAY_MS = 60_000;
 const POLL_INTERVAL_MS = 10_000;
+const LEASE_TIMEOUT_MS = 5 * 60_000;
 
 interface RetryItem {
   id: number;
@@ -51,19 +52,9 @@ export async function enqueueFailedWebhook(opts: {
 }): Promise<void> {
   const db = await getDb();
   if (!db) {
-    console.error("[WebhookRetry] Cannot enqueue — database unavailable:", opts.reference);
-    return;
+    throw new Error(`Cannot durably enqueue failed webhook ${opts.reference}: database unavailable`);
   }
   const nextRetryAt = new Date(Date.now() + calculateBackoff(0));
-  await db.execute(
-    `INSERT INTO webhook_retry_queue ("reference", "tenantId", "amountKobo", "attempts", "nextRetryAt", "status", "lastError", "createdAt")
-     VALUES ($1, $2, $3, 0, $4, 'pending', $5, NOW())
-     ON CONFLICT ("reference") DO UPDATE SET
-       "attempts" = webhook_retry_queue."attempts",
-       "lastError" = EXCLUDED."lastError"`,
-    // @ts-ignore — raw SQL params
-  );
-  // Use Drizzle raw SQL for the insert
   try {
     const { sql } = await import("drizzle-orm");
     await db.execute(sql`
@@ -87,6 +78,14 @@ export async function processRetryQueue(): Promise<{ processed: number; succeede
 
   try {
     // Fetch items due for retry
+    // Recover a row only after its worker lease has expired. This is the
+    // bounded crash-recovery path for a process that dies after claiming work.
+    await db.execute(sql`
+      UPDATE webhook_retry_queue
+      SET "status" = 'pending', "leasedAt" = NULL
+      WHERE "status" = 'processing'
+        AND "leasedAt" < NOW() - (${LEASE_TIMEOUT_MS} * INTERVAL '1 millisecond')
+    `);
     const rows = await db.execute(sql`
       SELECT * FROM webhook_retry_queue
       WHERE "status" = 'pending' AND "nextRetryAt" <= NOW()
@@ -97,6 +96,16 @@ export async function processRetryQueue(): Promise<{ processed: number; succeede
     const items = (rows as any).rows ?? rows ?? [];
 
     for (const item of items) {
+      // Atomically lease each row. Multiple process replicas must not create
+      // concurrent ledger transfers for the same provider reference.
+      const claimed = await db.execute(sql`
+        UPDATE webhook_retry_queue
+        SET "status" = 'processing', "leasedAt" = NOW()
+        WHERE "id" = ${item.id} AND "status" = 'pending' AND "nextRetryAt" <= NOW()
+        RETURNING *
+      `);
+      const claimedRows = (claimed as any).rows ?? claimed ?? [];
+      if (!Array.isArray(claimedRows) || claimedRows.length === 0) continue;
       processed++;
       const attempts = (item.attempts ?? 0) + 1;
 
@@ -111,7 +120,7 @@ export async function processRetryQueue(): Promise<{ processed: number; succeede
           // Success — mark as completed
           await db.execute(sql`
             UPDATE webhook_retry_queue
-            SET "status" = 'completed', "attempts" = ${attempts}
+            SET "status" = 'completed', "attempts" = ${attempts}, "leasedAt" = NULL
             WHERE "reference" = ${item.reference}
           `);
           succeeded++;
@@ -121,7 +130,7 @@ export async function processRetryQueue(): Promise<{ processed: number; succeede
           if (attempts >= MAX_ATTEMPTS) {
             await db.execute(sql`
               UPDATE webhook_retry_queue
-              SET "status" = 'dead_letter', "attempts" = ${attempts}, "lastError" = 'Max attempts exceeded'
+              SET "status" = 'dead_letter', "attempts" = ${attempts}, "lastError" = 'Max attempts exceeded', "leasedAt" = NULL
               WHERE "reference" = ${item.reference}
             `);
             deadLettered++;
@@ -131,7 +140,7 @@ export async function processRetryQueue(): Promise<{ processed: number; succeede
             const nextRetry = new Date(Date.now() + nextDelay);
             await db.execute(sql`
               UPDATE webhook_retry_queue
-              SET "attempts" = ${attempts}, "nextRetryAt" = ${nextRetry}, "lastError" = 'TB unavailable'
+              SET "status" = 'pending', "attempts" = ${attempts}, "nextRetryAt" = ${nextRetry}, "lastError" = 'TB unavailable', "leasedAt" = NULL
               WHERE "reference" = ${item.reference}
             `);
           }
@@ -141,7 +150,7 @@ export async function processRetryQueue(): Promise<{ processed: number; succeede
         if (attempts >= MAX_ATTEMPTS) {
           await db.execute(sql`
             UPDATE webhook_retry_queue
-            SET "status" = 'dead_letter', "attempts" = ${attempts}, "lastError" = ${errMsg}
+            SET "status" = 'dead_letter', "attempts" = ${attempts}, "lastError" = ${errMsg}, "leasedAt" = NULL
             WHERE "reference" = ${item.reference}
           `);
           deadLettered++;
@@ -150,7 +159,7 @@ export async function processRetryQueue(): Promise<{ processed: number; succeede
           const nextRetry = new Date(Date.now() + nextDelay);
           await db.execute(sql`
             UPDATE webhook_retry_queue
-            SET "attempts" = ${attempts}, "nextRetryAt" = ${nextRetry}, "lastError" = ${errMsg}
+            SET "status" = 'pending', "attempts" = ${attempts}, "nextRetryAt" = ${nextRetry}, "lastError" = ${errMsg}, "leasedAt" = NULL
             WHERE "reference" = ${item.reference}
           `);
         }
