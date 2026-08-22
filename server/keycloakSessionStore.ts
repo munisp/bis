@@ -91,10 +91,18 @@ export async function createOnboardingDraft(payload: unknown) {
   return id;
 }
 
+export async function claimOnboardingDraft(id: string, userId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const [row] = await db.update(keycloakOnboardingDrafts).set({ claimedByUserId: userId, claimedAt: new Date() })
+    .where(and(eq(keycloakOnboardingDrafts.id, id), isNull(keycloakOnboardingDrafts.claimedByUserId), isNull(keycloakOnboardingDrafts.consumedAt), gt(keycloakOnboardingDrafts.expiresAt, new Date()))).returning();
+  return Boolean(row);
+}
+
 export async function consumeOnboardingDraft(id: string, userId: number) {
   const db = await getDb();
   if (!db) throw new Error("Database unavailable");
-  const [row] = await db.update(keycloakOnboardingDrafts).set({ claimedByUserId: userId, claimedAt: new Date(), consumedAt: new Date() })
-    .where(and(eq(keycloakOnboardingDrafts.id, id), isNull(keycloakOnboardingDrafts.consumedAt), gt(keycloakOnboardingDrafts.expiresAt, new Date()))).returning();
+  const [row] = await db.update(keycloakOnboardingDrafts).set({ consumedAt: new Date() })
+    .where(and(eq(keycloakOnboardingDrafts.id, id), eq(keycloakOnboardingDrafts.claimedByUserId, userId), isNull(keycloakOnboardingDrafts.consumedAt), gt(keycloakOnboardingDrafts.expiresAt, new Date()))).returning();
   return row ? JSON.parse(decrypt(row.payloadEncrypted)) : null;
 }
