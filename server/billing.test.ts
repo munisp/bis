@@ -120,6 +120,23 @@ describe("billing module — tier pricing", () => {
       expect(result.available).toBe(false);
     }
   });
+
+  it("derives the same debit transfer ID for an exact retry and a different ID for a different debit intent", async () => {
+    const { __billingInternals } = await import("./billing");
+    const original = __billingInternals.deterministicDebitTransferId({
+      tenantId: "42", investigationId: "INV-001", tier: "standard", amountKobo: 150_000,
+    });
+    const retry = __billingInternals.deterministicDebitTransferId({
+      tenantId: "42", investigationId: "INV-001", tier: "standard", amountKobo: 150_000,
+    });
+    const differentTier = __billingInternals.deterministicDebitTransferId({
+      tenantId: "42", investigationId: "INV-001", tier: "premium", amountKobo: 500_000,
+    });
+
+    expect(retry).toBe(original);
+    expect(differentTier).not.toBe(original);
+    expect(original).toMatch(/^[a-f0-9]{32}$/);
+  });
 });
 
 // ─── APISix configuration tests ──────────────────────────────────────────────

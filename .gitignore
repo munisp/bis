@@ -119,3 +119,6 @@ services/event-emitter/target/
 services/aml-engine/target/
 services/event-processor/target/
 .project-config.json
+__pycache__/
+*.pyc
+.project-config.json

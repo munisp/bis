@@ -58,6 +58,7 @@ async function deliverWithRetry(
  * the main transaction flow. Uses exponential backoff retry (5 attempts).
  */
 async function dispatchAmlWebhook(payload: {
+  tenantId: number;
   event: string;
   riskLevel: string;
   title: string;
@@ -74,7 +75,7 @@ async function dispatchAmlWebhook(payload: {
     if (!db) return;
     // Find all active webhooks subscribed to aml.alert events
     const activeWebhooks = await db.select().from(webhooks)
-      .where(eq(webhooks.status, "active"));
+      .where(and(eq(webhooks.status, "active"), eq(webhooks.tenantId, payload.tenantId)));
     const amlWebhooks = activeWebhooks.filter(wh => {
       const events = (wh.events ?? []) as string[];
       return events.length === 0 || events.includes("aml.alert") || events.includes("*");
@@ -167,6 +168,24 @@ function uetrGen(): string {
   return `${hex()}-${hex().slice(0, 4)}-4${hex().slice(0, 3)}-${hex().slice(0, 4)}-${hex()}${hex().slice(0, 4)}`;
 }
 
+function requireTenantId(ctx: { tenantId?: number | null }): number {
+  if (ctx.tenantId === null || ctx.tenantId === undefined) {
+    throw new Error("Tenant context is required for financial operations");
+  }
+  return ctx.tenantId;
+}
+
+function assertLegalTransition(
+  current: string,
+  next: string,
+  transitions: Record<string, readonly string[]>,
+  label: string,
+): void {
+  if (!transitions[current]?.includes(next)) {
+    throw new Error(`Illegal ${label} transition: ${current} -> ${next}`);
+  }
+}
+
 function scoreTransaction(tx: {
   amount: number; currency: string; originatorCountry: string; beneficiaryCountry: string;
   type: string; narration?: string | null;
@@ -201,10 +220,11 @@ export const amlRouter = router({
         minAmount: z.number().optional(),
         maxAmount: z.number().optional(),
       }))
-      .query(async ({ input }) => {
+      .query(async ({ input, ctx }) => {
         const db = await getDb();
         if (!db) throw new Error("Database unavailable");
         const conditions = [];
+        if (ctx.tenantId !== null) conditions.push(eq(transactions.tenantId, ctx.tenantId));
         if (input.status) conditions.push(eq(transactions.status, input.status as any));
         if (input.riskLevel) conditions.push(eq(transactions.amlRiskLevel, input.riskLevel as any));
         if (input.type) conditions.push(eq(transactions.type, input.type as any));
@@ -227,10 +247,13 @@ export const amlRouter = router({
         return { items: rows, total };
       }),
 
-    get: protectedProcedure.input(z.object({ id: z.number() })).query(async ({ input }) => {
+    get: protectedProcedure.input(z.object({ id: z.number() })).query(async ({ input, ctx }) => {
       const db = await getDb();
-        if (!db) throw new Error("Database unavailable");
-      const [row] = await db.select().from(transactions).where(eq(transactions.id, input.id));
+      if (!db) throw new Error("Database unavailable");
+      const where = ctx.tenantId !== null
+        ? and(eq(transactions.id, input.id), eq(transactions.tenantId, ctx.tenantId))
+        : eq(transactions.id, input.id);
+      const [row] = await db.select().from(transactions).where(where);
       return row ?? null;
     }),
 
@@ -257,6 +280,7 @@ export const amlRouter = router({
       .mutation(async ({ input, ctx }) => {
         const db = await getDb();
         if (!db) throw new Error("Database unavailable");
+        const tenantId = requireTenantId(ctx);
         const { score, flags } = scoreTransaction({
           amount: input.amount, currency: input.currency,
           originatorCountry: input.originatorCountry, beneficiaryCountry: input.beneficiaryCountry,
@@ -265,6 +289,7 @@ export const amlRouter = router({
         const riskLevel = score >= 70 ? "critical" : score >= 50 ? "high" : score >= 25 ? "medium" : "low";
         const status = score >= 70 ? "flagged" : "completed";
         const [tx] = await db.insert(transactions).values({
+          tenantId,
           txRef: txRef(), type: input.type, status: status as any,
           amount: input.amount, currency: input.currency,
           amountUsd: input.currency === "USD" ? input.amount : input.currency === "NGN" ? input.amount / 1600 : undefined,
@@ -280,7 +305,7 @@ export const amlRouter = router({
           valueDate: input.valueDate ? new Date(input.valueDate) : new Date(),
         }).returning();
         if (score >= 50 && flags.length > 0) {
-          const [newAlert] = await db.insert(amlAlerts).values({ alertRef: amlAlertRef(), transactionId: tx.id, status: "open",
+          const [newAlert] = await db.insert(amlAlerts).values({ tenantId, alertRef: amlAlertRef(), transactionId: tx.id, status: "open",
             riskLevel: riskLevel as any,
             title: `${riskLevel.toUpperCase()} Risk: ${input.originatorName} → ${input.beneficiaryName}`,
             description: `Transaction ${tx.txRef} triggered: ${flags.join(", ")}. Amount: ${input.currency} ${input.amount.toLocaleString()}`,
@@ -332,6 +357,7 @@ export const amlRouter = router({
           void permifyWriteRelationship([{ entity: { type: "aml_alert", id: String(newAlert.id) }, relation: "owner", subject: { type: "user", id: String(ctx.user.id) } }]).catch(e => console.warn("[AML Permify]", e));
           // Webhook fan-out: notify all subscribed tenants (non-blocking)
           dispatchAmlWebhook({
+            tenantId,
             event: "aml.alert",
             riskLevel,
             title: newAlert.title ?? `AML Alert ${newAlert.alertRef ?? `ALT-\${String(newAlert.id).padStart(6, "0")}`}`,
@@ -352,10 +378,12 @@ export const amlRouter = router({
       .mutation(async ({ input, ctx }) => {
         const db = await getDb();
         if (!db) throw new Error("Database unavailable");
+        const tenantId = requireTenantId(ctx);
         const [tx] = await db.update(transactions)
           .set({ status: "flagged", flaggedAt: new Date(), flaggedBy: ctx.user.id, updatedAt: new Date() })
-          .where(eq(transactions.id, input.id)).returning();
-        await db.insert(amlAlerts).values({ alertRef: amlAlertRef(), transactionId: tx.id, status: "open", riskLevel: "high",
+          .where(and(eq(transactions.id, input.id), eq(transactions.tenantId, tenantId))).returning();
+        if (!tx) throw new Error("Transaction not found");
+        await db.insert(amlAlerts).values({ tenantId, alertRef: amlAlertRef(), transactionId: tx.id, status: "open", riskLevel: "high",
           title: `Manually Flagged: ${tx.originatorName} → ${tx.beneficiaryName}`,
           description: input.reason, triggeredValue: tx.amount,
         });
@@ -364,24 +392,26 @@ export const amlRouter = router({
 
     clear: writeProcedure
       .input(z.object({ id: z.number(), notes: z.string().optional() }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         const db = await getDb();
         if (!db) throw new Error("Database unavailable");
+        const tenantId = requireTenantId(ctx);
         const [tx] = await db.update(transactions)
           .set({ status: "completed", amlRiskLevel: "low", updatedAt: new Date() })
-          .where(eq(transactions.id, input.id)).returning();
+          .where(and(eq(transactions.id, input.id), eq(transactions.tenantId, tenantId), eq(transactions.status, "flagged"))).returning();
+        if (!tx) throw new Error("Only a tenant-owned flagged transaction can be cleared");
         return tx;
       }),
 
-    stats: protectedProcedure.query(async () => {
+    stats: protectedProcedure.query(async ({ ctx }) => {
       const db = await getDb();
-        if (!db) throw new Error("Database unavailable");
+      if (!db) throw new Error("Database unavailable");
       const [totals] = await db.select({
         total: count(),
         totalAmount: sum(transactions.amount),
         flagged: sql<number>`count(*) filter (where ${transactions.status} = 'flagged')`,
         highRisk: sql<number>`count(*) filter (where ${transactions.amlRiskLevel} in ('high','critical'))`,
-      }).from(transactions);
+      }).from(transactions).where(ctx.tenantId !== null ? eq(transactions.tenantId, ctx.tenantId) : undefined);
       return {
         total: Number(totals.total), totalAmount: Number(totals.totalAmount ?? 0),
         flagged: Number(totals.flagged), highRisk: Number(totals.highRisk),
@@ -479,9 +509,18 @@ export const amlRouter = router({
         // Permify: check that user can review this AML alert
         const canReview = await permifyCheck("aml_alert", String(input.id), "update", String(ctx.user.id));
         if (!canReview) throw new Error("Permission denied: cannot review AML alert");
+        const tenantCondition = ctx.tenantId !== null ? eq(amlAlerts.tenantId, ctx.tenantId) : undefined;
+        const [existing] = await db.select().from(amlAlerts)
+          .where(tenantCondition ? and(eq(amlAlerts.id, input.id), tenantCondition) : eq(amlAlerts.id, input.id));
+        if (!existing) throw new Error("AML alert not found");
+        assertLegalTransition(existing.status, input.status, {
+          open: ["under_review", "escalated", "cleared", "false_positive"],
+          under_review: ["escalated", "cleared", "filed", "false_positive"],
+          escalated: ["cleared", "filed"],
+        }, "AML alert");
         const [alert] = await db.update(amlAlerts)
           .set({ status: input.status, reviewedBy: ctx.user.id, reviewedAt: new Date(), reviewNotes: input.notes, investigationId: input.investigationId, updatedAt: new Date() })
-          .where(eq(amlAlerts.id, input.id)).returning();
+          .where(tenantCondition ? and(eq(amlAlerts.id, input.id), tenantCondition) : eq(amlAlerts.id, input.id)).returning();
         // Dapr: publish status change event
         void publishAmlAlert({ alertId: alert.id, alertType: alert.riskLevel ?? "medium", riskScore: 0, autoEscalated: false }).catch(() => {});
         // Temporal: start AML escalation workflow if escalated
@@ -559,10 +598,11 @@ export const amlRouter = router({
         limit: z.number().min(1).max(250).default(50), offset: z.number().default(0),
         status: z.string().optional(), messageType: z.string().optional(), search: z.string().optional(),
       }))
-      .query(async ({ input }) => {
+      .query(async ({ input, ctx }) => {
         const db = await getDb();
         if (!db) throw new Error("Database unavailable");
         const conditions = [];
+        if (ctx.tenantId !== null) conditions.push(eq(swiftMessages.tenantId, ctx.tenantId));
         if (input.status) conditions.push(eq(swiftMessages.status, input.status as any));
         if (input.messageType) conditions.push(eq(swiftMessages.messageType, input.messageType as any));
         if (input.search) {
@@ -589,10 +629,12 @@ export const amlRouter = router({
         beneficiaryCustomer: z.string().optional(), remittanceInfo: z.string().optional(),
         rawMessage: z.string().optional(),
       }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         const db = await getDb();
         if (!db) throw new Error("Database unavailable");
+        const tenantId = requireTenantId(ctx);
         const [msg] = await db.insert(swiftMessages).values({
+          tenantId,
           uetr: uetrGen(), messageType: input.messageType, status: "received",
           senderBic: input.senderBic, receiverBic: input.receiverBic,
           amount: input.amount, currency: input.currency,
@@ -611,13 +653,21 @@ export const amlRouter = router({
         complianceStatus: z.enum(["pending", "cleared", "blocked", "escalated"]),
         notes: z.string().optional(),
       }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         const db = await getDb();
         if (!db) throw new Error("Database unavailable");
+        const tenantId = requireTenantId(ctx);
+        const [existing] = await db.select().from(swiftMessages)
+          .where(and(eq(swiftMessages.id, input.id), eq(swiftMessages.tenantId, tenantId)));
+        if (!existing) throw new Error("SWIFT message not found");
+        assertLegalTransition(existing.complianceStatus ?? "pending", input.complianceStatus, {
+          pending: ["cleared", "blocked", "escalated"],
+          escalated: ["cleared", "blocked"],
+        }, "SWIFT compliance");
         const newStatus = input.complianceStatus === "cleared" ? "completed" : input.complianceStatus === "blocked" ? "rejected" : "pending_compliance";
         const [msg] = await db.update(swiftMessages)
           .set({ complianceStatus: input.complianceStatus, complianceNotes: input.notes, status: newStatus as any, updatedAt: new Date() })
-          .where(eq(swiftMessages.id, input.id)).returning();
+          .where(and(eq(swiftMessages.id, input.id), eq(swiftMessages.tenantId, tenantId))).returning();
         return msg;
       }),
   }),
@@ -625,10 +675,13 @@ export const amlRouter = router({
   sepa: router({
     list: protectedProcedure
       .input(z.object({ limit: z.number().min(1).max(250).default(50), offset: z.number().default(0), status: z.string().optional() }))
-      .query(async ({ input }) => {
+      .query(async ({ input, ctx }) => {
         const db = await getDb();
         if (!db) throw new Error("Database unavailable");
-        const where = input.status ? eq(sepaPayments.status, input.status as any) : undefined;
+        const conditions = [];
+        if (ctx.tenantId !== null) conditions.push(eq(sepaPayments.tenantId, ctx.tenantId));
+        if (input.status) conditions.push(eq(sepaPayments.status, input.status as any));
+        const where = conditions.length ? and(...conditions) : undefined;
         const [rows, [{ total }]] = await Promise.all([
           db.select().from(sepaPayments).where(where).orderBy(desc(sepaPayments.createdAt)).limit(input.limit).offset(input.offset),
           db.select({ total: count() }).from(sepaPayments).where(where),
@@ -645,11 +698,13 @@ export const amlRouter = router({
         creditorIban: z.string().min(15).max(34), creditorBic: z.string().optional(),
         remittanceInfo: z.string().optional(), executionDate: z.string().optional(),
       }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         const db = await getDb();
         if (!db) throw new Error("Database unavailable");
+        const tenantId = requireTenantId(ctx);
         const endToEndId = `E2E-${Date.now().toString(36).toUpperCase()}-${crypto.randomUUID().replace(/-/g,'').slice(0,6).toUpperCase()}`;
         const [payment] = await db.insert(sepaPayments).values({
+          tenantId,
           endToEndId, ...input,
           executionDate: input.executionDate ? new Date(input.executionDate) : new Date(),
         }).returning();
@@ -658,12 +713,14 @@ export const amlRouter = router({
 
     settle: writeProcedure
       .input(z.object({ id: z.number() }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         const db = await getDb();
         if (!db) throw new Error("Database unavailable");
+        const tenantId = requireTenantId(ctx);
         const [payment] = await db.update(sepaPayments)
           .set({ status: "settled", settlementDate: new Date() })
-          .where(eq(sepaPayments.id, input.id)).returning();
+          .where(and(eq(sepaPayments.id, input.id), eq(sepaPayments.tenantId, tenantId), eq(sepaPayments.status, "accepted"))).returning();
+        if (!payment) throw new Error("Only a tenant-owned accepted SEPA payment can be settled");
         return payment;
       }),
   }),
@@ -671,10 +728,13 @@ export const amlRouter = router({
   travelRule: router({
     list: protectedProcedure
       .input(z.object({ limit: z.number().min(1).max(250).default(50), offset: z.number().default(0), status: z.string().optional() }))
-      .query(async ({ input }) => {
+      .query(async ({ input, ctx }) => {
         const db = await getDb();
         if (!db) throw new Error("Database unavailable");
-        const where = input.status ? eq(travelRuleRecords.status, input.status as any) : undefined;
+        const conditions = [];
+        if (ctx.tenantId !== null) conditions.push(eq(travelRuleRecords.tenantId, ctx.tenantId));
+        if (input.status) conditions.push(eq(travelRuleRecords.status, input.status as any));
+        const where = conditions.length ? and(...conditions) : undefined;
         const [rows, [{ total }]] = await Promise.all([
           db.select().from(travelRuleRecords).where(where).orderBy(desc(travelRuleRecords.createdAt)).limit(input.limit).offset(input.offset),
           db.select({ total: count() }).from(travelRuleRecords).where(where),
@@ -693,20 +753,29 @@ export const amlRouter = router({
         beneficiaryAddress: z.string().optional(), beneficiaryCountry: z.string().length(2).optional(),
         vasp: z.string().optional(),
       }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         const db = await getDb();
         if (!db) throw new Error("Database unavailable");
+        const tenantId = requireTenantId(ctx);
+        if (input.transactionId) {
+          const [transaction] = await db.select({ id: transactions.id }).from(transactions)
+            .where(and(eq(transactions.id, input.transactionId), eq(transactions.tenantId, tenantId)));
+          if (!transaction) throw new Error("Transaction not found");
+        }
         const ref = `TR-${Date.now().toString(36).toUpperCase()}-${crypto.randomUUID().replace(/-/g,'').slice(0,5).toUpperCase()}`;
-        const [record] = await db.insert(travelRuleRecords).values({ recordRef: ref, ...input, status: "pending" }).returning();
+        const [record] = await db.insert(travelRuleRecords).values({ tenantId, recordRef: ref, ...input, status: "pending" }).returning();
         return record;
       }),
 
     send: writeProcedure
       .input(z.object({ id: z.number() }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         const db = await getDb();
         if (!db) throw new Error("Database unavailable");
-        const [record] = await db.update(travelRuleRecords).set({ status: "sent", sentAt: new Date() }).where(eq(travelRuleRecords.id, input.id)).returning();
+        const tenantId = requireTenantId(ctx);
+        const [record] = await db.update(travelRuleRecords).set({ status: "sent", sentAt: new Date() })
+          .where(and(eq(travelRuleRecords.id, input.id), eq(travelRuleRecords.tenantId, tenantId), eq(travelRuleRecords.status, "pending"))).returning();
+        if (!record) throw new Error("Only a tenant-owned pending Travel Rule record can be sent");
         // Publish Travel Rule sent event to Dapr pub/sub for compliance engine (non-blocking)
         publishAmlAlert({alertId: 0, 
           alertType: "travel_rule_sent",
@@ -720,10 +789,13 @@ export const amlRouter = router({
 
     acknowledge: writeProcedure
       .input(z.object({ id: z.number() }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         const db = await getDb();
         if (!db) throw new Error("Database unavailable");
-        const [record] = await db.update(travelRuleRecords).set({ status: "acknowledged", acknowledgedAt: new Date() }).where(eq(travelRuleRecords.id, input.id)).returning();
+        const tenantId = requireTenantId(ctx);
+        const [record] = await db.update(travelRuleRecords).set({ status: "acknowledged", acknowledgedAt: new Date() })
+          .where(and(eq(travelRuleRecords.id, input.id), eq(travelRuleRecords.tenantId, tenantId), eq(travelRuleRecords.status, "sent"))).returning();
+        if (!record) throw new Error("Only a tenant-owned sent Travel Rule record can be acknowledged");
         // Publish Travel Rule acknowledged event to Dapr pub/sub for compliance engine (non-blocking)
         publishAmlAlert({alertId: 0, 
           alertType: "travel_rule_acknowledged",
@@ -741,7 +813,7 @@ export const amlRouter = router({
    * List velocity blocks recorded by the Fluvio sliding-window engine.
    * Used by the AML dashboard to surface blocked transfers for compliance review.
    */
-  listVelocityBlocks: protectedProcedure
+  listVelocityBlocks: adminProcedure
     .input(z.object({
       accountId: z.string().optional(),
       limit: z.number().int().min(1).max(200).default(50),
