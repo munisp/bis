@@ -28,7 +28,7 @@ hex = "0.4"
 once_cell = "1"
 regex = "1"
 reqwest = { version = "0.13", features = ["json"] }
-redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
+redis = { version = "1.6", features = ["tokio-comp", "connection-manager"] }
 
 [dev-dependencies]
 tokio-test = "0.4"
