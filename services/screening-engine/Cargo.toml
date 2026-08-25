@@ -27,7 +27,7 @@ prometheus      = { version = "0.13", features = ["process"] }
 axum-prometheus = "0.7"
 base64          = "0.22"
 hmac            = "0.12"
-sha2            = "0.10"
+sha2            = "0.11"
 hex             = "0.4"
 
 # PostgreSQL async client — for persisting screening results
