@@ -1,12 +1,12 @@
 module bis/gateway
 
-go 1.22.4
+go 1.23.0
 
 require (
 	github.com/coreos/go-oidc/v3 v3.11.0
 	github.com/lib/pq v1.12.3
 	github.com/redis/go-redis/v9 v9.6.1
-	github.com/segmentio/kafka-go v0.4.47
+	github.com/segmentio/kafka-go v0.4.51
 	github.com/stretchr/testify v1.9.0
 	go.temporal.io/sdk v1.29.1
 	go.uber.org/zap v1.18.1
@@ -34,12 +34,12 @@ require (
 	go.temporal.io/api v1.38.0 // indirect
 	go.uber.org/atomic v1.7.0 // indirect
 	go.uber.org/multierr v1.6.0 // indirect
-	golang.org/x/crypto v0.26.0 // indirect
+	golang.org/x/crypto v0.36.0 // indirect
 	golang.org/x/exp v0.0.0-20231127185646-65229373498e // indirect
-	golang.org/x/net v0.28.0 // indirect
-	golang.org/x/sync v0.8.0 // indirect
-	golang.org/x/sys v0.24.0 // indirect
-	golang.org/x/text v0.17.0 // indirect
+	golang.org/x/net v0.38.0 // indirect
+	golang.org/x/sync v0.12.0 // indirect
+	golang.org/x/sys v0.31.0 // indirect
+	golang.org/x/text v0.23.0 // indirect
 	golang.org/x/time v0.3.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20240822170219-fc7c04adadcd // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240822170219-fc7c04adadcd // indirect
