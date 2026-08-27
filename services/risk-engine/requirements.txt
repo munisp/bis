@@ -4,4 +4,4 @@ scikit-learn==1.5.2
 numpy==1.26.4
 pandas==2.2.3
 pydantic==2.9.2
-httpx==0.27.2
+httpx==0.28.1
