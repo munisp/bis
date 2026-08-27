@@ -10,7 +10,7 @@ paddlepaddle==2.6.2
 paddleocr==2.9.1
 pytesseract==0.3.13
 Pillow==11.0.0
-redis[asyncio]==5.2.1
+redis[asyncio]==8.1.0
 kafka-python==2.0.2
 prometheus-client==0.21.1
 python-multipart==0.0.19
