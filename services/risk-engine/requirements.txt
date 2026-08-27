@@ -3,5 +3,5 @@ uvicorn[standard]==0.30.6
 scikit-learn==1.5.2
 numpy==1.26.4
 pandas==2.2.3
-pydantic==2.9.2
+pydantic==2.13.4
 httpx==0.27.2
