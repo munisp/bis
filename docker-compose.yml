@@ -108,7 +108,7 @@ services:
       retries: 5
 
   kafka:
-    image: confluentinc/cp-kafka:7.6.0
+    image: confluentinc/cp-kafka:8.3.1
     container_name: bis-kafka
     restart: unless-stopped
     depends_on:
@@ -1147,7 +1147,7 @@ services:
 
   # ─── Kafka Topic Init (creates all 32 BIS topics on first boot) ──────────────
   kafka-init:
-    image: confluentinc/cp-kafka:7.6.1
+    image: confluentinc/cp-kafka:8.3.1
     container_name: bis-kafka-init
     restart: "no"
     depends_on:
