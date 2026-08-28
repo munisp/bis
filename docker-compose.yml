@@ -607,7 +607,7 @@ services:
   # k6 writes results via: k6 run --out influxdb=http://influxdb:8086/k6 script.js
   # Grafana reads from InfluxDB using the provisioned datasource.
   influxdb:
-    image: influxdb:1.8-alpine
+    image: influxdb:2.9-alpine
     container_name: bis-influxdb
     restart: unless-stopped
     environment:
