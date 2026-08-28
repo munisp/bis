@@ -312,7 +312,7 @@ services:
 
   # ─── APISix — API Gateway / Single Ingress ────────────────────────────────────
   apisix:
-    image: apache/apisix:3.9.0-debian
+    image: apache/apisix:3.18.0-debian
     container_name: bis-apisix
     restart: unless-stopped
     volumes:
