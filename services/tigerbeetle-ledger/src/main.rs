@@ -31,11 +31,11 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use tigerbeetle_ledger::{
-    accounts, execute_debit, execute_topup, ledger, tier, BalanceRequest, BalanceResponse,
-    CreateTransferRequest, DebitRequest, DebitResponse, LedgerError, MojaloopTransferRequest,
-    StablecoinTransferRequest, TbClient, TopupRequest, TopupResponse,
+    accounts, execute_debit, execute_topup, tier, BalanceResponse, CreateTransferRequest,
+    DebitRequest, LedgerError, MojaloopTransferRequest, StablecoinTransferRequest, TbClient,
+    TopupRequest,
 };
-use tracing::{error, info, warn};
+use tracing::{error, info};
 use uuid::Uuid;
 
 // ─── App State ────────────────────────────────────────────────────────────────
@@ -399,13 +399,13 @@ async fn main() {
             return;
         }
     };
-    let service_key = match std::env::var("BIS_LEDGER_KEY") {
-        Ok(value) if !value.trim().is_empty() => value,
-        _ => {
-            error!("BIS_LEDGER_KEY must be configured");
-            return;
-        }
-    };
+    if std::env::var("BIS_LEDGER_KEY")
+        .map(|value| value.trim().is_empty())
+        .unwrap_or(true)
+    {
+        error!("BIS_LEDGER_KEY must be configured");
+        return;
+    }
     let port: u16 = std::env::var("LEDGER_PORT")
         .unwrap_or_else(|_| "8097".to_string())
         .parse()
@@ -439,4 +439,112 @@ async fn main() {
         .await
         .expect("Failed to bind");
     axum::serve(listener, app).await.expect("Server failed");
+}
+
+#[cfg(test)]
+mod service_auth_tests {
+    use super::*;
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+        routing::get,
+        Router,
+    };
+    use tower::ServiceExt;
+
+    const KEY: &str = "ledger-test-service-key";
+
+    fn signed_headers(
+        tenant_id: i32,
+        actor_id: i32,
+        timestamp: i64,
+        signing_tenant: i32,
+        signing_actor: i32,
+    ) -> Vec<(&'static str, String)> {
+        let mut mac = HmacSha256::new_from_slice(KEY.as_bytes()).expect("test HMAC key");
+        mac.update(format!("{signing_tenant}:{signing_actor}:{timestamp}").as_bytes());
+        vec![
+            ("x-bis-key", KEY.to_string()),
+            ("x-bis-tenant-id", tenant_id.to_string()),
+            ("x-bis-actor-id", actor_id.to_string()),
+            ("x-bis-timestamp", timestamp.to_string()),
+            ("x-bis-signature", hex::encode(mac.finalize().into_bytes())),
+        ]
+    }
+
+    fn protected_router() -> Router {
+        Router::new()
+            .route("/protected", get(|| async { StatusCode::OK }))
+            .layer(middleware::from_fn(service_auth))
+    }
+
+    async fn call(headers: Vec<(&'static str, String)>) -> StatusCode {
+        let mut builder = Request::builder().uri("/protected").method("GET");
+        for (name, value) in headers {
+            builder = builder.header(name, value);
+        }
+        protected_router()
+            .oneshot(builder.body(Body::empty()).expect("request"))
+            .await
+            .expect("router response")
+            .status()
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn signed_ledger_identity_rejects_negative_authorization_scenarios() {
+        std::env::set_var("BIS_LEDGER_KEY", KEY);
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time")
+            .as_secs() as i64;
+
+        assert_eq!(
+            call(vec![]).await,
+            StatusCode::UNAUTHORIZED,
+            "missing identity headers"
+        );
+
+        let mut bad_key = signed_headers(101, 202, now, 101, 202);
+        bad_key[0].1 = "incorrect-key".to_string();
+        assert_eq!(
+            call(bad_key).await,
+            StatusCode::UNAUTHORIZED,
+            "invalid service key"
+        );
+
+        let mut missing_tenant = signed_headers(101, 202, now, 101, 202);
+        missing_tenant.retain(|(name, _)| *name != "x-bis-tenant-id");
+        assert_eq!(
+            call(missing_tenant).await,
+            StatusCode::UNAUTHORIZED,
+            "missing tenant identity"
+        );
+
+        assert_eq!(
+            call(signed_headers(101, 202, now - 301, 101, 202)).await,
+            StatusCode::UNAUTHORIZED,
+            "stale timestamp",
+        );
+
+        let mut bad_signature = signed_headers(101, 202, now, 101, 202);
+        bad_signature[4].1 = "00".repeat(32);
+        assert_eq!(
+            call(bad_signature).await,
+            StatusCode::UNAUTHORIZED,
+            "invalid signature"
+        );
+
+        assert_eq!(
+            call(signed_headers(102, 202, now, 101, 202)).await,
+            StatusCode::UNAUTHORIZED,
+            "tenant tampering invalidates signed identity",
+        );
+
+        assert_eq!(
+            call(signed_headers(101, 202, now, 101, 202)).await,
+            StatusCode::OK,
+            "valid signed service identity",
+        );
+        std::env::remove_var("BIS_LEDGER_KEY");
+    }
 }
