@@ -1,10 +1,20 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { AlertCircle, Home } from "lucide-react";
+import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 
 export default function NotFound() {
   const [, setLocation] = useLocation();
+  const [serviceAvailable, setServiceAvailable] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch("/api/health", { signal: controller.signal })
+      .then((response) => setServiceAvailable(response.ok))
+      .catch(() => setServiceAvailable(false));
+    return () => controller.abort();
+  }, []);
 
   const handleGoHome = () => {
     setLocation("/");
@@ -32,6 +42,12 @@ export default function NotFound() {
             <br />
             It may have been moved or deleted.
           </p>
+
+          {serviceAvailable === false && (
+            <p className="mb-4 text-sm text-amber-700">
+              Service status is temporarily unavailable. You can still return to the dashboard.
+            </p>
+          )}
 
           <div
             id="not-found-button-group"

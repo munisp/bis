@@ -10,10 +10,10 @@ package tigerbeetle
 import (
 	"bytes"
 	"context"
+	cryptorand "crypto/rand"
 	"encoding/json"
 	"fmt"
 	"log"
-	"math/rand"
 	"net/http"
 	"os"
 	"time"
@@ -94,8 +94,8 @@ type InvestigationDebit struct {
 	Timestamp       time.Time
 }
 
-// New creates a TigerBeetle client from environment variables.
-// When TIGERBEETLE_URL is not set the client is disabled (no-op).
+// New creates a TigerBeetle client from environment variables. A missing URL
+// leaves the client unavailable; each operation returns an explicit error.
 func New() *Client {
 	url := os.Getenv("TIGERBEETLE_URL")
 	if url == "" {
@@ -115,7 +115,7 @@ func New() *Client {
 // TigerBeetle is idempotent on account creation with the same ID.
 func (c *Client) CreateAccount(ctx context.Context, tenantID string) error {
 	if !c.enabled {
-		return nil
+		return fmt.Errorf("TigerBeetle is not configured")
 	}
 
 	accounts := []Account{
@@ -134,15 +134,15 @@ func (c *Client) CreateAccount(ctx context.Context, tenantID string) error {
 // EnsureRevenueAccount creates the platform revenue account if it doesn't exist.
 func (c *Client) EnsureRevenueAccount(ctx context.Context) error {
 	if !c.enabled {
-		return nil
+		return fmt.Errorf("TigerBeetle is not configured")
 	}
 
 	accounts := []Account{
 		{
-			ID:      AccountRevenue,
-			Ledger:  LedgerNGN,
-			Code:    2, // revenue account
-			Flags:   0,
+			ID:     AccountRevenue,
+			Ledger: LedgerNGN,
+			Code:   2, // revenue account
+			Flags:  0,
 		},
 	}
 
@@ -150,13 +150,12 @@ func (c *Client) EnsureRevenueAccount(ctx context.Context) error {
 }
 
 // RecordInvestigationDebit posts a double-entry transfer:
-//   Debit:  tenant account (reduces tenant balance)
-//   Credit: revenue account (increases platform revenue)
+//
+//	Debit:  tenant account (reduces tenant balance)
+//	Credit: revenue account (increases platform revenue)
 func (c *Client) RecordInvestigationDebit(ctx context.Context, d InvestigationDebit) error {
 	if !c.enabled {
-		log.Printf("[TigerBeetle] (disabled) would record debit: tenant=%s inv=%s tier=%d amount=%d",
-			d.TenantID, d.InvestigationID, d.Tier, d.Amount)
-		return nil
+		return fmt.Errorf("TigerBeetle is not configured")
 	}
 
 	amount := d.Amount
@@ -199,7 +198,7 @@ func (c *Client) RecordInvestigationDebit(ctx context.Context, d InvestigationDe
 // GetAccountBalance returns the current posted balance for a tenant account.
 func (c *Client) GetAccountBalance(ctx context.Context, tenantID string) (uint64, error) {
 	if !c.enabled {
-		return 0, nil
+		return 0, fmt.Errorf("TigerBeetle is not configured")
 	}
 
 	accountID := AccountTenantPrefix + tenantID
@@ -256,7 +255,9 @@ func (c *Client) post(ctx context.Context, path string, payload interface{}) err
 
 // newID generates a random 16-character hex string for TigerBeetle transfer IDs.
 func newID() string {
-	b := make([]byte, 8)
-	rand.Read(b) //nolint:gosec
+	b := make([]byte, 16)
+	if _, err := cryptorand.Read(b); err != nil {
+		panic(fmt.Sprintf("secure transfer ID generation failed: %v", err))
+	}
 	return fmt.Sprintf("%x", b)
 }

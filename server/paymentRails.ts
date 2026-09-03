@@ -565,7 +565,7 @@ export const paymentRailsRouter = router({
    * Aggregates debits and credits per originator/beneficiary account.
    *
    * Note: In production, this would query TigerBeetle directly via the Go
-   * payment-rails service. Here we derive balances from the MySQL transactions table.
+   * payment-rails service. Here we derive balances from the PostgreSQL transactions table.
    */
   getAccountBalances: protectedProcedure
     .input(

@@ -103,13 +103,18 @@ impl AmlDlq {
         let mut q = self.queue.lock().unwrap();
         if q.len() >= DLQ_CAPACITY {
             q.pop_front();
-            self.total_dropped.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.total_dropped
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             warn!("[aml-dlq] Queue full — evicted oldest entry");
         }
         let id = entry.id.clone();
         q.push_back(entry);
-        self.total_enqueued.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        warn!("[aml-dlq] Enqueued failed screening {} — error: {}", id, error);
+        self.total_enqueued
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        warn!(
+            "[aml-dlq] Enqueued failed screening {} — error: {}",
+            id, error
+        );
     }
 
     /// Return current DLQ statistics.
@@ -117,10 +122,18 @@ impl AmlDlq {
         let q = self.queue.lock().unwrap();
         DlqStats {
             pending: q.len(),
-            total_enqueued: self.total_enqueued.load(std::sync::atomic::Ordering::Relaxed),
-            total_replayed: self.total_replayed.load(std::sync::atomic::Ordering::Relaxed),
-            total_dropped: self.total_dropped.load(std::sync::atomic::Ordering::Relaxed),
-            total_permanent_failures: self.total_permanent_failures.load(std::sync::atomic::Ordering::Relaxed),
+            total_enqueued: self
+                .total_enqueued
+                .load(std::sync::atomic::Ordering::Relaxed),
+            total_replayed: self
+                .total_replayed
+                .load(std::sync::atomic::Ordering::Relaxed),
+            total_dropped: self
+                .total_dropped
+                .load(std::sync::atomic::Ordering::Relaxed),
+            total_permanent_failures: self
+                .total_permanent_failures
+                .load(std::sync::atomic::Ordering::Relaxed),
         }
     }
 
@@ -150,7 +163,8 @@ impl AmlDlq {
 
         if entry.retry_count >= MAX_RETRIES {
             entry.permanent_failure = true;
-            self.total_permanent_failures.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.total_permanent_failures
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             warn!(
                 "[aml-dlq] Entry {} permanently failed after {} retries — last error: {}",
                 entry.id, MAX_RETRIES, error
@@ -160,7 +174,8 @@ impl AmlDlq {
         let mut q = self.queue.lock().unwrap();
         if q.len() >= DLQ_CAPACITY {
             q.pop_front();
-            self.total_dropped.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.total_dropped
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
         q.push_back(entry);
     }
@@ -230,15 +245,13 @@ impl AmlDlq {
                         .await
                     {
                         Ok(resp) if resp.status().is_success() => {
-                            self.total_replayed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            self.total_replayed
+                                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                             info!("[aml-dlq] Replayed entry {} successfully", entry.id);
                         }
                         Ok(resp) => {
                             let status = resp.status();
-                            self.re_enqueue_failed(
-                                entry,
-                                format!("HTTP {}", status),
-                            );
+                            self.re_enqueue_failed(entry, format!("HTTP {}", status));
                         }
                         Err(e) => {
                             self.re_enqueue_failed(entry, e.to_string());

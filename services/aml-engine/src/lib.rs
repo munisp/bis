@@ -1,18 +1,18 @@
 pub mod sdn_sync;
 
 use serde::{Deserialize, Serialize};
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 
 // ─── AML Scoring ─────────────────────────────────────────────────────────────
 
 /// High-risk jurisdictions per FATF, OFAC, UN Security Council
 static HIGH_RISK_COUNTRIES: &[&str] = &[
-    "AF", "BY", "CF", "CG", "CU", "ER", "IR", "KP", "LY", "ML",
-    "MM", "NI", "RU", "SO", "SS", "SY", "VE", "YE", "ZW",
+    "AF", "BY", "CF", "CG", "CU", "ER", "IR", "KP", "LY", "ML", "MM", "NI", "RU", "SO", "SS", "SY",
+    "VE", "YE", "ZW",
 ];
 
-/// OFAC/UN sanctioned BIC prefixes (stub list — production uses full OFAC SDN)
+/// OFAC/UN sanctioned BIC prefixes used by the local rules engine.
 static SANCTIONED_BIC_PREFIXES: &[&str] = &[
     "CBIRKPSE", // Central Bank of DPRK
     "SYRIABANK",
@@ -121,7 +121,10 @@ pub fn score_transaction(req: &TransactionScreenRequest) -> ScreeningResult {
             rule_id: "AML-001".to_string(),
             rule_name: "High-Risk Originator Country".to_string(),
             score_contribution: 35,
-            description: format!("Originator country {} is on FATF/OFAC high-risk list", req.originator_country),
+            description: format!(
+                "Originator country {} is on FATF/OFAC high-risk list",
+                req.originator_country
+            ),
         });
     }
 
@@ -133,7 +136,10 @@ pub fn score_transaction(req: &TransactionScreenRequest) -> ScreeningResult {
             rule_id: "AML-002".to_string(),
             rule_name: "High-Risk Beneficiary Country".to_string(),
             score_contribution: 35,
-            description: format!("Beneficiary country {} is on FATF/OFAC high-risk list", req.beneficiary_country),
+            description: format!(
+                "Beneficiary country {} is on FATF/OFAC high-risk list",
+                req.beneficiary_country
+            ),
         });
     }
 
@@ -163,7 +169,10 @@ pub fn score_transaction(req: &TransactionScreenRequest) -> ScreeningResult {
             rule_id: "AML-004".to_string(),
             rule_name: "Large Cash Transaction (CTR Required)".to_string(),
             score_contribution: 20,
-            description: format!("Cash transaction {:.2} {} exceeds CTR threshold {:.2}", req.amount, req.currency, threshold),
+            description: format!(
+                "Cash transaction {:.2} {} exceeds CTR threshold {:.2}",
+                req.amount, req.currency, threshold
+            ),
         });
     }
 
@@ -176,7 +185,10 @@ pub fn score_transaction(req: &TransactionScreenRequest) -> ScreeningResult {
             rule_id: "AML-005".to_string(),
             rule_name: "Cash Transaction".to_string(),
             score_contribution: 10,
-            description: format!("Transaction type {} involves physical cash", req.transaction_type),
+            description: format!(
+                "Transaction type {} involves physical cash",
+                req.transaction_type
+            ),
         });
     }
 
@@ -184,10 +196,20 @@ pub fn score_transaction(req: &TransactionScreenRequest) -> ScreeningResult {
     if let Some(narration) = &req.narration {
         let narration_lower = narration.to_lowercase();
         let suspicious_keywords = [
-            "shell", "offshore", "nominee", "bearer", "crypto", "bitcoin",
-            "hawala", "smurfing", "layering", "placement", "integration",
+            "shell",
+            "offshore",
+            "nominee",
+            "bearer",
+            "crypto",
+            "bitcoin",
+            "hawala",
+            "smurfing",
+            "layering",
+            "placement",
+            "integration",
         ];
-        let found: Vec<&str> = suspicious_keywords.iter()
+        let found: Vec<&str> = suspicious_keywords
+            .iter()
             .filter(|&&kw| narration_lower.contains(kw))
             .copied()
             .collect();
@@ -198,7 +220,10 @@ pub fn score_transaction(req: &TransactionScreenRequest) -> ScreeningResult {
                 rule_id: "AML-006".to_string(),
                 rule_name: "Suspicious Narration Keywords".to_string(),
                 score_contribution: 30,
-                description: format!("Narration contains suspicious keywords: {}", found.join(", ")),
+                description: format!(
+                    "Narration contains suspicious keywords: {}",
+                    found.join(", ")
+                ),
             });
         }
     }
@@ -211,7 +236,10 @@ pub fn score_transaction(req: &TransactionScreenRequest) -> ScreeningResult {
             rule_id: "AML-007".to_string(),
             rule_name: "Large FX Conversion".to_string(),
             score_contribution: 15,
-            description: format!("FX conversion of {:.2} {} exceeds threshold", req.amount, req.currency),
+            description: format!(
+                "FX conversion of {:.2} {} exceeds threshold",
+                req.amount, req.currency
+            ),
         });
     }
 
@@ -224,7 +252,10 @@ pub fn score_transaction(req: &TransactionScreenRequest) -> ScreeningResult {
     .filter_map(|b| *b)
     .collect();
     for bic in bics_to_check {
-        if SANCTIONED_BIC_PREFIXES.iter().any(|&prefix| bic.starts_with(prefix)) {
+        if SANCTIONED_BIC_PREFIXES
+            .iter()
+            .any(|&prefix| bic.starts_with(prefix))
+        {
             score += 100; // Automatic block
             flags.push("sanctioned_bic".to_string());
             rule_hits.push(RuleHit {
@@ -244,21 +275,26 @@ pub fn score_transaction(req: &TransactionScreenRequest) -> ScreeningResult {
             rule_id: "AML-009".to_string(),
             rule_name: "Round Number Large Transfer".to_string(),
             score_contribution: 10,
-            description: format!("Transfer amount {:.2} is a round number >= 100,000 (layering indicator)", req.amount),
+            description: format!(
+                "Transfer amount {:.2} is a round number >= 100,000 (layering indicator)",
+                req.amount
+            ),
         });
     }
 
     // Rule 10: Cross-border wire with no purpose code
     let cross_border = req.originator_country != req.beneficiary_country;
     let wire_types = ["wire_transfer", "swift_mt103", "swift_mt202"];
-    if cross_border && wire_types.contains(&req.transaction_type.as_str()) && req.amount > 10_000.0 {
+    if cross_border && wire_types.contains(&req.transaction_type.as_str()) && req.amount > 10_000.0
+    {
         score += 5;
         flags.push("cross_border_wire".to_string());
         rule_hits.push(RuleHit {
             rule_id: "AML-010".to_string(),
             rule_name: "Cross-Border Wire Transfer".to_string(),
             score_contribution: 5,
-            description: "Cross-border wire transfer above threshold — verify purpose code".to_string(),
+            description: "Cross-border wire transfer above threshold — verify purpose code"
+                .to_string(),
         });
     }
 
@@ -292,7 +328,7 @@ pub struct EvidenceItem {
     pub previous_hash: String,
     pub timestamp: String,
     pub custodian: String,
-    pub action: String,       // "collected", "transferred", "analyzed", "submitted"
+    pub action: String, // "collected", "transferred", "analyzed", "submitted"
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -320,7 +356,10 @@ pub fn compute_chain_hash(
     custodian: &str,
     action: &str,
 ) -> String {
-    let data = format!("{}{}{}{}{}", previous_hash, content_hash, timestamp, custodian, action);
+    let data = format!(
+        "{}{}{}{}{}",
+        previous_hash, content_hash, timestamp, custodian, action
+    );
     sha256_hex(data.as_bytes())
 }
 
@@ -422,7 +461,9 @@ mod tests {
         req.originator_country = "KP".to_string(); // North Korea
         let result = score_transaction(&req);
         assert!(result.risk_score >= 35);
-        assert!(result.flags.contains(&"high_risk_originator_country".to_string()));
+        assert!(result
+            .flags
+            .contains(&"high_risk_originator_country".to_string()));
     }
 
     #[test]
@@ -434,8 +475,12 @@ mod tests {
         // 35 + 35 = 70 → High (50-74 range)
         assert!(result.risk_score >= 70);
         assert!(result.risk_level == RiskLevel::High || result.risk_level == RiskLevel::Critical);
-        assert!(result.flags.contains(&"high_risk_originator_country".to_string()));
-        assert!(result.flags.contains(&"high_risk_beneficiary_country".to_string()));
+        assert!(result
+            .flags
+            .contains(&"high_risk_originator_country".to_string()));
+        assert!(result
+            .flags
+            .contains(&"high_risk_beneficiary_country".to_string()));
     }
 
     #[test]
@@ -500,7 +545,9 @@ mod tests {
         req.originator_country = "NG".to_string();
         req.beneficiary_country = "NG".to_string();
         let result = score_transaction(&req);
-        assert!(result.flags.contains(&"round_number_large_transfer".to_string()));
+        assert!(result
+            .flags
+            .contains(&"round_number_large_transfer".to_string()));
     }
 
     #[test]
@@ -537,7 +584,10 @@ mod tests {
         assert_eq!(hash, hash2, "SHA256 must be deterministic");
         // Verify different inputs produce different hashes
         let hash3 = sha256_hex(b"hello world!");
-        assert_ne!(hash, hash3, "Different inputs must produce different hashes");
+        assert_ne!(
+            hash, hash3,
+            "Different inputs must produce different hashes"
+        );
     }
 
     #[test]
@@ -552,11 +602,18 @@ mod tests {
         let genesis_hash = "0000000000000000000000000000000000000000000000000000000000000000";
         let content_hash1 = sha256_hex(b"evidence file 1 content");
         let ts1 = "2026-04-14T10:00:00Z";
-        let chain_hash1 = compute_chain_hash(genesis_hash, &content_hash1, ts1, "officer_001", "collected");
+        let chain_hash1 = compute_chain_hash(
+            genesis_hash,
+            &content_hash1,
+            ts1,
+            "officer_001",
+            "collected",
+        );
 
         let content_hash2 = sha256_hex(b"evidence file 2 content");
         let ts2 = "2026-04-14T11:00:00Z";
-        let chain_hash2 = compute_chain_hash(&chain_hash1, &content_hash2, ts2, "analyst_002", "analyzed");
+        let chain_hash2 =
+            compute_chain_hash(&chain_hash1, &content_hash2, ts2, "analyst_002", "analyzed");
 
         let items = vec![
             EvidenceItem {
@@ -577,7 +634,8 @@ mod tests {
                 case_ref: "CASE-2026-001".to_string(),
                 file_name: "analysis.xlsx".to_string(),
                 file_size: 2048,
-                mime_type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet".to_string(),
+                mime_type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    .to_string(),
                 content_hash: content_hash2,
                 chain_hash: chain_hash2,
                 previous_hash: chain_hash1,
@@ -588,7 +646,11 @@ mod tests {
         ];
 
         let result = verify_evidence_chain(&items);
-        assert!(result.is_valid, "Expected valid chain, got error: {:?}", result.error);
+        assert!(
+            result.is_valid,
+            "Expected valid chain, got error: {:?}",
+            result.error
+        );
         assert_eq!(result.total_items, 2);
     }
 
@@ -597,26 +659,33 @@ mod tests {
         let genesis_hash = "0000000000000000000000000000000000000000000000000000000000000000";
         let content_hash1 = sha256_hex(b"evidence file 1 content");
         let ts1 = "2026-04-14T10:00:00Z";
-        let chain_hash1 = compute_chain_hash(genesis_hash, &content_hash1, ts1, "officer_001", "collected");
+        let chain_hash1 = compute_chain_hash(
+            genesis_hash,
+            &content_hash1,
+            ts1,
+            "officer_001",
+            "collected",
+        );
 
-        let items = vec![
-            EvidenceItem {
-                id: "EV-001".to_string(),
-                case_ref: "CASE-2026-001".to_string(),
-                file_name: "document1.pdf".to_string(),
-                file_size: 1024,
-                mime_type: "application/pdf".to_string(),
-                content_hash: "tampered_hash_here".to_string(), // TAMPERED
-                chain_hash: chain_hash1,
-                previous_hash: genesis_hash.to_string(),
-                timestamp: ts1.to_string(),
-                custodian: "officer_001".to_string(),
-                action: "collected".to_string(),
-            },
-        ];
+        let items = vec![EvidenceItem {
+            id: "EV-001".to_string(),
+            case_ref: "CASE-2026-001".to_string(),
+            file_name: "document1.pdf".to_string(),
+            file_size: 1024,
+            mime_type: "application/pdf".to_string(),
+            content_hash: "tampered_hash_here".to_string(), // TAMPERED
+            chain_hash: chain_hash1,
+            previous_hash: genesis_hash.to_string(),
+            timestamp: ts1.to_string(),
+            custodian: "officer_001".to_string(),
+            action: "collected".to_string(),
+        }];
 
         let result = verify_evidence_chain(&items);
-        assert!(!result.is_valid, "Expected invalid chain for tampered evidence");
+        assert!(
+            !result.is_valid,
+            "Expected invalid chain for tampered evidence"
+        );
         assert_eq!(result.broken_at, Some(0));
     }
 
@@ -625,13 +694,20 @@ mod tests {
         let genesis_hash = "0000000000000000000000000000000000000000000000000000000000000000";
         let content_hash1 = sha256_hex(b"evidence file 1");
         let ts1 = "2026-04-14T10:00:00Z";
-        let chain_hash1 = compute_chain_hash(genesis_hash, &content_hash1, ts1, "officer_001", "collected");
+        let chain_hash1 = compute_chain_hash(
+            genesis_hash,
+            &content_hash1,
+            ts1,
+            "officer_001",
+            "collected",
+        );
 
         let content_hash2 = sha256_hex(b"evidence file 2");
         let ts2 = "2026-04-14T11:00:00Z";
         // Use wrong previous hash (not chain_hash1)
         let wrong_prev = "wrong_previous_hash_here";
-        let chain_hash2 = compute_chain_hash(wrong_prev, &content_hash2, ts2, "analyst_002", "analyzed");
+        let chain_hash2 =
+            compute_chain_hash(wrong_prev, &content_hash2, ts2, "analyst_002", "analyzed");
 
         let items = vec![
             EvidenceItem {
@@ -663,7 +739,10 @@ mod tests {
         ];
 
         let result = verify_evidence_chain(&items);
-        assert!(!result.is_valid, "Expected invalid chain for broken linkage");
+        assert!(
+            !result.is_valid,
+            "Expected invalid chain for broken linkage"
+        );
         assert_eq!(result.broken_at, Some(1));
     }
 

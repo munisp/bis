@@ -5,13 +5,13 @@
  * "Use a tiered storage strategy: hot (0–90 days), warm (90 days–1 year), cold (1–10 years)."
  *
  * Tier definitions:
- *   HOT  (0–90 days):    TigerBeetle ledger + MySQL (fast reads, full indexes)
+ *   HOT  (0–90 days):    TigerBeetle ledger + PostgreSQL (fast reads, full indexes)
  *   WARM (90d–1 year):   ClickHouse OLAP (analytical queries, compressed columnar)
  *   COLD (1–10 years):   S3 Parquet (regulatory retention, near-zero cost)
  *
  * This module implements:
  *   1. Tiering configuration constants
- *   2. A nightly archival job that moves aged transactions from MySQL → ClickHouse → S3
+ *   2. A nightly archival job that moves aged transactions from PostgreSQL → ClickHouse → S3
  *   3. A tRPC procedure to trigger archival manually (admin-only)
  *   4. Archival status tracking in the DB
  */
@@ -47,7 +47,7 @@ function getClickHouseClient() {
 
 export const TIERS = {
   /**
-   * HOT tier: TigerBeetle + MySQL
+   * HOT tier: TigerBeetle + PostgreSQL
    * Age: 0–90 days
    * Characteristics: O_DIRECT WAL, zero fsyncs, full indexes, sub-ms reads
    * Lesson: TigerBeetle achieves 48K sustained TPS because it never calls fsync —
@@ -56,9 +56,9 @@ export const TIERS = {
   HOT: {
     name: "hot",
     maxAgeDays: 90,
-    storage: ["tigerbeetle", "mysql"],
+    storage: ["tigerbeetle", "postgresql"],
     readLatencyTarget: "< 1ms",
-    description: "TigerBeetle ledger + MySQL (0–90 days)",
+    description: "TigerBeetle ledger + PostgreSQL (0–90 days)",
   },
   /**
    * WARM tier: ClickHouse OLAP
@@ -104,7 +104,7 @@ export interface ArchivalResult {
 }
 
 /**
- * archiveToWarm moves transactions older than 90 days from MySQL to ClickHouse.
+ * archiveToWarm moves transactions older than 90 days from PostgreSQL to ClickHouse.
  * In production, this would use a ClickHouse HTTP client to INSERT SELECT.
  * Here we stub the ClickHouse write and log the operation.
  */

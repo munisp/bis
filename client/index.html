@@ -24,17 +24,12 @@
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
-    <script
-      defer
-      src="%VITE_ANALYTICS_ENDPOINT%/umami"
-      data-website-id="%VITE_ANALYTICS_WEBSITE_ID%"></script>
     <script>
       // Register Service Worker for offline PWA capability
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', function () {
           navigator.serviceWorker.register('/sw.js', { scope: '/' })
             .then(function (reg) {
-              console.log('[BIS PWA] Service worker registered:', reg.scope);
               // Check for updates
               reg.addEventListener('updatefound', function () {
                 const newWorker = reg.installing;
@@ -46,8 +41,8 @@
                 });
               });
             })
-            .catch(function (err) {
-              console.warn('[BIS PWA] Service worker registration failed:', err);
+            .catch(function () {
+              // Service worker support is optional; the app remains online-capable.
             });
         });
       }

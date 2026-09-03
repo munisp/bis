@@ -1,21 +1,24 @@
 mod mtls_cert_inspect;
-use mtls_cert_inspect::{inspect_peer_cert, peer_cn_from_header};
+use mtls_cert_inspect::inspect_peer_cert;
 
+use axum::{
+    extract::{Json, State},
+    http::{HeaderMap, StatusCode},
+    middleware::{self, Next},
+    response::{IntoResponse, Response},
+    routing::{get, post},
+    Router,
+};
+use serde::Deserialize;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::time;
 use tracing::{error, info, warn};
-use velocity_lib::{default_rules, VelocityBreach, VelocityEngine, PaymentEvent as LibPaymentEvent};
-use axum::{
-    extract::{Json, State},
-    http::{HeaderMap, StatusCode},
-    response::IntoResponse,
-    routing::{get, post},
-    Router,
+use velocity_lib::{
+    default_rules, PaymentEvent as LibPaymentEvent, VelocityBreach, VelocityEngine,
 };
-use serde::Deserialize;
 
 // ─── Prometheus counters ──────────────────────────────────────────────────────
 
@@ -56,6 +59,7 @@ fn render_metrics() -> String {
 struct Config {
     gateway_url: String,
     gateway_key: String,
+    service_key: String,
     webhook_port: u16,
     gc_interval_secs: u64,
     redis_url: String,
@@ -71,18 +75,21 @@ impl Config {
             .map(|s| s.trim().to_string())
             .collect();
         Self {
-            gateway_url: std::env::var("GATEWAY_URL")
-                .unwrap_or_else(|_| "http://localhost:8080".to_string()),
-            gateway_key: std::env::var("BIS_GATEWAY_KEY")
-                .unwrap_or_else(|_| "dev-gateway-key-change-in-prod".to_string()),
+            gateway_url: std::env::var("GATEWAY_URL").unwrap_or_default(),
+            gateway_key: std::env::var("BIS_GATEWAY_KEY").unwrap_or_default(),
+            service_key: std::env::var("BIS_FLUVIO_VELOCITY_KEY").unwrap_or_default(),
             webhook_port: std::env::var("WEBHOOK_PORT")
-                .ok().and_then(|v| v.parse().ok()).unwrap_or(9090),
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(9090),
             gc_interval_secs: std::env::var("GC_INTERVAL_SECS")
-                .ok().and_then(|v| v.parse().ok()).unwrap_or(300),
-            redis_url: std::env::var("REDIS_URL")
-                .unwrap_or_else(|_| "redis://localhost:6379".to_string()),
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(300),
+            redis_url: std::env::var("REDIS_URL").unwrap_or_default(),
             mtls_enabled: std::env::var("MTLS_ENABLED")
-                .map(|v| v.to_lowercase() == "true").unwrap_or(false),
+                .map(|v| v.eq_ignore_ascii_case("true"))
+                .unwrap_or(false),
             mtls_allowed_cns: mtls_cns,
         }
     }
@@ -92,17 +99,34 @@ impl Config {
 
 fn redis_addr(url: &str) -> Option<String> {
     let s = url.strip_prefix("redis://").unwrap_or(url);
-    let s = if let Some(at) = s.rfind('@') { &s[at+1..] } else { s };
-    if s.contains(':') { Some(s.to_string()) } else { Some(format!("{}:6379", s)) }
+    let s = if let Some(at) = s.rfind('@') {
+        &s[at + 1..]
+    } else {
+        s
+    };
+    if s.contains(':') {
+        Some(s.to_string())
+    } else {
+        Some(format!("{}:6379", s))
+    }
 }
 
 async fn redis_set_ex(url: &str, key: &str, value: &str, ex: u64) {
     use tokio::io::AsyncWriteExt;
     use tokio::net::TcpStream;
     let Some(addr) = redis_addr(url) else { return };
-    let Ok(mut s) = TcpStream::connect(&addr).await else { return };
-    let cmd = format!("*5\r\n$3\r\nSET\r\n${}\r\n{}\r\n${}\r\n{}\r\n$2\r\nEX\r\n${}\r\n{}\r\n",
-        key.len(), key, value.len(), value, ex.to_string().len(), ex);
+    let Ok(mut s) = TcpStream::connect(&addr).await else {
+        return;
+    };
+    let cmd = format!(
+        "*5\r\n$3\r\nSET\r\n${}\r\n{}\r\n${}\r\n{}\r\n$2\r\nEX\r\n${}\r\n{}\r\n",
+        key.len(),
+        key,
+        value.len(),
+        value,
+        ex.to_string().len(),
+        ex
+    );
     let _ = s.write_all(cmd.as_bytes()).await;
 }
 
@@ -110,7 +134,9 @@ async fn redis_del(url: &str, key: &str) {
     use tokio::io::AsyncWriteExt;
     use tokio::net::TcpStream;
     let Some(addr) = redis_addr(url) else { return };
-    let Ok(mut s) = TcpStream::connect(&addr).await else { return };
+    let Ok(mut s) = TcpStream::connect(&addr).await else {
+        return;
+    };
     let cmd = format!("*2\r\n$3\r\nDEL\r\n${}\r\n{}\r\n", key.len(), key);
     let _ = s.write_all(cmd.as_bytes()).await;
 }
@@ -127,12 +153,16 @@ async fn redis_get(url: &str, key: &str) -> Option<String> {
     let resp = std::str::from_utf8(&buf[..n]).ok()?;
     if resp.starts_with('$') {
         resp.splitn(3, "\r\n").nth(1).map(|s| s.to_string())
-    } else { None }
+    } else {
+        None
+    }
 }
 
 async fn is_circuit_open(redis_url: &str) -> bool {
-    redis_get(redis_url, "bis:velocity:circuit_breaker").await
-        .map(|v| v == "open").unwrap_or(false)
+    redis_get(redis_url, "bis:velocity:circuit_breaker")
+        .await
+        .map(|v| v == "open")
+        .unwrap_or(false)
 }
 
 async fn open_circuit(redis_url: &str) {
@@ -153,11 +183,13 @@ async fn dispatch_breach(client: &reqwest::Client, config: &Config, breach: &Vel
         return;
     }
     let url = format!("{}/v1/velocity/alert", config.gateway_url);
-    match client.post(&url)
-        .header("X-Gateway-Key", &config.gateway_key)
+    match client
+        .post(&url)
+        .header("X-BIS-Key", &config.gateway_key)
         .json(breach)
         .timeout(Duration::from_secs(10))
-        .send().await
+        .send()
+        .await
     {
         Ok(r) if r.status().is_success() => {
             DISPATCH_SUCCESS_TOTAL.fetch_add(1, Ordering::Relaxed);
@@ -191,6 +223,41 @@ async fn run_gc(engine: Arc<Mutex<VelocityEngine>>, interval_secs: u64) {
     }
 }
 
+// ─── Service authentication ────────────────────────────────────────────────────
+
+fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+    let mut difference = 0u8;
+    for (a, b) in left.iter().zip(right.iter()) {
+        difference |= a ^ b;
+    }
+    difference == 0
+}
+
+async fn service_auth(headers: HeaderMap, request: axum::extract::Request, next: Next) -> Response {
+    let expected = std::env::var("BIS_FLUVIO_VELOCITY_KEY").unwrap_or_default();
+    let supplied = headers
+        .get("x-bis-key")
+        .and_then(|v| v.to_str().ok())
+        .or_else(|| {
+            headers
+                .get("authorization")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.strip_prefix("Bearer "))
+        })
+        .unwrap_or("");
+    if expected.is_empty() || !constant_time_eq(supplied.as_bytes(), expected.as_bytes()) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error":"unauthorized"})),
+        )
+            .into_response();
+    }
+    next.run(request).await
+}
+
 // ─── HTTP handlers ────────────────────────────────────────────────────────────
 
 #[derive(Clone)]
@@ -215,18 +282,26 @@ struct PaymentEventReq {
 }
 
 async fn handle_health() -> impl IntoResponse {
-    (StatusCode::OK, Json(serde_json::json!({
-        "status": "ok",
-        "service": "fluvio-velocity",
-        "events_total": EVENTS_TOTAL.load(Ordering::Relaxed),
-        "breaches_total": BREACHES_TOTAL.load(Ordering::Relaxed),
-    })))
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "status": "ok",
+            "service": "fluvio-velocity",
+            "events_total": EVENTS_TOTAL.load(Ordering::Relaxed),
+            "breaches_total": BREACHES_TOTAL.load(Ordering::Relaxed),
+        })),
+    )
 }
 
 async fn handle_metrics() -> impl IntoResponse {
-    (StatusCode::OK,
-     [(axum::http::header::CONTENT_TYPE, "text/plain; version=0.0.4")],
-     render_metrics())
+    (
+        StatusCode::OK,
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "text/plain; version=0.0.4",
+        )],
+        render_metrics(),
+    )
 }
 
 async fn handle_event(
@@ -239,45 +314,44 @@ async fn handle_event(
     // parses the real certificate CN/SANs, and validates against the allow-list.
     // Dev/test fallback: trusts X-Peer-CN header when X-Peer-Cert-DER is absent.
     if state.config.mtls_enabled {
-        let allowed = if let Some(der_b64) = headers.get("X-Peer-Cert-DER")
-            .and_then(|v| v.to_str().ok())
-        {
-            use base64::Engine as _;
-            match base64::engine::general_purpose::STANDARD.decode(der_b64) {
-                Ok(der) => {
-                    let (info, ok) = inspect_peer_cert(&der, &state.config.mtls_allowed_cns);
-                    if ok {
-                        info!(identity = %info.identity(), "mTLS peer cert accepted");
-                    } else {
-                        warn!(identity = %info.identity(), "mTLS peer cert rejected");
+        let allowed =
+            if let Some(der_b64) = headers.get("X-Peer-Cert-DER").and_then(|v| v.to_str().ok()) {
+                use base64::Engine as _;
+                match base64::engine::general_purpose::STANDARD.decode(der_b64) {
+                    Ok(der) => {
+                        let (info, ok) = inspect_peer_cert(&der, &state.config.mtls_allowed_cns);
+                        if ok {
+                            info!(identity = %info.identity(), "mTLS peer cert accepted");
+                        } else {
+                            warn!(identity = %info.identity(), "mTLS peer cert rejected");
+                        }
+                        ok
                     }
-                    ok
+                    Err(_) => {
+                        warn!("X-Peer-Cert-DER header present but not valid base64 — rejecting");
+                        false
+                    }
                 }
-                Err(_) => {
-                    warn!("X-Peer-Cert-DER header present but not valid base64 — rejecting");
-                    false
-                }
-            }
-        } else {
-            // Header-based fallback (dev/test only — not for production)
-            let cn = peer_cn_from_header(&headers).unwrap_or_default();
-            let ok = state.config.mtls_allowed_cns.iter().any(|a| a.as_str() == cn.as_str());
-            if !ok {
-                warn!(peer_cn = %cn, "mTLS peer CN (header fallback) not allowed");
-            }
-            ok
-        };
+            } else {
+                warn!("mTLS peer certificate is required");
+                false
+            };
         if !allowed {
-            return (StatusCode::FORBIDDEN,
-                Json(serde_json::json!({"error": "peer certificate not allowed"})));
+            return (
+                StatusCode::FORBIDDEN,
+                Json(serde_json::json!({"error": "peer certificate not allowed"})),
+            );
         }
     }
     EVENTS_TOTAL.fetch_add(1, Ordering::Relaxed);
-    let amount_kobo = req.amount_kobo
+    let amount_kobo = req
+        .amount_kobo
         .unwrap_or_else(|| (req.amount.unwrap_or(0.0) * 100.0) as i64);
     let event = LibPaymentEvent {
         event_type: req.event_type.unwrap_or_else(|| "payment".to_string()),
-        tx_ref: req.tx_ref.unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+        tx_ref: req
+            .tx_ref
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
         account_id: req.account_id.clone(),
         amount_kobo,
         currency: req.currency,
@@ -295,10 +369,13 @@ async fn handle_event(
             dispatch_breach(&state.client, &state.config, breach).await;
         }
     }
-    (StatusCode::OK, Json(serde_json::json!({
-        "breaches": breaches,
-        "events_total": EVENTS_TOTAL.load(Ordering::Relaxed),
-    })))
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "breaches": breaches,
+            "events_total": EVENTS_TOTAL.load(Ordering::Relaxed),
+        })),
+    )
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
@@ -311,8 +388,25 @@ async fn main() {
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(&log_level)),
-        ).init();
+        )
+        .init();
     let config = Arc::new(Config::from_env());
+    if config.gateway_url.is_empty()
+        || config.gateway_key.is_empty()
+        || config.service_key.is_empty()
+        || config.redis_url.is_empty()
+    {
+        error!("GATEWAY_URL, BIS_GATEWAY_KEY, BIS_FLUVIO_VELOCITY_KEY, and REDIS_URL must be configured");
+        return;
+    }
+    if std::env::var("BIS_ENV")
+        .map(|v| v.eq_ignore_ascii_case("production"))
+        .unwrap_or(false)
+        && (!config.mtls_enabled || config.mtls_allowed_cns.is_empty())
+    {
+        error!("production requires MTLS_ENABLED=true and MTLS_ALLOWED_CNS");
+        return;
+    }
     let engine = Arc::new(Mutex::new(VelocityEngine::new(default_rules())));
     let client = Arc::new(reqwest::Client::new());
     info!("BIS Fluvio Velocity Processor starting...");
@@ -321,12 +415,21 @@ async fn main() {
     info!("Redis circuit breaker: {}", config.redis_url);
     let gc_engine = engine.clone();
     let gc_interval = config.gc_interval_secs;
-    tokio::spawn(async move { run_gc(gc_engine, gc_interval).await; });
-    let state = AppState { engine, client, config: config.clone() };
-    let app = Router::new()
-        .route("/health", get(handle_health))
+    tokio::spawn(async move {
+        run_gc(gc_engine, gc_interval).await;
+    });
+    let state = AppState {
+        engine,
+        client,
+        config: config.clone(),
+    };
+    let protected = Router::new()
         .route("/metrics", get(handle_metrics))
         .route("/event", post(handle_event))
+        .layer(middleware::from_fn(service_auth));
+    let app = Router::new()
+        .route("/health", get(handle_health))
+        .merge(protected)
         .with_state(state);
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], config.webhook_port));
     info!("Listening on {}", addr);

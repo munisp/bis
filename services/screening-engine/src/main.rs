@@ -25,8 +25,9 @@ pub mod db;
 
 use axum::{
     extract::State,
-    http::StatusCode,
-    response::Json,
+    http::{HeaderMap, StatusCode},
+    middleware::{self, Next},
+    response::{IntoResponse, Json, Response},
     routing::{get, post},
     Router,
 };
@@ -40,7 +41,6 @@ use rdkafka::{
 use redis::aio::ConnectionManager;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, sync::Arc, time::Duration};
-use tokio::sync::RwLock;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
@@ -81,31 +81,31 @@ pub enum ScreeningType {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScreeningRequest {
-    pub request_id:    String,
-    pub order_ref:     String,
-    pub result_id:     i64,
-    pub candidate_id:  i64,
-    pub tenant_id:     i64,
+    pub request_id: String,
+    pub order_ref: String,
+    pub result_id: i64,
+    pub candidate_id: i64,
+    pub tenant_id: i64,
     pub screening_type: ScreeningType,
-    pub subject:       SubjectInfo,
-    pub options:       HashMap<String, serde_json::Value>,
-    pub callback_url:  Option<String>,
-    pub created_at:    chrono::DateTime<Utc>,
+    pub subject: SubjectInfo,
+    pub options: HashMap<String, serde_json::Value>,
+    pub callback_url: Option<String>,
+    pub created_at: chrono::DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SubjectInfo {
-    pub full_name:     String,
-    pub nin:           Option<String>,
-    pub bvn:           Option<String>,
-    pub dob:           Option<String>,
-    pub phone:         Option<String>,
-    pub email:         Option<String>,
-    pub address:       Option<String>,
-    pub state:         Option<String>,
-    pub cac_rc:        Option<String>,
-    pub waec_number:   Option<String>,
-    pub nysc_number:   Option<String>,
+    pub full_name: String,
+    pub nin: Option<String>,
+    pub bvn: Option<String>,
+    pub dob: Option<String>,
+    pub phone: Option<String>,
+    pub email: Option<String>,
+    pub address: Option<String>,
+    pub state: Option<String>,
+    pub cac_rc: Option<String>,
+    pub waec_number: Option<String>,
+    pub nysc_number: Option<String>,
     pub licence_number: Option<String>,
 }
 
@@ -121,51 +121,50 @@ pub enum ScreeningOutcome {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScreeningResult {
-    pub request_id:    String,
-    pub order_ref:     String,
-    pub result_id:     i64,
+    pub request_id: String,
+    pub order_ref: String,
+    pub result_id: i64,
     pub screening_type: ScreeningType,
-    pub outcome:       ScreeningOutcome,
-    pub summary:       String,
-    pub details:       serde_json::Value,
-    pub risk_score:    f64,
-    pub sources:       Vec<String>,
-    pub completed_at:  chrono::DateTime<Utc>,
-    pub error:         Option<String>,
+    pub outcome: ScreeningOutcome,
+    pub summary: String,
+    pub details: serde_json::Value,
+    pub risk_score: f64,
+    pub sources: Vec<String>,
+    pub completed_at: chrono::DateTime<Utc>,
+    pub error: Option<String>,
 }
 
 // ─── App State ────────────────────────────────────────────────────────────────
 
 #[derive(Clone)]
 pub struct AppState {
-    pub redis:    ConnectionManager,
+    pub redis: ConnectionManager,
     pub producer: FutureProducer,
-    pub config:   Arc<EngineConfig>,
-    pub metrics:  Arc<Metrics>,
+    pub config: Arc<EngineConfig>,
+    pub metrics: Arc<Metrics>,
     /// Optional PostgreSQL connection pool — None in dev/test mode
-    pub db_pool:  Option<Arc<Pool>>,
+    pub db_pool: Option<Arc<Pool>>,
 }
 
 pub struct EngineConfig {
-    pub nimc_url:    String,
-    pub nimc_key:    String,
-    pub nibss_url:   String,
-    pub nibss_key:   String,
-    pub efcc_url:    String,
-    pub efcc_key:    String,
-    pub icpc_url:    String,
-    pub icpc_key:    String,
-    pub cac_url:     String,
-    pub cac_key:     String,
-    pub waec_url:    String,
-    pub waec_key:    String,
-    pub simulate:    bool,
+    pub nimc_url: String,
+    pub nimc_key: String,
+    pub nibss_url: String,
+    pub nibss_key: String,
+    pub efcc_url: String,
+    pub efcc_key: String,
+    pub icpc_url: String,
+    pub icpc_key: String,
+    pub cac_url: String,
+    pub cac_key: String,
+    pub waec_url: String,
+    pub waec_key: String,
 }
 
 pub struct Metrics {
-    pub screenings_total:   prometheus::CounterVec,
+    pub screenings_total: prometheus::CounterVec,
     pub screening_duration: prometheus::HistogramVec,
-    pub errors_total:       prometheus::CounterVec,
+    pub errors_total: prometheus::CounterVec,
 }
 
 impl Metrics {
@@ -174,19 +173,61 @@ impl Metrics {
             "bis_screening_total",
             "Total number of screenings processed",
             &["screening_type", "outcome"]
-        ).unwrap();
+        )
+        .unwrap();
         let screening_duration = prometheus::register_histogram_vec!(
             "bis_screening_duration_seconds",
             "Screening processing duration",
             &["screening_type"]
-        ).unwrap();
+        )
+        .unwrap();
         let errors_total = prometheus::register_counter_vec!(
             "bis_screening_errors_total",
             "Total screening errors",
             &["screening_type", "error_kind"]
-        ).unwrap();
-        Self { screenings_total, screening_duration, errors_total }
+        )
+        .unwrap();
+        Self {
+            screenings_total,
+            screening_duration,
+            errors_total,
+        }
     }
+}
+
+// ─── Service authentication ────────────────────────────────────────────────────
+
+fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+    let mut difference = 0u8;
+    for (a, b) in left.iter().zip(right.iter()) {
+        difference |= a ^ b;
+    }
+    difference == 0
+}
+
+async fn service_auth(headers: HeaderMap, request: axum::extract::Request, next: Next) -> Response {
+    let expected = std::env::var("BIS_SCREENING_ENGINE_KEY").unwrap_or_default();
+    let supplied = headers
+        .get("x-bis-key")
+        .and_then(|value| value.to_str().ok())
+        .or_else(|| {
+            headers
+                .get("authorization")
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| value.strip_prefix("Bearer "))
+        })
+        .unwrap_or("");
+    if expected.is_empty() || !constant_time_eq(supplied.as_bytes(), expected.as_bytes()) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error": "unauthorized"})),
+        )
+            .into_response();
+    }
+    next.run(request).await
 }
 
 // ─── Screening Handlers ───────────────────────────────────────────────────────
@@ -197,62 +238,84 @@ pub async fn run_screening(
     config: &EngineConfig,
     redis: &mut ConnectionManager,
 ) -> ScreeningResult {
-    let start = std::time::Instant::now();
-
     // Check Redis cache first (TTL 24h for stable checks)
     let cache_key = format!(
         "bis:screening:cache:{}:{}",
         serde_json::to_string(&req.screening_type).unwrap_or_default(),
-        req.subject.nin.as_deref().or(req.subject.bvn.as_deref()).unwrap_or("unknown")
+        req.subject
+            .nin
+            .as_deref()
+            .or(req.subject.bvn.as_deref())
+            .unwrap_or("unknown")
     );
 
-    if let Ok(cached) = redis::cmd("GET").arg(&cache_key).query_async::<Option<String>>(redis).await {
+    if let Ok(cached) = redis::cmd("GET")
+        .arg(&cache_key)
+        .query_async::<Option<String>>(redis)
+        .await
+    {
         if let Some(json) = cached {
             if let Ok(mut result) = serde_json::from_str::<ScreeningResult>(&json) {
                 result.request_id = req.request_id.clone();
-                result.result_id  = req.result_id;
+                result.result_id = req.result_id;
                 return result;
             }
         }
     }
 
     let result = match req.screening_type {
-        ScreeningType::NinTrace             => screen_nin_trace(req, config).await,
-        ScreeningType::BvnVerification      => screen_bvn(req, config).await,
-        ScreeningType::CriminalEfcc         => screen_efcc(req, config).await,
-        ScreeningType::CriminalIcpc         => screen_icpc(req, config).await,
-        ScreeningType::CourtRecord          => screen_court_records(req, config).await,
-        ScreeningType::CacDirectorship      => screen_cac(req, config).await,
-        ScreeningType::EducationWaec        => screen_waec(req, config).await,
-        ScreeningType::EducationNeco        => screen_neco(req, config).await,
-        ScreeningType::EducationUniversity  => screen_university(req, config).await,
-        ScreeningType::NyscDischarge        => screen_nysc(req, config).await,
+        ScreeningType::NinTrace => screen_nin_trace(req, config).await,
+        ScreeningType::BvnVerification => screen_bvn(req, config).await,
+        ScreeningType::CriminalEfcc => screen_efcc(req, config).await,
+        ScreeningType::CriminalIcpc => screen_icpc(req, config).await,
+        ScreeningType::CourtRecord => screen_court_records(req, config).await,
+        ScreeningType::CacDirectorship => screen_cac(req, config).await,
+        ScreeningType::EducationWaec => screen_waec(req, config).await,
+        ScreeningType::EducationNeco => screen_neco(req, config).await,
+        ScreeningType::EducationUniversity => screen_university(req, config).await,
+        ScreeningType::NyscDischarge => screen_nysc(req, config).await,
         ScreeningType::EmploymentVerification => screen_employment(req, config).await,
-        ScreeningType::ProfessionalLicenceCoren => screen_professional_licence(req, config, "COREN").await,
-        ScreeningType::ProfessionalLicenceNba   => screen_professional_licence(req, config, "NBA").await,
-        ScreeningType::ProfessionalLicenceMdcn  => screen_professional_licence(req, config, "MDCN").await,
-        ScreeningType::ProfessionalLicenceIcan  => screen_professional_licence(req, config, "ICAN").await,
-        ScreeningType::ProfessionalLicenceCibn  => screen_professional_licence(req, config, "CIBN").await,
-        ScreeningType::AdverseMedia         => screen_adverse_media(req, config).await,
-        ScreeningType::PepSanctions         => screen_pep_sanctions(req, config).await,
-        ScreeningType::Watchlist            => screen_watchlist(req, config).await,
-        ScreeningType::TerrorismWatchlist   => screen_terrorism(req, config).await,
-        ScreeningType::InterpolNotice       => screen_interpol(req, config).await,
-        ScreeningType::SexOffenderRegistry  => screen_sex_offender(req, config).await,
-        ScreeningType::AddressVerification  => screen_address(req, config).await,
-        ScreeningType::WorkPermit           => screen_work_permit(req, config).await,
-        ScreeningType::CreditCheck          => screen_credit(req, config).await,
-        ScreeningType::DrugTest             => screen_drug_test(req, config).await,
-        ScreeningType::SocialMedia          => screen_social_media(req, config).await,
-        ScreeningType::ContinuousMonitor    => screen_continuous(req, config).await,
+        ScreeningType::ProfessionalLicenceCoren => {
+            screen_professional_licence(req, config, "COREN").await
+        }
+        ScreeningType::ProfessionalLicenceNba => {
+            screen_professional_licence(req, config, "NBA").await
+        }
+        ScreeningType::ProfessionalLicenceMdcn => {
+            screen_professional_licence(req, config, "MDCN").await
+        }
+        ScreeningType::ProfessionalLicenceIcan => {
+            screen_professional_licence(req, config, "ICAN").await
+        }
+        ScreeningType::ProfessionalLicenceCibn => {
+            screen_professional_licence(req, config, "CIBN").await
+        }
+        ScreeningType::AdverseMedia => screen_adverse_media(req, config).await,
+        ScreeningType::PepSanctions => screen_pep_sanctions(req, config).await,
+        ScreeningType::Watchlist => screen_watchlist(req, config).await,
+        ScreeningType::TerrorismWatchlist => screen_terrorism(req, config).await,
+        ScreeningType::InterpolNotice => screen_interpol(req, config).await,
+        ScreeningType::SexOffenderRegistry => screen_sex_offender(req, config).await,
+        ScreeningType::AddressVerification => screen_address(req, config).await,
+        ScreeningType::WorkPermit => screen_work_permit(req, config).await,
+        ScreeningType::CreditCheck => screen_credit(req, config).await,
+        ScreeningType::DrugTest => screen_drug_test(req, config).await,
+        ScreeningType::SocialMedia => screen_social_media(req, config).await,
+        ScreeningType::ContinuousMonitor => screen_continuous(req, config).await,
     };
 
     // Cache stable results for 24h
-    if matches!(result.outcome, ScreeningOutcome::Clear | ScreeningOutcome::Consider | ScreeningOutcome::Adverse) {
+    if matches!(
+        result.outcome,
+        ScreeningOutcome::Clear | ScreeningOutcome::Consider | ScreeningOutcome::Adverse
+    ) {
         if let Ok(json) = serde_json::to_string(&result) {
             let _: Result<(), _> = redis::cmd("SETEX")
-                .arg(&cache_key).arg(86400u64).arg(&json)
-                .query_async(redis).await;
+                .arg(&cache_key)
+                .arg(86400u64)
+                .arg(&json)
+                .query_async(redis)
+                .await;
         }
     }
 
@@ -262,177 +325,318 @@ pub async fn run_screening(
 // ─── Individual Screening Implementations ────────────────────────────────────
 
 async fn screen_nin_trace(req: &ScreeningRequest, config: &EngineConfig) -> ScreeningResult {
-    if config.simulate {
-        return unavailable_result(req, "NIMC", "NIN verification is disabled because simulated screening is prohibited");
-    }
     // Real NIMC API call
     let client = reqwest::Client::new();
     let nin = req.subject.nin.as_deref().unwrap_or("");
-    match client.post(format!("{}/v1/nin/verify", config.nimc_url))
+    match client
+        .post(format!("{}/v1/nin/verify", config.nimc_url))
         .header("Authorization", format!("Bearer {}", config.nimc_key))
         .json(&serde_json::json!({ "nin": nin, "name": req.subject.full_name }))
         .timeout(Duration::from_secs(30))
-        .send().await
+        .send()
+        .await
     {
         Ok(resp) if resp.status().is_success() => {
             let data: serde_json::Value = resp.json().await.unwrap_or_default();
             let matched = data["data"]["matchScore"].as_f64().unwrap_or(0.0);
-            let outcome = if matched >= 0.8 { ScreeningOutcome::Clear } else { ScreeningOutcome::Consider };
-            make_result(req, outcome, &format!("NIN match score: {:.0}%", matched * 100.0), data, 1.0 - matched, vec!["NIMC".into()])
+            let outcome = if matched >= 0.8 {
+                ScreeningOutcome::Clear
+            } else {
+                ScreeningOutcome::Consider
+            };
+            make_result(
+                req,
+                outcome,
+                &format!("NIN match score: {:.0}%", matched * 100.0),
+                data,
+                1.0 - matched,
+                vec!["NIMC".into()],
+            )
         }
         Ok(resp) => {
             let status = resp.status().as_u16();
-            make_result(req, ScreeningOutcome::Unverified, &format!("NIMC API returned {status}"), serde_json::Value::Null, 0.5, vec!["NIMC".into()])
+            make_result(
+                req,
+                ScreeningOutcome::Unverified,
+                &format!("NIMC API returned {status}"),
+                serde_json::Value::Null,
+                0.5,
+                vec!["NIMC".into()],
+            )
         }
         Err(e) => error_result(req, &e.to_string()),
     }
 }
 
 async fn screen_bvn(req: &ScreeningRequest, config: &EngineConfig) -> ScreeningResult {
-    if config.simulate {
-        return unavailable_result(req, "NIBSS", "BVN verification is disabled because simulated screening is prohibited");
-    }
     let client = reqwest::Client::new();
     let bvn = req.subject.bvn.as_deref().unwrap_or("");
-    match client.post(format!("{}/v2/bvn/verify", config.nibss_url))
+    match client
+        .post(format!("{}/v2/bvn/verify", config.nibss_url))
         .header("Authorization", format!("Bearer {}", config.nibss_key))
         .json(&serde_json::json!({ "bvn": bvn }))
         .timeout(Duration::from_secs(30))
-        .send().await
+        .send()
+        .await
     {
         Ok(resp) if resp.status().is_success() => {
             let data: serde_json::Value = resp.json().await.unwrap_or_default();
             let verified = data["data"]["verified"].as_bool().unwrap_or(false);
-            let outcome = if verified { ScreeningOutcome::Clear } else { ScreeningOutcome::Consider };
-            make_result(req, outcome, if verified { "BVN verified" } else { "BVN mismatch" }, data, if verified { 0.02 } else { 0.6 }, vec!["NIBSS".into()])
+            let outcome = if verified {
+                ScreeningOutcome::Clear
+            } else {
+                ScreeningOutcome::Consider
+            };
+            make_result(
+                req,
+                outcome,
+                if verified {
+                    "BVN verified"
+                } else {
+                    "BVN mismatch"
+                },
+                data,
+                if verified { 0.02 } else { 0.6 },
+                vec!["NIBSS".into()],
+            )
         }
-        Ok(resp) => make_result(req, ScreeningOutcome::Unverified, &format!("NIBSS returned {}", resp.status()), serde_json::Value::Null, 0.5, vec!["NIBSS".into()]),
+        Ok(resp) => make_result(
+            req,
+            ScreeningOutcome::Unverified,
+            &format!("NIBSS returned {}", resp.status()),
+            serde_json::Value::Null,
+            0.5,
+            vec!["NIBSS".into()],
+        ),
         Err(e) => error_result(req, &e.to_string()),
     }
 }
 
 async fn screen_efcc(req: &ScreeningRequest, config: &EngineConfig) -> ScreeningResult {
-    if config.simulate {
-        return unavailable_result(req, "EFCC", "EFCC verification is disabled because simulated screening is prohibited");
-    }
     let client = reqwest::Client::new();
-    match client.post(format!("{}/v1/search", config.efcc_url))
+    match client
+        .post(format!("{}/v1/search", config.efcc_url))
         .header("x-api-key", &config.efcc_key)
         .json(&serde_json::json!({ "name": req.subject.full_name, "nin": req.subject.nin }))
         .timeout(Duration::from_secs(45))
-        .send().await
+        .send()
+        .await
     {
         Ok(resp) if resp.status().is_success() => {
             let data: serde_json::Value = resp.json().await.unwrap_or_default();
             let hits = data["data"]["totalHits"].as_i64().unwrap_or(0);
-            let outcome = if hits == 0 { ScreeningOutcome::Clear } else { ScreeningOutcome::Adverse };
-            make_result(req, outcome, &format!("EFCC records: {hits}"), data, if hits == 0 { 0.01 } else { 0.95 }, vec!["EFCC".into()])
+            let outcome = if hits == 0 {
+                ScreeningOutcome::Clear
+            } else {
+                ScreeningOutcome::Adverse
+            };
+            make_result(
+                req,
+                outcome,
+                &format!("EFCC records: {hits}"),
+                data,
+                if hits == 0 { 0.01 } else { 0.95 },
+                vec!["EFCC".into()],
+            )
         }
-        Ok(resp) => make_result(req, ScreeningOutcome::Unverified, &format!("EFCC API returned {}", resp.status()), serde_json::Value::Null, 0.5, vec!["EFCC".into()]),
+        Ok(resp) => make_result(
+            req,
+            ScreeningOutcome::Unverified,
+            &format!("EFCC API returned {}", resp.status()),
+            serde_json::Value::Null,
+            0.5,
+            vec!["EFCC".into()],
+        ),
         Err(e) => error_result(req, &e.to_string()),
     }
 }
 
 async fn screen_icpc(req: &ScreeningRequest, config: &EngineConfig) -> ScreeningResult {
-    if config.simulate {
-        return unavailable_result(req, "ICPC", "ICPC verification is disabled because simulated screening is prohibited");
-    }
     let client = reqwest::Client::new();
-    match client.post(format!("{}/v1/search", config.icpc_url))
+    match client
+        .post(format!("{}/v1/search", config.icpc_url))
         .header("x-api-key", &config.icpc_key)
         .json(&serde_json::json!({ "name": req.subject.full_name }))
         .timeout(Duration::from_secs(45))
-        .send().await
+        .send()
+        .await
     {
         Ok(resp) if resp.status().is_success() => {
             let data: serde_json::Value = resp.json().await.unwrap_or_default();
             let hits = data["data"]["totalHits"].as_i64().unwrap_or(0);
-            let outcome = if hits == 0 { ScreeningOutcome::Clear } else { ScreeningOutcome::Adverse };
-            make_result(req, outcome, &format!("ICPC records: {hits}"), data, if hits == 0 { 0.01 } else { 0.95 }, vec!["ICPC".into()])
+            let outcome = if hits == 0 {
+                ScreeningOutcome::Clear
+            } else {
+                ScreeningOutcome::Adverse
+            };
+            make_result(
+                req,
+                outcome,
+                &format!("ICPC records: {hits}"),
+                data,
+                if hits == 0 { 0.01 } else { 0.95 },
+                vec!["ICPC".into()],
+            )
         }
-        Ok(resp) => make_result(req, ScreeningOutcome::Unverified, &format!("ICPC API returned {}", resp.status()), serde_json::Value::Null, 0.5, vec!["ICPC".into()]),
+        Ok(resp) => make_result(
+            req,
+            ScreeningOutcome::Unverified,
+            &format!("ICPC API returned {}", resp.status()),
+            serde_json::Value::Null,
+            0.5,
+            vec!["ICPC".into()],
+        ),
         Err(e) => error_result(req, &e.to_string()),
     }
 }
 
-async fn screen_court_records(req: &ScreeningRequest, config: &EngineConfig) -> ScreeningResult {
-    if config.simulate {
-        return unavailable_result(req, "State Judiciary", "Court-record verification is disabled because simulated screening is prohibited");
-    }
-    unavailable_result(req, "State Judiciary", "No live court-record provider is configured")
+async fn screen_court_records(req: &ScreeningRequest, _config: &EngineConfig) -> ScreeningResult {
+    unavailable_result(
+        req,
+        "State Judiciary",
+        "No live court-record provider is configured",
+    )
 }
 
 async fn screen_cac(req: &ScreeningRequest, config: &EngineConfig) -> ScreeningResult {
-    if config.simulate {
-        return unavailable_result(req, "CAC", "CAC verification is disabled because simulated screening is prohibited");
-    }
     let client = reqwest::Client::new();
-    match client.get(format!("{}/api/v1/search/director?name={}", config.cac_url, urlencoding::encode(&req.subject.full_name)))
+    match client
+        .get(format!(
+            "{}/api/v1/search/director?name={}",
+            config.cac_url,
+            urlencoding::encode(&req.subject.full_name)
+        ))
         .header("Authorization", format!("Bearer {}", config.cac_key))
         .timeout(Duration::from_secs(30))
-        .send().await
+        .send()
+        .await
     {
         Ok(resp) if resp.status().is_success() => {
             let data: serde_json::Value = resp.json().await.unwrap_or_default();
             let companies = data["data"].as_array().map(|a| a.len()).unwrap_or(0);
-            make_result(req, ScreeningOutcome::Clear,
+            make_result(
+                req,
+                ScreeningOutcome::Clear,
                 &format!("Found {companies} CAC company associations"),
-                data, 0.1, vec!["CAC".into()])
+                data,
+                0.1,
+                vec!["CAC".into()],
+            )
         }
-        Ok(resp) => make_result(req, ScreeningOutcome::Unverified, &format!("CAC API returned {}", resp.status()), serde_json::Value::Null, 0.5, vec!["CAC".into()]),
+        Ok(resp) => make_result(
+            req,
+            ScreeningOutcome::Unverified,
+            &format!("CAC API returned {}", resp.status()),
+            serde_json::Value::Null,
+            0.5,
+            vec!["CAC".into()],
+        ),
         Err(e) => error_result(req, &e.to_string()),
     }
 }
 
 async fn screen_waec(req: &ScreeningRequest, config: &EngineConfig) -> ScreeningResult {
-    if config.simulate {
-        return unavailable_result(req, "WAEC", "WAEC verification is disabled because simulated screening is prohibited");
-    }
     let client = reqwest::Client::new();
     let waec_num = req.subject.waec_number.as_deref().unwrap_or("");
-    match client.post(format!("{}/v1/verify", config.waec_url))
+    match client
+        .post(format!("{}/v1/verify", config.waec_url))
         .header("x-api-key", &config.waec_key)
         .json(&serde_json::json!({ "examNumber": waec_num, "name": req.subject.full_name }))
         .timeout(Duration::from_secs(60))
-        .send().await
+        .send()
+        .await
     {
         Ok(resp) if resp.status().is_success() => {
             let data: serde_json::Value = resp.json().await.unwrap_or_default();
             let verified = data["data"]["verified"].as_bool().unwrap_or(false);
-            let outcome = if verified { ScreeningOutcome::Clear } else { ScreeningOutcome::Consider };
-            make_result(req, outcome, if verified { "WAEC certificate verified" } else { "WAEC certificate not verified" }, data, if verified { 0.05 } else { 0.7 }, vec!["WAEC".into()])
+            let outcome = if verified {
+                ScreeningOutcome::Clear
+            } else {
+                ScreeningOutcome::Consider
+            };
+            make_result(
+                req,
+                outcome,
+                if verified {
+                    "WAEC certificate verified"
+                } else {
+                    "WAEC certificate not verified"
+                },
+                data,
+                if verified { 0.05 } else { 0.7 },
+                vec!["WAEC".into()],
+            )
         }
-        Ok(resp) => make_result(req, ScreeningOutcome::Unverified, &format!("WAEC API returned {}", resp.status()), serde_json::Value::Null, 0.5, vec!["WAEC".into()]),
+        Ok(resp) => make_result(
+            req,
+            ScreeningOutcome::Unverified,
+            &format!("WAEC API returned {}", resp.status()),
+            serde_json::Value::Null,
+            0.5,
+            vec!["WAEC".into()],
+        ),
         Err(e) => error_result(req, &e.to_string()),
     }
 }
 
 async fn screen_neco(req: &ScreeningRequest, _config: &EngineConfig) -> ScreeningResult {
-    unavailable_result(req, "NECO", "No live NECO verification provider is configured")
+    unavailable_result(
+        req,
+        "NECO",
+        "No live NECO verification provider is configured",
+    )
 }
 
 async fn screen_university(req: &ScreeningRequest, _config: &EngineConfig) -> ScreeningResult {
-    unavailable_result(req, "University", "No live university verification provider is configured")
+    unavailable_result(
+        req,
+        "University",
+        "No live university verification provider is configured",
+    )
 }
 
 async fn screen_nysc(req: &ScreeningRequest, _config: &EngineConfig) -> ScreeningResult {
-    unavailable_result(req, "NYSC", "No live NYSC verification provider is configured")
+    unavailable_result(
+        req,
+        "NYSC",
+        "No live NYSC verification provider is configured",
+    )
 }
 
 async fn screen_employment(req: &ScreeningRequest, _config: &EngineConfig) -> ScreeningResult {
-    unavailable_result(req, "Employment", "No live employment-verification provider is configured")
+    unavailable_result(
+        req,
+        "Employment",
+        "No live employment-verification provider is configured",
+    )
 }
 
-async fn screen_professional_licence(req: &ScreeningRequest, _config: &EngineConfig, council: &str) -> ScreeningResult {
-    unavailable_result(req, council, "No live professional-licence provider is configured")
+async fn screen_professional_licence(
+    req: &ScreeningRequest,
+    _config: &EngineConfig,
+    council: &str,
+) -> ScreeningResult {
+    unavailable_result(
+        req,
+        council,
+        "No live professional-licence provider is configured",
+    )
 }
 
 async fn screen_adverse_media(req: &ScreeningRequest, _config: &EngineConfig) -> ScreeningResult {
-    unavailable_result(req, "Adverse Media", "No live adverse-media provider is configured")
+    unavailable_result(
+        req,
+        "Adverse Media",
+        "No live adverse-media provider is configured",
+    )
 }
 
 async fn screen_pep_sanctions(req: &ScreeningRequest, _config: &EngineConfig) -> ScreeningResult {
-    unavailable_result(req, "PEP/Sanctions", "No live PEP and sanctions provider is configured")
+    unavailable_result(
+        req,
+        "PEP/Sanctions",
+        "No live PEP and sanctions provider is configured",
+    )
 }
 
 async fn screen_watchlist(req: &ScreeningRequest, _config: &EngineConfig) -> ScreeningResult {
@@ -440,7 +644,11 @@ async fn screen_watchlist(req: &ScreeningRequest, _config: &EngineConfig) -> Scr
 }
 
 async fn screen_terrorism(req: &ScreeningRequest, _config: &EngineConfig) -> ScreeningResult {
-    unavailable_result(req, "Terrorism Watchlist", "No live terrorism-watchlist provider is configured")
+    unavailable_result(
+        req,
+        "Terrorism Watchlist",
+        "No live terrorism-watchlist provider is configured",
+    )
 }
 
 async fn screen_interpol(req: &ScreeningRequest, _config: &EngineConfig) -> ScreeningResult {
@@ -448,11 +656,19 @@ async fn screen_interpol(req: &ScreeningRequest, _config: &EngineConfig) -> Scre
 }
 
 async fn screen_sex_offender(req: &ScreeningRequest, _config: &EngineConfig) -> ScreeningResult {
-    unavailable_result(req, "Sex Offender Registry", "No live sex-offender registry provider is configured")
+    unavailable_result(
+        req,
+        "Sex Offender Registry",
+        "No live sex-offender registry provider is configured",
+    )
 }
 
 async fn screen_address(req: &ScreeningRequest, _config: &EngineConfig) -> ScreeningResult {
-    unavailable_result(req, "Address Verification", "No live address-verification provider is configured")
+    unavailable_result(
+        req,
+        "Address Verification",
+        "No live address-verification provider is configured",
+    )
 }
 
 async fn screen_work_permit(req: &ScreeningRequest, _config: &EngineConfig) -> ScreeningResult {
@@ -460,19 +676,35 @@ async fn screen_work_permit(req: &ScreeningRequest, _config: &EngineConfig) -> S
 }
 
 async fn screen_credit(req: &ScreeningRequest, _config: &EngineConfig) -> ScreeningResult {
-    unavailable_result(req, "Credit Bureau", "No live credit-bureau provider is configured")
+    unavailable_result(
+        req,
+        "Credit Bureau",
+        "No live credit-bureau provider is configured",
+    )
 }
 
 async fn screen_drug_test(req: &ScreeningRequest, _config: &EngineConfig) -> ScreeningResult {
-    unavailable_result(req, "Drug Test", "No live laboratory result provider is configured")
+    unavailable_result(
+        req,
+        "Drug Test",
+        "No live laboratory result provider is configured",
+    )
 }
 
 async fn screen_social_media(req: &ScreeningRequest, _config: &EngineConfig) -> ScreeningResult {
-    unavailable_result(req, "Social Media", "No live social-media screening provider is configured")
+    unavailable_result(
+        req,
+        "Social Media",
+        "No live social-media screening provider is configured",
+    )
 }
 
 async fn screen_continuous(req: &ScreeningRequest, _config: &EngineConfig) -> ScreeningResult {
-    unavailable_result(req, "Continuous Monitoring", "No live continuous-monitoring provider is configured")
+    unavailable_result(
+        req,
+        "Continuous Monitoring",
+        "No live continuous-monitoring provider is configured",
+    )
 }
 
 // ─── Result Helpers ───────────────────────────────────────────────────────────
@@ -502,33 +734,33 @@ fn make_result(
     sources: Vec<String>,
 ) -> ScreeningResult {
     ScreeningResult {
-        request_id:    req.request_id.clone(),
-        order_ref:     req.order_ref.clone(),
-        result_id:     req.result_id,
+        request_id: req.request_id.clone(),
+        order_ref: req.order_ref.clone(),
+        result_id: req.result_id,
         screening_type: req.screening_type.clone(),
         outcome,
-        summary:       summary.to_string(),
+        summary: summary.to_string(),
         details,
         risk_score,
         sources,
-        completed_at:  Utc::now(),
-        error:         None,
+        completed_at: Utc::now(),
+        error: None,
     }
 }
 
 fn error_result(req: &ScreeningRequest, err: &str) -> ScreeningResult {
     ScreeningResult {
-        request_id:    req.request_id.clone(),
-        order_ref:     req.order_ref.clone(),
-        result_id:     req.result_id,
+        request_id: req.request_id.clone(),
+        order_ref: req.order_ref.clone(),
+        result_id: req.result_id,
         screening_type: req.screening_type.clone(),
-        outcome:       ScreeningOutcome::Error,
-        summary:       format!("Screening error: {err}"),
-        details:       serde_json::json!({ "error": err }),
-        risk_score:    0.5,
-        sources:       vec![],
-        completed_at:  Utc::now(),
-        error:         Some(err.to_string()),
+        outcome: ScreeningOutcome::Error,
+        summary: format!("Screening error: {err}"),
+        details: serde_json::json!({ "error": err }),
+        risk_score: 0.5,
+        sources: vec![],
+        completed_at: Utc::now(),
+        error: Some(err.to_string()),
     }
 }
 
@@ -538,7 +770,9 @@ async fn handle_screen(
     State(state): State<AppState>,
     Json(req): Json<ScreeningRequest>,
 ) -> Result<Json<ScreeningResult>, StatusCode> {
-    let timer = state.metrics.screening_duration
+    let timer = state
+        .metrics
+        .screening_duration
         .with_label_values(&[&format!("{:?}", req.screening_type)])
         .start_timer();
 
@@ -546,8 +780,13 @@ async fn handle_screen(
     let result = run_screening(&req, &state.config, &mut redis).await;
 
     timer.observe_duration();
-    state.metrics.screenings_total
-        .with_label_values(&[&format!("{:?}", result.screening_type), &format!("{:?}", result.outcome)])
+    state
+        .metrics
+        .screenings_total
+        .with_label_values(&[
+            &format!("{:?}", result.screening_type),
+            &format!("{:?}", result.outcome),
+        ])
         .inc();
 
     // Persist result to PostgreSQL (fire-and-forget)
@@ -588,14 +827,18 @@ async fn handle_batch(
 }
 
 async fn handle_health() -> Json<serde_json::Value> {
-    Json(serde_json::json!({ "status": "ok", "service": "screening-engine", "version": env!("CARGO_PKG_VERSION") }))
+    Json(
+        serde_json::json!({ "status": "ok", "service": "screening-engine", "version": env!("CARGO_PKG_VERSION") }),
+    )
 }
 
 async fn handle_metrics() -> String {
     use prometheus::Encoder;
     let encoder = prometheus::TextEncoder::new();
     let mut buf = Vec::new();
-    encoder.encode(&prometheus::gather(), &mut buf).unwrap_or_default();
+    encoder
+        .encode(&prometheus::gather(), &mut buf)
+        .unwrap_or_default();
     String::from_utf8(buf).unwrap_or_default()
 }
 
@@ -611,7 +854,9 @@ async fn start_kafka_consumer(state: AppState) {
         .create()
         .expect("Failed to create Kafka consumer");
 
-    consumer.subscribe(&["bis.screening.requests"]).expect("Failed to subscribe");
+    consumer
+        .subscribe(&["bis.screening.requests"])
+        .expect("Failed to subscribe");
     info!("Kafka consumer started on bis.screening.requests");
 
     loop {
@@ -623,7 +868,8 @@ async fn start_kafka_consumer(state: AppState) {
                             let state_clone = state.clone();
                             tokio::spawn(async move {
                                 let mut redis = state_clone.redis.clone();
-                                let result = run_screening(&req, &state_clone.config, &mut redis).await;
+                                let result =
+                                    run_screening(&req, &state_clone.config, &mut redis).await;
                                 // Persist to PostgreSQL
                                 if let Some(pool) = &state_clone.db_pool {
                                     db::persist_result(pool, &result).await;
@@ -633,7 +879,10 @@ async fn start_kafka_consumer(state: AppState) {
                                     let record = FutureRecord::to("bis.screening.results")
                                         .key(&result.order_ref)
                                         .payload(&json);
-                                    let _ = state_clone.producer.send(record, Duration::from_secs(5)).await;
+                                    let _ = state_clone
+                                        .producer
+                                        .send(record, Duration::from_secs(5))
+                                        .await;
                                 }
                             });
                         }
@@ -667,39 +916,59 @@ async fn main() -> anyhow::Result<()> {
         .create()?;
 
     let config = Arc::new(EngineConfig {
-        nimc_url:  std::env::var("NIMC_URL").unwrap_or_else(|_| "https://api.nimc.gov.ng".into()),
-        nimc_key:  std::env::var("NIMC_API_KEY").unwrap_or_default(),
-        nibss_url: std::env::var("NIBSS_URL").unwrap_or_else(|_| "https://api.nibss-plc.com.ng".into()),
+        nimc_url: std::env::var("NIMC_URL").unwrap_or_else(|_| "https://api.nimc.gov.ng".into()),
+        nimc_key: std::env::var("NIMC_API_KEY").unwrap_or_default(),
+        nibss_url: std::env::var("NIBSS_URL")
+            .unwrap_or_else(|_| "https://api.nibss-plc.com.ng".into()),
         nibss_key: std::env::var("NIBSS_API_KEY").unwrap_or_default(),
-        efcc_url:  std::env::var("EFCC_URL").unwrap_or_else(|_| "https://api.efcc.gov.ng".into()),
-        efcc_key:  std::env::var("EFCC_API_KEY").unwrap_or_default(),
-        icpc_url:  std::env::var("ICPC_URL").unwrap_or_else(|_| "https://api.icpc.gov.ng".into()),
-        icpc_key:  std::env::var("ICPC_API_KEY").unwrap_or_default(),
-        cac_url:   std::env::var("CAC_URL").unwrap_or_else(|_| "https://efts.cac.gov.ng".into()),
-        cac_key:   std::env::var("CAC_API_KEY").unwrap_or_default(),
-        waec_url:  std::env::var("WAEC_URL").unwrap_or_else(|_| "https://api.waecnigeria.org".into()),
-        waec_key:  std::env::var("WAEC_API_KEY").unwrap_or_default(),
-        // Simulation never produces screening decisions; it only causes an
-        // explicit unverified result. Default false to prevent accidental use.
-        simulate:  std::env::var("SCREENING_SIMULATE").map(|v| v == "true").unwrap_or(false),
+        efcc_url: std::env::var("EFCC_URL").unwrap_or_else(|_| "https://api.efcc.gov.ng".into()),
+        efcc_key: std::env::var("EFCC_API_KEY").unwrap_or_default(),
+        icpc_url: std::env::var("ICPC_URL").unwrap_or_else(|_| "https://api.icpc.gov.ng".into()),
+        icpc_key: std::env::var("ICPC_API_KEY").unwrap_or_default(),
+        cac_url: std::env::var("CAC_URL").unwrap_or_else(|_| "https://efts.cac.gov.ng".into()),
+        cac_key: std::env::var("CAC_API_KEY").unwrap_or_default(),
+        waec_url: std::env::var("WAEC_URL")
+            .unwrap_or_else(|_| "https://api.waecnigeria.org".into()),
+        waec_key: std::env::var("WAEC_API_KEY").unwrap_or_default(),
     });
 
+    if std::env::var("BIS_SCREENING_ENGINE_KEY")
+        .unwrap_or_default()
+        .is_empty()
+    {
+        anyhow::bail!("BIS_SCREENING_ENGINE_KEY must be configured");
+    }
+    if std::env::var("DATABASE_URL").unwrap_or_default().is_empty() {
+        anyhow::bail!("DATABASE_URL must be configured for durable screening results");
+    }
     let metrics = Arc::new(Metrics::new());
 
-    // ── PostgreSQL pool (optional) ───────────────────────────────────────────────────────────────────
+    // A screening decision may not be served without durable PostgreSQL persistence.
     let db_pool = db::build_pool().await.map(Arc::new);
+    if db_pool.is_none() {
+        anyhow::bail!("screening-engine could not create the required PostgreSQL pool");
+    }
 
-    let state = AppState { redis: redis_mgr, producer, config, metrics, db_pool };
+    let state = AppState {
+        redis: redis_mgr,
+        producer,
+        config,
+        metrics,
+        db_pool,
+    };
 
     // Start Kafka consumer in background
     let state_clone = state.clone();
     tokio::spawn(async move { start_kafka_consumer(state_clone).await });
 
-    let app = Router::new()
-        .route("/screen",  post(handle_screen))
-        .route("/batch",   post(handle_batch))
-        .route("/health",  get(handle_health))
+    let protected = Router::new()
+        .route("/screen", post(handle_screen))
+        .route("/batch", post(handle_batch))
         .route("/metrics", get(handle_metrics))
+        .layer(middleware::from_fn(service_auth));
+    let app = Router::new()
+        .route("/health", get(handle_health))
+        .merge(protected)
         .with_state(state);
 
     let port = std::env::var("PORT").unwrap_or_else(|_| "8085".into());
@@ -718,89 +987,100 @@ mod tests {
 
     fn make_req(screening_type: ScreeningType) -> ScreeningRequest {
         ScreeningRequest {
-            request_id:    Uuid::new_v4().to_string(),
-            order_ref:     "ORD-2025-TEST".into(),
-            result_id:     1,
-            candidate_id:  1,
-            tenant_id:     1,
+            request_id: Uuid::new_v4().to_string(),
+            order_ref: "ORD-2025-TEST".into(),
+            result_id: 1,
+            candidate_id: 1,
+            tenant_id: 1,
             screening_type,
             subject: SubjectInfo {
-                full_name:     "Adebayo Okafor".into(),
-                nin:           Some("12345678901".into()),
-                bvn:           Some("22345678901".into()),
-                dob:           Some("1990-01-15".into()),
-                phone:         Some("+2348012345678".into()),
-                email:         Some("adebayo@example.com".into()),
-                address:       Some("14 Broad Street, Lagos Island, Lagos".into()),
-                state:         Some("Lagos".into()),
-                cac_rc:        None,
-                waec_number:   Some("WEC/2008/123456".into()),
-                nysc_number:   Some("NYSC/2013/A/123456".into()),
+                full_name: "Adebayo Okafor".into(),
+                nin: Some("12345678901".into()),
+                bvn: Some("22345678901".into()),
+                dob: Some("1990-01-15".into()),
+                phone: Some("+2348012345678".into()),
+                email: Some("adebayo@example.com".into()),
+                address: Some("14 Broad Street, Lagos Island, Lagos".into()),
+                state: Some("Lagos".into()),
+                cac_rc: None,
+                waec_number: Some("WEC/2008/123456".into()),
+                nysc_number: Some("NYSC/2013/A/123456".into()),
                 licence_number: None,
             },
-            options:      HashMap::new(),
+            options: HashMap::new(),
             callback_url: None,
-            created_at:   Utc::now(),
+            created_at: Utc::now(),
         }
     }
 
-    fn simulated_config() -> EngineConfig {
+    fn test_config() -> EngineConfig {
         EngineConfig {
-            nimc_url: "".into(), nimc_key: "".into(),
-            nibss_url: "".into(), nibss_key: "".into(),
-            efcc_url: "".into(), efcc_key: "".into(),
-            icpc_url: "".into(), icpc_key: "".into(),
-            cac_url: "".into(), cac_key: "".into(),
-            waec_url: "".into(), waec_key: "".into(),
-            simulate: true,
+            nimc_url: "".into(),
+            nimc_key: "".into(),
+            nibss_url: "".into(),
+            nibss_key: "".into(),
+            efcc_url: "".into(),
+            efcc_key: "".into(),
+            icpc_url: "".into(),
+            icpc_key: "".into(),
+            cac_url: "".into(),
+            cac_key: "".into(),
+            waec_url: "".into(),
+            waec_key: "".into(),
         }
     }
 
     #[tokio::test]
-    async fn test_nin_trace_simulated() {
+    async fn test_nin_trace_provider_unavailable() {
         let req = make_req(ScreeningType::NinTrace);
-        let config = simulated_config();
+        let config = test_config();
         let result = screen_nin_trace(&req, &config).await;
-        assert!(matches!(result.outcome, ScreeningOutcome::Unverified));
+        assert!(matches!(result.outcome, ScreeningOutcome::Error));
         assert!(result.risk_score >= 0.0);
     }
 
     #[tokio::test]
-    async fn test_efcc_simulated() {
+    async fn test_efcc_provider_unavailable() {
         let req = make_req(ScreeningType::CriminalEfcc);
-        let config = simulated_config();
+        let config = test_config();
         let result = screen_efcc(&req, &config).await;
-        assert!(matches!(result.outcome, ScreeningOutcome::Unverified));
+        assert!(matches!(result.outcome, ScreeningOutcome::Error));
     }
 
     #[tokio::test]
-    async fn test_waec_simulated() {
+    async fn test_waec_provider_unavailable() {
         let req = make_req(ScreeningType::EducationWaec);
-        let config = simulated_config();
+        let config = test_config();
         let result = screen_waec(&req, &config).await;
-        assert!(matches!(result.outcome, ScreeningOutcome::Unverified));
+        assert!(matches!(result.outcome, ScreeningOutcome::Error));
     }
 
     #[tokio::test]
-    async fn test_pep_sanctions_simulated() {
+    async fn test_pep_sanctions_provider_not_configured() {
         let req = make_req(ScreeningType::PepSanctions);
-        let config = simulated_config();
+        let config = test_config();
         let result = screen_pep_sanctions(&req, &config).await;
         assert!(matches!(result.outcome, ScreeningOutcome::Unverified));
         assert!(result.risk_score >= 0.0);
     }
 
     #[tokio::test]
-    async fn test_all_screening_types_simulated() {
+    async fn test_all_screening_types_provider_unavailable() {
         let types = vec![
-            ScreeningType::NinTrace, ScreeningType::BvnVerification,
-            ScreeningType::CriminalEfcc, ScreeningType::CriminalIcpc,
-            ScreeningType::CourtRecord, ScreeningType::CacDirectorship,
-            ScreeningType::EducationWaec, ScreeningType::NyscDischarge,
-            ScreeningType::PepSanctions, ScreeningType::Watchlist,
-            ScreeningType::AdverseMedia, ScreeningType::AddressVerification,
+            ScreeningType::NinTrace,
+            ScreeningType::BvnVerification,
+            ScreeningType::CriminalEfcc,
+            ScreeningType::CriminalIcpc,
+            ScreeningType::CourtRecord,
+            ScreeningType::CacDirectorship,
+            ScreeningType::EducationWaec,
+            ScreeningType::NyscDischarge,
+            ScreeningType::PepSanctions,
+            ScreeningType::Watchlist,
+            ScreeningType::AdverseMedia,
+            ScreeningType::AddressVerification,
         ];
-        let config = simulated_config();
+        let config = test_config();
         for st in types {
             let req = make_req(st);
             let result = screen_adverse_media(&req, &config).await;

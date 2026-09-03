@@ -245,9 +245,7 @@ impl VelocityEngine {
             let total = window.total_amount(rule.cross_border_only);
 
             let count_breach = rule.count_limit.map_or(false, |limit| count > limit);
-            let amount_breach = rule
-                .amount_limit_kobo
-                .map_or(false, |limit| total > limit);
+            let amount_breach = rule.amount_limit_kobo.map_or(false, |limit| total > limit);
 
             if count_breach || amount_breach {
                 breaches.push(VelocityBreach {
@@ -423,7 +421,9 @@ mod tests {
         let event = make_event("ACC-004", 10_000, t0 + chrono::Duration::seconds(3), true);
         let breaches = engine.process(&event);
 
-        let cb_breach = breaches.iter().find(|b| b.rule_name == "CROSS_BORDER_1HOUR");
+        let cb_breach = breaches
+            .iter()
+            .find(|b| b.rule_name == "CROSS_BORDER_1HOUR");
         assert!(cb_breach.is_some(), "Expected CROSS_BORDER_1HOUR breach");
     }
 
@@ -436,7 +436,9 @@ mod tests {
         for i in 0..10 {
             let event = make_event("ACC-005", 10_000, t0 + chrono::Duration::seconds(i), false);
             let breaches = engine.process(&event);
-            let cb_breach = breaches.iter().find(|b| b.rule_name == "CROSS_BORDER_1HOUR");
+            let cb_breach = breaches
+                .iter()
+                .find(|b| b.rule_name == "CROSS_BORDER_1HOUR");
             assert!(
                 cb_breach.is_none(),
                 "CROSS_BORDER_1HOUR should not fire for domestic tx at {i}"
@@ -456,7 +458,12 @@ mod tests {
         }
 
         // 1 transaction 2 minutes later — old events should be evicted
-        let event = make_event("ACC-006", 10_000, t0 + chrono::Duration::seconds(120), false);
+        let event = make_event(
+            "ACC-006",
+            10_000,
+            t0 + chrono::Duration::seconds(120),
+            false,
+        );
         let breaches = engine.process(&event);
 
         let count_breach = breaches.iter().find(|b| b.rule_name == "COUNT_1MIN");
@@ -498,7 +505,11 @@ mod tests {
 
         assert!(engine.active_windows() > 0);
         engine.gc();
-        assert_eq!(engine.active_windows(), 0, "GC should remove all stale windows");
+        assert_eq!(
+            engine.active_windows(),
+            0,
+            "GC should remove all stale windows"
+        );
     }
 
     #[test]

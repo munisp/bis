@@ -1,27 +1,55 @@
 // topics.go — Kafka topic management helpers for BIS gateway.
-// EnsureTopic is a best-effort call that creates a Kafka topic if it does not
-// exist. In development (no Kafka configured) this is a no-op.
 package kafka
 
 import (
-	"log"
+	"context"
+	"errors"
+	"fmt"
 	"os"
+	"strings"
+	"time"
+
+	kafkago "github.com/segmentio/kafka-go"
 )
 
-// EnsureTopic attempts to create a Kafka topic if it does not exist.
-// This is a best-effort operation; failures are logged but not fatal.
-// In production, topics should be pre-created via the Kafka admin API or
-// a Terraform/Helm chart. This helper is for development convenience.
+// EnsureTopic creates a topic through the Kafka controller when it does not
+// already exist. Broker configuration and controller reachability are mandatory.
 func EnsureTopic(topic string) error {
-	brokers := os.Getenv("KAFKA_BROKERS")
-	if brokers == "" {
-		// Kafka not configured — no-op
-		return nil
+	if strings.TrimSpace(topic) == "" {
+		return fmt.Errorf("Kafka topic is required")
 	}
-	// In a production implementation this would use the Kafka admin client
-	// (e.g. github.com/segmentio/kafka-go AdminClient) to create the topic.
-	// For now we log the intent and return nil to avoid adding a new dependency.
-	log.Printf("[Kafka] EnsureTopic: %s (broker: %s)", topic, brokers)
+	brokers := strings.Split(strings.TrimSpace(os.Getenv("KAFKA_BROKERS")), ",")
+	if len(brokers) == 0 || strings.TrimSpace(brokers[0]) == "" {
+		return fmt.Errorf("KAFKA_BROKERS is required to provision topic %q", topic)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	bootstrap, err := kafkago.DialContext(ctx, "tcp", strings.TrimSpace(brokers[0]))
+	if err != nil {
+		return fmt.Errorf("connect to Kafka bootstrap broker: %w", err)
+	}
+	defer bootstrap.Close()
+
+	controller, err := bootstrap.Controller()
+	if err != nil {
+		return fmt.Errorf("discover Kafka controller: %w", err)
+	}
+	controllerAddress := fmt.Sprintf("%s:%d", controller.Host, controller.Port)
+	controllerConnection, err := kafkago.DialContext(ctx, "tcp", controllerAddress)
+	if err != nil {
+		return fmt.Errorf("connect to Kafka controller: %w", err)
+	}
+	defer controllerConnection.Close()
+
+	err = controllerConnection.CreateTopics(kafkago.TopicConfig{
+		Topic:             topic,
+		NumPartitions:     3,
+		ReplicationFactor: 1,
+	})
+	if err != nil && !errors.Is(err, kafkago.TopicAlreadyExists) {
+		return fmt.Errorf("create Kafka topic %q: %w", topic, err)
+	}
 	return nil
 }
 

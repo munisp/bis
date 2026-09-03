@@ -4,7 +4,7 @@ package temporal
 
 import (
 	"context"
-	"log"
+	"fmt"
 	"os"
 	"sync"
 )
@@ -20,24 +20,19 @@ func init() {
 	defaultClientOnce.Do(func() {
 		host := os.Getenv("TEMPORAL_HOST")
 		ns := os.Getenv("TEMPORAL_NAMESPACE")
-		if ns == "" {
-			ns = "bis"
-		}
 		c, err := NewClient(host, ns)
 		if err != nil {
-			log.Printf("[Temporal] DefaultClient init warning: %v — using no-op client", err)
-			DefaultClient = &Client{}
+			DefaultClient = nil
 			return
 		}
 		DefaultClient = c
 	})
 }
 
-// StartWorkflowSafe is a nil-safe wrapper around DefaultClient.StartWorkflow.
-// Returns "temporal-unavailable" if Temporal is not configured.
+// StartWorkflowSafe returns an error when Temporal infrastructure is unavailable.
 func StartWorkflowSafe(ctx context.Context, workflowType string, input interface{}) (string, error) {
 	if DefaultClient == nil {
-		return "temporal-unavailable", nil
+		return "", fmt.Errorf("Temporal workflow infrastructure is unavailable")
 	}
 	return DefaultClient.StartWorkflow(ctx, workflowType, input)
 }

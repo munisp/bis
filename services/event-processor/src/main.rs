@@ -6,9 +6,9 @@ pub mod db;
 pub mod insider_threat;
 pub mod kafka;
 pub mod otel;
-pub mod traceparent;
 #[cfg(test)]
 mod tests;
+pub mod traceparent;
 
 use axum::{
     extract::{Path, State},
@@ -21,15 +21,15 @@ use axum::{
 use chrono::{DateTime, Utc};
 use dashmap::DashMap;
 use insider_threat::InsiderThreatDetector;
+#[allow(unused_imports)]
+use otel::{init_otel, OtlpAnyValue, SpanBuilder, SpanSender};
 use serde::{Deserialize, Serialize};
+use std::sync::OnceLock;
 use std::{
     env,
     sync::{Arc, Mutex},
     time::Instant,
 };
-#[allow(unused_imports)]
-use otel::{init_otel, OtlpAnyValue, SpanBuilder, SpanSender};
-use std::sync::OnceLock;
 use tokio::sync::broadcast;
 use tracing::{info, warn};
 use uuid::Uuid;
@@ -46,7 +46,7 @@ const AUDIT_LOG_CAPACITY: usize = 10_000;
 const BROADCAST_CAPACITY: usize = 256;
 
 fn gateway_key() -> String {
-    env::var("BIS_GATEWAY_KEY").unwrap_or_else(|_| "dev-gateway-key-change-in-prod".to_string())
+    env::var("BIS_EVENT_PROCESSOR_KEY").unwrap_or_default()
 }
 
 fn port() -> String {
@@ -209,7 +209,16 @@ async fn auth_middleware(
         .get("x-bis-key")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
-    if key != gateway_key() {
+    let expected = gateway_key();
+    if expected.is_empty()
+        || key.len() != expected.len()
+        || !key
+            .as_bytes()
+            .iter()
+            .zip(expected.as_bytes())
+            .fold(0u8, |diff, (a, b)| diff | (a ^ b))
+            .eq(&0)
+    {
         return (
             StatusCode::UNAUTHORIZED,
             Json(ErrorResponse {
@@ -255,7 +264,9 @@ async fn publish_event(
     let http_headers: Vec<(String, String)> = headers
         .iter()
         .filter_map(|(k, v)| {
-            v.to_str().ok().map(|val| (k.as_str().to_string(), val.to_string()))
+            v.to_str()
+                .ok()
+                .map(|val| (k.as_str().to_string(), val.to_string()))
         })
         .collect();
     let trace_ctx = traceparent::TraceContext::from_http_headers(&http_headers);
@@ -264,11 +275,14 @@ async fn publish_event(
     let span_builder = trace_ctx
         .child_span("event.publish")
         .server()
-        .attr_str("event.type",    format!("{:?}", req.event_type))
+        .attr_str("event.type", format!("{:?}", req.event_type))
         .attr_str("event.subject", req.subject_ref.clone())
-        .attr_str("event.source",  req.source_service.clone())
-        .attr_str("event.severity",format!("{:?}", req.severity))
-        .attr_str("trace.upstream", if trace_ctx.is_remote { "true" } else { "false" });
+        .attr_str("event.source", req.source_service.clone())
+        .attr_str("event.severity", format!("{:?}", req.severity))
+        .attr_str(
+            "trace.upstream",
+            if trace_ctx.is_remote { "true" } else { "false" },
+        );
 
     let _ = state.event_tx.send(event.clone());
     let sub_count = state
@@ -396,10 +410,7 @@ async fn list_subscriptions(State(state): State<AppState>) -> Json<Vec<Subscript
     )
 }
 
-async fn delete_subscription(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> StatusCode {
+async fn delete_subscription(State(state): State<AppState>, Path(id): Path<String>) -> StatusCode {
     if state.subscriptions.remove(&id).is_some() {
         // Mark inactive in PostgreSQL
         if let Some(pool) = state.db_pool.clone() {
@@ -448,6 +459,9 @@ async fn main() {
     let (otel_sender, _otel_handle) = init_otel();
     OTEL_TX.set(otel_sender).ok();
 
+    if gateway_key().is_empty() {
+        panic!("BIS_EVENT_PROCESSOR_KEY must be configured");
+    }
     // ── PostgreSQL pool (optional) ───────────────────────────────────────────────────────────────────
     let db_pool = db::build_pool().await;
     if let Some(pool) = &db_pool {
@@ -489,10 +503,7 @@ async fn main() {
 
     let protected = Router::new()
         .route("/v1/events", post(publish_event))
-        .route(
-            "/v1/subscriptions",
-            post(subscribe).get(list_subscriptions),
-        )
+        .route("/v1/subscriptions", post(subscribe).get(list_subscriptions))
         .route(
             "/v1/subscriptions/:id",
             axum::routing::delete(delete_subscription),

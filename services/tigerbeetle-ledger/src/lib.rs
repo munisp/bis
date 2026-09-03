@@ -60,7 +60,11 @@ pub enum LedgerError {
     #[error("TigerBeetle HTTP proxy error: {0}")]
     ProxyError(String),
     #[error("Insufficient balance: account {account_id} has {available} but {required} required")]
-    InsufficientBalance { account_id: String, available: u64, required: u64 },
+    InsufficientBalance {
+        account_id: String,
+        available: u64,
+        required: u64,
+    },
     #[error("Account not found: {0}")]
     AccountNotFound(String),
     #[error("Duplicate transfer: idempotency key {0} already processed")]
@@ -231,20 +235,21 @@ pub struct StablecoinTransferRequest {
 pub struct TbClient {
     base_url: String,
     http: reqwest::Client,
-    pub enabled: bool,
 }
 
 impl TbClient {
-    pub fn new(base_url: &str) -> Self {
-        let enabled = !base_url.is_empty() && base_url != "disabled";
-        Self {
-            base_url: base_url.to_string(),
+    pub fn new(base_url: &str) -> Result<Self, LedgerError> {
+        if base_url.trim().is_empty() || base_url == "disabled" {
+            return Err(LedgerError::ProxyError(
+                "TIGERBEETLE_HTTP_URL must be configured".to_string(),
+            ));
+        }
+        Ok(Self {
+            base_url: base_url.trim_end_matches('/').to_string(),
             http: reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(10))
-                .build()
-                .expect("Failed to build HTTP client"),
-            enabled,
-        }
+                .build()?,
+        })
     }
 
     pub fn tenant_account_id(tenant_id: i32) -> String {
@@ -270,12 +275,15 @@ impl TbClient {
     }
 
     /// Create or ensure a tenant account exists in TigerBeetle
-    pub async fn ensure_account(&self, account_id: &str, ledger_code: u32, tenant_id: i32) -> Result<TbAccount, LedgerError> {
-        if !self.enabled {
-            return Ok(self.mock_account(account_id, ledger_code));
-        }
+    pub async fn ensure_account(
+        &self,
+        account_id: &str,
+        ledger_code: u32,
+        tenant_id: i32,
+    ) -> Result<TbAccount, LedgerError> {
         // Try to fetch existing account first
-        let resp = self.http
+        let resp = self
+            .http
             .get(format!("{}/accounts/{}", self.base_url, account_id))
             .send()
             .await?;
@@ -293,42 +301,47 @@ impl TbClient {
             code: 1000, // Tenant debit account code
             flags: 0,
         };
-        let resp = self.http
+        let resp = self
+            .http
             .post(format!("{}/accounts", self.base_url))
             .json(&[&req])
             .send()
             .await?;
         if !resp.status().is_success() {
             let body = resp.text().await.unwrap_or_default();
-            return Err(LedgerError::ProxyError(format!("create account failed: {}", body)));
+            return Err(LedgerError::ProxyError(format!(
+                "create account failed: {}",
+                body
+            )));
         }
-        Ok(self.mock_account(account_id, ledger_code))
+        self.get_account(account_id).await
     }
 
     /// Post a double-entry transfer
-    pub async fn create_transfer(&self, req: &CreateTransferRequest) -> Result<String, LedgerError> {
-        if !self.enabled {
-            tracing::debug!("[TigerBeetle] (dev) transfer {} → {} amount={}", req.debit_account_id, req.credit_account_id, req.amount);
-            return Ok(req.id.clone());
-        }
-        let resp = self.http
+    pub async fn create_transfer(
+        &self,
+        req: &CreateTransferRequest,
+    ) -> Result<String, LedgerError> {
+        let resp = self
+            .http
             .post(format!("{}/transfers", self.base_url))
             .json(&[req])
             .send()
             .await?;
         if !resp.status().is_success() {
             let body = resp.text().await.unwrap_or_default();
-            return Err(LedgerError::ProxyError(format!("create transfer failed: {}", body)));
+            return Err(LedgerError::ProxyError(format!(
+                "create transfer failed: {}",
+                body
+            )));
         }
         Ok(req.id.clone())
     }
 
     /// Fetch account balance
     pub async fn get_account(&self, account_id: &str) -> Result<TbAccount, LedgerError> {
-        if !self.enabled {
-            return Ok(self.mock_account(account_id, ledger::NGN));
-        }
-        let resp = self.http
+        let resp = self
+            .http
             .get(format!("{}/accounts/{}", self.base_url, account_id))
             .send()
             .await?;
@@ -340,22 +353,6 @@ impl TbClient {
             return Err(LedgerError::ProxyError(body));
         }
         Ok(resp.json().await?)
-    }
-
-    fn mock_account(&self, id: &str, ledger_code: u32) -> TbAccount {
-        TbAccount {
-            id: id.to_string(),
-            debits_pending: 0,
-            debits_posted: 0,
-            credits_pending: 0,
-            credits_posted: 10_000_000_000, // ₦100,000 mock balance
-            user_data_128: String::new(),
-            user_data_64: 0,
-            user_data_32: 0,
-            ledger: ledger_code,
-            code: 1000,
-            flags: 0,
-        }
     }
 }
 
@@ -369,7 +366,9 @@ pub async fn execute_topup(
     let ledger_code = TbClient::ledger_for_currency(&req.currency);
     let tenant_account_id = TbClient::tenant_account_id(req.tenant_id);
     // Ensure tenant account exists
-    client.ensure_account(&tenant_account_id, ledger_code, req.tenant_id).await?;
+    client
+        .ensure_account(&tenant_account_id, ledger_code, req.tenant_id)
+        .await?;
     // Transfer: FLOAT → TENANT
     let transfer_id = Uuid::new_v4().to_string();
     let transfer = CreateTransferRequest {

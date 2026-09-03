@@ -1277,7 +1277,7 @@ export default function PaymentRailsPage() {
           <strong className="text-slate-300">1B payments lessons applied:</strong>{" "}
           Transfers are batched at 8,190 (TigerBeetle limit), partitioned by account via murmur2 hash across 32 Kafka partitions,
           and protected by idempotency keys. Backpressure returns HTTP 503 when the queue exceeds capacity.
-          Data is tiered: hot (MySQL, 0–90d), warm (S3 JSONL, 90d–1yr), cold (S3 archive, 1yr+).
+          Data is tiered: hot (PostgreSQL, 0–90d), warm (S3 JSONL, 90d–1yr), cold (S3 archive, 1yr+).
           Archival runs nightly at 02:00 UTC or on demand via the button above.
         </AlertDescription>
       </Alert>

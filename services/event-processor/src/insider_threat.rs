@@ -220,7 +220,10 @@ pub async fn handle_process_event(
 ) -> (StatusCode, Json<serde_json::Value>) {
     let alerts = detector.process(&event);
     let count = alerts.len();
-    info!("[InsiderThreat] Processed event: {} alert(s) triggered", count);
+    info!(
+        "[InsiderThreat] Processed event: {} alert(s) triggered",
+        count
+    );
     (
         StatusCode::OK,
         Json(serde_json::json!({

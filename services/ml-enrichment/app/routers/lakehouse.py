@@ -4,7 +4,7 @@ app/routers/lakehouse.py — Natural-language AI query over the BIS data lakehou
 The Lakehouse AI query pipeline:
   1. Accept a natural-language question from the analyst
   2. Use Ollama (or cloud LLM) to convert the question to a SQL query
-  3. Execute the SQL against the BIS MySQL/TiDB database
+  3. Execute the SQL against the BIS PostgreSQL database
   4. Use Ollama to summarise the result set in plain English
   5. Return both the SQL and the natural-language answer
 
@@ -48,7 +48,7 @@ class LakehouseQueryResponse(BaseModel):
 # ── Schema context for SQL generation ────────────────────────────────────────
 
 SCHEMA_CONTEXT = """
-BIS Platform MySQL/TiDB Database Schema (key tables, camelCase column names):
+BIS Platform PostgreSQL Database Schema (key tables, snake_case column names):
 
 investigations(id, ref, title, status, priority, riskScore, subjectName, createdAt, dueAt)
   status values: open | in_progress | closed | archived
@@ -80,11 +80,11 @@ auditLog(id, action, entityType, entityId, actorId, createdAt)
 Rules:
 - Always use SELECT only (no INSERT/UPDATE/DELETE/DROP/ALTER)
 - Use LIMIT to cap results (max 1000 rows)
-- Column names are camelCase — quote them with backticks: `riskScore`, `createdAt`
-- Use DATE() or DATE_FORMAT() for date grouping
+- Column names are snake_case, for example risk_score and created_at
+- Use DATE_TRUNC() for date grouping
 - Use COUNT(*), AVG(), SUM() for aggregations
 - Always include createdAt in time-based queries
-- For date filtering use: WHERE `createdAt` >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+- For date filtering use: WHERE created_at >= NOW() - INTERVAL '30 days'
 """
 
 
@@ -100,12 +100,14 @@ def sanitize_sql(sql: str) -> str:
 
 
 def _make_async_url(db_url: str) -> str:
-    """Convert a sync database URL to an async one for SQLAlchemy."""
-    if db_url.startswith("mysql://"):
-        return db_url.replace("mysql://", "mysql+aiomysql://", 1)
+    """Normalize an explicit PostgreSQL URL for SQLAlchemy's asyncpg driver."""
+    if db_url.startswith("postgresql+asyncpg://"):
+        return db_url
     if db_url.startswith("postgresql://"):
         return db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
-    return db_url
+    if db_url.startswith("postgres://"):
+        return db_url.replace("postgres://", "postgresql+asyncpg://", 1)
+    raise ValueError("DATABASE_URL must be a PostgreSQL URL")
 
 
 # ── Endpoint ──────────────────────────────────────────────────────────────────
@@ -124,14 +126,14 @@ async def lakehouse_query(req: LakehouseQueryRequest, request: Request) -> Lakeh
 Question: {req.question}
 {f'Additional context: {req.context}' if req.context else ''}
 
-Generate a single valid MySQL SELECT query to answer this question.
+Generate a single valid PostgreSQL SELECT query to answer this question.
 Return ONLY the SQL query, no explanation, no markdown fences.
 """
     try:
         generated_sql = await ollama.generate(
             model=model,
             prompt=sql_prompt,
-            system="You are a MySQL expert. Return only valid SQL SELECT statements.",
+            system="You are a PostgreSQL expert. Return only valid SQL SELECT statements.",
         )
         generated_sql = sanitize_sql(generated_sql.strip())
     except ValueError as e:
@@ -150,7 +152,7 @@ Return ONLY the SQL query, no explanation, no markdown fences.
             pool_pre_ping=True,
             pool_size=1,
             max_overflow=0,
-            connect_args={"connect_timeout": 5},
+            connect_args={"command_timeout": 5},
         )
         # Enforce row limit in generated SQL
         limited_sql = generated_sql
@@ -158,6 +160,8 @@ Return ONLY the SQL query, no explanation, no markdown fences.
             limited_sql = f"{limited_sql} LIMIT {req.max_rows}"
 
         async with engine.connect() as conn:
+            await conn.execute(sa_text("SET TRANSACTION READ ONLY"))
+            await conn.execute(sa_text("SET LOCAL statement_timeout = '5000ms'"))
             result = await conn.execute(sa_text(limited_sql))
             columns = list(result.keys())
             raw_rows = result.fetchall()

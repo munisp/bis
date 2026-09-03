@@ -906,56 +906,40 @@ describe("Seed Data", () => {
 
 // ─── Migration SQL tests ──────────────────────────────────────────────────────
 
-describe("Migration SQL Files", () => {
-  it("0055_drizzle_orm_improvements.sql should exist", async () => {
+describe("Canonical PostgreSQL Baseline", () => {
+  const baselinePath = repositoryFile("drizzle", "0000_postgresql_baseline.sql");
+  const journalPath = repositoryFile("drizzle", "meta", "_journal.json");
+
+  it("ships exactly one executable PostgreSQL baseline migration", async () => {
     const fs = await import("fs");
-    expect(fs.existsSync(repositoryFile("drizzle", "0055_drizzle_orm_improvements.sql"))).toBe(true);
+    expect(fs.existsSync(baselinePath)).toBe(true);
+    const journal = JSON.parse(fs.readFileSync(journalPath, "utf8")) as { dialect: string; entries: Array<{ tag: string }> };
+    expect(journal.dialect).toBe("postgresql");
+    expect(journal.entries.map((entry) => entry.tag)).toEqual(["0000_postgresql_baseline"]);
   });
 
-  it("0055_drizzle_orm_improvements.rollback.sql should exist", async () => {
+  it("includes jsonb columns and soft-delete fields", async () => {
     const fs = await import("fs");
-    expect(fs.existsSync(repositoryFile("drizzle", "0055_drizzle_orm_improvements.rollback.sql"))).toBe(true);
-  });
-
-  it("migration SQL should include jsonb upgrades", async () => {
-    const fs = await import("fs");
-    const content = fs.readFileSync(repositoryFile("drizzle", "0055_drizzle_orm_improvements.sql"), "utf8");
-    expect(content).toContain("TYPE jsonb");
-  });
-
-  it("migration SQL should include soft-delete columns", async () => {
-    const fs = await import("fs");
-    const content = fs.readFileSync(repositoryFile("drizzle", "0055_drizzle_orm_improvements.sql"), "utf8");
+    const content = fs.readFileSync(baselinePath, "utf8");
+    expect(content).toContain("jsonb");
     expect(content).toContain("deletedAt");
     expect(content).toContain("deletedBy");
   });
 
-  it("migration SQL should include GIN full-text search indexes", async () => {
+  it("includes GIN full-text search indexes", async () => {
     const fs = await import("fs");
-    const content = fs.readFileSync(repositoryFile("drizzle", "0055_drizzle_orm_improvements.sql"), "utf8");
+    const content = fs.readFileSync(baselinePath, "utf8");
     expect(content).toContain("investigations_search_idx");
     expect(content).toContain("kyc_records_search_idx");
     expect(content).toContain("cases_search_idx");
   });
 
-  it("migration SQL should include CHECK constraints", async () => {
+  it("includes risk-score CHECK constraints", async () => {
     const fs = await import("fs");
-    const content = fs.readFileSync(repositoryFile("drizzle", "0055_drizzle_orm_improvements.sql"), "utf8");
+    const content = fs.readFileSync(baselinePath, "utf8");
     expect(content).toContain("investigations_risk_score_check");
     expect(content).toContain("kyc_records_risk_score_check");
     expect(content).toContain("cases_risk_score_check");
-  });
-
-  it("rollback SQL should include DROP INDEX statements", async () => {
-    const fs = await import("fs");
-    const content = fs.readFileSync(repositoryFile("drizzle", "0055_drizzle_orm_improvements.rollback.sql"), "utf8");
-    expect(content).toContain("DROP INDEX");
-  });
-
-  it("rollback SQL should include DROP CONSTRAINT statements", async () => {
-    const fs = await import("fs");
-    const content = fs.readFileSync(repositoryFile("drizzle", "0055_drizzle_orm_improvements.rollback.sql"), "utf8");
-    expect(content).toContain("DROP CONSTRAINT");
   });
 });
 

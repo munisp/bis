@@ -1,1 +1,0 @@
-ALTER TABLE "audit_log" ADD COLUMN "integrityHash" varchar(64);

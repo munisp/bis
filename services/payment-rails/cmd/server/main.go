@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -22,29 +23,60 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+func serviceAuthMiddleware(expectedKey string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			key := r.Header.Get("X-BIS-Key")
+			if key == "" {
+				if authorization := r.Header.Get("Authorization"); len(authorization) > len("Bearer ") && authorization[:len("Bearer ")] == "Bearer " {
+					key = authorization[len("Bearer "):]
+				}
+			}
+			if expectedKey == "" || len(key) != len(expectedKey) || subtle.ConstantTimeCompare([]byte(key), []byte(expectedKey)) != 1 {
+				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 func main() {
 	zerolog.TimeFieldFormat = time.RFC3339
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339})
 	cfg := config.Load()
-
-	// TigerBeetle hot-tier ledger client
-	// Lesson: 48K sustained / 63K burst TPS via O_DIRECT + io_uring + circular WAL (zero fsyncs)
-	if cfg.TigerBeetleURL != "" {
-		os.Setenv("TIGERBEETLE_URL", cfg.TigerBeetleURL)
+	if err := cfg.ValidateProduction(); err != nil {
+		log.Fatal().Err(err).Msg("invalid production configuration")
 	}
-	tbClient := tigerbeetle.New()
+	if cfg.ServiceAPIKey == "" {
+		log.Fatal().Msg("BIS_PAYMENT_RAILS_KEY must be configured")
+	}
+
+	// TigerBeetle must be reachable before the service can accept a monetary operation.
+	if cfg.TigerBeetleURL == "" {
+		log.Fatal().Msg("TIGERBEETLE_URL must be configured")
+	}
+	os.Setenv("TIGERBEETLE_URL", cfg.TigerBeetleURL)
+	tbClient, err := tigerbeetle.New()
+	if err != nil {
+		log.Fatal().Err(err).Msg("TigerBeetle client initialization failed")
+	}
 	initCtx, initCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	if err := tbClient.EnsureSystemAccounts(initCtx); err != nil {
-		log.Warn().Err(err).Msg("[TigerBeetle] Could not bootstrap system accounts")
+		initCancel()
+		log.Fatal().Err(err).Msg("TigerBeetle system-account bootstrap failed")
 	}
 	initCancel()
 
 	// Backpressure limiter — return 503 early when pipeline is saturated
 	bp := backpressure.New(cfg.MaxInflightTransfers)
 
-	// Real Kafka publisher (falls back to no-op stub when KAFKA_BROKERS is unset).
+	// Payment events are synchronously acknowledged by Kafka before a success response.
 	kafkaCfg := kafka.LoadConfigFromEnv()
-	kafkaPublisher := kafka.New(kafkaCfg)
+	kafkaPublisher, err := kafka.New(kafkaCfg)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Kafka publisher initialization failed")
+	}
 	defer kafkaPublisher.Close()
 
 	swiftH := handlers.NewSWIFTHandler(cfg.AMLEngineURL, kafkaPublisher)
@@ -90,41 +122,44 @@ func main() {
 		fmt.Fprintf(w, "payment_rails_tb_max_batch_size %d\n", tigerbeetle.MaxBatchSize)
 	})
 
-	r.Route("/api/swift", func(r chi.Router) {
-		r.Use(bp.Middleware)
-		r.Post("/mt103", swiftH.HandleMT103)
-		r.Post("/mt202", swiftH.HandleMT202)
-		r.Get("/gpi/{uetr}", swiftH.HandleGPITrack)
-	})
+	r.Group(func(r chi.Router) {
+		r.Use(serviceAuthMiddleware(cfg.ServiceAPIKey))
+		r.Route("/api/swift", func(r chi.Router) {
+			r.Use(bp.Middleware)
+			r.Post("/mt103", swiftH.HandleMT103)
+			r.Post("/mt202", swiftH.HandleMT202)
+			r.Get("/gpi/{uetr}", swiftH.HandleGPITrack)
+		})
 
-	r.Route("/api/sepa", func(r chi.Router) {
-		r.Use(bp.Middleware)
-		r.Post("/credit-transfer", sepaH.HandleCreditTransfer)
-		r.Post("/direct-debit", sepaH.HandleDirectDebit)
-		r.Post("/instant", sepaH.HandleInstant)
-	})
+		r.Route("/api/sepa", func(r chi.Router) {
+			r.Use(bp.Middleware)
+			r.Post("/credit-transfer", sepaH.HandleCreditTransfer)
+			r.Post("/direct-debit", sepaH.HandleDirectDebit)
+			r.Post("/instant", sepaH.HandleInstant)
+		})
 
-	r.Route("/api/travel-rule", func(r chi.Router) {
-		r.Use(bp.Middleware)
-		r.Post("/send", travelH.HandleSend)
-		r.Post("/receive", travelH.HandleReceive)
-		r.Get("/thresholds", travelH.HandleThresholds)
-	})
+		r.Route("/api/travel-rule", func(r chi.Router) {
+			r.Use(bp.Middleware)
+			r.Post("/send", travelH.HandleSend)
+			r.Post("/receive", travelH.HandleReceive)
+			r.Get("/thresholds", travelH.HandleThresholds)
+		})
 
-	r.Route("/api/ledger", func(r chi.Router) {
-		r.Get("/balance/{accountId}", func(w http.ResponseWriter, r *http.Request) {
-			accountID := chi.URLParam(r, "accountId")
-			balance, err := tbClient.GetBalance(r.Context(), accountID)
-			if err != nil {
-				http.Error(w, `{"error":"ledger_error"}`, http.StatusInternalServerError)
-				return
-			}
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"account_id": accountID,
-				"balance":    balance,
-				"currency":   "NGN",
-				"unit":       "kobo",
+		r.Route("/api/ledger", func(r chi.Router) {
+			r.Get("/balance/{accountId}", func(w http.ResponseWriter, r *http.Request) {
+				accountID := chi.URLParam(r, "accountId")
+				balance, err := tbClient.GetBalance(r.Context(), accountID)
+				if err != nil {
+					http.Error(w, `{"error":"ledger_error"}`, http.StatusInternalServerError)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"account_id": accountID,
+					"balance":    balance,
+					"currency":   "NGN",
+					"unit":       "kobo",
+				})
 			})
 		})
 	})

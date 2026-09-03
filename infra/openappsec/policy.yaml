@@ -15,7 +15,7 @@ metadata:
   name: bis-screening-waf
   namespace: bis-platform
   labels:
-    app: bis-pwa
+    app: bis
     environment: production
 
 spec:
@@ -25,7 +25,7 @@ spec:
   
   # ─── Protected Assets ─────────────────────────────────────────────────────
   assets:
-    - name: bis-pwa-api
+    - name: bis-api
       urls:
         - "/api/trpc/*"
         - "/api/oauth/*"

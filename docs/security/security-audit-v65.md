@@ -120,7 +120,7 @@ A comprehensive security audit was conducted across all layers of the BIS Platfo
 ### Data Protection
 
 - **Passwords:** Not stored (OAuth-only authentication)
-- **Sensitive data:** Encrypted at rest via database-level encryption (TiDB/MySQL)
+- **Sensitive data:** Encrypted at rest via database-level encryption (PostgreSQL)
 - **API tokens:** Stored as SHA-256 hashes, never in plaintext
 - **TOTP secrets:** Stored encrypted in database
 - **Audit trail:** Immutable append-only log with integrity verification
@@ -185,7 +185,7 @@ Internet
 3. **Enable Keycloak SSO:** Set `KEYCLOAK_URL`, `KEYCLOAK_REALM`, `KEYCLOAK_CLIENT_ID`, `KEYCLOAK_CLIENT_SECRET`
 4. **Configure SMTP:** Set `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` for email notifications
 5. **Set ALLOWED_ORIGINS:** Add production domain to `ALLOWED_ORIGINS` environment variable
-6. **Enable database encryption:** Ensure TiDB/MySQL encryption-at-rest is enabled
+6. **Enable database encryption:** Ensure PostgreSQL encryption-at-rest is enabled
 7. **Rotate JWT_SECRET:** Generate a new 256-bit random secret for production
 8. **Configure Slack alerts:** Set `SLACK_WEBHOOK_URL` for operational notifications
 

@@ -21,6 +21,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -33,8 +34,8 @@ import (
 	daprpkg "bis/gateway/dapr"
 	insiderpkg "bis/gateway/insider"
 	kafkapkg "bis/gateway/kafka"
-	ospkg "bis/gateway/opensearch"
 	keycloakpkg "bis/gateway/keycloak"
+	ospkg "bis/gateway/opensearch"
 	permifypkg "bis/gateway/permify"
 	redispkg "bis/gateway/redis"
 	temporalpkg "bis/gateway/temporal"
@@ -46,11 +47,11 @@ import (
 
 var (
 	port          = envOr("GATEWAY_PORT", "8081")
-	gatewayKey    = envOr("BIS_GATEWAY_KEY", "dev-gateway-key-change-in-prod")
+	gatewayKey    = os.Getenv("BIS_GATEWAY_KEY")
 	riskEngineURL = envOr("RISK_ENGINE_URL", "http://localhost:8082")
 	eventProcURL  = envOr("EVENT_PROCESSOR_URL", "http://localhost:8083")
 
-		// External API credentials — empty means the dependent route is unavailable.
+	// External API credentials — empty means the dependent route is unavailable.
 	nimcAPIURL  = envOr("NIMC_API_URL", "")
 	nimcAPIKey  = envOr("NIMC_API_KEY", "")
 	nibssAPIURL = envOr("NIBSS_API_URL", "")
@@ -75,14 +76,14 @@ var (
 	tbAddr        = envOr("TIGERBEETLE_ADDR", "")
 
 	// Initialized middleware clients (nil = not configured)
-	redisClient      *redispkg.Client
-	kafkaProducer    *kafkapkg.Producer
-	keycloakClient   *keycloakpkg.OIDCClient
-	permifyClient    *permifypkg.Client
-	temporalClient   *temporalpkg.Client
-	tbClient         *tigerbeetlepkg.Client
+	redisClient    *redispkg.Client
+	kafkaProducer  *kafkapkg.Producer
+	keycloakClient *keycloakpkg.OIDCClient
+	permifyClient  *permifypkg.Client
+	temporalClient *temporalpkg.Client
+	tbClient       *tigerbeetlepkg.Client
 	// BIS own verification engine (with Youverify fallback)
-	verifyEngine     *verifypkg.Engine
+	verifyEngine *verifypkg.Engine
 )
 
 func envOr(key, fallback string) string {
@@ -258,24 +259,17 @@ type GatewayError struct {
 
 func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// 1. Try Keycloak Bearer token if configured
-		if keycloakClient != nil {
-			bearer := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-			if bearer != "" {
-				if err := keycloakClient.ValidateToken(r.Context(), bearer); err == nil {
-					next(w, r)
-					return
-				}
-			}
-		}
-
-		// 2. Fall back to X-BIS-Key header / query param
+		// Service callers authenticate with an explicitly configured API key. Browser
+		// clients authenticate through the BFF; query-string credentials are forbidden
+		// because URLs are routinely logged by proxies and observability systems.
 		key := r.Header.Get("X-BIS-Key")
 		if key == "" {
-			key = r.URL.Query().Get("key")
+			if authorization := r.Header.Get("Authorization"); strings.HasPrefix(authorization, "Bearer ") {
+				key = strings.TrimPrefix(authorization, "Bearer ")
+			}
 		}
-		if key != gatewayKey {
-			writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "Invalid or missing API key")
+		if gatewayKey == "" || len(key) != len(gatewayKey) || subtle.ConstantTimeCompare([]byte(key), []byte(gatewayKey)) != 1 {
+			writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "Invalid or missing service credential")
 			return
 		}
 		next(w, r)
@@ -293,9 +287,18 @@ func loggingMiddleware(next http.HandlerFunc) http.HandlerFunc {
 
 func corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-BIS-Key, Authorization")
+		origin := r.Header.Get("Origin")
+		allowedOrigin := os.Getenv("BIS_CORS_ORIGIN")
+		if origin != "" {
+			if allowedOrigin == "" || origin != allowedOrigin {
+				writeError(w, http.StatusForbidden, "CORS_ORIGIN_FORBIDDEN", "Origin is not allowed")
+				return
+			}
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Vary", "Origin")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-BIS-Key, Authorization")
+		}
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return
@@ -358,15 +361,17 @@ func publishEvent(topic string, payload any) {
 	publishEventWithDLQ(topic, payload)
 }
 
-// checkPermify verifies fine-grained authorization. Returns true if Permify is not configured (permissive default).
+// checkPermify verifies fine-grained authorization. Authorization fails closed
+// whenever the policy service is unavailable or cannot evaluate a request.
 func checkPermify(ctx context.Context, subject, action, resource string) bool {
 	if permifyClient == nil {
-		return true // permissive when not configured
+		log.Printf("[WARN] Permify is not configured; denying %s on %s", action, resource)
+		return false
 	}
 	allowed, err := permifyClient.Check(ctx, "user", subject, action, resource)
 	if err != nil {
-		log.Printf("[WARN] Permify check failed: %v — allowing by default", err)
-		return true
+		log.Printf("[WARN] Permify check failed: %v — denying request", err)
+		return false
 	}
 	return allowed
 }
@@ -1167,12 +1172,12 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 		"version": "2.0.0",
 		"time":    now(),
 		"middleware": map[string]bool{
-			"redis":        redisClient != nil,
-			"kafka":        kafkaProducer != nil,
-			"keycloak":     keycloakClient != nil,
-			"permify":      permifyClient != nil,
-			"temporal":     temporalClient != nil,
-			"tigerbeetle":  tbClient != nil,
+			"redis":       redisClient != nil,
+			"kafka":       kafkaProducer != nil,
+			"keycloak":    keycloakClient != nil,
+			"permify":     permifyClient != nil,
+			"temporal":    temporalClient != nil,
+			"tigerbeetle": tbClient != nil,
 		},
 		"externalAPIs": map[string]bool{
 			"nimc":      nimcAPIURL != "" && nimcAPIKey != "",
@@ -1314,26 +1319,43 @@ func newRouter() http.Handler {
 	mux.HandleFunc("/v1/velocity/alert", protected(handleVelocityAlert))
 
 	// ── Criminal Records, Corporate Check, AI Summary, Field Visit, Thin-File ──
-	RegisterCriminalRecordsRoutes(mux)
+	RegisterCriminalRecordsRoutes(mux, protected)
 	RegisterMojaloopComplianceRoutes(mux, protected)
 
 	// ── Dapr pub/sub subscriber endpoints ────────────────────────────────────
 	// Dapr calls GET /dapr/subscribe to discover subscriptions
-	mux.HandleFunc("/dapr/subscribe", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/dapr/subscribe", protected(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(daprpkg.Subscriptions())
-	})
-	mux.HandleFunc("/dapr/subscribe/aml-alerts", daprpkg.HandleAMLAlert)
-	mux.HandleFunc("/dapr/subscribe/investigation-events", daprpkg.HandleInvestigationEvent)
-	mux.HandleFunc("/dapr/subscribe/biometric-events", daprpkg.HandleBiometricEvent)
-	mux.HandleFunc("/dapr/subscribe/kyc-events", daprpkg.HandleKYCEvent)
-		mux.HandleFunc("/dapr/subscribe/payment-events", daprpkg.HandlePaymentEvent)
+	}))
+	mux.HandleFunc("/dapr/subscribe/aml-alerts", protected(daprpkg.HandleAMLAlert))
+	mux.HandleFunc("/dapr/subscribe/investigation-events", protected(daprpkg.HandleInvestigationEvent))
+	mux.HandleFunc("/dapr/subscribe/biometric-events", protected(daprpkg.HandleBiometricEvent))
+	mux.HandleFunc("/dapr/subscribe/kyc-events", protected(daprpkg.HandleKYCEvent))
+	mux.HandleFunc("/dapr/subscribe/payment-events", protected(daprpkg.HandlePaymentEvent))
 	// Insider Threat — Dapr subscription handler
-	mux.HandleFunc("/dapr/subscribe/insider-events", insiderpkg.HandleInsiderEvent)
+	mux.HandleFunc("/dapr/subscribe/insider-events", protected(insiderpkg.HandleInsiderEvent))
 	return mux
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
+
+func validateStartupConfig() {
+	if gatewayKey == "" {
+		log.Fatal("BIS_GATEWAY_KEY must be set")
+	}
+	if strings.EqualFold(os.Getenv("BIS_ENV"), "production") {
+		if keycloakURL == "" || keycloakClient == nil {
+			log.Fatal("production requires a reachable Keycloak OIDC client")
+		}
+		if permifyURL == "" || permifyClient == nil {
+			log.Fatal("production requires a reachable Permify authorization client")
+		}
+		if os.Getenv("BIS_CORS_ORIGIN") == "" {
+			log.Fatal("production requires BIS_CORS_ORIGIN when browser access is enabled")
+		}
+	}
+}
 
 func main() {
 	// Ensure OpenSearch indices exist at startup (non-fatal)
@@ -1348,6 +1370,7 @@ func main() {
 	log.Printf("Event Processor URL: %s", eventProcURL)
 
 	initMiddleware()
+	validateStartupConfig()
 
 	srv := &http.Server{
 		Addr:         ":" + port,

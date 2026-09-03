@@ -1,1 +1,0 @@
-ALTER TABLE "onboarding_applications" ADD COLUMN "adminNotes" text;

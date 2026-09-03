@@ -44,11 +44,9 @@ pub struct CriminalRecordIngestedPayload {
 /// - Computes a severity level based on offence category and verdict
 /// - Triggers a BFF alert for terrorism, violent, or warrant records
 /// - Publishes an enriched event for the OpenSearch indexer
-pub async fn handle_criminal_record_ingested(
-    event: &BisEvent,
-    audit_log: AuditLog,
-) {
-    let payload: CriminalRecordIngestedPayload = match serde_json::from_value(event.payload.clone()) {
+pub async fn handle_criminal_record_ingested(event: &BisEvent, audit_log: AuditLog) {
+    let payload: CriminalRecordIngestedPayload = match serde_json::from_value(event.payload.clone())
+    {
         Ok(p) => p,
         Err(e) => {
             warn!("[CriminalRecord] Failed to deserialise payload: {}", e);
@@ -159,17 +157,15 @@ pub struct CorporateCheckCompletedPayload {
 /// Handles bis.corporate.check_completed events.
 /// - Triggers BFF alert for adverse outcomes
 /// - Publishes enriched event for OpenSearch indexer
-pub async fn handle_corporate_check_completed(
-    event: &BisEvent,
-    audit_log: AuditLog,
-) {
-    let payload: CorporateCheckCompletedPayload = match serde_json::from_value(event.payload.clone()) {
-        Ok(p) => p,
-        Err(e) => {
-            warn!("[CorporateCheck] Failed to deserialise payload: {}", e);
-            return;
-        }
-    };
+pub async fn handle_corporate_check_completed(event: &BisEvent, audit_log: AuditLog) {
+    let payload: CorporateCheckCompletedPayload =
+        match serde_json::from_value(event.payload.clone()) {
+            Ok(p) => p,
+            Err(e) => {
+                warn!("[CorporateCheck] Failed to deserialise payload: {}", e);
+                return;
+            }
+        };
 
     info!(
         "[CorporateCheck] Completed: ref={} outcome={} risk={:.1} flags={:?}",
@@ -237,10 +233,7 @@ pub struct FieldVisitCheckInPayload {
 }
 
 /// Handles bis.field_visit.checked_in events.
-pub async fn handle_field_visit_checked_in(
-    event: &BisEvent,
-    audit_log: AuditLog,
-) {
+pub async fn handle_field_visit_checked_in(event: &BisEvent, audit_log: AuditLog) {
     let payload: FieldVisitCheckInPayload = match serde_json::from_value(event.payload.clone()) {
         Ok(p) => p,
         Err(e) => {
@@ -285,14 +278,14 @@ pub struct FieldVisitCheckOutPayload {
 
 /// Handles bis.field_visit.checked_out events.
 /// Flags suspiciously short visits (< 5 minutes) for review.
-pub async fn handle_field_visit_checked_out(
-    event: &BisEvent,
-    audit_log: AuditLog,
-) {
+pub async fn handle_field_visit_checked_out(event: &BisEvent, audit_log: AuditLog) {
     let payload: FieldVisitCheckOutPayload = match serde_json::from_value(event.payload.clone()) {
         Ok(p) => p,
         Err(e) => {
-            warn!("[FieldVisit] Failed to deserialise check-out payload: {}", e);
+            warn!(
+                "[FieldVisit] Failed to deserialise check-out payload: {}",
+                e
+            );
             return;
         }
     };
@@ -356,14 +349,14 @@ pub struct ThinFileFlaggedPayload {
 
 /// Handles bis.investigation.thin_file_flagged events.
 /// Notifies the BFF so the investigation dashboard updates in real-time.
-pub async fn handle_thin_file_flagged(
-    event: &BisEvent,
-    audit_log: AuditLog,
-) {
+pub async fn handle_thin_file_flagged(event: &BisEvent, audit_log: AuditLog) {
     let payload: ThinFileFlaggedPayload = match serde_json::from_value(event.payload.clone()) {
         Ok(p) => p,
         Err(e) => {
-            warn!("[ThinFile] Failed to deserialise thin_file_flagged payload: {}", e);
+            warn!(
+                "[ThinFile] Failed to deserialise thin_file_flagged payload: {}",
+                e
+            );
             return;
         }
     };
@@ -415,14 +408,14 @@ pub struct ThinFileRevertedPayload {
 }
 
 /// Handles bis.investigation.thin_file_reverted events.
-pub async fn handle_thin_file_reverted(
-    event: &BisEvent,
-    audit_log: AuditLog,
-) {
+pub async fn handle_thin_file_reverted(event: &BisEvent, audit_log: AuditLog) {
     let payload: ThinFileRevertedPayload = match serde_json::from_value(event.payload.clone()) {
         Ok(p) => p,
         Err(e) => {
-            warn!("[ThinFile] Failed to deserialise thin_file_reverted payload: {}", e);
+            warn!(
+                "[ThinFile] Failed to deserialise thin_file_reverted payload: {}",
+                e
+            );
             return;
         }
     };
@@ -460,10 +453,7 @@ pub struct MojaloopCompliancePayload {
 
 /// Handles bis.mojaloop.compliance_checked events.
 /// Blocks and alerts on non-approved compliance checks.
-pub async fn handle_mojaloop_compliance(
-    event: &BisEvent,
-    audit_log: AuditLog,
-) {
+pub async fn handle_mojaloop_compliance(event: &BisEvent, audit_log: AuditLog) {
     let payload: MojaloopCompliancePayload = match serde_json::from_value(event.payload.clone()) {
         Ok(p) => p,
         Err(e) => {
@@ -525,14 +515,14 @@ pub struct FluvioCriminalRecordPayload {
 
 /// Handles bis.fluvio.criminal_record events from the Fluvio velocity stream.
 /// These are lightweight, high-throughput events for real-time analytics.
-pub async fn handle_fluvio_criminal_record(
-    event: &BisEvent,
-    audit_log: AuditLog,
-) {
+pub async fn handle_fluvio_criminal_record(event: &BisEvent, audit_log: AuditLog) {
     let payload: FluvioCriminalRecordPayload = match serde_json::from_value(event.payload.clone()) {
         Ok(p) => p,
         Err(e) => {
-            warn!("[Fluvio] Failed to deserialise criminal record payload: {}", e);
+            warn!(
+                "[Fluvio] Failed to deserialise criminal record payload: {}",
+                e
+            );
             return;
         }
     };

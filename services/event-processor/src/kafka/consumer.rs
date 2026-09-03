@@ -61,9 +61,13 @@ pub async fn start_consumer(audit_log: AuditLog) {
     use rdkafka::message::Message;
 
     let brokers = std::env::var("KAFKA_BROKERS").unwrap_or_else(|_| "localhost:9092".to_string());
-    let security = std::env::var("KAFKA_SECURITY_PROTOCOL").unwrap_or_else(|_| "PLAINTEXT".to_string());
+    let security =
+        std::env::var("KAFKA_SECURITY_PROTOCOL").unwrap_or_else(|_| "PLAINTEXT".to_string());
 
-    info!("[Kafka] Native rdkafka consumer starting — brokers={} topics={:?}", brokers, TOPICS);
+    info!(
+        "[Kafka] Native rdkafka consumer starting — brokers={} topics={:?}",
+        brokers, TOPICS
+    );
 
     let mut config = ClientConfig::new();
     config
@@ -115,8 +119,11 @@ pub async fn start_consumer(audit_log: AuditLog) {
                             process_event(event, log.clone()).await;
                         }
                         Err(e) => {
-                            warn!("[Kafka] Failed to deserialize event: {} — raw: {:?}", e,
-                                  String::from_utf8_lossy(payload));
+                            warn!(
+                                "[Kafka] Failed to deserialize event: {} — raw: {:?}",
+                                e,
+                                String::from_utf8_lossy(payload)
+                            );
                         }
                     }
                 }
@@ -222,7 +229,8 @@ async fn forward_to_bff(entry: serde_json::Value) {
 
     let client = match reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
-        .build() {
+        .build()
+    {
         Ok(c) => c,
         Err(e) => {
             warn!("[BFF] Failed to build HTTP client: {}", e);

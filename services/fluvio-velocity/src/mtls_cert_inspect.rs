@@ -44,7 +44,10 @@ impl PeerCertInfo {
         if let Some(cn) = &self.common_name {
             return cn.as_str();
         }
-        self.dns_sans.first().map(|s| s.as_str()).unwrap_or("<unknown>")
+        self.dns_sans
+            .first()
+            .map(|s| s.as_str())
+            .unwrap_or("<unknown>")
     }
 }
 
@@ -55,8 +58,7 @@ pub fn parse_peer_cert(der: &[u8]) -> Option<PeerCertInfo> {
     // Use x509-parser if available; otherwise fall back to a lightweight
     // manual parser for the CN only (avoids a hard dependency in environments
     // where x509-parser is not yet vendored).
-    parse_with_x509_parser(der)
-        .or_else(|| parse_cn_fallback(der))
+    parse_with_x509_parser(der).or_else(|| parse_cn_fallback(der))
 }
 
 /// Parse using the `x509-parser` crate (preferred).
@@ -212,13 +214,20 @@ mod tests {
         let cn_len = cn_bytes.len() as u8;
         let mut der = vec![
             // Padding to simulate real DER prefix
-            0x30, 0x82, 0x00, 0x00,
+            0x30,
+            0x82,
+            0x00,
+            0x00,
             // commonName OID
-            0x55, 0x04, 0x03,
+            0x55,
+            0x04,
+            0x03,
             // SET tag + length
-            0x31, (cn_len + 2),
+            0x31,
+            (cn_len + 2),
             // UTF8String tag + length
-            0x0C, cn_len,
+            0x0C,
+            cn_len,
         ];
         der.extend_from_slice(cn_bytes);
         der

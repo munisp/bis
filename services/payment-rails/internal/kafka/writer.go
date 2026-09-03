@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -20,7 +21,7 @@ import (
 	"github.com/segmentio/kafka-go/sasl/scram"
 )
 
-// Publisher is the interface satisfied by both the real writer and the stub.
+// Publisher is the durable event-publishing contract used by payment operations.
 type Publisher interface {
 	Publish(ctx context.Context, topic, key string, value []byte) error
 	Close() error
@@ -80,29 +81,36 @@ func LoadConfigFromEnv() WriterConfig {
 
 // writer is the production Kafka publisher backed by kafka-go.
 type writer struct {
+	mu      sync.Mutex
 	writers map[string]*kafkago.Writer
 	cfg     WriterConfig
 }
 
-// New creates a new Kafka publisher.  If cfg.Brokers is empty the function
-// returns a no-op stub so the service starts cleanly in dev/test environments.
-func New(cfg WriterConfig) Publisher {
-	if cfg.Brokers == "" {
-		log.Warn().Msg("[Kafka] KAFKA_BROKERS not set — using no-op stub publisher")
-		return &stubPublisher{}
+// New creates a synchronous Kafka publisher. Payment processing must never
+// acknowledge a durable operation when its event stream is unavailable.
+func New(cfg WriterConfig) (Publisher, error) {
+	if strings.TrimSpace(cfg.Brokers) == "" {
+		return nil, fmt.Errorf("KAFKA_BROKERS must be configured")
+	}
+	if strings.TrimSpace(cfg.Username) == "" || strings.TrimSpace(cfg.Password) == "" {
+		return nil, fmt.Errorf("KAFKA_USERNAME and KAFKA_PASSWORD must be configured for SASL/TLS")
+	}
+	if cfg.Async {
+		return nil, fmt.Errorf("asynchronous Kafka publishing is prohibited for payment events")
 	}
 	log.Info().
 		Str("brokers", cfg.Brokers).
-		Bool("sasl", cfg.Username != "").
-		Msg("[Kafka] initialising real publisher")
+		Msg("[Kafka] initialising durable SASL/TLS publisher")
 	return &writer{
 		writers: make(map[string]*kafkago.Writer),
 		cfg:     cfg,
-	}
+	}, nil
 }
 
 // writerFor returns (creating if necessary) a *kafkago.Writer for the given topic.
 func (w *writer) writerFor(topic string) *kafkago.Writer {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	if kw, ok := w.writers[topic]; ok {
 		return kw
 	}
@@ -110,16 +118,13 @@ func (w *writer) writerFor(topic string) *kafkago.Writer {
 	transport := &kafkago.Transport{
 		DialTimeout: 5 * time.Second,
 	}
-	// Enable TLS + SASL when credentials are provided.
-	if w.cfg.Username != "" {
-		mechanism, err := scram.Mechanism(scram.SHA512, w.cfg.Username, w.cfg.Password)
-		if err != nil {
-			log.Error().Err(err).Msg("[Kafka] failed to create SCRAM mechanism")
-		} else {
-			transport.SASL = mechanism
-			transport.TLS = &tls.Config{MinVersion: tls.VersionTLS12}
-		}
+	// Authentication and TLS were validated at construction time.
+	mechanism, err := scram.Mechanism(scram.SHA512, w.cfg.Username, w.cfg.Password)
+	if err != nil {
+		panic(fmt.Sprintf("Kafka SCRAM configuration was prevalidated but failed: %v", err))
 	}
+	transport.SASL = mechanism
+	transport.TLS = &tls.Config{MinVersion: tls.VersionTLS12}
 	kw := &kafkago.Writer{
 		Addr:         kafkago.TCP(brokers...),
 		Topic:        topic,
@@ -130,8 +135,8 @@ func (w *writer) writerFor(topic string) *kafkago.Writer {
 		Compression:  kafkago.Snappy,
 		Async:        w.cfg.Async,
 		Transport:    transport,
-		// Allow the writer to create the topic automatically if it doesn't exist.
-		AllowAutoTopicCreation: true,
+		// Payment topics are provisioned and access-controlled before deployment.
+		AllowAutoTopicCreation: false,
 		// Log errors via zerolog.
 		Logger:      kafkago.LoggerFunc(func(msg string, args ...interface{}) { log.Debug().Msgf("[Kafka] "+msg, args...) }),
 		ErrorLogger: kafkago.LoggerFunc(func(msg string, args ...interface{}) { log.Error().Msgf("[Kafka] "+msg, args...) }),
@@ -171,6 +176,8 @@ func (w *writer) Publish(ctx context.Context, topic, key string, value []byte) e
 
 // Close flushes and closes all underlying writers.
 func (w *writer) Close() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	var errs []string
 	for topic, kw := range w.writers {
 		if err := kw.Close(); err != nil {
@@ -182,19 +189,3 @@ func (w *writer) Close() error {
 	}
 	return nil
 }
-
-// ── No-op stub ────────────────────────────────────────────────────────────────
-
-// stubPublisher is a no-op publisher used when KAFKA_BROKERS is not configured.
-type stubPublisher struct{}
-
-func (s *stubPublisher) Publish(_ context.Context, topic, key string, value []byte) error {
-	log.Debug().
-		Str("topic", topic).
-		Str("key", key).
-		Int("bytes", len(value)).
-		Msg("[Kafka/stub] publish (no-op)")
-	return nil
-}
-
-func (s *stubPublisher) Close() error { return nil }

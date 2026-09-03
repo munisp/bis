@@ -43,6 +43,9 @@ const productionCriticalConfigKeys = [
   "TIGERBEETLE_HTTP_URL",
   "PERMIFY_URL",
   "KEYCLOAK_URL",
+  "KEYCLOAK_REALM",
+  "KEYCLOAK_CLIENT_ID",
+  "KEYCLOAK_CLIENT_SECRET",
   "REDIS_URL",
   "BIS_WAF_KEY",
   "BIS_EDGE_TOKEN_SECRET",
@@ -51,15 +54,12 @@ const productionCriticalConfigKeys = [
 ] as const;
 
 export function resolveDatabaseUrl(source: SessionSecretSource = process.env): string {
-  const explicitPostgres = source.BIS_DATABASE_URL;
-  if (explicitPostgres) return explicitPostgres;
-
-  const injected = source.DATABASE_URL ?? "";
-  const isPostgres = injected.startsWith("postgresql:") || injected.startsWith("postgres:");
-  if (source.NODE_ENV !== "production" && !isPostgres) {
-    return "postgresql://bis_user:bis_secure_2026@localhost:5432/bis_db";
+  const databaseUrl = source.BIS_DATABASE_URL ?? source.DATABASE_URL ?? "";
+  if (!databaseUrl) return "";
+  if (!databaseUrl.startsWith("postgresql:") && !databaseUrl.startsWith("postgres:")) {
+    throw new Error("BIS_DATABASE_URL or DATABASE_URL must use a PostgreSQL URL");
   }
-  return injected;
+  return databaseUrl;
 }
 
 export function missingProductionConfig(values: Record<string, string>): string[] {
@@ -73,9 +73,7 @@ export const ENV = {
   // built-in JWT_SECRET. This value signs BFF session cookies and derives the
   // purpose-separated authenticator-seed encryption key.
   cookieSecret: sessionSigningSecret,
-  // The managed platform may inject a TiDB DATABASE_URL. PostgreSQL-only BIS
-  // deployments set BIS_DATABASE_URL explicitly. Development uses local PostgreSQL
-  // before module initialization so static imports cannot bind the injected TiDB URL.
+  // PostgreSQL is the sole supported relational database in every environment.
   databaseUrl: resolveDatabaseUrl(),
   oAuthServerUrl: process.env.OAUTH_SERVER_URL ?? "",
   ownerOpenId: process.env.OWNER_OPEN_ID ?? "",
@@ -187,9 +185,9 @@ export const ENV = {
   youverifyBaseUrl: process.env.YOUVERIFY_BASE_URL ?? "https://api.youverify.co/v2",
 
   // Keycloak IDP
-  keycloakUrl: configuredOrDevelopmentDefault("KEYCLOAK_URL", "http://keycloak:8080"),
-  keycloakRealm: process.env.KEYCLOAK_REALM ?? "bis-platform",
-  keycloakClientId: process.env.KEYCLOAK_CLIENT_ID ?? "bis-platform",
+  keycloakUrl: process.env.KEYCLOAK_URL ?? "",
+  keycloakRealm: process.env.KEYCLOAK_REALM ?? "",
+  keycloakClientId: process.env.KEYCLOAK_CLIENT_ID ?? "",
   keycloakClientSecret: process.env.KEYCLOAK_CLIENT_SECRET ?? "",
   keycloakPublicOrigin: process.env.KEYCLOAK_PUBLIC_ORIGIN ?? "",
 
@@ -255,7 +253,7 @@ export function validateEnv(): void {
     ["LAKEHOUSE_URL", ENV.lakehouseUrl, "Lakehouse writer defaults to localhost:8085"],
     ["OLLAMA_URL", ENV.ollamaUrl, "Ollama LLM defaults to localhost:11434"],
     ["CLICKHOUSE_URL", ENV.clickhouseUrl, "ClickHouse warm-tier archival defaults to localhost:8123"],
-    ["GOAML_API_KEY", ENV.goamlApiKey, "goAML NFIU submissions will use simulated reference numbers"],
+    ["GOAML_API_KEY", ENV.goamlApiKey, "goAML NFIU submissions are rejected until credentials are configured"],
     ["GOAML_INSTITUTION_CODE", ENV.goamlInstitutionCode, "goAML institution code not set — NFIU submissions will fail"],
     ["SLACK_WEBHOOK_URL", ENV.slackWebhookUrl, "Slack deploy/alert notifications disabled"],
     ["FCM_SERVER_KEY", ENV.fcmServerKey, "FCM push notifications disabled — mobile alerts will not be delivered"],

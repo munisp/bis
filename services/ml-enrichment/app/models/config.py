@@ -6,7 +6,9 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     env: str = "development"
     port: int = 8083
-    database_url: str = "mysql+aiomysql://root:@localhost:3306/bis_db"
+    # PostgreSQL is the only supported relational database. Deployment must provide
+    # a postgresql+asyncpg URL; startup validation rejects an empty or other dialect.
+    database_url: str = ""
     ollama_url: str = "http://localhost:11434"
     ollama_default_model: str = "llama3.2"
     ollama_fallback_to_cloud: bool = True

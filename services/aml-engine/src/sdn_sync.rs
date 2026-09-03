@@ -10,16 +10,14 @@ use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
 /// Public URL of the OFAC SDN XML feed.
-pub const OFAC_SDN_URL: &str =
-    "https://www.treasury.gov/ofac/downloads/sdn.xml";
+pub const OFAC_SDN_URL: &str = "https://www.treasury.gov/ofac/downloads/sdn.xml";
 
 /// Public URL of the OFAC Consolidated Sanctions List (CSV — faster to parse).
 pub const OFAC_CONS_URL: &str =
     "https://www.treasury.gov/ofac/downloads/consolidated/consolidated.xml";
 
 /// UN Security Council Consolidated Sanctions List
-pub const UN_SANCTIONS_URL: &str =
-    "https://scsanctions.un.org/resources/xml/en/consolidated.xml";
+pub const UN_SANCTIONS_URL: &str = "https://scsanctions.un.org/resources/xml/en/consolidated.xml";
 
 /// How often to refresh the cached list.
 pub const REFRESH_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60); // 6 hours
@@ -55,7 +53,13 @@ pub fn normalise_name(name: &str) -> Vec<String> {
     let lower = name.to_lowercase();
     let cleaned: String = lower
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == ' ' { c } else { ' ' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == ' ' {
+                c
+            } else {
+                ' '
+            }
+        })
         .collect();
     cleaned
         .split_whitespace()
@@ -77,7 +81,10 @@ pub fn name_hits_sdn(name: &str, cache: &SdnCache) -> bool {
         .count();
     // Require at least 2 matching tokens OR a single specific token (≥ 7 chars).
     // 7+ chars avoids common words ("bank", "corp", "ltd") while catching entity names.
-    hits >= 2 || tokens.iter().any(|t| t.len() >= 7 && cache.name_tokens.contains(t))
+    hits >= 2
+        || tokens
+            .iter()
+            .any(|t| t.len() >= 7 && cache.name_tokens.contains(t))
 }
 
 /// Seed the cache with the static compile-time lists so screening works
@@ -122,11 +129,11 @@ pub fn seed_static_lists(cache: &mut SdnCache) {
         "CBIRKPSE", // Central Bank of DPRK
         "KORYOBNK", // Koryo Bank
         // Iran
-        "MELIHBIC", // Mellat Bank
+        "MELIHBIC",  // Mellat Bank
         "IRIBANKIR", // Bank of Iran
-        "BKIBIRTE", // Bank Keshavarzi Iran
-        "SEPAIRTE", // Bank Sepah
-        "PARSIRTE", // Parsian Bank (sanctioned entity)
+        "BKIBIRTE",  // Bank Keshavarzi Iran
+        "SEPAIRTE",  // Bank Sepah
+        "PARSIRTE",  // Parsian Bank (sanctioned entity)
         // Syria
         "SYRIABANK",
         "CBOSSYDA", // Central Bank of Syria
@@ -163,11 +170,26 @@ pub fn seed_static_lists(cache: &mut SdnCache) {
 
     // ── High-profile SDN name tokens (seed — full list comes from API sync) ──
     let seed_names = [
-        "kim jong un", "bashar al-assad", "ali khamenei", "vladimir putin",
-        "alexander lukashenko", "nicolas maduro", "min aung hlaing",
-        "islamic state", "al-qaeda", "al qaeda", "hamas", "hezbollah",
-        "wagner group", "prigozhin", "rosoboronexport", "gazprombank",
-        "sberbank", "vtb bank", "alfa bank", "promsvyazbank",
+        "kim jong un",
+        "bashar al-assad",
+        "ali khamenei",
+        "vladimir putin",
+        "alexander lukashenko",
+        "nicolas maduro",
+        "min aung hlaing",
+        "islamic state",
+        "al-qaeda",
+        "al qaeda",
+        "hamas",
+        "hezbollah",
+        "wagner group",
+        "prigozhin",
+        "rosoboronexport",
+        "gazprombank",
+        "sberbank",
+        "vtb bank",
+        "alfa bank",
+        "promsvyazbank",
     ];
     for name in &seed_names {
         for token in normalise_name(name) {
@@ -189,9 +211,7 @@ pub struct SdnSyncStatus {
 
 /// Get the current sync status from the cache.
 pub fn get_status(cache: &SdnCache) -> SdnSyncStatus {
-    let last_refreshed_secs_ago = cache
-        .last_refreshed
-        .map(|t| t.elapsed().as_secs());
+    let last_refreshed_secs_ago = cache.last_refreshed.map(|t| t.elapsed().as_secs());
     let is_stale = last_refreshed_secs_ago
         .map(|s| s > REFRESH_INTERVAL.as_secs())
         .unwrap_or(true);
@@ -218,21 +238,51 @@ mod tests {
     #[test]
     fn test_seed_populates_countries() {
         let c = seeded_cache();
-        assert!(c.sanctioned_countries.contains("KP"), "North Korea must be in sanctioned countries");
-        assert!(c.sanctioned_countries.contains("IR"), "Iran must be in sanctioned countries");
-        assert!(c.sanctioned_countries.contains("RU"), "Russia must be in sanctioned countries");
-        assert!(c.sanctioned_countries.contains("SY"), "Syria must be in sanctioned countries");
-        assert!(!c.sanctioned_countries.contains("NG"), "Nigeria must NOT be in sanctioned countries");
-        assert!(!c.sanctioned_countries.contains("GB"), "UK must NOT be in sanctioned countries");
+        assert!(
+            c.sanctioned_countries.contains("KP"),
+            "North Korea must be in sanctioned countries"
+        );
+        assert!(
+            c.sanctioned_countries.contains("IR"),
+            "Iran must be in sanctioned countries"
+        );
+        assert!(
+            c.sanctioned_countries.contains("RU"),
+            "Russia must be in sanctioned countries"
+        );
+        assert!(
+            c.sanctioned_countries.contains("SY"),
+            "Syria must be in sanctioned countries"
+        );
+        assert!(
+            !c.sanctioned_countries.contains("NG"),
+            "Nigeria must NOT be in sanctioned countries"
+        );
+        assert!(
+            !c.sanctioned_countries.contains("GB"),
+            "UK must NOT be in sanctioned countries"
+        );
     }
 
     #[test]
     fn test_seed_populates_bic_prefixes() {
         let c = seeded_cache();
-        assert!(c.bic_prefixes.contains("CBIRKPSE"), "DPRK central bank BIC must be present");
-        assert!(c.bic_prefixes.contains("VTBRRUMM"), "VTB Bank BIC must be present");
-        assert!(c.bic_prefixes.contains("SBERRUММ"), "Sberbank BIC must be present");
-        assert!(!c.bic_prefixes.contains("BARCGB22"), "Barclays must NOT be sanctioned");
+        assert!(
+            c.bic_prefixes.contains("CBIRKPSE"),
+            "DPRK central bank BIC must be present"
+        );
+        assert!(
+            c.bic_prefixes.contains("VTBRRUMM"),
+            "VTB Bank BIC must be present"
+        );
+        assert!(
+            c.bic_prefixes.contains("SBERRUММ"),
+            "Sberbank BIC must be present"
+        );
+        assert!(
+            !c.bic_prefixes.contains("BARCGB22"),
+            "Barclays must NOT be sanctioned"
+        );
     }
 
     #[test]
@@ -273,7 +323,10 @@ mod tests {
     fn test_get_status_stale_when_never_refreshed() {
         let c = seeded_cache();
         let status = get_status(&c);
-        assert!(status.is_stale, "Cache with no refresh timestamp must be stale");
+        assert!(
+            status.is_stale,
+            "Cache with no refresh timestamp must be stale"
+        );
         assert!(status.entry_count > 0);
     }
 
@@ -290,7 +343,11 @@ mod tests {
         let c = seeded_cache();
         // Grey-list countries added in 2024 FATF plenary
         for cc in &["PK", "ET", "HT", "LB", "MZ", "TZ", "VU"] {
-            assert!(c.sanctioned_countries.contains(*cc), "{} must be in grey list", cc);
+            assert!(
+                c.sanctioned_countries.contains(*cc),
+                "{} must be in grey list",
+                cc
+            );
         }
     }
 
@@ -299,7 +356,10 @@ mod tests {
         let c = seeded_cache();
         // Full BIC "VTBRRUMM001" starts with "VTBRRUMM"
         let full_bic = "VTBRRUMM001";
-        let hit = c.bic_prefixes.iter().any(|prefix| full_bic.starts_with(prefix.as_str()));
+        let hit = c
+            .bic_prefixes
+            .iter()
+            .any(|prefix| full_bic.starts_with(prefix.as_str()));
         assert!(hit, "Full BIC starting with sanctioned prefix must match");
     }
 }

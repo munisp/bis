@@ -57,12 +57,12 @@ impl TraceContext {
     /// Generate a new root trace context (no upstream parent).
     pub fn new_root() -> Self {
         Self {
-            trace_id:      new_trace_id(),
+            trace_id: new_trace_id(),
             parent_span_id: new_span_id(),
-            flags:         1, // sampled
-            tracestate:    None,
-            baggage:       Vec::new(),
-            is_remote:     false,
+            flags: 1, // sampled
+            tracestate: None,
+            baggage: Vec::new(),
+            is_remote: false,
         }
     }
 
@@ -89,7 +89,8 @@ impl TraceContext {
             return None;
         }
         // parent-id: 16 lowercase hex chars, must not be all-zeros
-        if parent_span_id.len() != 16 || !is_hex(parent_span_id) || parent_span_id == "0".repeat(16) {
+        if parent_span_id.len() != 16 || !is_hex(parent_span_id) || parent_span_id == "0".repeat(16)
+        {
             return None;
         }
         // flags: 2 hex chars
@@ -99,12 +100,12 @@ impl TraceContext {
         let flags = u8::from_str_radix(flags_str, 16).ok()?;
 
         Some(Self {
-            trace_id:      trace_id.to_lowercase(),
+            trace_id: trace_id.to_lowercase(),
             parent_span_id: parent_span_id.to_lowercase(),
             flags,
-            tracestate:    None,
-            baggage:       vec![],
-            is_remote:     true,
+            tracestate: None,
+            baggage: vec![],
+            is_remote: true,
         })
     }
 
@@ -277,7 +278,12 @@ fn new_trace_id() -> String {
     let pid = std::process::id();
     static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let seq = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    format!("{:016x}{:08x}{:08x}", seq.wrapping_mul(0x9e37_79b9_7f4a_7c15), ns, pid)
+    format!(
+        "{:016x}{:08x}{:08x}",
+        seq.wrapping_mul(0x9e37_79b9_7f4a_7c15),
+        ns,
+        pid
+    )
 }
 
 /// Generate a new 16-char lowercase hex span ID.
@@ -288,7 +294,11 @@ fn new_span_id() -> String {
         .subsec_nanos();
     static SPAN_CTR: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
     let seq = SPAN_CTR.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    format!("{:016x}", seq.wrapping_add(ns as u64).wrapping_mul(0x517c_c1b7_2722_0a95))
+    format!(
+        "{:016x}",
+        seq.wrapping_add(ns as u64)
+            .wrapping_mul(0x517c_c1b7_2722_0a95)
+    )
 }
 
 use std::time::SystemTime;
@@ -298,8 +308,7 @@ use std::time::SystemTime;
 mod tests {
     use super::*;
 
-    const VALID_TRACEPARENT: &str =
-        "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+    const VALID_TRACEPARENT: &str = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
 
     #[test]
     fn parse_valid_traceparent() {
@@ -330,7 +339,10 @@ mod tests {
     #[test]
     fn from_kafka_headers_extracts_context() {
         let headers = vec![
-            ("traceparent".to_string(), VALID_TRACEPARENT.as_bytes().to_vec()),
+            (
+                "traceparent".to_string(),
+                VALID_TRACEPARENT.as_bytes().to_vec(),
+            ),
             ("tracestate".to_string(), b"rojo=00f067aa0ba902b7".to_vec()),
         ];
         let ctx = TraceContext::from_kafka_headers(&headers);
@@ -388,8 +400,14 @@ mod tests {
     #[test]
     fn from_kafka_headers_extracts_baggage() {
         let headers = vec![
-            ("traceparent".to_string(), VALID_TRACEPARENT.as_bytes().to_vec()),
-            ("baggage".to_string(), b"userId=alice, tenantId=t-001".to_vec()),
+            (
+                "traceparent".to_string(),
+                VALID_TRACEPARENT.as_bytes().to_vec(),
+            ),
+            (
+                "baggage".to_string(),
+                b"userId=alice, tenantId=t-001".to_vec(),
+            ),
         ];
         let ctx = TraceContext::from_kafka_headers(&headers);
         assert_eq!(ctx.baggage_get("userId"), Some("alice"));

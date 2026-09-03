@@ -223,12 +223,19 @@ func (s *Server) processSMSSubmission(w http.ResponseWriter, senderPhone, text, 
 		return
 	}
 
-	// Rate limit by sender phone (not submitter ID for SMS — phone is the identity)
-	rateLimitKey := senderPhone
-	if rateLimitKey == "" {
-		rateLimitKey = parsed.AgencyCode
+	// The issued PIN binds an SMS submission to the agency and sender phone.
+	if senderPhone == "" {
+		w.Header().Set("Content-Type", "text/plain")
+		http.Error(w, "ERR:IDENTITY", http.StatusUnauthorized)
+		return
 	}
-	allowed, count, err := s.store.CheckRateLimit(rateLimitKey, 10) // 10 SMS per day per number
+	submitterID := parsed.AgencyCode + ":" + senderPhone
+	if result := s.store.VerifyPIN(submitterID, s.pinHash(submitterID, parsed.PIN)); !result.Valid {
+		w.Header().Set("Content-Type", "text/plain")
+		http.Error(w, "ERR:PIN", http.StatusUnauthorized)
+		return
+	}
+	allowed, count, err := s.store.CheckRateLimit(submitterID, 10) // 10 SMS per day per number
 	if err != nil || !allowed {
 		w.Header().Set("Content-Type", "text/plain")
 		fmt.Fprintf(w, "ERR:LIMIT — Daily SMS limit reached (%d/10). Try again tomorrow.", count)
@@ -237,7 +244,7 @@ func (s *Server) processSMSSubmission(w http.ResponseWriter, senderPhone, text, 
 
 	// Build payload (same schema as JSON submissions)
 	payload, _ := json.Marshal(map[string]any{
-		"submitterId":   parsed.AgencyCode + ":" + senderPhone, // composite ID for SMS
+		"submitterId":   submitterID,
 		"agencyCode":    parsed.AgencyCode,
 		"pin":           parsed.PIN,
 		"incidentType":  strings.ToLower(parsed.IncidentType),
@@ -251,13 +258,13 @@ func (s *Server) processSMSSubmission(w http.ResponseWriter, senderPhone, text, 
 	})
 
 	localRef := fmt.Sprintf("LEX-SMS-%s-%d", strings.ToUpper(parsed.AgencyCode), time.Now().UnixMilli())
-	pinHash := fmt.Sprintf("sha256:%s:%s", parsed.AgencyCode, parsed.PIN)
+	pinHash := s.pinHash(submitterID, parsed.PIN)
 
 	// Try immediate BIS sync
 	if s.bis.Ping() {
 		bisRef, err := s.bis.Submit(string(payload))
 		if err == nil {
-			s.store.Enqueue(localRef, parsed.AgencyCode, parsed.AgencyCode, pinHash, string(payload))
+			s.store.Enqueue(localRef, submitterID, parsed.AgencyCode, pinHash, string(payload))
 			log.Printf("[sms] Synced immediately → BIS ref %s", bisRef)
 			// ── Outbound confirmation SMS ──────────────────────────────────────
 			if senderPhone != "" {
@@ -280,7 +287,7 @@ func (s *Server) processSMSSubmission(w http.ResponseWriter, senderPhone, text, 
 	}
 
 	// Queue for later
-	if err := s.store.Enqueue(localRef, parsed.AgencyCode, parsed.AgencyCode, pinHash, string(payload)); err != nil {
+	if err := s.store.Enqueue(localRef, submitterID, parsed.AgencyCode, pinHash, string(payload)); err != nil {
 		log.Printf("[sms] Enqueue error: %v", err)
 		w.Header().Set("Content-Type", "text/plain")
 		w.WriteHeader(http.StatusInternalServerError)

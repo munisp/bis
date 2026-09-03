@@ -198,7 +198,7 @@ async function main() {
 function writeReport() {
   const fs = require("fs");
   const report = { timestamp: new Date().toISOString(), config: { KEYCLOAK_URL, BFF_URL, TEST_USER }, results };
-  fs.writeFileSync("/home/ubuntu/bis-pwa/docs/e2e-investigation-report.json", JSON.stringify(report, null, 2));
+  fs.writeFileSync("/home/ubuntu/bis/docs/e2e-investigation-report.json", JSON.stringify(report, null, 2));
   console.log("\nReport saved to docs/e2e-investigation-report.json");
 }
 

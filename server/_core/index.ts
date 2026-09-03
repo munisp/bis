@@ -3,19 +3,6 @@ import { getDb } from '../db';
 
 import "../sentry.server.config";
 
-// BIS platform prefers PostgreSQL. When a non-PostgreSQL URL is injected (e.g. managed TiDB),
-// log a warning and continue — the ORM layer handles both dialects. In local dev, override
-// to the local PostgreSQL instance for full schema fidelity.
-const _dbUrl = process.env.BIS_DATABASE_URL ?? process.env.DATABASE_URL ?? "";
-if (!_dbUrl.startsWith("postgresql") && !_dbUrl.startsWith("postgres")) {
-  if (process.env.NODE_ENV === "production" || process.env.NODE_ENV === "staging") {
-    console.warn("[BIS] DATABASE_URL is not PostgreSQL — some features (PKCE sessions, retry leases) require PostgreSQL and will degrade gracefully.");
-  } else {
-    process.env.DATABASE_URL = "postgresql://bis_user:bis_secure_2026@localhost:5432/bis_db";
-    console.log("[BIS] Overriding DATABASE_URL → local PostgreSQL (bis_db)");
-  }
-}
-
 import express, { type Request, type Response, type NextFunction } from "express";
 import { createServer } from "http";
 import net from "net";

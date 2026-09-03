@@ -51,7 +51,7 @@ func TestAuthMiddleware_MissingKey(t *testing.T) {
 	}
 }
 
-func TestAuthMiddleware_KeyInQueryParam(t *testing.T) {
+func TestAuthMiddleware_RejectsQueryParamCredential(t *testing.T) {
 	gatewayKey = "test-key-123"
 	handler := authMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -59,25 +59,27 @@ func TestAuthMiddleware_KeyInQueryParam(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/health?key=test-key-123", nil)
 	rr := httptest.NewRecorder()
 	handler(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rr.Code)
+	if rr.Code != http.StatusUnauthorized {
+		t.Errorf("expected query-string credential rejection with 401, got %d", rr.Code)
 	}
 }
 
 // ─── corsMiddleware tests ─────────────────────────────────────────────────────
 
 func TestCORSMiddleware_OptionsRequest(t *testing.T) {
+	t.Setenv("BIS_CORS_ORIGIN", "https://app.example.test")
 	handler := corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
 	req := httptest.NewRequest(http.MethodOptions, "/api/nin", nil)
+	req.Header.Set("Origin", "https://app.example.test")
 	rr := httptest.NewRecorder()
 	handler(rr, req)
 	if rr.Code != http.StatusNoContent {
 		t.Errorf("expected 204 for OPTIONS, got %d", rr.Code)
 	}
-	if rr.Header().Get("Access-Control-Allow-Origin") != "*" {
-		t.Error("expected Access-Control-Allow-Origin: *")
+	if rr.Header().Get("Access-Control-Allow-Origin") != "https://app.example.test" {
+		t.Error("expected explicit Access-Control-Allow-Origin")
 	}
 }
 

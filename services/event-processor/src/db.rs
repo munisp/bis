@@ -172,8 +172,7 @@ pub async fn fetch_recent_audit(pool: &Pool, limit: i64) -> Vec<AuditEntry> {
             let severity_str: String = row.get("severity");
             let event_type: EventType =
                 serde_json::from_str(&format!("\"{}\"", event_type_str)).ok()?;
-            let severity: Severity =
-                serde_json::from_str(&format!("\"{}\"", severity_str)).ok()?;
+            let severity: Severity = serde_json::from_str(&format!("\"{}\"", severity_str)).ok()?;
             let written_at: DateTime<Utc> = row.get("written_at");
             let processing_ns: i64 = row.get("processing_ns");
             Some(AuditEntry {
@@ -294,8 +293,7 @@ pub async fn load_subscriptions(pool: &Pool) -> Vec<Subscription> {
     rows.iter()
         .filter_map(|row| {
             let event_types_json: serde_json::Value = row.get("event_types");
-            let event_types: Vec<EventType> =
-                serde_json::from_value(event_types_json).ok()?;
+            let event_types: Vec<EventType> = serde_json::from_value(event_types_json).ok()?;
             let severity_str: String = row.get("min_severity");
             let min_severity: Severity =
                 serde_json::from_str(&format!("\"{}\"", severity_str)).ok()?;

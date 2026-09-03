@@ -15,7 +15,6 @@ package main
 import (
 	"encoding/json"
 	"log"
-	"math/rand"
 	"net/http"
 	"strings"
 	"time"
@@ -29,38 +28,38 @@ import (
 
 // CriminalRecordRequest represents a data collection request sent to a law enforcement agency.
 type CriminalRecordRequest struct {
-	RequestRef   string `json:"requestRef"`
-	SubjectName  string `json:"subjectName"`
-	NIN          string `json:"nin,omitempty"`
-	DOB          string `json:"dob,omitempty"`
-	Agency       string `json:"agency"` // npf, efcc, icpc, dss, ndlea, nscdc, frsc
-	State        string `json:"state"`
-	LGA          string `json:"lga,omitempty"`
-	Priority     string `json:"priority"` // low, medium, high, critical
-	Purpose      string `json:"purpose"`
-	RequestedBy  string `json:"requestedBy"`
-	InvestRef    string `json:"investigationRef,omitempty"`
+	RequestRef  string `json:"requestRef"`
+	SubjectName string `json:"subjectName"`
+	NIN         string `json:"nin,omitempty"`
+	DOB         string `json:"dob,omitempty"`
+	Agency      string `json:"agency"` // npf, efcc, icpc, dss, ndlea, nscdc, frsc
+	State       string `json:"state"`
+	LGA         string `json:"lga,omitempty"`
+	Priority    string `json:"priority"` // low, medium, high, critical
+	Purpose     string `json:"purpose"`
+	RequestedBy string `json:"requestedBy"`
+	InvestRef   string `json:"investigationRef,omitempty"`
 }
 
 // CriminalRecordIngest represents an agency response being ingested.
 type CriminalRecordIngest struct {
-	RequestRef      string                 `json:"requestRef"`
-	AgencyRef       string                 `json:"agencyRef,omitempty"`
-	SubjectName     string                 `json:"subjectName"`
-	NIN             string                 `json:"nin,omitempty"`
-	OffenceCategory string                 `json:"offenceCategory"` // violent, financial, drug, cybercrime, terrorism, corruption, traffic, other
-	OffenceCode     string                 `json:"offenceCode,omitempty"`
-	OffenceDesc     string                 `json:"offenceDescription"`
-	CourtName       string                 `json:"courtName,omitempty"`
-	CaseNumber      string                 `json:"caseNumber,omitempty"`
-	Verdict         string                 `json:"verdict"` // convicted, acquitted, discharged, pending, nolle_prosequi, unknown
-	Sentence        string                 `json:"sentence,omitempty"`
-	DateArrested    string                 `json:"dateArrested,omitempty"`
-	DateConvicted   string                 `json:"dateConvicted,omitempty"`
-	OutstandingWarrant bool               `json:"outstandingWarrant"`
-	WarrantDetails  string                 `json:"warrantDetails,omitempty"`
-	RawPayload      map[string]interface{} `json:"rawPayload,omitempty"`
-	IngestSource    string                 `json:"ingestSource"` // agency_response, manual_entry, api_integration
+	RequestRef         string                 `json:"requestRef"`
+	AgencyRef          string                 `json:"agencyRef,omitempty"`
+	SubjectName        string                 `json:"subjectName"`
+	NIN                string                 `json:"nin,omitempty"`
+	OffenceCategory    string                 `json:"offenceCategory"` // violent, financial, drug, cybercrime, terrorism, corruption, traffic, other
+	OffenceCode        string                 `json:"offenceCode,omitempty"`
+	OffenceDesc        string                 `json:"offenceDescription"`
+	CourtName          string                 `json:"courtName,omitempty"`
+	CaseNumber         string                 `json:"caseNumber,omitempty"`
+	Verdict            string                 `json:"verdict"` // convicted, acquitted, discharged, pending, nolle_prosequi, unknown
+	Sentence           string                 `json:"sentence,omitempty"`
+	DateArrested       string                 `json:"dateArrested,omitempty"`
+	DateConvicted      string                 `json:"dateConvicted,omitempty"`
+	OutstandingWarrant bool                   `json:"outstandingWarrant"`
+	WarrantDetails     string                 `json:"warrantDetails,omitempty"`
+	RawPayload         map[string]interface{} `json:"rawPayload,omitempty"`
+	IngestSource       string                 `json:"ingestSource"` // agency_response, manual_entry, api_integration
 }
 
 // CorporateCheckRequest represents a corporate background check request.
@@ -75,21 +74,21 @@ type CorporateCheckRequest struct {
 
 // FieldVisitCheckIn represents a GPS-stamped field visit check-in.
 type FieldVisitCheckIn struct {
-	TaskRef    string  `json:"taskRef"`
-	AgentID    string  `json:"agentId"`
-	Lat        float64 `json:"lat"`
-	Lng        float64 `json:"lng"`
-	Accuracy   float64 `json:"accuracy,omitempty"`
-	Notes      string  `json:"notes,omitempty"`
+	TaskRef  string  `json:"taskRef"`
+	AgentID  string  `json:"agentId"`
+	Lat      float64 `json:"lat"`
+	Lng      float64 `json:"lng"`
+	Accuracy float64 `json:"accuracy,omitempty"`
+	Notes    string  `json:"notes,omitempty"`
 }
 
 // FieldVisitCheckOut represents a GPS-stamped field visit check-out.
 type FieldVisitCheckOut struct {
-	TaskRef    string  `json:"taskRef"`
-	AgentID    string  `json:"agentId"`
-	Lat        float64 `json:"lat"`
-	Lng        float64 `json:"lng"`
-	Notes      string  `json:"notes,omitempty"`
+	TaskRef string  `json:"taskRef"`
+	AgentID string  `json:"agentId"`
+	Lat     float64 `json:"lat"`
+	Lng     float64 `json:"lng"`
+	Notes   string  `json:"notes,omitempty"`
 }
 
 // ThinFileFlagRequest represents a request to flag an investigation as thin-file.
@@ -125,13 +124,13 @@ func handleCriminalRecordRequest(w http.ResponseWriter, r *http.Request) {
 	// Trigger Temporal CriminalRecordsWorkflow
 	ctx := r.Context()
 	workflowInput := map[string]interface{}{
-		"workflowType": "CriminalRecordsWorkflow",
-		"requestRef":   requestRef,
-		"subjectName":  req.SubjectName,
-		"nin":          req.NIN,
-		"agency":       req.Agency,
-		"state":        req.State,
-		"priority":     req.Priority,
+		"workflowType":     "CriminalRecordsWorkflow",
+		"requestRef":       requestRef,
+		"subjectName":      req.SubjectName,
+		"nin":              req.NIN,
+		"agency":           req.Agency,
+		"state":            req.State,
+		"priority":         req.Priority,
 		"investigationRef": req.InvestRef,
 	}
 	workflowID, err := temporalpkg.DefaultClient.StartWorkflow(ctx, "CriminalRecordsWorkflow", workflowInput)
@@ -142,16 +141,16 @@ func handleCriminalRecordRequest(w http.ResponseWriter, r *http.Request) {
 
 	// Publish Kafka event
 	publishEvent("bis.criminal.request_submitted", map[string]interface{}{
-		"requestRef":   requestRef,
-		"agency":       req.Agency,
-		"subjectName":  req.SubjectName,
-		"nin":          req.NIN,
-		"state":        req.State,
-		"priority":     req.Priority,
+		"requestRef":       requestRef,
+		"agency":           req.Agency,
+		"subjectName":      req.SubjectName,
+		"nin":              req.NIN,
+		"state":            req.State,
+		"priority":         req.Priority,
 		"investigationRef": req.InvestRef,
-		"requestedBy":  req.RequestedBy,
-		"workflowId":   workflowID,
-		"timestamp":    now(),
+		"requestedBy":      req.RequestedBy,
+		"workflowId":       workflowID,
+		"timestamp":        now(),
 	})
 
 	// TigerBeetle: debit tenant account for criminal check fee (₦500)
@@ -160,26 +159,26 @@ func handleCriminalRecordRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusAccepted, map[string]interface{}{
-		"requestRef": requestRef,
-		"status":     "submitted",
-		"workflowId": workflowID,
-		"agency":     req.Agency,
+		"requestRef":          requestRef,
+		"status":              "submitted",
+		"workflowId":          workflowID,
+		"agency":              req.Agency,
 		"estimatedTurnaround": agencyTurnaround(req.Agency, req.Priority),
-		"sandbox":    false,
-		"timestamp":  now(),
+		"sandbox":             false,
+		"timestamp":           now(),
 	})
 }
 
 // agencyTurnaround returns the expected turnaround time for an agency response.
 func agencyTurnaround(agency, priority string) string {
 	base := map[string]string{
-		"npf":    "3-5 business days",
-		"efcc":   "5-7 business days",
-		"icpc":   "5-7 business days",
-		"dss":    "7-14 business days",
-		"ndlea":  "3-5 business days",
-		"nscdc":  "3-5 business days",
-		"frsc":   "1-2 business days",
+		"npf":          "3-5 business days",
+		"efcc":         "5-7 business days",
+		"icpc":         "5-7 business days",
+		"dss":          "7-14 business days",
+		"ndlea":        "3-5 business days",
+		"nscdc":        "3-5 business days",
+		"frsc":         "1-2 business days",
 		"custom_state": "5-10 business days",
 	}
 	t, ok := base[agency]
@@ -219,25 +218,25 @@ func handleCriminalRecordIngest(w http.ResponseWriter, r *http.Request) {
 
 	// Publish Kafka event — event-processor will update investigation risk score
 	publishEvent("bis.criminal.record_ingested", map[string]interface{}{
-		"recordRef":        recordRef,
-		"requestRef":       req.RequestRef,
-		"subjectName":      req.SubjectName,
-		"nin":              req.NIN,
-		"offenceCategory":  req.OffenceCategory,
-		"verdict":          req.Verdict,
+		"recordRef":          recordRef,
+		"requestRef":         req.RequestRef,
+		"subjectName":        req.SubjectName,
+		"nin":                req.NIN,
+		"offenceCategory":    req.OffenceCategory,
+		"verdict":            req.Verdict,
 		"outstandingWarrant": req.OutstandingWarrant,
-		"riskContribution": riskContribution,
-		"ingestSource":     req.IngestSource,
-		"timestamp":        now(),
+		"riskContribution":   riskContribution,
+		"ingestSource":       req.IngestSource,
+		"timestamp":          now(),
 	})
 
 	// Publish to Fluvio velocity stream for real-time analytics
 	publishEvent("bis.fluvio.criminal_record", map[string]interface{}{
-		"recordRef":       recordRef,
-		"offenceCategory": req.OffenceCategory,
-		"verdict":         req.Verdict,
+		"recordRef":        recordRef,
+		"offenceCategory":  req.OffenceCategory,
+		"verdict":          req.Verdict,
 		"riskContribution": riskContribution,
-		"timestamp":       now(),
+		"timestamp":        now(),
 	})
 
 	writeJSON(w, http.StatusCreated, map[string]interface{}{
@@ -253,16 +252,16 @@ func handleCriminalRecordIngest(w http.ResponseWriter, r *http.Request) {
 // computeCriminalRiskContribution returns a 0-100 risk contribution score for a criminal record.
 func computeCriminalRiskContribution(category, verdict string, warrant bool) float64 {
 	base := map[string]float64{
-		"terrorism":   90,
-		"violent":     70,
-		"financial":   60,
-		"cybercrime":  55,
-		"drug":        50,
-		"corruption":  65,
-		"sexual":      75,
-		"property":    35,
-		"traffic":     15,
-		"other":       25,
+		"terrorism":  90,
+		"violent":    70,
+		"financial":  60,
+		"cybercrime": 55,
+		"drug":       50,
+		"corruption": 65,
+		"sexual":     75,
+		"property":   35,
+		"traffic":    15,
+		"other":      25,
 	}
 	score := base[category]
 	if score == 0 {
@@ -435,11 +434,11 @@ func handleCorporateCheck(w http.ResponseWriter, r *http.Request) {
 
 	// Trigger Temporal CorporateCheckWorkflow for async enrichment
 	workflowInput := map[string]interface{}{
-		"workflowType": "CorporateCheckWorkflow",
-		"checkRef":     checkRef,
-		"rcNumber":     req.RCNumber,
-		"tin":          req.TIN,
-		"checks":       req.Checks,
+		"workflowType":     "CorporateCheckWorkflow",
+		"checkRef":         checkRef,
+		"rcNumber":         req.RCNumber,
+		"tin":              req.TIN,
+		"checks":           req.Checks,
 		"investigationRef": req.InvestRef,
 		"initialRiskScore": riskScore,
 	}
@@ -456,26 +455,26 @@ func handleCorporateCheck(w http.ResponseWriter, r *http.Request) {
 
 	// Publish Kafka event
 	publishEvent("bis.corporate.check_completed", map[string]interface{}{
-		"checkRef":    checkRef,
-		"rcNumber":    req.RCNumber,
-		"outcome":     outcome,
-		"riskScore":   riskScore,
-		"flags":       flags,
-		"workflowId":  workflowID,
+		"checkRef":         checkRef,
+		"rcNumber":         req.RCNumber,
+		"outcome":          outcome,
+		"riskScore":        riskScore,
+		"flags":            flags,
+		"workflowId":       workflowID,
 		"investigationRef": req.InvestRef,
-		"timestamp":   now(),
+		"timestamp":        now(),
 	})
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"checkRef":    checkRef,
-		"rcNumber":    req.RCNumber,
-		"outcome":     outcome,
-		"riskScore":   riskScore,
-		"flags":       flags,
-		"results":     results,
-		"workflowId":  workflowID,
-		"sandbox":     false,
-		"timestamp":   now(),
+		"checkRef":   checkRef,
+		"rcNumber":   req.RCNumber,
+		"outcome":    outcome,
+		"riskScore":  riskScore,
+		"flags":      flags,
+		"results":    results,
+		"workflowId": workflowID,
+		"sandbox":    false,
+		"timestamp":  now(),
 	})
 }
 
@@ -618,13 +617,13 @@ func handleFieldVisitCheckIn(w http.ResponseWriter, r *http.Request) {
 	})
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"checkInRef": checkInRef,
-		"taskRef":    req.TaskRef,
-		"status":     "checked_in",
+		"checkInRef":  checkInRef,
+		"taskRef":     req.TaskRef,
+		"status":      "checked_in",
 		"checkedInAt": now(),
 		"gps": map[string]interface{}{
-			"lat": req.Lat,
-			"lng": req.Lng,
+			"lat":      req.Lat,
+			"lng":      req.Lng,
 			"accuracy": req.Accuracy,
 		},
 		"sandbox": false,
@@ -821,10 +820,7 @@ func RegisterCriminalRecordsTopics() {
 // AI summary, field visit, and thin-file routes to the given mux.
 // The protect argument is the chain(h, corsMiddleware, loggingMiddleware, authMiddleware) closure
 // defined in newRouter — passed in to avoid a package-level dependency.
-func RegisterCriminalRecordsRoutes(mux *http.ServeMux) {
-	protect := func(h http.HandlerFunc) http.HandlerFunc {
-		return chain(h, corsMiddleware, loggingMiddleware, authMiddleware)
-	}
+func RegisterCriminalRecordsRoutes(mux *http.ServeMux, protect func(http.HandlerFunc) http.HandlerFunc) {
 
 	// Criminal records data collection
 	mux.HandleFunc("/v1/criminal-records/request", protect(handleCriminalRecordRequest))
@@ -849,8 +845,8 @@ func RegisterCriminalRecordsRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/v1/mojaloop/compliance-check", protect(handleMojaloopComplianceCheck))
 
 	// Dapr subscriptions for new topics
-	mux.HandleFunc("/dapr/subscribe/criminal-records", handleDaprCriminalRecords)
-	mux.HandleFunc("/dapr/subscribe/corporate-checks", handleDaprCorporateChecks)
+	mux.HandleFunc("/dapr/subscribe/criminal-records", protect(handleDaprCriminalRecords))
+	mux.HandleFunc("/dapr/subscribe/corporate-checks", protect(handleDaprCorporateChecks))
 }
 
 // ─── Dapr Subscription Handlers ──────────────────────────────────────────────
@@ -882,4 +878,3 @@ func handleDaprCorporateChecks(w http.ResponseWriter, r *http.Request) {
 
 // ─── Unused import prevention ─────────────────────────────────────────────────
 var _ = strings.Contains
-var _ = rand.New

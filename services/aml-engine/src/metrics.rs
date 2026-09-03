@@ -13,7 +13,6 @@
 ///
 /// Histograms (hand-rolled buckets):
 ///   aml_latency_seconds_bucket    — /screen endpoint latency
-
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
@@ -48,15 +47,33 @@ pub fn record_latency(start: Instant) {
     let elapsed_us = start.elapsed().as_micros() as u64;
     LATENCY_SUM_MICROS.fetch_add(elapsed_us, Ordering::Relaxed);
     // Cumulative buckets
-    if elapsed_ms <= 1 { LATENCY_BUCKET_1MS.fetch_add(1, Ordering::Relaxed); }
-    if elapsed_ms <= 5 { LATENCY_BUCKET_5MS.fetch_add(1, Ordering::Relaxed); }
-    if elapsed_ms <= 10 { LATENCY_BUCKET_10MS.fetch_add(1, Ordering::Relaxed); }
-    if elapsed_ms <= 25 { LATENCY_BUCKET_25MS.fetch_add(1, Ordering::Relaxed); }
-    if elapsed_ms <= 50 { LATENCY_BUCKET_50MS.fetch_add(1, Ordering::Relaxed); }
-    if elapsed_ms <= 100 { LATENCY_BUCKET_100MS.fetch_add(1, Ordering::Relaxed); }
-    if elapsed_ms <= 250 { LATENCY_BUCKET_250MS.fetch_add(1, Ordering::Relaxed); }
-    if elapsed_ms <= 500 { LATENCY_BUCKET_500MS.fetch_add(1, Ordering::Relaxed); }
-    if elapsed_ms <= 1000 { LATENCY_BUCKET_1S.fetch_add(1, Ordering::Relaxed); }
+    if elapsed_ms <= 1 {
+        LATENCY_BUCKET_1MS.fetch_add(1, Ordering::Relaxed);
+    }
+    if elapsed_ms <= 5 {
+        LATENCY_BUCKET_5MS.fetch_add(1, Ordering::Relaxed);
+    }
+    if elapsed_ms <= 10 {
+        LATENCY_BUCKET_10MS.fetch_add(1, Ordering::Relaxed);
+    }
+    if elapsed_ms <= 25 {
+        LATENCY_BUCKET_25MS.fetch_add(1, Ordering::Relaxed);
+    }
+    if elapsed_ms <= 50 {
+        LATENCY_BUCKET_50MS.fetch_add(1, Ordering::Relaxed);
+    }
+    if elapsed_ms <= 100 {
+        LATENCY_BUCKET_100MS.fetch_add(1, Ordering::Relaxed);
+    }
+    if elapsed_ms <= 250 {
+        LATENCY_BUCKET_250MS.fetch_add(1, Ordering::Relaxed);
+    }
+    if elapsed_ms <= 500 {
+        LATENCY_BUCKET_500MS.fetch_add(1, Ordering::Relaxed);
+    }
+    if elapsed_ms <= 1000 {
+        LATENCY_BUCKET_1S.fetch_add(1, Ordering::Relaxed);
+    }
     LATENCY_BUCKET_INF.fetch_add(1, Ordering::Relaxed);
 }
 

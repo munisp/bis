@@ -153,7 +153,7 @@ Extended to include 9 services (up from 4) with `displayName`, `uptime`, and `la
 5. API tokens in `api_tokens` table
 
 ### Mitigations in Place
-- **Data at rest:** Database encryption via TiDB/PostgreSQL TDE
+- **Data at rest:** Database encryption via PostgreSQL TDE
 - **Data in transit:** TLS 1.3 enforced at APISIX gateway
 - **Access control:** Permify RBAC + Keycloak OIDC + tRPC `protectedProcedure`
 - **Audit trail:** Tamper-evident HMAC audit log

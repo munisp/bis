@@ -98,7 +98,7 @@ groups:
             The 99th-percentile request latency through the APISix gateway has
             exceeded 2,000 ms for more than 2 minutes. Current value: {{ $values.B.Value }} ms.
             Check upstream service health and database query times.
-          runbook_url: "https://github.com/your-org/bis/wiki/runbooks/high-latency"
+          runbook_url: "https://github.com/munisp/bis/wiki/runbooks/high-latency"
         labels:
           severity: critical
           team: platform
@@ -191,7 +191,7 @@ groups:
             More than 5% of requests through the APISix gateway are returning
             5xx errors over the last 5 minutes. Current rate: {{ $values.B.Value }}%.
             Inspect upstream service logs and recent deployments.
-          runbook_url: "https://github.com/your-org/bis/wiki/runbooks/high-error-rate"
+          runbook_url: "https://github.com/munisp/bis/wiki/runbooks/high-error-rate"
         labels:
           severity: critical
           team: platform
@@ -281,7 +281,7 @@ groups:
             Total Kafka consumer group lag across all topics has exceeded 1,000
             messages for more than 3 minutes. Current lag: {{ $values.B.Value }}.
             Check the Rust event processor health and Kafka broker throughput.
-          runbook_url: "https://github.com/your-org/bis/wiki/runbooks/kafka-lag"
+          runbook_url: "https://github.com/munisp/bis/wiki/runbooks/kafka-lag"
         labels:
           severity: warning
           team: platform

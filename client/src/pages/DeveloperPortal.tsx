@@ -105,7 +105,7 @@ const result = await client.risk.score('Amaka Okonkwo', {
   bvn: '22345678901',
   includeFactors: true
 });
-console.log(\`Score: \${result.score}/100 — \${result.level}\`);`,
+logger.info(\`Score: \${result.score}/100 — \${result.level}\`);`,
     full_due_diligence: `import { BISClient } from '@bis/sdk';
 
 const client = new BISClient({
@@ -116,9 +116,9 @@ const report = await client.fullDueDiligence('Amaka Okonkwo', {
   bvn: '22345678901',
   priority: 'high'
 });
-console.log(\`Risk: \${report.riskScore}/100 — \${report.riskLevel}\`);
-console.log(\`Clear: \${report.isClear}\`);
-console.log(\`Investigation: \${report.investigationRef}\`);`,
+logger.info(\`Risk: \${report.riskScore}/100 — \${report.riskLevel}\`);
+logger.info(\`Clear: \${report.isClear}\`);
+logger.info(\`Investigation: \${report.investigationRef}\`);`,
     kyc_verify: `import { BISClient } from '@bis/sdk';
 
 const client = new BISClient({
@@ -130,7 +130,7 @@ const record = await client.kyc.verify({
   fullName: 'Emeka Adeyemi',
   bvn: '22345678901'
 });
-console.log(\`Status: \${record.status}\`);`,
+logger.info(\`Status: \${record.status}\`);`,
   },
   go: {
     risk_score: `package main

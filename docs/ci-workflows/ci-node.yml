@@ -122,7 +122,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: success()
         with:
-          name: bis-pwa-dist
+          name: bis-dist
           path: dist/
           retention-days: 7
 

@@ -35,7 +35,7 @@ import {
 } from "../drizzle/schema";
 
 // ─── DB connection ────────────────────────────────────────────────────────────
-// The app's DATABASE_URL may be a MySQL/TiDB URL (for the hosted environment).
+// The app's DATABASE_URL may be a PostgreSQL URL (for the hosted environment).
 // The seed script always targets the local PostgreSQL instance used for
 // development and migrations (same DB that drizzle.config.ts points to).
 

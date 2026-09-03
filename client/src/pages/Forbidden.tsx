@@ -8,10 +8,20 @@
 import BISLayout from '@/components/BISLayout';
 import { Button } from '@/components/ui/button';
 import { ShieldOff, ArrowLeft, Home } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import { useLocation } from 'wouter';
 
 function ForbiddenInner() {
   const [, navigate] = useLocation();
+  const [serviceAvailable, setServiceAvailable] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch('/api/health', { signal: controller.signal })
+      .then((response) => setServiceAvailable(response.ok))
+      .catch(() => setServiceAvailable(false));
+    return () => controller.abort();
+  }, []);
 
   return (
     <div className="flex flex-col items-center justify-center min-h-[60vh] gap-6 text-center px-4">
@@ -34,6 +44,12 @@ function ForbiddenInner() {
           administrator or the BIS platform owner to request elevated access.
         </p>
       </div>
+
+      {serviceAvailable === false && (
+        <p className="text-sm text-amber-700">
+          Service status is temporarily unavailable; your access request remains protected.
+        </p>
+      )}
 
       {/* Actions */}
       <div className="flex flex-col sm:flex-row gap-3">
