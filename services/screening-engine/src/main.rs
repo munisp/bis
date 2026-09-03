@@ -159,6 +159,8 @@ pub struct EngineConfig {
     pub cac_key: String,
     pub waec_url: String,
     pub waec_key: String,
+    pub aggregator_url: String,
+    pub aggregator_key: String,
 }
 
 pub struct Metrics {
@@ -268,40 +270,31 @@ pub async fn run_screening(
         ScreeningType::BvnVerification => screen_bvn(req, config).await,
         ScreeningType::CriminalEfcc => screen_efcc(req, config).await,
         ScreeningType::CriminalIcpc => screen_icpc(req, config).await,
-        ScreeningType::CourtRecord => screen_court_records(req, config).await,
-        ScreeningType::CacDirectorship => screen_cac(req, config).await,
-        ScreeningType::EducationWaec => screen_waec(req, config).await,
-        ScreeningType::EducationNeco => screen_neco(req, config).await,
-        ScreeningType::EducationUniversity => screen_university(req, config).await,
-        ScreeningType::NyscDischarge => screen_nysc(req, config).await,
-        ScreeningType::EmploymentVerification => screen_employment(req, config).await,
-        ScreeningType::ProfessionalLicenceCoren => {
-            screen_professional_licence(req, config, "COREN").await
+        ScreeningType::CourtRecord
+        | ScreeningType::EducationNeco
+        | ScreeningType::EducationUniversity
+        | ScreeningType::NyscDischarge
+        | ScreeningType::EmploymentVerification
+        | ScreeningType::ProfessionalLicenceCoren
+        | ScreeningType::ProfessionalLicenceNba
+        | ScreeningType::ProfessionalLicenceMdcn
+        | ScreeningType::ProfessionalLicenceIcan
+        | ScreeningType::ProfessionalLicenceCibn
+        | ScreeningType::AdverseMedia
+        | ScreeningType::PepSanctions
+        | ScreeningType::Watchlist
+        | ScreeningType::TerrorismWatchlist
+        | ScreeningType::InterpolNotice
+        | ScreeningType::SexOffenderRegistry
+        | ScreeningType::AddressVerification
+        | ScreeningType::WorkPermit
+        | ScreeningType::CreditCheck
+        | ScreeningType::DrugTest
+        | ScreeningType::SocialMedia
+        | ScreeningType::ContinuousMonitor => screen_aggregator(req, config).await,
+        ScreeningType::CacDirectorship | ScreeningType::EducationWaec => {
+            screen_aggregator(req, config).await
         }
-        ScreeningType::ProfessionalLicenceNba => {
-            screen_professional_licence(req, config, "NBA").await
-        }
-        ScreeningType::ProfessionalLicenceMdcn => {
-            screen_professional_licence(req, config, "MDCN").await
-        }
-        ScreeningType::ProfessionalLicenceIcan => {
-            screen_professional_licence(req, config, "ICAN").await
-        }
-        ScreeningType::ProfessionalLicenceCibn => {
-            screen_professional_licence(req, config, "CIBN").await
-        }
-        ScreeningType::AdverseMedia => screen_adverse_media(req, config).await,
-        ScreeningType::PepSanctions => screen_pep_sanctions(req, config).await,
-        ScreeningType::Watchlist => screen_watchlist(req, config).await,
-        ScreeningType::TerrorismWatchlist => screen_terrorism(req, config).await,
-        ScreeningType::InterpolNotice => screen_interpol(req, config).await,
-        ScreeningType::SexOffenderRegistry => screen_sex_offender(req, config).await,
-        ScreeningType::AddressVerification => screen_address(req, config).await,
-        ScreeningType::WorkPermit => screen_work_permit(req, config).await,
-        ScreeningType::CreditCheck => screen_credit(req, config).await,
-        ScreeningType::DrugTest => screen_drug_test(req, config).await,
-        ScreeningType::SocialMedia => screen_social_media(req, config).await,
-        ScreeningType::ContinuousMonitor => screen_continuous(req, config).await,
     };
 
     // Cache stable results for 24h
@@ -490,240 +483,72 @@ async fn screen_icpc(req: &ScreeningRequest, config: &EngineConfig) -> Screening
     }
 }
 
-async fn screen_court_records(req: &ScreeningRequest, _config: &EngineConfig) -> ScreeningResult {
-    unavailable_result(
-        req,
-        "State Judiciary",
-        "No live court-record provider is configured",
-    )
+#[derive(Deserialize)]
+struct AggregatorScreeningResponse {
+    outcome: ScreeningOutcome,
+    summary: String,
+    #[serde(default)]
+    details: serde_json::Value,
+    risk_score: f64,
+    source: String,
 }
 
-async fn screen_cac(req: &ScreeningRequest, config: &EngineConfig) -> ScreeningResult {
-    let client = reqwest::Client::new();
-    match client
-        .get(format!(
-            "{}/api/v1/search/director?name={}",
-            config.cac_url,
-            urlencoding::encode(&req.subject.full_name)
-        ))
-        .header("Authorization", format!("Bearer {}", config.cac_key))
-        .timeout(Duration::from_secs(30))
-        .send()
-        .await
-    {
-        Ok(resp) if resp.status().is_success() => {
-            let data: serde_json::Value = resp.json().await.unwrap_or_default();
-            let companies = data["data"].as_array().map(|a| a.len()).unwrap_or(0);
-            make_result(
-                req,
-                ScreeningOutcome::Clear,
-                &format!("Found {companies} CAC company associations"),
-                data,
-                0.1,
-                vec!["CAC".into()],
-            )
-        }
-        Ok(resp) => make_result(
-            req,
-            ScreeningOutcome::Unverified,
-            &format!("CAC API returned {}", resp.status()),
-            serde_json::Value::Null,
-            0.5,
-            vec!["CAC".into()],
-        ),
-        Err(e) => error_result(req, &e.to_string()),
+// screen_aggregator delegates specialist checks to the configured accredited
+// screening provider using the platform's normalized request and response contract.
+async fn screen_aggregator(req: &ScreeningRequest, config: &EngineConfig) -> ScreeningResult {
+    if config.aggregator_url.trim().is_empty() || config.aggregator_key.trim().is_empty() {
+        return error_result(req, "screening aggregator credentials are not configured");
     }
-}
-
-async fn screen_waec(req: &ScreeningRequest, config: &EngineConfig) -> ScreeningResult {
-    let client = reqwest::Client::new();
-    let waec_num = req.subject.waec_number.as_deref().unwrap_or("");
-    match client
-        .post(format!("{}/v1/verify", config.waec_url))
-        .header("x-api-key", &config.waec_key)
-        .json(&serde_json::json!({ "examNumber": waec_num, "name": req.subject.full_name }))
+    let screening_type = serde_json::to_value(&req.screening_type)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .unwrap_or_else(|| "unknown".to_owned());
+    let endpoint = format!(
+        "{}/v1/screenings/{}",
+        config.aggregator_url.trim_end_matches('/'),
+        screening_type
+    );
+    let response = reqwest::Client::new()
+        .post(endpoint)
+        .header("Authorization", format!("Bearer {}", config.aggregator_key))
+        .header("Idempotency-Key", &req.request_id)
+        .json(req)
         .timeout(Duration::from_secs(60))
         .send()
-        .await
-    {
-        Ok(resp) if resp.status().is_success() => {
-            let data: serde_json::Value = resp.json().await.unwrap_or_default();
-            let verified = data["data"]["verified"].as_bool().unwrap_or(false);
-            let outcome = if verified {
-                ScreeningOutcome::Clear
-            } else {
-                ScreeningOutcome::Consider
-            };
-            make_result(
-                req,
-                outcome,
-                if verified {
-                    "WAEC certificate verified"
-                } else {
-                    "WAEC certificate not verified"
-                },
-                data,
-                if verified { 0.05 } else { 0.7 },
-                vec!["WAEC".into()],
-            )
+        .await;
+
+    match response {
+        Ok(response) if response.status().is_success() => {
+            match response.json::<AggregatorScreeningResponse>().await {
+                Ok(provider) if provider.source.trim().is_empty() => {
+                    error_result(req, "screening aggregator response has no source")
+                }
+                Ok(provider) if !(0.0..=1.0).contains(&provider.risk_score) => {
+                    error_result(req, "screening aggregator returned an invalid risk score")
+                }
+                Ok(provider) => make_result(
+                    req,
+                    provider.outcome,
+                    &provider.summary,
+                    provider.details,
+                    provider.risk_score,
+                    vec![provider.source],
+                ),
+                Err(error) => error_result(
+                    req,
+                    &format!("parse screening aggregator response: {error}"),
+                ),
+            }
         }
-        Ok(resp) => make_result(
+        Ok(response) => error_result(
             req,
-            ScreeningOutcome::Unverified,
-            &format!("WAEC API returned {}", resp.status()),
-            serde_json::Value::Null,
-            0.5,
-            vec!["WAEC".into()],
+            &format!("screening aggregator returned HTTP {}", response.status()),
         ),
-        Err(e) => error_result(req, &e.to_string()),
+        Err(error) => error_result(req, &format!("call screening aggregator: {error}")),
     }
-}
-
-async fn screen_neco(req: &ScreeningRequest, _config: &EngineConfig) -> ScreeningResult {
-    unavailable_result(
-        req,
-        "NECO",
-        "No live NECO verification provider is configured",
-    )
-}
-
-async fn screen_university(req: &ScreeningRequest, _config: &EngineConfig) -> ScreeningResult {
-    unavailable_result(
-        req,
-        "University",
-        "No live university verification provider is configured",
-    )
-}
-
-async fn screen_nysc(req: &ScreeningRequest, _config: &EngineConfig) -> ScreeningResult {
-    unavailable_result(
-        req,
-        "NYSC",
-        "No live NYSC verification provider is configured",
-    )
-}
-
-async fn screen_employment(req: &ScreeningRequest, _config: &EngineConfig) -> ScreeningResult {
-    unavailable_result(
-        req,
-        "Employment",
-        "No live employment-verification provider is configured",
-    )
-}
-
-async fn screen_professional_licence(
-    req: &ScreeningRequest,
-    _config: &EngineConfig,
-    council: &str,
-) -> ScreeningResult {
-    unavailable_result(
-        req,
-        council,
-        "No live professional-licence provider is configured",
-    )
-}
-
-async fn screen_adverse_media(req: &ScreeningRequest, _config: &EngineConfig) -> ScreeningResult {
-    unavailable_result(
-        req,
-        "Adverse Media",
-        "No live adverse-media provider is configured",
-    )
-}
-
-async fn screen_pep_sanctions(req: &ScreeningRequest, _config: &EngineConfig) -> ScreeningResult {
-    unavailable_result(
-        req,
-        "PEP/Sanctions",
-        "No live PEP and sanctions provider is configured",
-    )
-}
-
-async fn screen_watchlist(req: &ScreeningRequest, _config: &EngineConfig) -> ScreeningResult {
-    unavailable_result(req, "Watchlist", "No live watchlist provider is configured")
-}
-
-async fn screen_terrorism(req: &ScreeningRequest, _config: &EngineConfig) -> ScreeningResult {
-    unavailable_result(
-        req,
-        "Terrorism Watchlist",
-        "No live terrorism-watchlist provider is configured",
-    )
-}
-
-async fn screen_interpol(req: &ScreeningRequest, _config: &EngineConfig) -> ScreeningResult {
-    unavailable_result(req, "INTERPOL", "No live INTERPOL provider is configured")
-}
-
-async fn screen_sex_offender(req: &ScreeningRequest, _config: &EngineConfig) -> ScreeningResult {
-    unavailable_result(
-        req,
-        "Sex Offender Registry",
-        "No live sex-offender registry provider is configured",
-    )
-}
-
-async fn screen_address(req: &ScreeningRequest, _config: &EngineConfig) -> ScreeningResult {
-    unavailable_result(
-        req,
-        "Address Verification",
-        "No live address-verification provider is configured",
-    )
-}
-
-async fn screen_work_permit(req: &ScreeningRequest, _config: &EngineConfig) -> ScreeningResult {
-    unavailable_result(req, "NIS", "No live work-permit provider is configured")
-}
-
-async fn screen_credit(req: &ScreeningRequest, _config: &EngineConfig) -> ScreeningResult {
-    unavailable_result(
-        req,
-        "Credit Bureau",
-        "No live credit-bureau provider is configured",
-    )
-}
-
-async fn screen_drug_test(req: &ScreeningRequest, _config: &EngineConfig) -> ScreeningResult {
-    unavailable_result(
-        req,
-        "Drug Test",
-        "No live laboratory result provider is configured",
-    )
-}
-
-async fn screen_social_media(req: &ScreeningRequest, _config: &EngineConfig) -> ScreeningResult {
-    unavailable_result(
-        req,
-        "Social Media",
-        "No live social-media screening provider is configured",
-    )
-}
-
-async fn screen_continuous(req: &ScreeningRequest, _config: &EngineConfig) -> ScreeningResult {
-    unavailable_result(
-        req,
-        "Continuous Monitoring",
-        "No live continuous-monitoring provider is configured",
-    )
 }
 
 // ─── Result Helpers ───────────────────────────────────────────────────────────
-
-fn unavailable_result(req: &ScreeningRequest, source: &str, reason: &str) -> ScreeningResult {
-    ScreeningResult {
-        request_id: req.request_id.clone(),
-        order_ref: req.order_ref.clone(),
-        result_id: req.result_id,
-        screening_type: req.screening_type.clone(),
-        outcome: ScreeningOutcome::Unverified,
-        summary: format!("Screening unavailable: {reason}"),
-        details: serde_json::json!({ "provider": source, "provider_available": false }),
-        risk_score: 1.0,
-        sources: vec![source.to_string()],
-        completed_at: Utc::now(),
-        error: Some(reason.to_string()),
-    }
-}
 
 fn make_result(
     req: &ScreeningRequest,
@@ -930,6 +755,8 @@ async fn main() -> anyhow::Result<()> {
         waec_url: std::env::var("WAEC_URL")
             .unwrap_or_else(|_| "https://api.waecnigeria.org".into()),
         waec_key: std::env::var("WAEC_API_KEY").unwrap_or_default(),
+        aggregator_url: std::env::var("SCREENING_AGGREGATOR_URL").unwrap_or_default(),
+        aggregator_key: std::env::var("SCREENING_AGGREGATOR_API_KEY").unwrap_or_default(),
     });
 
     if std::env::var("BIS_SCREENING_ENGINE_KEY")
@@ -937,6 +764,11 @@ async fn main() -> anyhow::Result<()> {
         .is_empty()
     {
         anyhow::bail!("BIS_SCREENING_ENGINE_KEY must be configured");
+    }
+    if config.aggregator_url.trim().is_empty() || config.aggregator_key.trim().is_empty() {
+        anyhow::bail!(
+            "SCREENING_AGGREGATOR_URL and SCREENING_AGGREGATOR_API_KEY must be configured"
+        );
     }
     if std::env::var("DATABASE_URL").unwrap_or_default().is_empty() {
         anyhow::bail!("DATABASE_URL must be configured for durable screening results");
@@ -1027,6 +859,8 @@ mod tests {
             cac_key: "".into(),
             waec_url: "".into(),
             waec_key: "".into(),
+            aggregator_url: "".into(),
+            aggregator_key: "".into(),
         }
     }
 
@@ -1051,21 +885,21 @@ mod tests {
     async fn test_waec_provider_unavailable() {
         let req = make_req(ScreeningType::EducationWaec);
         let config = test_config();
-        let result = screen_waec(&req, &config).await;
+        let result = screen_aggregator(&req, &config).await;
         assert!(matches!(result.outcome, ScreeningOutcome::Error));
     }
 
     #[tokio::test]
-    async fn test_pep_sanctions_provider_not_configured() {
+    async fn test_aggregator_requires_configuration() {
         let req = make_req(ScreeningType::PepSanctions);
         let config = test_config();
-        let result = screen_pep_sanctions(&req, &config).await;
-        assert!(matches!(result.outcome, ScreeningOutcome::Unverified));
+        let result = screen_aggregator(&req, &config).await;
+        assert!(matches!(result.outcome, ScreeningOutcome::Error));
         assert!(result.risk_score >= 0.0);
     }
 
     #[tokio::test]
-    async fn test_all_screening_types_provider_unavailable() {
+    async fn test_all_screening_types_require_credentialed_provider() {
         let types = vec![
             ScreeningType::NinTrace,
             ScreeningType::BvnVerification,
@@ -1083,8 +917,57 @@ mod tests {
         let config = test_config();
         for st in types {
             let req = make_req(st);
-            let result = screen_adverse_media(&req, &config).await;
-            assert!(!result.request_id.is_empty());
+            let result = screen_aggregator(&req, &config).await;
+            assert!(matches!(result.outcome, ScreeningOutcome::Error));
         }
+    }
+
+    #[tokio::test]
+    async fn test_aggregator_accepts_valid_provider_contract() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let provider = Router::new().route(
+            "/v1/screenings/pep_sanctions",
+            post(
+                |headers: axum::http::HeaderMap,
+                 axum::Json(request): axum::Json<ScreeningRequest>| async move {
+                    assert_eq!(
+                        headers
+                            .get("authorization")
+                            .and_then(|value| value.to_str().ok()),
+                        Some("Bearer integration-test-key")
+                    );
+                    assert_eq!(
+                        headers
+                            .get("idempotency-key")
+                            .and_then(|value| value.to_str().ok()),
+                        Some(request.request_id.as_str())
+                    );
+                    (
+                        axum::http::StatusCode::OK,
+                        axum::Json(serde_json::json!({
+                            "outcome": "clear",
+                            "summary": "Accredited provider completed PEP screening",
+                            "details": {"match": false},
+                            "risk_score": 0.02,
+                            "source": "accredited-provider"
+                        })),
+                    )
+                },
+            ),
+        );
+        tokio::spawn(async move { axum::serve(listener, provider).await.unwrap() });
+
+        let mut config = test_config();
+        config.aggregator_url = format!("http://{address}");
+        config.aggregator_key = "integration-test-key".into();
+        let request = make_req(ScreeningType::PepSanctions);
+        let result = screen_aggregator(&request, &config).await;
+        assert!(matches!(result.outcome, ScreeningOutcome::Clear));
+        assert_eq!(
+            result.summary,
+            "Accredited provider completed PEP screening"
+        );
+        assert_eq!(result.sources, vec!["accredited-provider"]);
     }
 }

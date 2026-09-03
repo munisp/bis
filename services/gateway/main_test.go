@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -61,6 +62,56 @@ func TestAuthMiddleware_RejectsQueryParamCredential(t *testing.T) {
 	handler(rr, req)
 	if rr.Code != http.StatusUnauthorized {
 		t.Errorf("expected query-string credential rejection with 401, got %d", rr.Code)
+	}
+}
+
+func TestStablecoinTransferRequiresCredentialedBridge(t *testing.T) {
+	previousBridge, previousKey := stablecoinBridge, stablecoinKey
+	defer func() { stablecoinBridge, stablecoinKey = previousBridge, previousKey }()
+	stablecoinBridge, stablecoinKey = "", ""
+
+	request := httptest.NewRequest(http.MethodPost, "/v1/stablecoin/transfer", bytes.NewBufferString(`{"txRef":"T-bridge-required","fromAddress":"0xfrom","toAddress":"0xto","amountUnits":"1"}`))
+	response := httptest.NewRecorder()
+	handleStablecoinTransfer(response, request)
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("missing settlement bridge: expected 503, got %d", response.Code)
+	}
+	var body GatewayError
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	if body.Code != "STABLECOIN_BRIDGE_UNAVAILABLE" {
+		t.Fatalf("expected bridge-unavailable code, got %q", body.Code)
+	}
+}
+
+func TestSensitiveGatewayRoutesRejectUnauthenticatedRequests(t *testing.T) {
+	gatewayKey = "route-test-key"
+
+	stablecoinHandler := StablecoinTransferRateLimitMiddleware(authMiddleware(http.HandlerFunc(handleStablecoinTransfer)))
+	stablecoinRequest := httptest.NewRequest(http.MethodPost, "/v1/stablecoin/transfer", bytes.NewBufferString(`{"txRef":"T-1","fromAddress":"from","toAddress":"to","amountUnits":"1"}`))
+	stablecoinResponse := httptest.NewRecorder()
+	stablecoinHandler.ServeHTTP(stablecoinResponse, stablecoinRequest)
+	if stablecoinResponse.Code != http.StatusUnauthorized {
+		t.Fatalf("stablecoin transfer without an API key: expected 401, got %d", stablecoinResponse.Code)
+	}
+
+	criminalRoutes := http.NewServeMux()
+	RegisterCriminalRecordsRoutes(criminalRoutes, authMiddleware)
+	for _, path := range []string{
+		"/v1/criminal-records/request",
+		"/v1/criminal-records/ingest",
+		"/v1/criminal-records/verify",
+		"/v1/corporate/check",
+		"/v1/field-visit/checkin",
+		"/v1/thin-file/flag",
+		"/v1/mojaloop/compliance-check",
+	} {
+		response := httptest.NewRecorder()
+		criminalRoutes.ServeHTTP(response, httptest.NewRequest(http.MethodPost, path, nil))
+		if response.Code != http.StatusUnauthorized {
+			t.Errorf("%s without an API key: expected 401, got %d", path, response.Code)
+		}
 	}
 }
 

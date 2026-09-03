@@ -29,12 +29,12 @@ import (
 // ─── Config ───────────────────────────────────────────────────────────────────
 
 var (
-	mojaloopHubURL  = os.Getenv("MOJALOOP_HUB_URL")   // e.g. https://hub.mojaloop.io
-	mojaloopDFSPID  = envOrDefault("MOJALOOP_DFSP_ID", "bis-dfsp")
-	nibssNIPURL     = os.Getenv("NIBSS_NIP_URL")       // NIBSS NIP gateway base URL
-	nibssNIPKey     = os.Getenv("NIBSS_NIP_KEY")       // NIBSS NIP API key
+	mojaloopHubURL   = os.Getenv("MOJALOOP_HUB_URL") // e.g. https://hub.mojaloop.io
+	mojaloopDFSPID   = envOrDefault("MOJALOOP_DFSP_ID", "bis-dfsp")
+	nibssNIPURL      = os.Getenv("NIBSS_NIP_URL")         // NIBSS NIP gateway base URL
+	nibssNIPKey      = os.Getenv("NIBSS_NIP_KEY")         // NIBSS NIP API key
 	stablecoinBridge = os.Getenv("STABLECOIN_BRIDGE_URL") // Internal bridge service URL
-	stablecoinKey   = os.Getenv("STABLECOIN_API_KEY")  // Bridge API key
+	stablecoinKey    = os.Getenv("STABLECOIN_API_KEY")    // Bridge API key
 )
 
 func envOrDefault(key, def string) string {
@@ -47,15 +47,15 @@ func envOrDefault(key, def string) string {
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type MojaloopTransferRequest struct {
-	TxRef              string `json:"txRef"`
-	OriginatorAccount  string `json:"originatorAccount"`
-	OriginatorName     string `json:"originatorName"`
-	BeneficiaryAccount string `json:"beneficiaryAccount"`
-	BeneficiaryName    string `json:"beneficiaryName"`
+	TxRef               string `json:"txRef"`
+	OriginatorAccount   string `json:"originatorAccount"`
+	OriginatorName      string `json:"originatorName"`
+	BeneficiaryAccount  string `json:"beneficiaryAccount"`
+	BeneficiaryName     string `json:"beneficiaryName"`
 	BeneficiaryBankCode string `json:"beneficiaryBankCode"`
-	AmountKobo         int64  `json:"amountKobo"`
-	Currency           string `json:"currency"`
-	Narration          string `json:"narration"`
+	AmountKobo          int64  `json:"amountKobo"`
+	Currency            string `json:"currency"`
+	Narration           string `json:"narration"`
 }
 
 type MojaloopTransferResponse struct {
@@ -68,31 +68,31 @@ type MojaloopTransferResponse struct {
 }
 
 type MojaloopStatusResponse struct {
-	TxRef       string `json:"txRef"`
-	ExternalRef string `json:"externalRef"`
-	Status      string `json:"status"`
-	CompletedAt string `json:"completedAt,omitempty"`
+	TxRef         string `json:"txRef"`
+	ExternalRef   string `json:"externalRef"`
+	Status        string `json:"status"`
+	CompletedAt   string `json:"completedAt,omitempty"`
 	FailureReason string `json:"failureReason,omitempty"`
 }
 
 type StablecoinTransferRequest struct {
-	TxRef              string `json:"txRef"`
-	FromAddress        string `json:"fromAddress"`
-	ToAddress          string `json:"toAddress"`
-	AmountUnits        string `json:"amountUnits"` // 6-decimal string, e.g. "1000000" = 1 USDC
-	Currency           string `json:"currency"`    // "USDC" | "cUSD"
-	Network            string `json:"network"`     // "ethereum" | "celo" | "polygon"
-	Narration          string `json:"narration,omitempty"`
+	TxRef       string `json:"txRef"`
+	FromAddress string `json:"fromAddress"`
+	ToAddress   string `json:"toAddress"`
+	AmountUnits string `json:"amountUnits"` // 6-decimal string, e.g. "1000000" = 1 USDC
+	Currency    string `json:"currency"`    // "USDC" | "cUSD"
+	Network     string `json:"network"`     // "ethereum" | "celo" | "polygon"
+	Narration   string `json:"narration,omitempty"`
 }
 
 type StablecoinTransferResponse struct {
-	TxRef     string `json:"txRef"`
-	TxHash    string `json:"txHash"`
-	Status    string `json:"status"` // pending | confirmed | failed
-	Network   string `json:"network"`
-	Currency  string `json:"currency"`
-	GasUsed   string `json:"gasUsed,omitempty"`
-	Sandbox   bool   `json:"sandbox,omitempty"`
+	TxRef    string `json:"txRef"`
+	TxHash   string `json:"txHash"`
+	Status   string `json:"status"` // pending | confirmed | failed
+	Network  string `json:"network"`
+	Currency string `json:"currency"`
+	GasUsed  string `json:"gasUsed,omitempty"`
+	Sandbox  bool   `json:"sandbox,omitempty"`
 }
 
 type StablecoinBalanceResponse struct {
@@ -104,15 +104,15 @@ type StablecoinBalanceResponse struct {
 }
 
 type VelocityAlertRequest struct {
-	AlertID   string  `json:"alert_id"`
-	AccountID string  `json:"account_id"`
-	RuleName  string  `json:"rule_name"`
-	TxCount   int     `json:"tx_count"`
-	TotalKobo int64   `json:"total_kobo"`
-	WindowSec int     `json:"window_sec"`
-	Score     float64 `json:"score"`
-	TenantID  string  `json:"tenant_id"`
-	TriggeredAt string `json:"triggered_at"`
+	AlertID     string  `json:"alert_id"`
+	AccountID   string  `json:"account_id"`
+	RuleName    string  `json:"rule_name"`
+	TxCount     int     `json:"tx_count"`
+	TotalKobo   int64   `json:"total_kobo"`
+	WindowSec   int     `json:"window_sec"`
+	Score       float64 `json:"score"`
+	TenantID    string  `json:"tenant_id"`
+	TriggeredAt string  `json:"triggered_at"`
 }
 
 // ─── Mojaloop Transfer ────────────────────────────────────────────────────────
@@ -305,15 +305,15 @@ func handleNIPTransfer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	body := map[string]interface{}{
-		"sessionId":          req.TxRef,
-		"channelCode":        "1",
-		"sourceAccountName":  req.OriginatorName,
-		"sourceAccountNumber": req.OriginatorAccount,
-		"destinationBankCode": req.BeneficiaryBankCode,
+		"sessionId":                req.TxRef,
+		"channelCode":              "1",
+		"sourceAccountName":        req.OriginatorName,
+		"sourceAccountNumber":      req.OriginatorAccount,
+		"destinationBankCode":      req.BeneficiaryBankCode,
 		"destinationAccountNumber": req.BeneficiaryAccount,
-		"destinationAccountName": req.BeneficiaryName,
-		"amount":             req.AmountKobo,
-		"narration":          req.Narration,
+		"destinationAccountName":   req.BeneficiaryName,
+		"amount":                   req.AmountKobo,
+		"narration":                req.Narration,
 	}
 
 	respBody, err := callExternalJSONWithKey(r.Context(), http.MethodPost, nibssNIPURL+"/transfer", nibssNIPKey, body)
@@ -373,7 +373,12 @@ func handleStablecoinTransfer(w http.ResponseWriter, r *http.Request) {
 		req.Network = "ethereum"
 	}
 
-	// Publish Kafka event
+	if stablecoinBridge == "" || stablecoinKey == "" {
+		writeError(w, http.StatusServiceUnavailable, "STABLECOIN_BRIDGE_UNAVAILABLE", "A credentialed stablecoin settlement bridge is required")
+		return
+	}
+
+	// Publish an initiation event only after confirming a live settlement provider is configured.
 	publishEvent("bis.payment.events", map[string]interface{}{
 		"event_type":   "STABLECOIN_TRANSFER_INITIATED",
 		"tx_ref":       req.TxRef,
@@ -384,27 +389,7 @@ func handleStablecoinTransfer(w http.ResponseWriter, r *http.Request) {
 		"source":       "bis-gateway",
 	})
 
-	if stablecoinBridge == "" {
-		// No external bridge configured — use direct on-chain settlement via blockchain.go
-		txHash, isSandbox, err := ExecuteOnChainTransfer(r.Context(), req.Network, req.Currency, req.ToAddress, req.AmountUnits)
-		if err != nil {
-			log.Printf("[Stablecoin] On-chain transfer failed: %v — falling back to sandbox hash", err)
-			txHash = fmt.Sprintf("0x%x%x", time.Now().UnixNano(), len(req.TxRef))
-			isSandbox = true
-		}
-		log.Printf("[Stablecoin] On-chain transfer: network=%s currency=%s txHash=%s sandbox=%v", req.Network, req.Currency, txHash, isSandbox)
-		writeJSON(w, http.StatusAccepted, StablecoinTransferResponse{
-			TxRef:    req.TxRef,
-			TxHash:   txHash,
-			Status:   "pending",
-			Network:  req.Network,
-			Currency: req.Currency,
-			Sandbox:  isSandbox,
-		})
-		return
-	}
-
-	// Live bridge call
+	// Submit the transfer to the credentialed bridge.
 	body := map[string]interface{}{
 		"txRef":       req.TxRef,
 		"fromAddress": req.FromAddress,
@@ -429,8 +414,14 @@ func handleStablecoinTransfer(w http.ResponseWriter, r *http.Request) {
 
 	txHash, _ := bridgeResp["txHash"].(string)
 	status, _ := bridgeResp["status"].(string)
-	if status == "" {
-		status = "pending"
+	if strings.TrimSpace(txHash) == "" || strings.TrimSpace(status) == "" {
+		writeError(w, http.StatusBadGateway, "STABLECOIN_INVALID_PROVIDER_RESPONSE", "settlement bridge response lacks a transaction reference or status")
+		return
+	}
+	validStatuses := map[string]bool{"pending": true, "submitted": true, "confirmed": true}
+	if !validStatuses[strings.ToLower(status)] {
+		writeError(w, http.StatusBadGateway, "STABLECOIN_INVALID_PROVIDER_RESPONSE", "settlement bridge returned an unsupported status")
+		return
 	}
 	gasUsed, _ := bridgeResp["gasUsed"].(string)
 
