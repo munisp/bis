@@ -177,7 +177,9 @@ function caseworkerProcedure(permission: "manage_consumer_disputes" | "supervise
       throw new TRPCError({ code: "FORBIDDEN", message: "A designated consumer-rights case role is required." });
     }
     if (ENV.isProduction) {
-      const allowed = await permifyCheck("platform", "bis", permission, String(ctx.user.id));
+      // Bind every authorization decision to the PostgreSQL tenant context. A
+      // relationship on platform:<tenant A> can never authorize tenant B.
+      const allowed = await permifyCheck("platform", String(ctx.tenantId), permission, String(ctx.user.id));
       if (!allowed) throw new TRPCError({ code: "FORBIDDEN", message: "Consumer-rights permission denied." });
     }
     return next({ ctx: { ...ctx, user: ctx.user } });

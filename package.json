@@ -23,6 +23,7 @@
     "staging:sse-kms-evidence": "node scripts/run-staging-sse-kms-evidence-acceptance.mjs",
     "permify:apply-schema": "node scripts/apply-permify-schema.mjs",
     "validate:onprem-s3-kms": "node scripts/validate-onprem-s3-kms-profile.mjs",
+    "verify:onprem-minio-kes-fail-closed": "node scripts/verify-onprem-minio-kes-fail-closed.mjs",
     "smoke": "tsx scripts/smoke-test.ts"
   },
   "dependencies": {

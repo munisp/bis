@@ -9,7 +9,7 @@
 The BFF calls Permify in production with the platform entity and the exact permission below:
 
 ```ts
-await permifyCheck("platform", "bis", "supervise_consumer_disputes", String(ctx.user.id));
+await permifyCheck("platform", String(ctx.tenantId), "supervise_consumer_disputes", String(ctx.user.id));
 ```
 
 The checked-in schema in `infra/permify/bis.perm` is:
@@ -43,11 +43,11 @@ Permify evaluates permissions from a schema and relationship tuples at runtime. 
 
 | Relation | Subject type | Grant authority | Meaning |
 |---|---|---|---|
-| `platform:bis#admin` | `user:<id>` | Break-glass authorization owner, dual-approved | May manage and supervise platform-wide consumer disputes. |
-| `platform:bis#consumer_dispute_supervisor` | `user:<id>` | Consumer-rights operations owner with compliance approval | May acknowledge/resolve deadline escalations and perform supervision. |
-| `platform:bis#consumer_dispute_caseworker` | `user:<id>` | Consumer-rights operations owner | May manage cases but **cannot** supervise/escalation-resolve. |
-| `consumer_dispute_case:<caseRef>#assigned_supervisor` | `user:<id>` | Case assignment workflow | Supports future resource-specific supervision; current BFF control remains the platform relation. |
-| `consumer_dispute_case:<caseRef>#platform` | `platform:bis` | Policy provisioning service | Links a case to the platform policy root. |
+| `platform:<tenantId>#admin` | `user:<id>` | Tenant break-glass authorization owner, dual-approved | May manage and supervise disputes only for that tenant. |
+| `platform:<tenantId>#consumer_dispute_supervisor` | `user:<id>` | Tenant consumer-rights operations owner with compliance approval | May acknowledge/resolve deadline escalations only for that tenant. |
+| `platform:<tenantId>#consumer_dispute_caseworker` | `user:<id>` | Tenant consumer-rights operations owner | May manage cases but **cannot** supervise/escalation-resolve. |
+| `consumer_dispute_case:<caseRef>#assigned_supervisor` | `user:<id>` | Tenant case assignment workflow | Supports future resource-specific supervision; current BFF control remains the tenant platform relation. |
+| `consumer_dispute_case:<caseRef>#platform` | `platform:<tenantId>` | Policy provisioning service | Links a case to its own tenant policy root. |
 
 The relationship-write API must be used by a dedicated policy-administration identity, not the BFF runtime identity. Apply the model only through the guarded command:
 
@@ -60,7 +60,7 @@ export PERMIFY_API_KEY=<policy-admin-secret>
 pnpm permify:apply-schema
 ```
 
-The BFF identity receives **check-only** access to the same tenant; it must not write schema or tuples. Admin tuple changes require two-person approval, a ticket reference, immediate removal on role transfer/offboarding, and a staging decision test proving: supervisor allowed; analyst/caseworker denied; unavailable Permify denied.
+The BFF identity receives **check-only** access to the same Permify authorization tenant; each `platform` entity ID must equal the authenticated PostgreSQL `tenantId`. It must not write schema or tuples. Admin tuple changes require two-person approval, a ticket reference, immediate removal on role transfer/offboarding, and a staging decision test proving: supervisor allowed; analyst/caseworker denied; unavailable Permify denied.
 
 ## 2. Portable storage and KMS capability contract
 
@@ -101,7 +101,7 @@ All values below are injected into the **BFF workload only** through a protected
 | `BIS_EVIDENCE_S3_KMS_KEY_ID` | Exact opaque active KMS key identity. It may be a cloud key ARN/URI or an on-prem KMS key name/ID; it must exactly match `STAGING_EXPECTED_KMS_KEY_ID`. |
 | `BIS_EVIDENCE_S3_ACCESS_KEY` and `BIS_EVIDENCE_S3_SECRET_KEY` | Both set or both absent. When present, are BFF-only secrets. When absent, the SDK standard workload identity chain is used. |
 | `BIS_EVIDENCE_ACTIVE_KEY_VERSION`, `BIS_EVIDENCE_KEYRING` | Versioned 32-byte AES evidence description keyring, BFF-only; distinct from storage KMS. |
-| `BIS_DATABASE_URL` | Tenant-scoped staging PostgreSQL with canonical migrations `0007` through `0009` applied. |
+| `DATABASE_URL` | Tenant-scoped staging PostgreSQL with canonical migrations `0007` through `0009` applied. |
 | `PERMIFY_URL`, `PERMIFY_TENANT_ID`, `PERMIFY_API_KEY` | Internal HTTPS authorization service, explicit environment tenant, and BFF check-only credential. |
 
 ## 4. Acceptance-runner environment and steps

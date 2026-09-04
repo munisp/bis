@@ -10,6 +10,8 @@ vi.mock("./_core/env", () => ({
 }));
 
 import { consumerDisputesRouter } from "./consumerDisputes";
+import { ENV } from "./_core/env";
+import { permifyCheck } from "./permify";
 
 const CASE_ROW = {
   id: "41", case_ref: "BIS-DR-0123456789ABCDEF01", tenant_id: 7, requester_user_id: 17,
@@ -51,6 +53,8 @@ function mockResolveAcknowledged(): void {
 beforeEach(() => {
   query.mockReset();
   connect.mockClear();
+  vi.mocked(permifyCheck).mockClear();
+  (ENV as { isProduction: boolean }).isProduction = false;
 });
 
 describe("consumer dispute deadline escalation supervisor procedures", () => {
@@ -62,6 +66,15 @@ describe("consumer dispute deadline escalation supervisor procedures", () => {
     expect(query).toHaveBeenCalledWith(expect.stringContaining("WHERE id = $1 AND case_id = $2"), [501, "41"]);
     expect(query).toHaveBeenCalledWith(expect.stringContaining("SET status = 'acknowledged'"), [99, "501"]);
     expect(query).toHaveBeenCalledWith(expect.stringContaining("INSERT INTO consumer_dispute_events"), expect.any(Array));
+  });
+
+  it("binds the production Permify supervision check to the authenticated tenant", async () => {
+    mockAcknowledgeOpen();
+    (ENV as { isProduction: boolean }).isProduction = true;
+    const caller = consumerDisputesRouter.createCaller(SUPERVISOR_CTX);
+    await expect(caller.acknowledgeDeadlineEscalation({ caseRef: CASE_ROW.case_ref, escalationId: 501 }))
+      .resolves.toEqual({ escalationId: "501", status: "acknowledged" });
+    expect(permifyCheck).toHaveBeenCalledWith("platform", "7", "supervise_consumer_disputes", "99");
   });
 
   it("requires a substantive resolution note and records resolution under the supervisor identity", async () => {
