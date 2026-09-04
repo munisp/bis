@@ -5,9 +5,9 @@ package main
 // DLQ design:
 //   - publishEvent() now calls publishEventWithDLQ() which retries once on failure.
 //   - On second failure the message is written to the DLQ topic: bis.dlq.<original-topic>
-//   - A background goroutine (startDLQReplay) reads from DLQ and retries every 30 s.
-//   - DLQ messages are stored in Redis as a list (bis:dlq:<topic>) when Kafka is
-//     completely unavailable, so they survive restarts.
+//   - A background goroutine (startDLQReplay) reads from a durable DLQ and retries every 30 s.
+//   - If neither Kafka nor Redis can persist a DLQ message, the caller receives an
+//     explicit error and must not acknowledge a durable business operation.
 //
 // SSRF allowlist design:
 //   - validateOutboundURL() checks every outbound HTTP target against an allowlist
@@ -41,43 +41,37 @@ type dlqMessage struct {
 	FirstFail int64           `json:"first_fail_unix"`
 }
 
-// inMemoryDLQ is a fallback when both Kafka and Redis are unavailable.
-var (
-	inMemoryDLQ   []dlqMessage
-	inMemoryDLQMu sync.Mutex
-)
-
 // publishEventWithDLQ is the production-safe replacement for publishEvent.
-// It retries once inline; on second failure it routes to the DLQ.
-func publishEventWithDLQ(topic string, payload any) {
+// It retries once inline, then persists to a durable DLQ. A caller receives an
+// error when neither the primary topic nor a durable DLQ acknowledges the event.
+func publishEventWithDLQ(topic string, payload any) error {
 	if kafkaProducer == nil {
-		enqueueDLQ(topic, payload, 0)
-		return
+		return enqueueDLQ(topic, payload, 0)
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {
-		log.Printf("[DLQ] Marshal error for topic %s: %v", topic, err)
-		return
+		return fmt.Errorf("marshal event for topic %s: %w", topic, err)
 	}
-	// First attempt
 	if err := kafkaProducer.Publish(topic, data); err == nil {
-		return
+		return nil
 	}
-	// Retry once after 200 ms
 	time.Sleep(200 * time.Millisecond)
 	if err := kafkaProducer.Publish(topic, data); err == nil {
-		return
+		return nil
 	}
-	// Both attempts failed — route to DLQ
-	log.Printf("[DLQ] Routing to DLQ after 2 failures: topic=%s", topic)
-	enqueueDLQ(topic, payload, 1)
+	log.Printf("[DLQ] Routing to durable DLQ after 2 failures: topic=%s", topic)
+	if err := enqueueDLQ(topic, payload, 1); err != nil {
+		return fmt.Errorf("primary and DLQ publish failed for %s: %w", topic, err)
+	}
+	return nil
 }
 
-// enqueueDLQ stores a message in the DLQ (Kafka DLQ topic → Redis → in-memory).
-func enqueueDLQ(topic string, payload any, attempts int) {
+// enqueueDLQ stores a message in a durable DLQ (Kafka topic or Redis list).
+// It never accepts an in-memory fallback for a durable business event.
+func enqueueDLQ(topic string, payload any, attempts int) error {
 	data, err := json.Marshal(payload)
 	if err != nil {
-		return
+		return fmt.Errorf("marshal DLQ payload: %w", err)
 	}
 	msg := dlqMessage{
 		Topic:     topic,
@@ -92,7 +86,7 @@ func enqueueDLQ(topic string, payload any, attempts int) {
 		dlqTopic := dlqTopicPrefix + topic
 		if err := kafkaProducer.Publish(dlqTopic, envelope); err == nil {
 			log.Printf("[DLQ] Message stored in Kafka DLQ topic %s", dlqTopic)
-			return
+			return nil
 		}
 	}
 
@@ -101,15 +95,10 @@ func enqueueDLQ(topic string, payload any, attempts int) {
 		key := dlqRedisKey + topic
 		if err := redisClient.LPush(key, string(envelope)); err == nil {
 			log.Printf("[DLQ] Message stored in Redis DLQ key %s", key)
-			return
+			return nil
 		}
 	}
-
-	// Last resort: in-memory queue
-	inMemoryDLQMu.Lock()
-	inMemoryDLQ = append(inMemoryDLQ, msg)
-	inMemoryDLQMu.Unlock()
-	log.Printf("[DLQ] Message stored in-memory DLQ (topic=%s, total=%d)", topic, len(inMemoryDLQ))
+	return fmt.Errorf("durable DLQ unavailable for topic %s", topic)
 }
 
 // startDLQReplay runs a background goroutine that replays DLQ messages.
@@ -118,48 +107,10 @@ func startDLQReplay() {
 		ticker := time.NewTicker(dlqRetryInterval)
 		defer ticker.Stop()
 		for range ticker.C {
-			replayInMemoryDLQ()
 			replayRedisDLQ()
 		}
 	}()
 	log.Printf("[DLQ] Replay goroutine started (interval=%s)", dlqRetryInterval)
-}
-
-func replayInMemoryDLQ() {
-	inMemoryDLQMu.Lock()
-	if len(inMemoryDLQ) == 0 {
-		inMemoryDLQMu.Unlock()
-		return
-	}
-	pending := make([]dlqMessage, len(inMemoryDLQ))
-	copy(pending, inMemoryDLQ)
-	inMemoryDLQ = inMemoryDLQ[:0]
-	inMemoryDLQMu.Unlock()
-
-	var failed []dlqMessage
-	for _, msg := range pending {
-		if msg.Attempts >= dlqMaxRetries {
-			log.Printf("[DLQ] Dropping message after %d attempts: topic=%s", msg.Attempts, msg.Topic)
-			continue
-		}
-		if kafkaProducer == nil {
-			msg.Attempts++
-			failed = append(failed, msg)
-			continue
-		}
-		if err := kafkaProducer.Publish(msg.Topic, msg.Payload); err != nil {
-			msg.Attempts++
-			failed = append(failed, msg)
-			log.Printf("[DLQ] Replay failed (attempt %d): topic=%s err=%v", msg.Attempts, msg.Topic, err)
-		} else {
-			log.Printf("[DLQ] Replay succeeded: topic=%s", msg.Topic)
-		}
-	}
-	if len(failed) > 0 {
-		inMemoryDLQMu.Lock()
-		inMemoryDLQ = append(failed, inMemoryDLQ...)
-		inMemoryDLQMu.Unlock()
-	}
 }
 
 func replayRedisDLQ() {

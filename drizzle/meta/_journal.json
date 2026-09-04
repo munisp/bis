@@ -8,6 +8,13 @@
       "when": 1786827600000,
       "tag": "0000_postgresql_baseline",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1788472000000,
+      "tag": "0001_cold_archive_parquet",
+      "breakpoints": true
     }
   ]
 }

@@ -67,9 +67,9 @@ var (
 	biometricEngineURL = envOr("BIOMETRIC_ENGINE_URL", "http://localhost:8084")
 
 	// Middleware
-	redisAddr     = envOr("REDIS_ADDR", "localhost:6379")
-	redisPassword = envOr("REDIS_PASSWORD", "bis_redis_dev")
-	kafkaBrokers  = envOr("KAFKA_BROKERS", "localhost:9092")
+	redisAddr     = envOr("REDIS_ADDR", "")
+	redisPassword = envOr("REDIS_PASSWORD", "")
+	kafkaBrokers  = envOr("KAFKA_BROKERS", "")
 	keycloakURL   = envOr("KEYCLOAK_URL", "")
 	permifyURL    = envOr("PERMIFY_URL", "")
 	temporalHost  = envOr("TEMPORAL_HOST", "")
@@ -107,14 +107,16 @@ func initMiddleware() {
 		}
 	}
 
-	// Kafka
-	if kafkaBrokers != "" {
+	// Kafka — durable-event handlers reject when this dependency is unavailable.
+	if kafkaBrokers == "" {
+		log.Printf("[WARN] Kafka is not configured; durable-event operations will reject")
+	} else {
 		p, err := kafkapkg.NewProducer(kafkaBrokers)
 		if err != nil {
-			log.Printf("[WARN] Kafka unavailable: %v — event publishing disabled", err)
+			log.Printf("[ERROR] Kafka initialization failed; durable-event operations will reject: %v", err)
 		} else {
 			kafkaProducer = p
-			log.Printf("[INFO] Kafka producer connected: %s", kafkaBrokers)
+			log.Printf("[INFO] Kafka producer configured: %s", kafkaBrokers)
 			startDLQReplay()
 		}
 	}
@@ -130,10 +132,12 @@ func initMiddleware() {
 		}
 	}
 
-	// Permify
-	if permifyURL != "" {
-		permifyClient = permifypkg.New()
-		log.Printf("[INFO] Permify client initialized: %s", permifyURL)
+	// Permify — a missing or incomplete configuration is non-authorizing.
+	permifyClient = permifypkg.New()
+	if !permifyClient.IsConfigured() {
+		log.Printf("[WARN] Permify is not fully configured; protected permissions will deny")
+	} else {
+		log.Printf("[INFO] Permify client configured: %s", permifyURL)
 	}
 
 	// Temporal
@@ -356,9 +360,10 @@ func cacheSet(ctx context.Context, key string, val []byte, ttl time.Duration) {
 	}
 }
 
-// publishEvent sends an event to Kafka with DLQ fallback on failure.
-func publishEvent(topic string, payload any) {
-	publishEventWithDLQ(topic, payload)
+// publishEvent sends an event to Kafka with a durable DLQ fallback. Callers that
+// require an audit event for acceptance must return this error to the client.
+func publishEvent(topic string, payload any) error {
+	return publishEventWithDLQ(topic, payload)
 }
 
 // checkPermify verifies fine-grained authorization. Authorization fails closed
@@ -1348,8 +1353,14 @@ func validateStartupConfig() {
 		if keycloakURL == "" || keycloakClient == nil {
 			log.Fatal("production requires a reachable Keycloak OIDC client")
 		}
-		if permifyURL == "" || permifyClient == nil {
-			log.Fatal("production requires a reachable Permify authorization client")
+		if permifyClient == nil || !permifyClient.IsConfigured() {
+			log.Fatal("production requires PERMIFY_URL, PERMIFY_TENANT_ID, and PERMIFY_API_KEY")
+		}
+		if kafkaBrokers == "" || kafkaProducer == nil {
+			log.Fatal("production requires a configured Kafka producer for durable event delivery")
+		}
+		if redisAddr == "" || redisClient == nil {
+			log.Fatal("production requires a reachable Redis client for rate limiting and durable workflow state")
 		}
 		if os.Getenv("BIS_CORS_ORIGIN") == "" {
 			log.Fatal("production requires BIS_CORS_ORIGIN when browser access is enabled")

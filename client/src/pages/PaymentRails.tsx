@@ -1114,7 +1114,7 @@ export default function PaymentRailsPage() {
               Dry Run
             </Label>
           </div>
-          {/* Run Archival Now */}
+          {/* Run warm archival now. Cold archival is executed only by the scheduled Parquet worker. */}
           <Button
             variant="outline"
             size="sm"
@@ -1124,12 +1124,12 @@ export default function PaymentRailsPage() {
                 : "border-orange-700/50 bg-orange-900/10 text-orange-300 hover:bg-orange-900/20 hover:text-orange-200"
             }`}
             disabled={runArchival.isPending}
-            onClick={() => runArchival.mutate({ tier: "all", dryRun: isDryRun })}
+            onClick={() => runArchival.mutate({ tier: "warm", dryRun: isDryRun })}
           >
             {runArchival.isPending
               ? <RefreshCw size={11} className="animate-spin" />
               : <Play size={11} />}
-            {runArchival.isPending ? "Running…" : isDryRun ? "Preview Archival" : "Run Archival Now"}
+            {runArchival.isPending ? "Running…" : isDryRun ? "Preview Warm Archive" : "Run Warm Archive"}
           </Button>
 
           <Badge variant="outline" className="text-[10px] font-mono bg-indigo-500/10 text-indigo-400 border-indigo-500/30">
