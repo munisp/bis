@@ -599,7 +599,7 @@ export const consumerDisputesRouter = router({
       Metadata: { "dispute-evidence-id": evidenceRef, sha256: input.sha256 },
       ChecksumAlgorithm: "SHA256",
       ChecksumSHA256: objectChecksum,
-      ServerSideEncryption: "aws:kms",
+      ServerSideEncryption: storage.sseAlgorithm,
       SSEKMSKeyId: storage.kmsKeyId,
     });
     const uploadUrl = await getSignedUrl(storage.client, command, { expiresIn: Math.max(1, Math.floor((expiresAt.getTime() - Date.now()) / 1000)) });
@@ -612,7 +612,7 @@ export const consumerDisputesRouter = router({
         "x-amz-meta-dispute-evidence-id": evidenceRef,
         "x-amz-meta-sha256": input.sha256,
         "x-amz-checksum-sha256": objectChecksum,
-        "x-amz-server-side-encryption": "aws:kms",
+        "x-amz-server-side-encryption": storage.sseAlgorithm,
         "x-amz-server-side-encryption-aws-kms-key-id": storage.kmsKeyId,
       },
     };
@@ -663,7 +663,7 @@ export const consumerDisputesRouter = router({
         && observedId === input.evidenceRef
         && object.ContentType === row.content_type
         && Number(object.ContentLength) === Number(row.byte_size)
-        && object.ServerSideEncryption === "aws:kms"
+        && object.ServerSideEncryption === storage.sseAlgorithm
         && object.SSEKMSKeyId === row.kms_key_id;
       await client.query("BEGIN");
       if (!valid) {

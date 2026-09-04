@@ -145,7 +145,7 @@ export const kycDocumentEvidenceRouter = router({
       Metadata: { "kyc-upload-id": uploadId, sha256: input.sha256 },
       ChecksumAlgorithm: "SHA256",
       ChecksumSHA256: objectChecksum,
-      ServerSideEncryption: "aws:kms",
+      ServerSideEncryption: storage.sseAlgorithm,
       SSEKMSKeyId: storage.kmsKeyId,
     });
     const uploadUrl = await getSignedUrl(storage.client, command, {
@@ -161,7 +161,7 @@ export const kycDocumentEvidenceRouter = router({
         "x-amz-meta-kyc-upload-id": uploadId,
         "x-amz-meta-sha256": input.sha256,
         "x-amz-checksum-sha256": objectChecksum,
-        "x-amz-server-side-encryption": "aws:kms",
+        "x-amz-server-side-encryption": storage.sseAlgorithm,
         "x-amz-server-side-encryption-aws-kms-key-id": storage.kmsKeyId,
       },
     };
@@ -209,7 +209,7 @@ export const kycDocumentEvidenceRouter = router({
       timingSafeEqual(expected, observed) &&
       object.ContentType === row.content_type &&
       Number(object.ContentLength) === Number(row.content_length) &&
-      object.ServerSideEncryption === "aws:kms" &&
+      object.ServerSideEncryption === storage.sseAlgorithm &&
       object.SSEKMSKeyId === storage.kmsKeyId;
 
     if (!valid) {

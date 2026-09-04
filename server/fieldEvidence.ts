@@ -46,13 +46,22 @@ export function evidenceStorage() {
   const accessKeyId = (process.env.BIS_EVIDENCE_S3_ACCESS_KEY ?? "").trim();
   const secretAccessKey = (process.env.BIS_EVIDENCE_S3_SECRET_KEY ?? "").trim();
   const kmsKeyId = (process.env.BIS_EVIDENCE_S3_KMS_KEY_ID ?? "").trim();
-  if (!endpoint.startsWith("https://") || !region || !bucket || !accessKeyId || !secretAccessKey || !kmsKeyId) {
-    serviceUnavailable("Secure evidence object storage is not configured");
+  const configuredSseAlgorithm = (process.env.BIS_EVIDENCE_S3_SSE_ALGORITHM ?? "aws:kms").trim();
+  const sseAlgorithm = "aws:kms" as const;
+  const hasStaticCredentials = Boolean(accessKeyId || secretAccessKey);
+  if (!endpoint.startsWith("https://") || !region || !bucket || !kmsKeyId || configuredSseAlgorithm !== sseAlgorithm) {
+    serviceUnavailable("Secure S3-compatible evidence storage requires HTTPS endpoint, region, bucket, KMS key identity, and aws:kms SSE capability");
+  }
+  if (hasStaticCredentials && (!accessKeyId || !secretAccessKey)) {
+    serviceUnavailable("S3-compatible evidence storage static credentials must be configured as a complete access-key and secret-key pair");
   }
   return {
     bucket,
     kmsKeyId,
-    client: new S3Client({ endpoint, region, credentials: { accessKeyId, secretAccessKey }, forcePathStyle: process.env.BIS_EVIDENCE_S3_FORCE_PATH_STYLE === "true" }),
+    sseAlgorithm,
+    // Omitting credentials intentionally activates the SDK's standard workload
+    // credential chain (for example, on-prem secret injection or cloud workload identity).
+    client: new S3Client({ endpoint, region, ...(hasStaticCredentials ? { credentials: { accessKeyId, secretAccessKey } } : {}), forcePathStyle: process.env.BIS_EVIDENCE_S3_FORCE_PATH_STYLE === "true" }),
   };
 }
 
@@ -144,7 +153,7 @@ export const fieldEvidenceRouter = router({
       }
     }
     const objectChecksum = s3ChecksumSha256FromHex(input.sha256);
-    const command = new PutObjectCommand({ Bucket: storage.bucket, Key: objectKey, ContentType: input.contentType, ContentLength: input.contentLength, Metadata: { "evidence-id": uploadId, "sha256": input.sha256 }, ChecksumAlgorithm: "SHA256", ChecksumSHA256: objectChecksum, ServerSideEncryption: "aws:kms", SSEKMSKeyId: storage.kmsKeyId });
+    const command = new PutObjectCommand({ Bucket: storage.bucket, Key: objectKey, ContentType: input.contentType, ContentLength: input.contentLength, Metadata: { "evidence-id": uploadId, "sha256": input.sha256 }, ChecksumAlgorithm: "SHA256", ChecksumSHA256: objectChecksum, ServerSideEncryption: storage.sseAlgorithm, SSEKMSKeyId: storage.kmsKeyId });
     const uploadUrl = await getSignedUrl(storage.client, command, { expiresIn: Math.max(1, Math.floor((expiresAt.getTime() - Date.now()) / 1000)) });
     return {
       uploadId,
@@ -156,7 +165,7 @@ export const fieldEvidenceRouter = router({
         "x-amz-meta-evidence-id": uploadId,
         "x-amz-meta-sha256": input.sha256,
         "x-amz-checksum-sha256": objectChecksum,
-        "x-amz-server-side-encryption": "aws:kms",
+        "x-amz-server-side-encryption": storage.sseAlgorithm,
         "x-amz-server-side-encryption-aws-kms-key-id": storage.kmsKeyId,
       },
     };
@@ -179,7 +188,7 @@ export const fieldEvidenceRouter = router({
     const checksumValid = s3ChecksumMatchesSha256Hex(row.expected_sha256, object.ChecksumSHA256);
     const expected = Buffer.from(row.expected_sha256, "utf8");
     const observed = Buffer.from(observedSha256, "utf8");
-    const valid = checksumValid && expected.length === observed.length && timingSafeEqual(expected, observed) && object.ContentType === row.content_type && Number(object.ContentLength) === Number(row.content_length) && object.ServerSideEncryption === "aws:kms" && object.SSEKMSKeyId === storage.kmsKeyId;
+    const valid = checksumValid && expected.length === observed.length && timingSafeEqual(expected, observed) && object.ContentType === row.content_type && Number(object.ContentLength) === Number(row.content_length) && object.ServerSideEncryption === storage.sseAlgorithm && object.SSEKMSKeyId === storage.kmsKeyId;
     if (!valid) {
       const metadata = { reason: "object_integrity_or_encryption_validation_failed" };
       await pool.query(`UPDATE field_evidence_uploads SET status = 'rejected', observed_sha256 = $2, updated_at = NOW() WHERE id = $1`, [input.uploadId, observedSha256 || null]);

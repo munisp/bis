@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
-import { s3ChecksumMatchesSha256Hex, s3ChecksumSha256FromHex } from "./fieldEvidence";
+import { evidenceStorage, s3ChecksumMatchesSha256Hex, s3ChecksumSha256FromHex } from "./fieldEvidence";
 import {
   consumerDisputeOutboxAad,
   decryptConsumerDisputeOutboxPayload,
@@ -36,6 +36,33 @@ describe("SSE-KMS object byte checksum enforcement", () => {
   it("accepts only an object-store checksum for the expected exact bytes", () => {
     const expected = createHash("sha256").update("exact synthetic bytes").digest("hex");
     expect(s3ChecksumMatchesSha256Hex(expected, s3ChecksumSha256FromHex(expected))).toBe(true);
+  });
+});
+
+describe("portable S3-compatible evidence storage", () => {
+  function configureStorage(): void {
+    process.env.BIS_EVIDENCE_S3_ENDPOINT = "https://object-storage.staging.internal";
+    process.env.BIS_EVIDENCE_S3_REGION = "onprem-1";
+    process.env.BIS_EVIDENCE_S3_BUCKET = "bis-staging-evidence";
+    process.env.BIS_EVIDENCE_S3_KMS_KEY_ID = "onprem-kms-key-bis-staging-evidence-v1";
+    process.env.BIS_EVIDENCE_S3_SSE_ALGORITHM = "aws:kms";
+  }
+
+  it("allows a standard workload credential chain without static S3 secrets", () => {
+    configureStorage();
+    const storage = evidenceStorage();
+    expect(storage.bucket).toBe("bis-staging-evidence");
+    expect(storage.kmsKeyId).toBe("onprem-kms-key-bis-staging-evidence-v1");
+    expect(storage.sseAlgorithm).toBe("aws:kms");
+  });
+
+  it("rejects an incomplete static credential pair and a non-SSE-KMS profile", () => {
+    configureStorage();
+    process.env.BIS_EVIDENCE_S3_ACCESS_KEY = "access-only";
+    expect(() => evidenceStorage()).toThrow("complete access-key and secret-key pair");
+    process.env.BIS_EVIDENCE_S3_SECRET_KEY = "secret";
+    process.env.BIS_EVIDENCE_S3_SSE_ALGORITHM = "AES256";
+    expect(() => evidenceStorage()).toThrow("aws:kms SSE capability");
   });
 });
 

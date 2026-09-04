@@ -1,0 +1,22 @@
+entity user {}
+
+entity platform {
+  relation admin @user
+  relation consumer_dispute_supervisor @user
+  relation consumer_dispute_caseworker @user
+  relation consumer_dispute_auditor @user
+
+  permission manage_consumer_disputes = admin or consumer_dispute_supervisor or consumer_dispute_caseworker
+  permission supervise_consumer_disputes = admin or consumer_dispute_supervisor
+}
+
+entity consumer_dispute_case {
+  relation platform @platform
+  relation consumer @user
+  relation assigned_caseworker @user
+  relation assigned_supervisor @user
+
+  permission view = consumer or assigned_caseworker or assigned_supervisor or platform.manage_consumer_disputes
+  permission manage = assigned_caseworker or assigned_supervisor or platform.manage_consumer_disputes
+  permission supervise = assigned_supervisor or platform.supervise_consumer_disputes
+}

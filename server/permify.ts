@@ -10,7 +10,7 @@ import { ENV } from "./_core/env";
 
 // Read at call-time so tests can delete process.env.PERMIFY_URL
 function getPermifyUrl() { return process.env.PERMIFY_URL ?? ""; }
-function getPermifyTenant() { return process.env.PERMIFY_TENANT_ID ?? "t1"; }
+function getPermifyTenant() { return process.env.PERMIFY_TENANT_ID ?? ""; }
 function getPermifyApiKey() { return process.env.PERMIFY_API_KEY ?? ""; }
 
 interface CheckRequest {
@@ -44,7 +44,7 @@ export async function permifyCheck(
   const PERMIFY_TENANT = getPermifyTenant();
   const PERMIFY_API_KEY = getPermifyApiKey();
 
-  if (!PERMIFY_URL) {
+  if (!PERMIFY_URL || !PERMIFY_TENANT || !PERMIFY_API_KEY) {
     throw new TRPCError({
       code: "FORBIDDEN",
       message: "Authorization service is not configured — access denied",
@@ -103,7 +103,10 @@ export async function permifyWriteRelationship(
   const PERMIFY_URL = getPermifyUrl();
   const PERMIFY_TENANT = getPermifyTenant();
   const PERMIFY_API_KEY = getPermifyApiKey();
-  if (!PERMIFY_URL) return;
+  if (!PERMIFY_URL || !PERMIFY_TENANT || !PERMIFY_API_KEY) {
+    if (ENV.isProduction) throw new Error("production relationship provisioning requires PERMIFY_URL, PERMIFY_TENANT_ID, and PERMIFY_API_KEY");
+    return;
+  }
 
   try {
     const res = await fetch(
