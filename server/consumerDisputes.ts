@@ -170,7 +170,10 @@ async function queueNotice(client: PoolClient, input: {
 
 function caseworkerProcedure(permission: "manage_consumer_disputes" | "supervise_consumer_disputes") {
   return writeProcedure.use(async ({ ctx, next }) => {
-    if (!ctx.user || !["admin", "analyst", "supervisor"].includes(ctx.user.role)) {
+    const permittedRoles = permission === "supervise_consumer_disputes"
+      ? ["admin", "supervisor"]
+      : ["admin", "analyst", "supervisor"];
+    if (!ctx.user || !permittedRoles.includes(ctx.user.role)) {
       throw new TRPCError({ code: "FORBIDDEN", message: "A designated consumer-rights case role is required." });
     }
     if (ENV.isProduction) {
@@ -739,6 +742,117 @@ export const consumerDisputesRouter = router({
       return { caseRef: caseRow.case_ref, assignedToUserId: input.assigneeUserId };
     } catch (error) {
       await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }),
+
+  deadlineEscalations: supervisorWriteProcedure.input(z.object({
+    caseRef: z.string().regex(CASE_REF_PATTERN),
+    status: z.enum(["open", "acknowledged", "resolved"]).optional(),
+  })).query(async ({ ctx, input }) => {
+    const pool = await poolOrThrow();
+    const tenantId = ctx.user?.role === "admin" ? null : requireTenant(ctx.tenantId);
+    const result = await pool.query<{
+      id: string; escalation_type: string; due_at: string; status: "open" | "acknowledged" | "resolved";
+      first_detected_at: string; acknowledged_at: string | null; acknowledged_by_user_id: number | null;
+      resolved_at: string | null; resolved_by_user_id: number | null; resolution_note: string | null;
+    }>(
+      `SELECT e.id, e.escalation_type, e.due_at, e.status, e.first_detected_at, e.acknowledged_at, e.acknowledged_by_user_id,
+              e.resolved_at, e.resolved_by_user_id, e.resolution_note
+         FROM consumer_dispute_deadline_escalations e
+         JOIN consumer_dispute_cases c ON c.id = e.case_id
+        WHERE c.case_ref = $1
+          AND ($2::integer IS NULL OR c.tenant_id = $2)
+          AND ($3::text IS NULL OR e.status = $3)
+        ORDER BY e.due_at ASC, e.id ASC`,
+      [input.caseRef, tenantId, input.status ?? null],
+    );
+    return result.rows;
+  }),
+
+  acknowledgeDeadlineEscalation: supervisorWriteProcedure.input(z.object({
+    caseRef: z.string().regex(CASE_REF_PATTERN),
+    escalationId: z.number().int().positive(),
+  })).mutation(async ({ ctx, input }) => {
+    const pool = await poolOrThrow();
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const caseRow = await assertInternalCase(client, input.caseRef, ctx.user?.role === "admin" ? null : requireTenant(ctx.tenantId));
+      const escalation = await client.query<{ id: string; escalation_type: string; due_at: string; status: "open" | "acknowledged" | "resolved"; acknowledged_at: string | null; acknowledged_by_user_id: number | null }>(
+        `SELECT id, escalation_type, due_at, status, acknowledged_at, acknowledged_by_user_id
+           FROM consumer_dispute_deadline_escalations
+          WHERE id = $1 AND case_id = $2
+          FOR UPDATE`,
+        [input.escalationId, caseRow.id],
+      );
+      const current = escalation.rows[0];
+      if (!current) throw new TRPCError({ code: "NOT_FOUND", message: "Deadline escalation not found in this case." });
+      if (current.status === "resolved") throw new TRPCError({ code: "CONFLICT", message: "A resolved deadline escalation cannot be acknowledged." });
+      if (current.status === "open") {
+        await client.query(
+          `UPDATE consumer_dispute_deadline_escalations
+              SET status = 'acknowledged', acknowledged_at = NOW(), acknowledged_by_user_id = $1, updated_at = NOW()
+            WHERE id = $2 AND status = 'open'`,
+          [ctx.user!.id, current.id],
+        );
+        await appendConsumerDisputeEvent(client, {
+          caseId: caseRow.id, caseRef: caseRow.case_ref, actorUserId: ctx.user!.id, actorKind: "supervisor",
+          eventType: "deadline_acknowledged", detail: { escalationId: current.id, escalationType: current.escalation_type, dueAt: current.due_at },
+        });
+      }
+      await client.query("COMMIT");
+      return { escalationId: current.id, status: "acknowledged" as const };
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }),
+
+  resolveDeadlineEscalation: supervisorWriteProcedure.input(z.object({
+    caseRef: z.string().regex(CASE_REF_PATTERN),
+    escalationId: z.number().int().positive(),
+    resolutionNote: z.string().trim().min(10).max(4_000),
+  })).mutation(async ({ ctx, input }) => {
+    const pool = await poolOrThrow();
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const caseRow = await assertInternalCase(client, input.caseRef, ctx.user?.role === "admin" ? null : requireTenant(ctx.tenantId));
+      const escalation = await client.query<{ id: string; escalation_type: string; due_at: string; status: "open" | "acknowledged" | "resolved"; resolution_note: string | null }>(
+        `SELECT id, escalation_type, due_at, status, resolution_note
+           FROM consumer_dispute_deadline_escalations
+          WHERE id = $1 AND case_id = $2
+          FOR UPDATE`,
+        [input.escalationId, caseRow.id],
+      );
+      const current = escalation.rows[0];
+      if (!current) throw new TRPCError({ code: "NOT_FOUND", message: "Deadline escalation not found in this case." });
+      if (current.status === "resolved") {
+        await client.query("COMMIT");
+        return { escalationId: current.id, status: "resolved" as const, resolutionNote: current.resolution_note };
+      }
+      await client.query(
+        `UPDATE consumer_dispute_deadline_escalations
+            SET status = 'resolved',
+                acknowledged_at = COALESCE(acknowledged_at, NOW()),
+                acknowledged_by_user_id = COALESCE(acknowledged_by_user_id, $1),
+                resolved_at = NOW(), resolved_by_user_id = $1, resolution_note = $2, updated_at = NOW()
+          WHERE id = $3 AND status IN ('open', 'acknowledged')`,
+        [ctx.user!.id, input.resolutionNote, current.id],
+      );
+      await appendConsumerDisputeEvent(client, {
+        caseId: caseRow.id, caseRef: caseRow.case_ref, actorUserId: ctx.user!.id, actorKind: "supervisor",
+        eventType: "deadline_resolved", detail: { escalationId: current.id, escalationType: current.escalation_type, dueAt: current.due_at, resolutionNote: input.resolutionNote },
+      });
+      await client.query("COMMIT");
+      return { escalationId: current.id, status: "resolved" as const, resolutionNote: input.resolutionNote };
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
       throw error;
     } finally {
       client.release();

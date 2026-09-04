@@ -594,6 +594,55 @@ async function startServer() {
     }
   });
 
+  app.get("/api/consumer-disputes/:caseRef/deadline-escalations", async (req: Request, res: Response) => {
+    const caseRef = consumerDisputeCaseRef(req.params.caseRef);
+    const status = typeof req.query.status === "string" ? req.query.status : undefined;
+    if (!caseRef || (status !== undefined && !["open", "acknowledged", "resolved"].includes(status))) {
+      res.status(400).json({ error: "A valid consumer dispute case reference and escalation status are required", code: "BAD_REQUEST" });
+      return;
+    }
+    try {
+      const ctx = await createContextFromRequest(req, res);
+      const result = await appRouter.createCaller(ctx).consumerDisputes.deadlineEscalations({ caseRef, status: status as "open" | "acknowledged" | "resolved" | undefined });
+      res.status(200).json(result);
+    } catch (error) {
+      respondConsumerAdapterError(req, res, error, "consumer_dispute_deadline_escalations_list");
+    }
+  });
+
+  app.post("/api/consumer-disputes/:caseRef/deadline-escalations/:escalationId/acknowledge", async (req: Request, res: Response) => {
+    const caseRef = consumerDisputeCaseRef(req.params.caseRef);
+    const escalationId = Number(Array.isArray(req.params.escalationId) ? req.params.escalationId[0] : req.params.escalationId);
+    if (!caseRef || !Number.isSafeInteger(escalationId) || escalationId <= 0) {
+      res.status(400).json({ error: "A valid consumer dispute case reference and escalation ID are required", code: "BAD_REQUEST" });
+      return;
+    }
+    try {
+      const ctx = await createContextFromRequest(req, res);
+      const result = await appRouter.createCaller(ctx).consumerDisputes.acknowledgeDeadlineEscalation({ caseRef, escalationId });
+      res.status(200).json(result);
+    } catch (error) {
+      respondConsumerAdapterError(req, res, error, "consumer_dispute_deadline_escalation_acknowledge");
+    }
+  });
+
+  app.post("/api/consumer-disputes/:caseRef/deadline-escalations/:escalationId/resolve", async (req: Request, res: Response) => {
+    const caseRef = consumerDisputeCaseRef(req.params.caseRef);
+    const escalationId = Number(Array.isArray(req.params.escalationId) ? req.params.escalationId[0] : req.params.escalationId);
+    const resolutionNote = req.body?.resolutionNote;
+    if (!caseRef || !Number.isSafeInteger(escalationId) || escalationId <= 0 || typeof resolutionNote !== "string") {
+      res.status(400).json({ error: "A valid consumer dispute case reference, escalation ID, and resolution note are required", code: "BAD_REQUEST" });
+      return;
+    }
+    try {
+      const ctx = await createContextFromRequest(req, res);
+      const result = await appRouter.createCaller(ctx).consumerDisputes.resolveDeadlineEscalation({ caseRef, escalationId, resolutionNote });
+      res.status(200).json(result);
+    } catch (error) {
+      respondConsumerAdapterError(req, res, error, "consumer_dispute_deadline_escalation_resolve");
+    }
+  });
+
   app.post("/api/consumer-disputes/:caseRef/withdraw", async (req: Request, res: Response) => {
     const caseRef = consumerDisputeCaseRef(req.params.caseRef);
     if (!caseRef) {
