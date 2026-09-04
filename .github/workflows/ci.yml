@@ -2,33 +2,34 @@ name: BIS Validation
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, hardening/production-readiness]
   push:
-    branches: [main]
+    branches: [main, hardening/production-readiness]
 
 permissions:
   contents: read
 
 jobs:
-  bff:
-    name: bff-validation
-    runs-on: ubuntu-latest
+  node-tests:
+    name: node-tests
+    runs-on: ubuntu-24.04
     services:
       postgres:
         image: postgres:16-alpine
         env:
-          POSTGRES_USER: bis_user
-          POSTGRES_PASSWORD: bis_secure_2026
-          POSTGRES_DB: bis_db
+          POSTGRES_USER: bis_ci
+          POSTGRES_PASSWORD: bis_ci_disposable_password
+          POSTGRES_DB: bis_ci
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U bis_user -d bis_db"
+          --health-cmd "pg_isready -U bis_ci -d bis_ci"
           --health-interval 10s
           --health-timeout 5s
-          --health-retries 5
+          --health-retries 10
     env:
-      DATABASE_URL: postgresql://bis_user:bis_secure_2026@localhost:5432/bis_db
+      DATABASE_URL: postgresql://bis_ci:bis_ci_disposable_password@localhost:5432/bis_ci
+      BIS_DATABASE_URL: postgresql://bis_ci:bis_ci_disposable_password@localhost:5432/bis_ci
       JWT_SECRET: ci-session-secret-not-for-production
       KEYCLOAK_URL: https://auth.bis.invalid
       KEYCLOAK_REALM: bis
@@ -42,11 +43,60 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Initialize disposable PostgreSQL test schema
-        run: pnpm drizzle-kit push --force
+      - name: Apply canonical PostgreSQL migrations
+        run: pnpm db:migrate
       - name: Type-check
-        run: pnpm check --noEmit
+        run: pnpm check
       - name: Production build
-        run: pnpm run build
-      - name: Test
+        run: pnpm build
+      - name: Node integration suite
         run: pnpm test
+
+  gateway-race:
+    name: gateway-race
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: services/gateway/go.mod
+          cache-dependency-path: services/gateway/go.sum
+      - name: Gateway control-plane race suite
+        working-directory: services/gateway
+        run: go test -race ./...
+
+  archive-worker:
+    name: archive-worker
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: services/cold-archive-writer/go.mod
+          cache-dependency-path: services/cold-archive-writer/go.sum
+      - name: Archive worker static and race checks
+        working-directory: services/cold-archive-writer
+        run: |
+          go vet ./...
+          go test -race ./...
+
+  mobile-security:
+    name: mobile-security
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: mobile/pnpm-lock.yaml
+      - name: Install mobile dependencies
+        working-directory: mobile
+        run: pnpm install --frozen-lockfile
+      - name: Validate mobile security client
+        working-directory: mobile
+        run: |
+          pnpm type-check
+          pnpm lint
+          pnpm test

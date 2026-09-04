@@ -122,7 +122,19 @@ export const fieldEvidenceRouter = router({
     }
     const command = new PutObjectCommand({ Bucket: storage.bucket, Key: objectKey, ContentType: input.contentType, ContentLength: input.contentLength, Metadata: { "evidence-id": uploadId, "sha256": input.sha256 }, ServerSideEncryption: "aws:kms", SSEKMSKeyId: storage.kmsKeyId });
     const uploadUrl = await getSignedUrl(storage.client, command, { expiresIn: Math.max(1, Math.floor((expiresAt.getTime() - Date.now()) / 1000)) });
-    return { uploadId, objectKey, uploadUrl, expiresAt: expiresAt.toISOString(), headers: { "content-type": input.contentType, "x-amz-meta-evidence-id": uploadId, "x-amz-meta-sha256": input.sha256 } };
+    return {
+      uploadId,
+      objectKey,
+      uploadUrl,
+      expiresAt: expiresAt.toISOString(),
+      headers: {
+        "content-type": input.contentType,
+        "x-amz-meta-evidence-id": uploadId,
+        "x-amz-meta-sha256": input.sha256,
+        "x-amz-server-side-encryption": "aws:kms",
+        "x-amz-server-side-encryption-aws-kms-key-id": storage.kmsKeyId,
+      },
+    };
   }),
 
   complete: protectedProcedure.input(completeSchema).mutation(async ({ ctx, input }) => {

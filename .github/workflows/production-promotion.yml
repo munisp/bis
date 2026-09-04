@@ -1,0 +1,361 @@
+name: BIS Production Promotion
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: "Full 40-character commit SHA from hardening/production-readiness to promote"
+        required: true
+        type: string
+
+concurrency:
+  group: bis-production-promotion
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+  attestations: write
+  id-token: write
+
+jobs:
+  validate-source:
+    name: validate-promotion-source
+    runs-on: ubuntu-24.04
+    outputs:
+      commit_sha: ${{ steps.source.outputs.commit_sha }}
+    steps:
+      - name: Validate requested SHA shape
+        env:
+          COMMIT_SHA: ${{ inputs.commit_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$COMMIT_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "A full lower-case 40-character commit SHA is required." >&2; exit 2; }
+      - name: Check out requested immutable revision
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 0
+      - name: Require ancestry from hardening/production-readiness
+        id: source
+        env:
+          REQUESTED_SHA: ${{ inputs.commit_sha }}
+        run: |
+          set -euo pipefail
+          git fetch origin hardening/production-readiness --depth=1
+          actual_sha="$(git rev-parse HEAD)"
+          [[ "$actual_sha" = "$REQUESTED_SHA" ]] || { echo "Checked-out revision differs from requested SHA." >&2; exit 1; }
+          git merge-base --is-ancestor "$actual_sha" origin/hardening/production-readiness || {
+            echo "Requested SHA is not reachable from hardening/production-readiness." >&2
+            exit 1
+          }
+          printf 'commit_sha=%s\n' "$actual_sha" >> "$GITHUB_OUTPUT"
+
+  validate:
+    name: validate-postgresql-and-mobile
+    needs: validate-source
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: bis_ci
+          POSTGRES_PASSWORD: bis_ci_disposable_password
+          POSTGRES_DB: bis_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U bis_ci -d bis_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://bis_ci:bis_ci_disposable_password@localhost:5432/bis_ci
+      BIS_DATABASE_URL: postgresql://bis_ci:bis_ci_disposable_password@localhost:5432/bis_ci
+      JWT_SECRET: ci-session-secret-not-for-production
+      KEYCLOAK_URL: https://auth.bis.invalid
+      KEYCLOAK_REALM: bis
+      KEYCLOAK_CLIENT_ID: bis-bff
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.validate-source.outputs.commit_sha }}
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install root dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Apply canonical PostgreSQL migrations
+        run: pnpm db:migrate
+      - name: Validate BFF and PWA
+        run: |
+          set -euo pipefail
+          pnpm check
+          pnpm test
+          pnpm build
+      - name: Validate gateway race safety
+        working-directory: services/gateway
+        run: go test -race ./...
+      - name: Validate archive worker race safety
+        working-directory: services/cold-archive-writer
+        run: |
+          go vet ./...
+          go test -race ./...
+      - name: Validate mobile security client
+        working-directory: mobile
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm type-check
+          pnpm lint
+          pnpm test
+
+  publish-images:
+    name: publish-immutable-images
+    needs: [validate-source, validate]
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: bff
+            context: .
+            file: Dockerfile.bff
+            target: runner
+          - image: bff-migrations
+            context: .
+            file: Dockerfile.bff
+            target: migrations
+          - image: gateway
+            context: services/gateway
+            file: services/gateway/Dockerfile
+            target: ""
+          - image: cold-archive-writer
+            context: services/cold-archive-writer
+            file: services/cold-archive-writer/Dockerfile
+            target: ""
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.validate-source.outputs.commit_sha }}
+      - uses: docker/setup-buildx-action@v3
+      - name: Authenticate to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and publish immutable image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          target: ${{ matrix.target }}
+          push: true
+          provenance: mode=max
+          sbom: true
+          tags: ghcr.io/${{ github.repository }}/${{ matrix.image }}:${{ needs.validate-source.outputs.commit_sha }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ needs.validate-source.outputs.commit_sha }}
+      - name: Attest image provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ghcr.io/${{ github.repository }}/${{ matrix.image }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+      - name: Save immutable digest reference
+        env:
+          IMAGE: ${{ matrix.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          COMMIT_SHA: ${{ needs.validate-source.outputs.commit_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "Build did not return an image digest." >&2; exit 1; }
+          mkdir -p image-digests
+          printf 'ghcr.io/%s/%s@%s\n' "${GITHUB_REPOSITORY,,}" "$IMAGE" "$DIGEST" > "image-digests/$IMAGE.txt"
+          printf '%s\n' "$COMMIT_SHA" > image-digests/commit_sha.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: immutable-image-${{ matrix.image }}
+          path: image-digests/
+          if-no-files-found: error
+          retention-days: 30
+
+  promote-staging:
+    name: deploy-and-verify-staging
+    needs: [validate-source, publish-images]
+    runs-on: ubuntu-24.04
+    environment: staging
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.validate-source.outputs.commit_sha }}
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: immutable-image-*
+          path: immutable-image-artifacts
+          merge-multiple: true
+      - name: Build release bundle from the validated revision
+        env:
+          COMMIT_SHA: ${{ needs.validate-source.outputs.commit_sha }}
+        run: |
+          set -euo pipefail
+          [[ -n "${{ vars.STAGING_DEPLOY_ROOT }}" ]] || { echo "STAGING_DEPLOY_ROOT repository variable is required." >&2; exit 2; }
+          mkdir -p release-payload
+          git archive --format=tar "$COMMIT_SHA" | tar -xf - -C release-payload
+          for image in bff bff-migrations gateway cold-archive-writer; do
+            test -s "immutable-image-artifacts/$image.txt"
+          done
+          cat > release-payload/release.env <<EOF
+          BIS_BFF_IMAGE=$(cat immutable-image-artifacts/bff.txt)
+          BIS_BFF_MIGRATIONS_IMAGE=$(cat immutable-image-artifacts/bff-migrations.txt)
+          BIS_GATEWAY_IMAGE=$(cat immutable-image-artifacts/gateway.txt)
+          BIS_COLD_ARCHIVE_WRITER_IMAGE=$(cat immutable-image-artifacts/cold-archive-writer.txt)
+          EOF
+          tar -C release-payload -czf release.tar.gz .
+      - name: Configure verified staging SSH transport
+        env:
+          SSH_KEY: ${{ secrets.STAGING_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.STAGING_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$SSH_KEY" || -z "$SSH_KNOWN_HOSTS" ]]; then
+            echo "Verified staging SSH credentials are required." >&2
+            exit 2
+          fi
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+      - name: Transfer and promote immutable staging release
+        env:
+          STAGING_HOST: ${{ vars.STAGING_HOST }}
+          STAGING_USER: ${{ vars.STAGING_USER }}
+          STAGING_DEPLOY_ROOT: ${{ vars.STAGING_DEPLOY_ROOT }}
+          STAGING_DEPLOY_ENV_FILE: ${{ vars.STAGING_DEPLOY_ENV_FILE }}
+          COMMIT_SHA: ${{ needs.validate-source.outputs.commit_sha }}
+        run: |
+          set -euo pipefail
+          for value in STAGING_HOST STAGING_USER STAGING_DEPLOY_ROOT STAGING_DEPLOY_ENV_FILE; do test -n "${!value}" || { echo "$value repository variable is required." >&2; exit 2; }; done
+          target="${STAGING_USER}@${STAGING_HOST}"
+          remote_dir="${STAGING_DEPLOY_ROOT}/releases/${COMMIT_SHA}"
+          ssh -o BatchMode=yes "$target" "set -euo pipefail; mkdir -p '$remote_dir'"
+          scp -o BatchMode=yes release.tar.gz "$target:$remote_dir/release.tar.gz"
+          ssh -o BatchMode=yes "$target" "set -euo pipefail; cd '$remote_dir'; tar -xzf release.tar.gz; rm -f release.tar.gz; chmod 0750 scripts/promote-compose-release.sh; BIS_DEPLOY_ROOT='$STAGING_DEPLOY_ROOT' BIS_DEPLOY_ENV_FILE='$STAGING_DEPLOY_ENV_FILE' BIS_PROMOTION_ENV=staging BIS_RELEASE_SHA='$COMMIT_SHA' ./scripts/promote-compose-release.sh"
+      - name: Verify physical-device session persistence and synthetic SSE-KMS upload
+        env:
+          BIS_ENV: staging
+          BIS_STAGING_CONFIRMATION: I_APPROVE_NON_PRODUCTION_MOBILE_KMS_TESTS
+          STAGING_BFF_URL: ${{ vars.STAGING_BFF_URL }}
+          STAGING_MOBILE_ACCESS_TOKEN: ${{ secrets.STAGING_MOBILE_ACCESS_TOKEN }}
+          STAGING_KYC_RECORD_ID: ${{ vars.STAGING_KYC_RECORD_ID }}
+          STAGING_DEVICE_ATTESTATION_JSON: ${{ secrets.STAGING_DEVICE_ATTESTATION_JSON }}
+          STAGING_EXPECTED_KMS_KEY_ID: ${{ vars.STAGING_EXPECTED_KMS_KEY_ID }}
+          STAGING_DATA_RETENTION_CONFIRMED: synthetic-only-approved
+          BIS_STAGING_REPORT_PATH: artifacts/mobile-kms-staging/report.json
+        run: |
+          set -euo pipefail
+          test -n "$STAGING_DEVICE_ATTESTATION_JSON" || { echo "STAGING_DEVICE_ATTESTATION_JSON is required from the approved device-lab run." >&2; exit 2; }
+          umask 077
+          attestation_file="$(mktemp)"
+          trap 'rm -f "$attestation_file"' EXIT
+          printf '%s' "$STAGING_DEVICE_ATTESTATION_JSON" > "$attestation_file"
+          STAGING_DEVICE_ATTESTATION_FILE="$attestation_file" node scripts/run-staging-mobile-kms-verification.mjs
+      - name: Verify staging OBS-001 metrics and alert rules
+        env:
+          BIS_ENV: staging
+          OBS_PROMETHEUS_URL: ${{ vars.STAGING_PROMETHEUS_URL }}
+          OBS_GATEWAY_METRICS_URL: ${{ vars.STAGING_GATEWAY_METRICS_URL }}
+          OBS_GATEWAY_KEY: ${{ secrets.STAGING_GATEWAY_METRICS_KEY }}
+          OBS_ALERTMANAGER_URL: ${{ vars.STAGING_ALERTMANAGER_URL }}
+        run: node scripts/verify-obs001-promotion.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: staging-mobile-kms-and-obs001-evidence
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 90
+
+  promote-production:
+    name: deploy-and-verify-production
+    needs: [validate-source, promote-staging]
+    runs-on: ubuntu-24.04
+    environment: production
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.validate-source.outputs.commit_sha }}
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: immutable-image-*
+          path: immutable-image-artifacts
+          merge-multiple: true
+      - name: Build production release bundle from the staging-validated revision
+        env:
+          COMMIT_SHA: ${{ needs.validate-source.outputs.commit_sha }}
+        run: |
+          set -euo pipefail
+          [[ -n "${{ vars.PRODUCTION_DEPLOY_ROOT }}" ]] || { echo "PRODUCTION_DEPLOY_ROOT repository variable is required." >&2; exit 2; }
+          mkdir -p release-payload
+          git archive --format=tar "$COMMIT_SHA" | tar -xf - -C release-payload
+          for image in bff bff-migrations gateway cold-archive-writer; do
+            test -s "immutable-image-artifacts/$image.txt"
+          done
+          cat > release-payload/release.env <<EOF
+          BIS_BFF_IMAGE=$(cat immutable-image-artifacts/bff.txt)
+          BIS_BFF_MIGRATIONS_IMAGE=$(cat immutable-image-artifacts/bff-migrations.txt)
+          BIS_GATEWAY_IMAGE=$(cat immutable-image-artifacts/gateway.txt)
+          BIS_COLD_ARCHIVE_WRITER_IMAGE=$(cat immutable-image-artifacts/cold-archive-writer.txt)
+          EOF
+          tar -C release-payload -czf release.tar.gz .
+      - name: Configure verified production SSH transport
+        env:
+          SSH_KEY: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.PRODUCTION_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$SSH_KEY" || -z "$SSH_KNOWN_HOSTS" ]]; then
+            echo "Verified production SSH credentials are required." >&2
+            exit 2
+          fi
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+      - name: Transfer and promote immutable production release
+        env:
+          PRODUCTION_HOST: ${{ vars.PRODUCTION_HOST }}
+          PRODUCTION_USER: ${{ vars.PRODUCTION_USER }}
+          PRODUCTION_DEPLOY_ROOT: ${{ vars.PRODUCTION_DEPLOY_ROOT }}
+          PRODUCTION_DEPLOY_ENV_FILE: ${{ vars.PRODUCTION_DEPLOY_ENV_FILE }}
+          COMMIT_SHA: ${{ needs.validate-source.outputs.commit_sha }}
+        run: |
+          set -euo pipefail
+          for value in PRODUCTION_HOST PRODUCTION_USER PRODUCTION_DEPLOY_ROOT PRODUCTION_DEPLOY_ENV_FILE; do test -n "${!value}" || { echo "$value repository variable is required." >&2; exit 2; }; done
+          target="${PRODUCTION_USER}@${PRODUCTION_HOST}"
+          remote_dir="${PRODUCTION_DEPLOY_ROOT}/releases/${COMMIT_SHA}"
+          ssh -o BatchMode=yes "$target" "set -euo pipefail; mkdir -p '$remote_dir'"
+          scp -o BatchMode=yes release.tar.gz "$target:$remote_dir/release.tar.gz"
+          ssh -o BatchMode=yes "$target" "set -euo pipefail; cd '$remote_dir'; tar -xzf release.tar.gz; rm -f release.tar.gz; chmod 0750 scripts/promote-compose-release.sh; BIS_DEPLOY_ROOT='$PRODUCTION_DEPLOY_ROOT' BIS_DEPLOY_ENV_FILE='$PRODUCTION_DEPLOY_ENV_FILE' BIS_PROMOTION_ENV=production BIS_RELEASE_SHA='$COMMIT_SHA' ./scripts/promote-compose-release.sh"
+      - name: Verify production OBS-001 metrics and alert rules
+        env:
+          BIS_ENV: production
+          OBS_PROMETHEUS_URL: ${{ vars.PRODUCTION_PROMETHEUS_URL }}
+          OBS_GATEWAY_METRICS_URL: ${{ vars.PRODUCTION_GATEWAY_METRICS_URL }}
+          OBS_GATEWAY_KEY: ${{ secrets.PRODUCTION_GATEWAY_METRICS_KEY }}
+          OBS_ALERTMANAGER_URL: ${{ vars.PRODUCTION_ALERTMANAGER_URL }}
+        run: node scripts/verify-obs001-promotion.mjs

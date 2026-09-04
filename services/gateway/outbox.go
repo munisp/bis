@@ -156,16 +156,17 @@ func (o *transactionalOutbox) start() {
 }
 
 func (o *transactionalOutbox) dispatchPending(ctx context.Context) error {
-	if o != nil && o.keyring != nil {
-		if o.keyring.needsRotation(o.keyring.activeVersion) {
-			controlPlaneMetrics.outboxKeyRotationDue.Set(1)
-		} else {
-			controlPlaneMetrics.outboxKeyRotationDue.Set(0)
-		}
+	startedAt := time.Now()
+	defer controlPlaneMetrics.observeOutboxDispatch(startedAt)
+	if o != nil {
+		defer controlPlaneMetrics.refreshOutboxState(ctx, o.db)
+		controlPlaneMetrics.setOutboxKeyPolicy(o.keyring)
 	}
 	if kafkaProducer == nil {
+		controlPlaneMetrics.setDependencyHealth("kafka", false)
 		return nil
 	}
+	controlPlaneMetrics.setDependencyHealth("kafka", true)
 	tx, err := o.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin outbox lease transaction: %w", err)
@@ -241,11 +242,13 @@ func (o *transactionalOutbox) dispatchPending(ctx context.Context) error {
 		}
 		event.Payload = plaintext
 		if err := kafkaProducer.Publish(event.Topic, event.Payload); err != nil {
+			controlPlaneMetrics.setDependencyHealth("kafka", false)
 			if markErr := o.markFailed(ctx, event, err); markErr != nil {
 				return markErr
 			}
 			continue
 		}
+		controlPlaneMetrics.setDependencyHealth("kafka", true)
 		if _, err := o.db.ExecContext(ctx, `
 			UPDATE gateway_transactional_outbox
 			SET state = 'delivered', delivered_at = NOW(), updated_at = NOW(), last_error = NULL
@@ -253,10 +256,6 @@ func (o *transactionalOutbox) dispatchPending(ctx context.Context) error {
 			return fmt.Errorf("mark delivered outbox event %s: %w", event.ID, err)
 		}
 		controlPlaneMetrics.outboxEvents.WithLabelValues("delivered").Inc()
-	}
-	var pending float64
-	if err := o.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM gateway_transactional_outbox WHERE state = 'pending'`).Scan(&pending); err == nil {
-		controlPlaneMetrics.outboxBacklog.Set(pending)
 	}
 	return nil
 }
@@ -301,12 +300,9 @@ func initializeTransactionalOutbox() error {
 		return err
 	}
 	gatewayOutbox = outbox
-	if outbox.keyring.needsRotation(outbox.keyring.activeVersion) {
-		controlPlaneMetrics.outboxKeyRotationDue.Set(1)
-	} else {
-		controlPlaneMetrics.outboxKeyRotationDue.Set(0)
-	}
+	controlPlaneMetrics.setOutboxKeyPolicy(outbox.keyring)
 	controlPlaneMetrics.setDependencyHealth("postgres_outbox", true)
+	controlPlaneMetrics.refreshOutboxState(context.Background(), outbox.db)
 	gatewayOutbox.start()
 	return nil
 }

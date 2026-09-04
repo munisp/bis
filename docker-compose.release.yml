@@ -1,0 +1,20 @@
+# Immutable release overlay. The promotion workflow writes the required image
+# digests into release.env and invokes this file with docker compose -p bis.
+# Images are intentionally referenced by digest; mutable tags are not accepted.
+services:
+  gateway:
+    image: ${BIS_GATEWAY_IMAGE:?BIS_GATEWAY_IMAGE must be a digest-pinned image reference}
+
+  bff:
+    image: ${BIS_BFF_IMAGE:?BIS_BFF_IMAGE must be a digest-pinned image reference}
+
+  cold-archive-writer:
+    image: ${BIS_COLD_ARCHIVE_WRITER_IMAGE:?BIS_COLD_ARCHIVE_WRITER_IMAGE must be a digest-pinned image reference}
+
+  bff-migrations:
+    image: ${BIS_BFF_MIGRATIONS_IMAGE:?BIS_BFF_MIGRATIONS_IMAGE must be a digest-pinned image reference}
+    profiles: ["release"]
+    command: ["pnpm", "db:migrate"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required for canonical PostgreSQL migrations}
+    networks: [bis-net]

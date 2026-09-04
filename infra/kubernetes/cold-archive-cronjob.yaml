@@ -55,8 +55,10 @@ spec:
               emptyDir:
                 sizeLimit: 1Gi
 ---
-# Populate this Secret only through the deployment secret manager. The S3 bucket
-# must be TLS-only, versioned, encrypted, and protected by the retention policy.
+# Populate this Secret only through the deployment secret manager. The image is
+# patched to a signed digest by the release controller; this base intentionally
+# cannot run until that patch and every secret value are supplied. The S3 bucket
+# must be TLS-only, versioned, SSE-KMS encrypted, and protected by retention.
 apiVersion: v1
 kind: Secret
 metadata:
@@ -71,5 +73,10 @@ stringData:
   BIS_ARCHIVE_S3_SECRET_KEY: "REPLACE_WITH_SECRET_MANAGER_REFERENCE"
   BIS_ARCHIVE_S3_BUCKET: "REPLACE_WITH_VERSIONED_ARCHIVE_BUCKET"
   BIS_ARCHIVE_S3_REGION: "REPLACE_WITH_REGION"
+  BIS_ARCHIVE_S3_KMS_KEY_ID: "REPLACE_WITH_ACTIVE_KMS_KEY_ID"
+  BIS_ARCHIVE_S3_KMS_KEY_EXPIRIES_JSON: "REPLACE_WITH_JSON_KEY_EXPIRY_REGISTRY"
+  BIS_ARCHIVE_KMS_POLICY_ENFORCE_EXPIRY: "true"
+  BIS_ARCHIVE_PUSHGATEWAY_URL: "https://REPLACE_WITH_ARCHIVE_PUSHGATEWAY_URL"
+  BIS_ENV: "production"
   BIS_COLD_ARCHIVE_BATCH_SIZE: "5000"
   BIS_COLD_ARCHIVE_AGE_DAYS: "365"

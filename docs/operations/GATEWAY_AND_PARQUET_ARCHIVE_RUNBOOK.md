@@ -2,7 +2,7 @@
 
 **Owner:** Platform Reliability and Financial Integrity
 **Applies to:** `services/gateway`, `services/cold-archive-writer`, PostgreSQL, S3-compatible cold storage, Permify, Kafka, and Redis.
-**Release baseline:** `f59ad75` plus the forward migration `0001_cold_archive_parquet`.
+**Release baseline:** `hardening/production-readiness` with canonical PostgreSQL migrations through `0007_kyc_document_uploads`, immutable digest promotion, and OBS-001 release gates.
 
 ## 1. Operational contract
 
@@ -19,7 +19,7 @@ The gateway is intentionally **fail closed**. It must not authorize a protected 
 
 ## 2. Monitoring baseline and required telemetry
 
-The current worker emits structured JSON log events and retains durable batch state in PostgreSQL. The gateway exposes protected internal Prometheus metrics for Permify decisions, control-plane dependency health, transactional-outbox state, backlog, and key-rotation status. PostgreSQL monitoring queries below remain the authoritative complement for archive batch state. Alerting must scrape only the internal protected metrics endpoint and preserve tenant, identity, and payload redaction.
+The worker emits structured JSON log events, Pushgateway metrics, and durable batch state in PostgreSQL. The gateway exposes **only** its authenticated `/internal/metrics` endpoint for Permify decisions, dependency health/fail-closed events, encrypted transactional-outbox state, backlog age, dispatch latency, and key-expiry status. The archive worker exports PostgreSQL batch lifecycle, object-store dependency, KMS upload, and KMS-key policy metrics through its required HTTPS Pushgateway. Prometheus must load `observability/prometheus/bis-production-alerts.yaml`, deliver to Alertmanager, and preserve tenant, identity, payload, and credential redaction.
 
 ### 2.1 Worker event log contract
 
@@ -31,9 +31,9 @@ The current worker emits structured JSON log events and retains durable batch st
 | `cold archive configuration invalid` | error | The worker did not start; configuration is incomplete or violates the TLS/PostgreSQL policy. |
 | `cold archive failed` | error | The job ended non-zero; inspect `cold_archive_batches.error_detail` before retrying. |
 
-### 2.2 Database-derived archive metrics
+### 2.2 Archive metrics
 
-Configure the PostgreSQL exporter or a scheduled read-only monitoring query to emit the following metrics. The monitoring identity may only `SELECT` these tables.
+The worker now pushes `bis_cold_archive_batches{state}`, `bis_cold_archive_dependency_healthy{dependency}`, `bis_cold_archive_kms_uploads_total{outcome}`, `bis_cold_archive_kms_key_rotation_due`, and `bis_cold_archive_active_kms_key_expiry_seconds` after each run. The following read-only PostgreSQL queries remain the reconciliation source for investigations and capacity analysis; they are not a substitute for the worker’s release telemetry.
 
 ```sql
 -- bis_cold_archive_batches_total{status}
@@ -75,9 +75,13 @@ The implementation exports the following metrics through the protected internal 
 |---|---|---|
 | `bis_gateway_permify_checks_total` | `outcome={allowed,denied,error}` | Detect policy transport/protocol failures separately from explicit denials. |
 | `bis_gateway_control_plane_dependency_healthy` | `dependency` | Detect unavailable mandatory dependencies without failing open. |
+| `bis_gateway_control_plane_dependency_fail_closed_total` | `dependency` | Quantify runtime fail-closed decisions for Permify, Redis, Kafka, and PostgreSQL outbox dependencies. |
 | `bis_gateway_transactional_outbox_events_total` | `state={persisted,delivered,persistence_error,dead_letter}` | Detect durable-event persistence and delivery failures. |
-| `bis_gateway_transactional_outbox_pending_events` | none | Detect delayed Kafka delivery backlog. |
-| `bis_gateway_transactional_outbox_key_rotation_due` | none | Detect the active outbox AES-256-GCM key entering its 30-day mandatory rotation window. |
+| `bis_gateway_transactional_outbox_events` | `state={pending,dispatching,delivered,dead_letter}` | Show authoritative current PostgreSQL state counts. |
+| `bis_gateway_transactional_outbox_oldest_pending_age_seconds` | none | Detect Kafka delivery delay before the row reaches dead-letter state. |
+| `bis_gateway_transactional_outbox_oldest_dispatching_age_seconds` | none | Detect a stuck dispatcher lease or encrypted payload processing failure. |
+| `bis_gateway_transactional_outbox_dispatch_cycle_duration_seconds` | histogram | Detect dispatcher latency regression. |
+| `bis_gateway_transactional_outbox_key_rotation_due` and `bis_gateway_transactional_outbox_active_key_expiry_seconds` | none | Enforce AES-256-GCM key rotation and expiry boundaries. |
 
 Alert rules must preserve dependency and route context while redacting all identities, tokens, request bodies, and transaction values. The key-rotation alert is a promotion gate: no active outbox key may enter its expiry boundary without a successor version available in the secret manager.
 
@@ -86,7 +90,7 @@ Alert rules must preserve dependency and route context while redacting all ident
 | Priority | Condition | Initial threshold | First response |
 |---|---|---:|---|
 | P1 | Archive worker exits non-zero or `cold_archive_batches.status='quarantined'` | Any occurrence | Stop scheduled retries; preserve object and database evidence; page Financial Integrity. |
-| P1 | `bis_gateway_dependency_fail_closed_total` for Permify/Redis/Kafka | >0 for 5 minutes on protected or financial routes | Page on-call; dependency incident, not a reason to bypass enforcement. |
+| P1 | `bis_gateway_control_plane_dependency_healthy == 0` or repeated `bis_gateway_control_plane_dependency_fail_closed_total` | Unavailable for 2 minutes or >5 events/10 minutes | Page on-call; dependency incident, not a reason to bypass enforcement. |
 | P1 | Oldest archive batch in `planned/uploading/verified` | >30 minutes | Stop concurrent manual runs; inspect batch and object key; recover same batch only. |
 | P2 | No `committed` archive batch | >26 hours when eligible row count >0 | Check CronJob schedule, image revision, object-store policy, PostgreSQL lock. |
 | P2 | DLQ acknowledgment share | >1% of events for 10 minutes | Investigate Kafka availability/partition leadership and Redis DLQ capacity. |
@@ -110,7 +114,7 @@ SELECT to_regclass('public.cold_archive_batches'),
        to_regclass('public.cold_archive_batch_items');
 ```
 
-For Kubernetes, populate `bis-cold-archive-writer` through the organization’s secret manager and set the release image digest in `infra/kubernetes/cold-archive-cronjob.yaml`. The included CronJob uses `concurrencyPolicy: Forbid`, a non-root filesystem, capped resources, and a 30-minute active deadline. For a controlled run using Compose, use the profile and pass all variables through a secret-injected environment; never commit them.
+For Kubernetes, populate `bis-cold-archive-writer` through the organization’s secret manager, including the active KMS key, its expiry registry, enforced expiry policy, HTTPS Pushgateway URL, and `BIS_ENV=production`; then patch the CronJob to a signed immutable release digest. The included CronJob uses `concurrencyPolicy: Forbid`, a non-root filesystem, capped resources, and a 30-minute active deadline. For a controlled Compose run, use the profile and host-managed secret environment; never commit credentials.
 
 ```bash
 docker compose --profile archive run --rm cold-archive-writer
@@ -192,7 +196,7 @@ DATABASE_URL="$DATABASE_URL" BIS_DATABASE_URL="$DATABASE_URL" pnpm test
 DATABASE_URL="$DATABASE_URL" pnpm exec tsx scripts/migrate-postgres.ts
 ```
 
-The full repeatable local test matrix is `scripts/run-full-local-integration.sh`. It intentionally performs no remote provider, settlement, or real object-store operation. A pre-production release must also run PostgreSQL-plus-versioned-MinIO integration tests and a restore drill in an isolated environment.
+The full repeatable local test matrix is `scripts/validate-encryption-offline.sh`. It intentionally performs no remote provider, settlement, device-lab, or real object-store operation. Before production approval, the protected workflow must complete `scripts/run-staging-mobile-kms-verification.mjs` with a fresh physical-device attestation and a synthetic KYC document, then complete `scripts/verify-obs001-promotion.mjs` with no critical OBS-001 alert firing. A pre-production release must also run PostgreSQL-plus-versioned-object-store integration tests and a restore drill in an isolated environment.
 
 ## 7. Ownership and escalation
 

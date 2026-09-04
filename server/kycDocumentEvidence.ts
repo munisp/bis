@@ -155,6 +155,8 @@ export const kycDocumentEvidenceRouter = router({
         "content-type": input.contentType,
         "x-amz-meta-kyc-upload-id": uploadId,
         "x-amz-meta-sha256": input.sha256,
+        "x-amz-server-side-encryption": "aws:kms",
+        "x-amz-server-side-encryption-aws-kms-key-id": storage.kmsKeyId,
       },
     };
   }),

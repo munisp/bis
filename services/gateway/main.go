@@ -351,23 +351,30 @@ func operationRef(prefix string) string {
 // cacheGet retrieves a cached value from Redis. Returns nil if Redis is not configured or key missing.
 func cacheGet(ctx context.Context, key string) []byte {
 	if redisClient == nil {
+		controlPlaneMetrics.setDependencyHealth("redis", false)
 		return nil
 	}
 	val, err := redisClient.Get(ctx, key)
 	if err != nil {
+		controlPlaneMetrics.setDependencyHealth("redis", false)
 		return nil
 	}
+	controlPlaneMetrics.setDependencyHealth("redis", true)
 	return []byte(val)
 }
 
 // cacheSet stores a value in Redis with a TTL. No-op if Redis is not configured.
 func cacheSet(ctx context.Context, key string, val []byte, ttl time.Duration) {
 	if redisClient == nil {
+		controlPlaneMetrics.setDependencyHealth("redis", false)
 		return
 	}
 	if err := redisClient.Set(ctx, key, string(val), ttl); err != nil {
+		controlPlaneMetrics.setDependencyHealth("redis", false)
 		log.Printf("[WARN] Redis SET failed for key %s: %v", key, err)
+		return
 	}
+	controlPlaneMetrics.setDependencyHealth("redis", true)
 }
 
 // publishEvent persists an event in PostgreSQL before asynchronous Kafka dispatch.

@@ -44,6 +44,7 @@ volumes:
   caddy_config:       # Caddy runtime configuration
   caddy_logs:         # Caddy access and error logs
   prometheus_data:
+  alertmanager_data:
   grafana_data:
   influxdb_data:
   lakehouse_data:
@@ -583,8 +584,14 @@ services:
       - "--web.console.templates=/usr/share/prometheus/consoles"
       - "--web.enable-lifecycle"
       - "--web.enable-remote-write-receiver"
+    environment:
+      BIS_ENV: ${BIS_ENV:-development}
+      BIS_ALERTMANAGER_TARGET: ${BIS_ALERTMANAGER_TARGET:-alertmanager:9093}
+      BIS_PROMETHEUS_GATEWAY_KEY: ${BIS_PROMETHEUS_GATEWAY_KEY:?BIS_PROMETHEUS_GATEWAY_KEY is required for protected gateway metrics}
+      BIS_ARCHIVE_PUSHGATEWAY_TARGET: ${BIS_ARCHIVE_PUSHGATEWAY_TARGET:?BIS_ARCHIVE_PUSHGATEWAY_TARGET is required for archive metrics ingestion}
     volumes:
       - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/prometheus/bis-production-alerts.yaml:/etc/prometheus/rules/bis-production-alerts.yaml:ro
       - prometheus_data:/prometheus
     ports:
       - "9090:9090"
@@ -595,8 +602,30 @@ services:
       - risk-engine
       - event-processor
       - bff
+      - alertmanager
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:9090/-/healthy"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.1
+    container_name: bis-alertmanager
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+      - "--storage.path=/alertmanager"
+    environment:
+      GRAFANA_WEBHOOK_SECRET: ${GRAFANA_WEBHOOK_SECRET:?GRAFANA_WEBHOOK_SECRET is required for authenticated alert delivery}
+    volumes:
+      - ./infra/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    networks: [bis-net]
+    depends_on:
+      - bff
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9093/-/healthy"]
       interval: 15s
       timeout: 5s
       retries: 3
@@ -1180,7 +1209,7 @@ services:
     entrypoint: ["/bin/bash", "/init-namespace.sh"]
     networks: [bis-net]
 
-  # ─── OpenSearch ISM Init (creates ILM policies, index templates, write aliases) 
+  # ─── OpenSearch ISM Init (creates ILM policies, index templates, write aliases)
   opensearch-init:
     image: curlimages/curl:8.7.1
     container_name: bis-opensearch-init
@@ -1366,6 +1395,11 @@ services:
       BIS_ARCHIVE_S3_SECRET_KEY: ${BIS_ARCHIVE_S3_SECRET_KEY:?BIS_ARCHIVE_S3_SECRET_KEY is required}
       BIS_ARCHIVE_S3_BUCKET: ${BIS_ARCHIVE_S3_BUCKET:?BIS_ARCHIVE_S3_BUCKET is required}
       BIS_ARCHIVE_S3_REGION: ${BIS_ARCHIVE_S3_REGION:?BIS_ARCHIVE_S3_REGION is required}
+      BIS_ARCHIVE_S3_KMS_KEY_ID: ${BIS_ARCHIVE_S3_KMS_KEY_ID:?BIS_ARCHIVE_S3_KMS_KEY_ID is required}
+      BIS_ARCHIVE_S3_KMS_KEY_EXPIRIES_JSON: ${BIS_ARCHIVE_S3_KMS_KEY_EXPIRIES_JSON:?BIS_ARCHIVE_S3_KMS_KEY_EXPIRIES_JSON is required}
+      BIS_ARCHIVE_KMS_POLICY_ENFORCE_EXPIRY: ${BIS_ARCHIVE_KMS_POLICY_ENFORCE_EXPIRY:-false}
+      BIS_ARCHIVE_PUSHGATEWAY_URL: ${BIS_ARCHIVE_PUSHGATEWAY_URL:?BIS_ARCHIVE_PUSHGATEWAY_URL is required}
+      BIS_ENV: ${BIS_ENV:-development}
       BIS_COLD_ARCHIVE_BATCH_SIZE: ${BIS_COLD_ARCHIVE_BATCH_SIZE:-5000}
       BIS_COLD_ARCHIVE_AGE_DAYS: ${BIS_COLD_ARCHIVE_AGE_DAYS:-365}
     depends_on:

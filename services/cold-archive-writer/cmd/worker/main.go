@@ -504,15 +504,23 @@ func uploadManifest(ctx context.Context, client *minio.Client, config Config, ma
 	return nil
 }
 
-func run(ctx context.Context, config Config, logger *slog.Logger) error {
+func run(ctx context.Context, config Config, logger *slog.Logger, metrics *archiveMetrics) error {
+	metrics.setKeyPolicy(config.KeyPolicy)
 	pool, err := pgxpool.New(ctx, config.DatabaseURL)
 	if err != nil {
 		return fmt.Errorf("connect PostgreSQL: %w", err)
 	}
 	defer pool.Close()
 	if err := pool.Ping(ctx); err != nil {
+		metrics.setDependencyHealth("postgres", false)
 		return fmt.Errorf("ping PostgreSQL: %w", err)
 	}
+	metrics.setDependencyHealth("postgres", true)
+	defer func() {
+		refreshCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		metrics.refreshBatchState(refreshCtx, pool)
+	}()
 	repository := Repository{pool: pool}
 	locked, err := repository.acquireLock(ctx)
 	if err != nil {
@@ -525,15 +533,19 @@ func run(ctx context.Context, config Config, logger *slog.Logger) error {
 	defer repository.releaseLock(context.Background())
 	storage, err := minio.New(config.S3Endpoint, &minio.Options{Creds: credentials.NewStaticV4(config.S3AccessKey, config.S3SecretKey, ""), Secure: true, Region: config.S3Region})
 	if err != nil {
+		metrics.setDependencyHealth("object_store", false)
 		return fmt.Errorf("create object store client: %w", err)
 	}
 	exists, err := storage.BucketExists(ctx, config.S3Bucket)
 	if err != nil {
+		metrics.setDependencyHealth("object_store", false)
 		return fmt.Errorf("check archive bucket: %w", err)
 	}
 	if !exists {
+		metrics.setDependencyHealth("object_store", false)
 		return fmt.Errorf("archive bucket %q does not exist; buckets and retention policy must be pre-provisioned", config.S3Bucket)
 	}
+	metrics.setDependencyHealth("object_store", true)
 	if err := repository.recoverInFlightBatches(ctx, storage, config.S3Bucket, config.KeyPolicy, logger); err != nil {
 		return err
 	}
@@ -563,19 +575,27 @@ func run(ctx context.Context, config Config, logger *slog.Logger) error {
 	}
 	versionID, err := uploadFile(ctx, storage, config, batch.ObjectKey, tempPath, checksum)
 	if err != nil {
+		metrics.setDependencyHealth("object_store", false)
+		metrics.kmsUploads.WithLabelValues("failed").Inc()
 		repository.markFailed(ctx, batch.ID, err)
 		return err
 	}
+	metrics.setDependencyHealth("object_store", true)
 	fingerprintBytes := sha256.Sum256([]byte("transactions-cold-v1|" + archiveStatuses))
 	manifest := ArchiveManifest{SchemaVersion: schemaVersion, ArchiveBatchID: batch.ID.String(), ObjectKey: batch.ObjectKey, ObjectVersionID: versionID, ManifestKey: batch.ManifestKey, RowCount: batch.RowCount, ByteCount: byteCount, SHA256: checksum, SourceQueryFingerprint: hex.EncodeToString(fingerprintBytes[:]), ObjectEncryptionAlgorithm: "aws:kms", ObjectEncryptionKeyID: config.S3KMSKeyID, CreatedAt: time.Now().UTC()}
 	if err := uploadManifest(ctx, storage, config, manifest); err != nil {
+		metrics.setDependencyHealth("object_store", false)
+		metrics.kmsUploads.WithLabelValues("failed").Inc()
 		repository.markFailed(ctx, batch.ID, err)
 		return err
 	}
+	metrics.setDependencyHealth("object_store", true)
+	metrics.kmsUploads.WithLabelValues("succeeded").Inc()
 	if err := repository.commitVerified(ctx, *batch, manifest); err != nil {
 		repository.markFailed(ctx, batch.ID, err)
 		return err
 	}
+	metrics.records.Add(float64(batch.RowCount))
 	logger.Info("cold archive committed", "batch_id", batch.ID, "rows", batch.RowCount, "bytes", byteCount, "object_key", batch.ObjectKey, "sha256", checksum)
 	return nil
 }
@@ -598,7 +618,7 @@ func main() {
 	startedAt := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
-	err = run(ctx, config, logger)
+	err = run(ctx, config, logger, metrics)
 	metrics.observeRun(startedAt, err)
 	if pushErr := metrics.push(config.PushgatewayURL, "bis-cold-archive-writer"); pushErr != nil {
 		logger.Error("cold archive metrics export failed", "error", pushErr)
