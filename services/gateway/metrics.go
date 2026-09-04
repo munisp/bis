@@ -10,10 +10,11 @@ import (
 type gatewayMetrics struct {
 	registry *prometheus.Registry
 
-	permifyChecks *prometheus.CounterVec
-	dependencies  *prometheus.GaugeVec
-	outboxEvents  *prometheus.CounterVec
-	outboxBacklog prometheus.Gauge
+	permifyChecks        *prometheus.CounterVec
+	dependencies         *prometheus.GaugeVec
+	outboxEvents         *prometheus.CounterVec
+	outboxBacklog        prometheus.Gauge
+	outboxKeyRotationDue prometheus.Gauge
 }
 
 func newGatewayMetrics() *gatewayMetrics {
@@ -35,8 +36,12 @@ func newGatewayMetrics() *gatewayMetrics {
 			Namespace: "bis", Subsystem: "gateway", Name: "transactional_outbox_pending_events",
 			Help: "Number of gateway events awaiting Kafka delivery from PostgreSQL.",
 		}),
+		outboxKeyRotationDue: prometheus.NewGauge(prometheus.GaugeOpts{
+			Namespace: "bis", Subsystem: "gateway", Name: "transactional_outbox_key_rotation_due",
+			Help: "Whether the active transactional-outbox encryption key is inside its mandatory rotation lead time (1 due, 0 current).",
+		}),
 	}
-	metrics.registry.MustRegister(metrics.permifyChecks, metrics.dependencies, metrics.outboxEvents, metrics.outboxBacklog)
+	metrics.registry.MustRegister(metrics.permifyChecks, metrics.dependencies, metrics.outboxEvents, metrics.outboxBacklog, metrics.outboxKeyRotationDue)
 	return metrics
 }
 

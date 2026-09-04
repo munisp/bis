@@ -11,20 +11,21 @@ import (
 )
 
 type inFlightBatch struct {
-	ID          uuid.UUID
-	Status      string
-	ObjectKey   string
-	ManifestKey *string
+	ID              uuid.UUID
+	Status          string
+	ObjectKey       string
+	ManifestKey     *string
+	EncryptionKeyID *string
 }
 
 // recoverInFlightBatches makes recovery explicit and safe. It only releases a
 // batch when no immutable object exists. Any possibly uploaded artifact is
 // quarantined for operator verification; no data is deleted and no source row
 // is cold-marked during recovery.
-func (r Repository) recoverInFlightBatches(ctx context.Context, storage *minio.Client, bucket string, logger *slog.Logger) error {
+func (r Repository) recoverInFlightBatches(ctx context.Context, storage *minio.Client, bucket string, keyPolicy *archiveKeyPolicy, logger *slog.Logger) error {
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, status, object_key, manifest_key
-		FROM cold_archive_batches
+			SELECT id, status, object_key, manifest_key, object_encryption_key_id
+			FROM cold_archive_batches
 		WHERE status IN ('planned', 'uploading', 'verified')
 		ORDER BY created_at ASC
 		FOR UPDATE`)
@@ -36,7 +37,7 @@ func (r Repository) recoverInFlightBatches(ctx context.Context, storage *minio.C
 	var batches []inFlightBatch
 	for rows.Next() {
 		var batch inFlightBatch
-		if err := rows.Scan(&batch.ID, &batch.Status, &batch.ObjectKey, &batch.ManifestKey); err != nil {
+		if err := rows.Scan(&batch.ID, &batch.Status, &batch.ObjectKey, &batch.ManifestKey, &batch.EncryptionKeyID); err != nil {
 			return fmt.Errorf("scan in-flight archive batch: %w", err)
 		}
 		batches = append(batches, batch)
@@ -46,6 +47,13 @@ func (r Repository) recoverInFlightBatches(ctx context.Context, storage *minio.C
 	}
 
 	for _, batch := range batches {
+		if quarantine, reason := recoveryKeyDisposition(keyPolicy, batch.Status, batch.EncryptionKeyID); quarantine {
+			if err := r.quarantineBatch(ctx, batch.ID, "archive encryption recovery blocked: "+reason); err != nil {
+				return err
+			}
+			logger.Error("quarantined archive batch with unavailable encryption key", "batch_id", batch.ID, "object_key", batch.ObjectKey, "reason", reason)
+			continue
+		}
 		switch batch.Status {
 		case "planned":
 			if err := r.releaseUnuploadedBatch(ctx, batch.ID, "recovered planned batch before object upload"); err != nil {

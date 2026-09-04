@@ -19,7 +19,7 @@ The gateway is intentionally **fail closed**. It must not authorize a protected 
 
 ## 2. Monitoring baseline and required telemetry
 
-The current worker emits structured JSON log events and retains durable batch state in PostgreSQL. The gateway currently emits dependency-state logs but does **not** yet expose dedicated Prometheus counters for Permify, Kafka, and Redis fail-closed outcomes. Until those counters are added, use the log queries and PostgreSQL queries below as the authoritative monitoring baseline. The alerting work item `OBS-001` should add the proposed metrics before unrestricted production promotion.
+The current worker emits structured JSON log events and retains durable batch state in PostgreSQL. The gateway exposes protected internal Prometheus metrics for Permify decisions, control-plane dependency health, transactional-outbox state, backlog, and key-rotation status. PostgreSQL monitoring queries below remain the authoritative complement for archive batch state. Alerting must scrape only the internal protected metrics endpoint and preserve tenant, identity, and payload redaction.
 
 ### 2.1 Worker event log contract
 
@@ -67,19 +67,19 @@ WHERE "archivedTier" IS NULL
   AND status::text IN ('completed', 'failed', 'reversed', 'blocked');
 ```
 
-### 2.3 Required gateway metrics: `OBS-001`
+### 2.3 Gateway metrics: `OBS-001`
 
-Before general availability, instrument the following Prometheus counters and histogram in `services/gateway`. These names are **required design targets**, not claims about the current code.
+The implementation exports the following metrics through the protected internal gateway endpoint.
 
 | Metric | Labels | Alert purpose |
 |---|---|---|
-| `bis_gateway_dependency_fail_closed_total` | `dependency={permify,redis,kafka,durable_dlq}`, `operation`, `http_status` | Detect protection or durable-event requests rejected because a dependency cannot prove safety. |
-| `bis_gateway_authorization_decisions_total` | `decision={allowed,denied,unavailable}`, `resource_type`, `permission` | Detect policy outages and denial spikes separately. |
-| `bis_gateway_rate_limit_decisions_total` | `decision={allowed,limited,unavailable}`, `route` | Detect Redis-controlled abuse protection outages and tuning needs. |
-| `bis_gateway_event_delivery_total` | `outcome={primary_ack,dlq_ack,failed}`, `topic`, `operation` | Detect audit delivery degradation before it causes business rejection. |
-| `bis_gateway_dependency_latency_seconds` | `dependency`, `operation` | Detect degradation before fail-closed rejection rates increase. |
+| `bis_gateway_permify_checks_total` | `outcome={allowed,denied,error}` | Detect policy transport/protocol failures separately from explicit denials. |
+| `bis_gateway_control_plane_dependency_healthy` | `dependency` | Detect unavailable mandatory dependencies without failing open. |
+| `bis_gateway_transactional_outbox_events_total` | `state={persisted,delivered,persistence_error,dead_letter}` | Detect durable-event persistence and delivery failures. |
+| `bis_gateway_transactional_outbox_pending_events` | none | Detect delayed Kafka delivery backlog. |
+| `bis_gateway_transactional_outbox_key_rotation_due` | none | Detect the active outbox AES-256-GCM key entering its 30-day mandatory rotation window. |
 
-Until `OBS-001` is deployed, create log-derived counters from the gateway’s `authorization_unavailable`, `rate_limit_unavailable`, `Kafka initialization failed`, `durable DLQ unavailable`, and `Permify is not fully configured` messages. Alert rules must preserve dependency and route context while redacting all identities, tokens, request bodies, and transaction values.
+Alert rules must preserve dependency and route context while redacting all identities, tokens, request bodies, and transaction values. The key-rotation alert is a promotion gate: no active outbox key may enter its expiry boundary without a successor version available in the secret manager.
 
 ## 3. Alerts and service objectives
 
@@ -116,7 +116,19 @@ For Kubernetes, populate `bis-cold-archive-writer` through the organization’s 
 docker compose --profile archive run --rm cold-archive-writer
 ```
 
-### 4.2 Normal archive verification
+### 4.2 Transactional-outbox key rotation
+
+The gateway requires `BIS_OUTBOX_ACTIVE_KEY_VERSION` and `BIS_OUTBOX_KEYRING`. In production, every keyring entry is `version:base64-encoded-32-byte-key:not-after-rfc3339`; startup fails if any retained key lacks an expiry, and dispatch refuses expired historical ciphertext.
+
+1. Create a new 32-byte AES key in the approved secret manager and assign a new immutable version name and an RFC 3339 not-after date.
+2. Publish the complete keyring with both the predecessor and successor keys, then switch `BIS_OUTBOX_ACTIVE_KEY_VERSION` to the successor and perform a rolling gateway restart.
+3. Verify `bis_gateway_transactional_outbox_key_rotation_due` returns to `0`. The dispatcher automatically re-encrypts pending records under the active version before Kafka publication.
+4. Reconcile PostgreSQL rows by `payload_key_version`; retain the previous key until no pending/dispatching rows use it and the approved recovery interval has elapsed.
+5. Disable and destroy the predecessor only through the key-management control plane. Never edit ciphertext or key versions directly in PostgreSQL.
+
+If an outbox row references expired or unavailable material, the dispatcher records a failed/dead-letter outcome. Preserve the row and use an approved historical recovery key in an isolated procedure; do not bypass encryption or alter its digest.
+
+### 4.3 Normal archive verification
 
 After a scheduled run, verify both database state and object metadata. The database result must be `committed`; a storage object alone is not success.
 
@@ -135,7 +147,7 @@ WHERE t."archivedTier" = 'cold' AND i.transaction_id IS NULL;
 
 The second query must return zero. Retrieve the object and manifest using a read-only audit identity, recompute SHA-256, and inspect Parquet metadata with an independent reader such as DuckDB or PyArrow. Reconcile the file’s record count against `row_count` and recompute the total amount only using decimal-safe representations.
 
-### 4.3 Failed worker run
+### 4.4 Failed worker run
 
 If the worker reports `cold archive failed`, identify the immutable batch first:
 
@@ -147,13 +159,13 @@ ORDER BY created_at;
 
 Do not delete `cold_archive_batch_items`, clear `coldArchiveBatchId`, or create a new batch for the same transactions. Preserve the object key, manifest key, worker log, and database error. A retry must resume or reconcile the same batch ID. If checksum, schema, record count, object version, or manifest verification differs, set status `quarantined`, preserve artifacts, and use a documented incident investigation before any manual recovery.
 
-### 4.4 Gateway dependency incident
+### 4.5 Gateway dependency incident
 
 When protected gateway requests return `authorization_unavailable`, first verify the configured Permify endpoint, tenant, API key reference, and client TLS/DNS reachability. When rate-limited routes return `rate_limit_unavailable`, verify Redis cluster health, authentication, memory, replication, and latency. When a financial/compliance request fails because durable event delivery is unavailable, verify Kafka cluster/partition/acknowledgment health, then Redis DLQ capacity.
 
 The correct remediation is to restore the dependency. A temporary bypass requires a formally approved emergency change and a new risk assessment; it must never be a code edit that allows protected traffic or acknowledges a financial operation without durable audit state.
 
-### 4.5 Restore drill
+### 4.6 Restore drill
 
 Run a quarterly restore drill with a read-only archive identity. Select a committed manifest, retrieve the exact object version, validate checksum and schema, load into an isolated PostgreSQL table, and reconcile all `transaction_id`, `transaction_ref`, decimal amount, currency, and timestamp values to the source database. Record the duration, mismatches, object version, manifest hash, operator, and outcome in an immutable audit record. No source-data deletion policy may be enabled until this drill succeeds repeatedly within the approved recovery time and point objectives.
 

@@ -156,6 +156,13 @@ func (o *transactionalOutbox) start() {
 }
 
 func (o *transactionalOutbox) dispatchPending(ctx context.Context) error {
+	if o != nil && o.keyring != nil {
+		if o.keyring.needsRotation(o.keyring.activeVersion) {
+			controlPlaneMetrics.outboxKeyRotationDue.Set(1)
+		} else {
+			controlPlaneMetrics.outboxKeyRotationDue.Set(0)
+		}
+	}
 	if kafkaProducer == nil {
 		return nil
 	}
@@ -294,6 +301,11 @@ func initializeTransactionalOutbox() error {
 		return err
 	}
 	gatewayOutbox = outbox
+	if outbox.keyring.needsRotation(outbox.keyring.activeVersion) {
+		controlPlaneMetrics.outboxKeyRotationDue.Set(1)
+	} else {
+		controlPlaneMetrics.outboxKeyRotationDue.Set(0)
+	}
 	controlPlaneMetrics.setDependencyHealth("postgres_outbox", true)
 	gatewayOutbox.start()
 	return nil

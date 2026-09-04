@@ -29,6 +29,16 @@ groups:
         annotations:
           summary: "BIS gateway permission denial rate exceeds 25%"
           description: "Review policy deployment, tenant bindings, and clients. This alert does not imply that the gateway has granted access."
+      - alert: BISOutboxKeyRotationDue
+        expr: bis_gateway_transactional_outbox_key_rotation_due == 1
+        for: 5m
+        labels:
+          severity: critical
+          service: gateway
+        annotations:
+          summary: "BIS transactional-outbox encryption key rotation is due"
+          description: "The active outbox AES-256-GCM key is within its 30-day rotation lead window or has been replaced. Activate a new versioned key in the secret manager, retain the previous key only through the approved recovery window, and verify the dispatcher rewrites pending events before retirement."
+          runbook: "docs/operations/GATEWAY_AND_PARQUET_ARCHIVE_RUNBOOK.md#transactional-outbox-key-rotation"
       - alert: BISOutboxBacklogGrowing
         expr: bis_gateway_transactional_outbox_pending_events > 100
         for: 10m

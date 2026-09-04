@@ -43,6 +43,7 @@ type Config struct {
 	S3Bucket       string
 	S3Region       string
 	S3KMSKeyID     string
+	KeyPolicy      *archiveKeyPolicy
 	PushgatewayURL string
 	BatchSize      int
 	ColdAgeDays    int
@@ -99,6 +100,9 @@ func loadConfig() (Config, error) {
 		return Config{}, err
 	}
 	if config.S3KMSKeyID, err = requireEnv("BIS_ARCHIVE_S3_KMS_KEY_ID"); err != nil {
+		return Config{}, err
+	}
+	if config.KeyPolicy, err = loadArchiveKeyPolicy(config.S3KMSKeyID); err != nil {
 		return Config{}, err
 	}
 	config.PushgatewayURL = strings.TrimSpace(os.Getenv("BIS_ARCHIVE_PUSHGATEWAY_URL"))
@@ -266,9 +270,24 @@ func (r Repository) planBatch(ctx context.Context, ageDays, limit int) (*Archive
 	return &ArchiveBatch{ID: batchID, ObjectKey: objectKey, ManifestKey: manifestKey, RowCount: len(ids), UpperCreated: upperCreated}, nil
 }
 
-func (r Repository) markUploading(ctx context.Context, batchID uuid.UUID) error {
-	_, err := r.pool.Exec(ctx, `UPDATE cold_archive_batches SET status = 'uploading', uploaded_at = NOW() WHERE id = $1 AND status = 'planned'`, batchID)
-	return err
+func (r Repository) markUploading(ctx context.Context, batchID uuid.UUID, keyPolicy *archiveKeyPolicy) error {
+	if keyPolicy == nil {
+		return errors.New("archive KMS key policy is unavailable")
+	}
+	if expired, reason := keyPolicy.isExpired(keyPolicy.activeKeyID); expired {
+		return fmt.Errorf("refuse archive upload with unavailable KMS key: %s", reason)
+	}
+	command, err := r.pool.Exec(ctx, `
+		UPDATE cold_archive_batches
+		SET status = 'uploading', uploaded_at = NOW(), object_encryption_algorithm = 'aws:kms', object_encryption_key_id = $2
+		WHERE id = $1 AND status = 'planned'`, batchID, keyPolicy.activeKeyID)
+	if err != nil {
+		return err
+	}
+	if command.RowsAffected() != 1 {
+		return fmt.Errorf("archive batch %s changed before encrypted upload", batchID)
+	}
+	return nil
 }
 
 func (r Repository) markFailed(ctx context.Context, batchID uuid.UUID, cause error) {
@@ -515,7 +534,7 @@ func run(ctx context.Context, config Config, logger *slog.Logger) error {
 	if !exists {
 		return fmt.Errorf("archive bucket %q does not exist; buckets and retention policy must be pre-provisioned", config.S3Bucket)
 	}
-	if err := repository.recoverInFlightBatches(ctx, storage, config.S3Bucket, logger); err != nil {
+	if err := repository.recoverInFlightBatches(ctx, storage, config.S3Bucket, config.KeyPolicy, logger); err != nil {
 		return err
 	}
 	if err := repository.requireNoInflightBatch(ctx); err != nil {
@@ -531,7 +550,7 @@ func run(ctx context.Context, config Config, logger *slog.Logger) error {
 		return nil
 	}
 	logger.Info("planned cold archive batch", "batch_id", batch.ID, "rows", batch.RowCount, "object_key", batch.ObjectKey)
-	if err := repository.markUploading(ctx, batch.ID); err != nil {
+	if err := repository.markUploading(ctx, batch.ID, config.KeyPolicy); err != nil {
 		return fmt.Errorf("mark batch uploading: %w", err)
 	}
 

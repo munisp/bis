@@ -19,8 +19,8 @@ async function key(): Promise<Buffer> {
   const stored = await Keychain.getGenericPassword({ service: KEYCHAIN_SERVICE });
   if (stored) return bytes(stored.password);
   const material = randomBytes(32);
-  const written = await Keychain.setGenericPassword('bis-field-operation', base64(material), { service: KEYCHAIN_SERVICE, accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY, securityLevel: Keychain.SECURITY_LEVEL.SECURE_SOFTWARE });
-  if (!written) throw new Error('Unable to provision device-bound field-operation encryption key');
+  const written = await Keychain.setGenericPassword('bis-field-operation', base64(material), { service: KEYCHAIN_SERVICE, accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY, securityLevel: Keychain.SECURITY_LEVEL.SECURE_HARDWARE });
+  if (!written) throw new Error('A hardware-backed field-operation encryption key is required; this device cannot securely queue dispatches');
   return Buffer.from(material);
 }
 

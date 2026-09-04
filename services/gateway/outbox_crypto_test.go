@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/base64"
 	"testing"
+	"time"
 )
 
 func testKey(byteValue byte) string {
@@ -51,5 +52,59 @@ func TestOutboxKeyringRejectsMalformedKeyMaterial(t *testing.T) {
 	t.Setenv("BIS_OUTBOX_KEYRING", "v1:not-base64")
 	if _, err := loadOutboxKeyringFromEnv(); err == nil {
 		t.Fatal("expected malformed key material to be rejected")
+	}
+}
+
+func TestOutboxKeyringEnforcesExpiryAndRejectsExpiredHistoricalMaterial(t *testing.T) {
+	past := time.Now().UTC().Add(-time.Hour).Format(time.RFC3339)
+	future := time.Now().UTC().Add(90 * 24 * time.Hour).Format(time.RFC3339)
+	t.Setenv("BIS_OUTBOX_ACTIVE_KEY_VERSION", "v2")
+	t.Setenv("BIS_OUTBOX_KEY_POLICY_ENFORCE_EXPIRY", "true")
+	t.Setenv("BIS_OUTBOX_KEYRING", "v1:"+testKey(1)+":"+past+",v2:"+testKey(2)+":"+future)
+	keyring, err := loadOutboxKeyringFromEnv()
+	if err != nil {
+		t.Fatalf("load keyring: %v", err)
+	}
+	if _, err := keyring.decrypt("bis.lookup", "synthetic:expired", "v1", []byte("ciphertext"), make([]byte, 12)); err == nil {
+		t.Fatal("expected expired historical key material to be refused before decryption")
+	}
+	if keyring.needsRotation("v2") {
+		t.Fatal("did not expect key outside rotation lead time to require rotation")
+	}
+}
+
+func TestOutboxKeyringRejectsExpiredActiveMaterialAndMissingExpiryPolicy(t *testing.T) {
+	past := time.Now().UTC().Add(-time.Hour).Format(time.RFC3339)
+	t.Setenv("BIS_OUTBOX_ACTIVE_KEY_VERSION", "v1")
+	t.Setenv("BIS_OUTBOX_KEY_POLICY_ENFORCE_EXPIRY", "true")
+	t.Setenv("BIS_OUTBOX_KEYRING", "v1:"+testKey(1)+":"+past)
+	if _, err := loadOutboxKeyringFromEnv(); err == nil {
+		t.Fatal("expected expired active key material to reject startup")
+	}
+	t.Setenv("BIS_OUTBOX_KEYRING", "v1:"+testKey(1))
+	if _, err := loadOutboxKeyringFromEnv(); err == nil {
+		t.Fatal("expected required expiry policy to reject an unbounded key")
+	}
+}
+
+func TestOutboxKeyringSignalsRotationInsideLeadTime(t *testing.T) {
+	expiresSoon := time.Now().UTC().Add(48 * time.Hour)
+	keyring := &outboxKeyring{
+		activeVersion: "v2",
+		keys:          map[string]outboxKeyMaterial{"v2": {value: bytesOf(2, 32), notAfter: &expiresSoon}},
+		now:           func() time.Time { return time.Now().UTC() },
+	}
+	if !keyring.needsRotation("v2") {
+		t.Fatal("expected active key inside rotation lead time to require rotation")
+	}
+}
+
+func TestOutboxKeyringProductionAutomaticallyRequiresExpiryMetadata(t *testing.T) {
+	t.Setenv("BIS_ENV", "production")
+	t.Setenv("BIS_OUTBOX_KEY_POLICY_ENFORCE_EXPIRY", "")
+	t.Setenv("BIS_OUTBOX_ACTIVE_KEY_VERSION", "v1")
+	t.Setenv("BIS_OUTBOX_KEYRING", "v1:"+testKey(1))
+	if _, err := loadOutboxKeyringFromEnv(); err == nil {
+		t.Fatal("expected production mode to reject an active key without expiry metadata")
 	}
 }

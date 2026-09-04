@@ -40,9 +40,9 @@ async function deviceKey(): Promise<Buffer> {
   const ok = await Keychain.setGenericPassword('bis-field-evidence', toBase64(key), {
     service: KEYCHAIN_SERVICE,
     accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
-    securityLevel: Keychain.SECURITY_LEVEL.SECURE_SOFTWARE,
+    securityLevel: Keychain.SECURITY_LEVEL.SECURE_HARDWARE,
   });
-  if (!ok) throw new Error('Secure hardware-backed evidence key could not be persisted');
+  if (!ok) throw new Error('A hardware-backed evidence encryption key is required; this device cannot securely store field evidence');
   return Buffer.from(key);
 }
 
