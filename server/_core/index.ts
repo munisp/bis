@@ -773,6 +773,49 @@ async function startServer() {
     catch (error) { respondConsumerAdapterError(req, res, error, "informal_verification_complete"); }
   });
 
+  // ── Explainable investigation intelligence. Routes delegate to tenant-scoped tRPC;
+  // they do not invoke providers and never return an automated adverse decision.
+  app.post("/api/investigation-intelligence/policies", async (req: Request, res: Response) => {
+    try { const ctx = await createContextFromRequest(req, res); const result = await appRouter.createCaller(ctx).investigationIntelligence.createScorePolicy(req.body); res.status(201).json(result); }
+    catch (error) { respondConsumerAdapterError(req, res, error, "intelligence_policy_create"); }
+  });
+  app.post("/api/investigation-intelligence/policies/:policyId/activate", async (req: Request, res: Response) => {
+    try { const ctx = await createContextFromRequest(req, res); const policyId = Array.isArray(req.params.policyId) ? req.params.policyId[0] : req.params.policyId; const result = await appRouter.createCaller(ctx).investigationIntelligence.activateScorePolicy({ policyId }); res.status(200).json(result); }
+    catch (error) { respondConsumerAdapterError(req, res, error, "intelligence_policy_activate"); }
+  });
+  app.post("/api/investigation-intelligence/sources", async (req: Request, res: Response) => {
+    try { const ctx = await createContextFromRequest(req, res); const result = await appRouter.createCaller(ctx).investigationIntelligence.registerSource(req.body); res.status(201).json(result); }
+    catch (error) { respondConsumerAdapterError(req, res, error, "intelligence_source_register"); }
+  });
+  app.post("/api/investigation-intelligence/evidence", async (req: Request, res: Response) => {
+    try { const ctx = await createContextFromRequest(req, res); const result = await appRouter.createCaller(ctx).investigationIntelligence.recordEvidence(req.body); res.status(201).json(result); }
+    catch (error) { respondConsumerAdapterError(req, res, error, "intelligence_evidence_record"); }
+  });
+  app.post("/api/investigation-intelligence/scores", async (req: Request, res: Response) => {
+    try { const ctx = await createContextFromRequest(req, res); const result = await appRouter.createCaller(ctx).investigationIntelligence.calculateScore(req.body); res.status(201).json(result); }
+    catch (error) { respondConsumerAdapterError(req, res, error, "intelligence_score_calculate"); }
+  });
+  app.post("/api/investigation-intelligence/conflicts", async (req: Request, res: Response) => {
+    try { const ctx = await createContextFromRequest(req, res); const result = await appRouter.createCaller(ctx).investigationIntelligence.reportConflict(req.body); res.status(201).json(result); }
+    catch (error) { respondConsumerAdapterError(req, res, error, "intelligence_conflict_report"); }
+  });
+  app.post("/api/investigation-intelligence/reviews", async (req: Request, res: Response) => {
+    try { const ctx = await createContextFromRequest(req, res); const result = await appRouter.createCaller(ctx).investigationIntelligence.requestHumanReview(req.body); res.status(201).json(result); }
+    catch (error) { respondConsumerAdapterError(req, res, error, "intelligence_review_request"); }
+  });
+  app.post("/api/investigation-intelligence/reviews/:reviewCaseId/resolve", async (req: Request, res: Response) => {
+    try { const ctx = await createContextFromRequest(req, res); const reviewCaseId = Array.isArray(req.params.reviewCaseId) ? req.params.reviewCaseId[0] : req.params.reviewCaseId; const result = await appRouter.createCaller(ctx).investigationIntelligence.resolveHumanReview({ ...req.body, reviewCaseId }); res.status(200).json(result); }
+    catch (error) { respondConsumerAdapterError(req, res, error, "intelligence_review_resolve"); }
+  });
+  app.post("/api/investigation-intelligence/monitoring", async (req: Request, res: Response) => {
+    try { const ctx = await createContextFromRequest(req, res); const result = await appRouter.createCaller(ctx).investigationIntelligence.registerMonitoring(req.body); res.status(201).json(result); }
+    catch (error) { respondConsumerAdapterError(req, res, error, "intelligence_monitoring_register"); }
+  });
+  app.post("/api/investigation-intelligence/fraud-signals", async (req: Request, res: Response) => {
+    try { const ctx = await createContextFromRequest(req, res); const result = await appRouter.createCaller(ctx).investigationIntelligence.recordFraudSignal(req.body); res.status(201).json(result); }
+    catch (error) { respondConsumerAdapterError(req, res, error, "intelligence_fraud_signal_record"); }
+  });
+
   // ── CSRF token endpoint ────────────────────────────────────────────────────
   // Provides a per-session CSRF token for state-changing requests from the frontend.
   // tRPC mutations should include X-CSRF-Token header; validated in context.ts.
