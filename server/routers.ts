@@ -130,6 +130,7 @@ import { analyticsRouter } from "./orm/analyticsRouter"; // analytics.getDashboa
 import { caddyRouter } from "./caddy";
 import { consumerIntelligenceRouter } from "./consumerIntelligence";
 import { consumerGovernanceRouter } from "./consumerGovernance";
+import { consumerDisputesRouter } from "./consumerDisputes";
 import { fieldEvidenceRouter } from "./fieldEvidence";
 import { kycDocumentEvidenceRouter } from "./kycDocumentEvidence";
 
@@ -7611,6 +7612,7 @@ export const appRouter = router({
   caddy: caddyRouter,
   consumerIntelligence: consumerIntelligenceRouter,
   consumerGovernance: consumerGovernanceRouter,
+  consumerDisputes: consumerDisputesRouter,
   fieldEvidence: fieldEvidenceRouter,
   kycDocumentEvidence: kycDocumentEvidenceRouter,
 });

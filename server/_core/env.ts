@@ -173,9 +173,11 @@ export const ENV = {
   gatewaySandbox: (process.env.GATEWAY_SANDBOX ?? "false") === "true",
 
   // Own Nigerian verification engine
-  bisVerifyNimcUrl: process.env.BIS_VERIFY_NIMC_URL ?? "https://api.nimc.gov.ng/v1",
+  // NIMC and NIBSS issue production interface details through approved onboarding.
+  // Never guess a public API endpoint or enable a live provider without its contract-issued configuration.
+  bisVerifyNimcUrl: process.env.BIS_VERIFY_NIMC_URL ?? "",
   bisVerifyNimcKey: process.env.BIS_VERIFY_NIMC_KEY ?? "",
-  bisVerifyNibssUrl: process.env.BIS_VERIFY_NIBSS_URL ?? "https://api.nibss-plc.com.ng/v1",
+  bisVerifyNibssUrl: process.env.BIS_VERIFY_NIBSS_URL ?? "",
   bisVerifyNibssKey: process.env.BIS_VERIFY_NIBSS_KEY ?? "",
   bisVerifyCacUrl: process.env.BIS_VERIFY_CAC_URL ?? "https://search.cac.gov.ng/api/v1",
   bisVerifyCacKey: process.env.BIS_VERIFY_CAC_KEY ?? "",
@@ -242,8 +244,8 @@ export function validateEnv(): void {
   ];
 
   const optional: Array<[string, string, string]> = [
-    ["BIS_VERIFY_NIMC_KEY", ENV.bisVerifyNimcKey, "NIN own-engine lookups will fall back to Youverify/sandbox"],
-    ["BIS_VERIFY_NIBSS_KEY", ENV.bisVerifyNibssKey, "BVN own-engine lookups will fall back to Youverify/sandbox"],
+    ["BIS_VERIFY_NIMC_KEY", ENV.bisVerifyNimcKey, "NIMC verification is disabled until contract-issued endpoint and credentials are configured"],
+    ["BIS_VERIFY_NIBSS_KEY", ENV.bisVerifyNibssKey, "NIBSS BVN verification is disabled until contract-issued endpoint and credentials are configured"],
     ["BIS_VERIFY_CAC_KEY", ENV.bisVerifyCacKey, "CAC own-engine lookups will fall back to Youverify/sandbox"],
     ["YOUVERIFY_API_KEY", ENV.youverifyApiKey, "Verification fallback disabled — sandbox mode only"],
     ["KEYCLOAK_CLIENT_SECRET", ENV.keycloakClientSecret, "Keycloak IDP page will show 'not configured'"],

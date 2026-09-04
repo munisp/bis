@@ -521,6 +521,109 @@ async function startServer() {
     }
   });
 
+  // Consumer-dispute adapters delegate to the same ownership-bound tRPC procedures.
+  // They never expose source credentials, raw provider responses, or another consumer's data.
+  const consumerDisputeCaseRef = (value: unknown): string | null => {
+    const candidate = Array.isArray(value) ? value[0] : value;
+    return typeof candidate === "string" && /^BIS-DR-[A-Z0-9]{18}$/.test(candidate) ? candidate : null;
+  };
+
+  app.post("/api/consumer-disputes", async (req: Request, res: Response) => {
+    try {
+      const ctx = await createContextFromRequest(req, res);
+      const result = await appRouter.createCaller(ctx).consumerDisputes.open(req.body);
+      res.status(201).json(result);
+    } catch (error) {
+      respondConsumerAdapterError(req, res, error, "consumer_dispute_open");
+    }
+  });
+
+  app.get("/api/consumer-disputes", async (req: Request, res: Response) => {
+    try {
+      const ctx = await createContextFromRequest(req, res);
+      const result = await appRouter.createCaller(ctx).consumerDisputes.mine();
+      res.status(200).json(result);
+    } catch (error) {
+      respondConsumerAdapterError(req, res, error, "consumer_dispute_mine");
+    }
+  });
+
+  app.get("/api/consumer-disputes/:caseRef", async (req: Request, res: Response) => {
+    const caseRef = consumerDisputeCaseRef(req.params.caseRef);
+    if (!caseRef) {
+      res.status(400).json({ error: "A valid consumer dispute case reference is required", code: "BAD_REQUEST" });
+      return;
+    }
+    try {
+      const ctx = await createContextFromRequest(req, res);
+      const result = await appRouter.createCaller(ctx).consumerDisputes.getMine({ caseRef });
+      res.status(200).json(result);
+    } catch (error) {
+      respondConsumerAdapterError(req, res, error, "consumer_dispute_get");
+    }
+  });
+
+  app.post("/api/consumer-disputes/:caseRef/evidence/initiate", async (req: Request, res: Response) => {
+    const caseRef = consumerDisputeCaseRef(req.params.caseRef);
+    if (!caseRef) {
+      res.status(400).json({ error: "A valid consumer dispute case reference is required", code: "BAD_REQUEST" });
+      return;
+    }
+    try {
+      const ctx = await createContextFromRequest(req, res);
+      const result = await appRouter.createCaller(ctx).consumerDisputes.initiateEvidence({ ...req.body, caseRef });
+      res.status(201).json(result);
+    } catch (error) {
+      respondConsumerAdapterError(req, res, error, "consumer_dispute_evidence_initiate");
+    }
+  });
+
+  app.post("/api/consumer-disputes/:caseRef/evidence/:evidenceRef/complete", async (req: Request, res: Response) => {
+    const caseRef = consumerDisputeCaseRef(req.params.caseRef);
+    const rawEvidenceRef = Array.isArray(req.params.evidenceRef) ? req.params.evidenceRef[0] : req.params.evidenceRef;
+    if (!caseRef || typeof rawEvidenceRef !== "string" || !/^BIS-DE-[A-Z0-9]{18}$/.test(rawEvidenceRef)) {
+      res.status(400).json({ error: "A valid consumer dispute and evidence reference are required", code: "BAD_REQUEST" });
+      return;
+    }
+    try {
+      const ctx = await createContextFromRequest(req, res);
+      const result = await appRouter.createCaller(ctx).consumerDisputes.completeEvidence({ caseRef, evidenceRef: rawEvidenceRef });
+      res.status(200).json(result);
+    } catch (error) {
+      respondConsumerAdapterError(req, res, error, "consumer_dispute_evidence_complete");
+    }
+  });
+
+  app.post("/api/consumer-disputes/:caseRef/withdraw", async (req: Request, res: Response) => {
+    const caseRef = consumerDisputeCaseRef(req.params.caseRef);
+    if (!caseRef) {
+      res.status(400).json({ error: "A valid consumer dispute case reference is required", code: "BAD_REQUEST" });
+      return;
+    }
+    try {
+      const ctx = await createContextFromRequest(req, res);
+      const result = await appRouter.createCaller(ctx).consumerDisputes.withdraw({ caseRef });
+      res.status(200).json(result);
+    } catch (error) {
+      respondConsumerAdapterError(req, res, error, "consumer_dispute_withdraw");
+    }
+  });
+
+  app.post("/api/consumer-disputes/:caseRef/method-description-requests", async (req: Request, res: Response) => {
+    const caseRef = consumerDisputeCaseRef(req.params.caseRef);
+    if (!caseRef) {
+      res.status(400).json({ error: "A valid consumer dispute case reference is required", code: "BAD_REQUEST" });
+      return;
+    }
+    try {
+      const ctx = await createContextFromRequest(req, res);
+      const result = await appRouter.createCaller(ctx).consumerDisputes.requestMethodDescription({ caseRef });
+      res.status(202).json(result);
+    } catch (error) {
+      respondConsumerAdapterError(req, res, error, "consumer_dispute_method_description");
+    }
+  });
+
   // Mobile evidence adapter delegates to the same protected tRPC procedures.
   // It authorizes direct-to-object-store uploads; evidence bytes do not transit this server.
   app.post("/api/evidence/initiate", async (req: Request, res: Response) => {
