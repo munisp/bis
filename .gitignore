@@ -121,3 +121,14 @@ audit/
 .project-config.json
 __pycache__/
 *.pyc
+
+# Rendered on-premises secrets, private PKI, and local storage state
+infra/onprem/bis-onprem.env
+infra/onprem/runtime/
+infra/onprem/pki/
+infra/onprem/secrets/
+infra/onprem/*.key
+infra/onprem/*.crt
+infra/onprem/*.pem
+!infra/onprem/templates/
+!infra/onprem/bis-onprem.env.example

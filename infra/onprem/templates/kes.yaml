@@ -1,0 +1,49 @@
+address: 0.0.0.0:7373
+root: ${ROOT_IDENTITY}
+tls:
+  key: /etc/kes/tls/server.key
+  cert: /etc/kes/tls/server.crt
+
+api:
+  /v1/ready:
+    skip_auth: false
+  timeout: 15s
+
+policy:
+  minio-evidence:
+    allow:
+      - /v1/key/create/bis-evidence-*
+      - /v1/key/generate/bis-evidence-*
+      - /v1/key/decrypt/bis-evidence-*
+      - /v1/status
+    identities:
+      - ${MINIO_IDENTITY}
+
+keys:
+  - name: ${BIS_EVIDENCE_S3_KMS_KEY_ID}
+
+cache:
+  expiry:
+    any: 5m0s
+    unused: 20s
+    offline: 0s
+
+log:
+  error: "on"
+  audit: "on"
+
+keystore:
+  vault:
+    endpoint: https://vault:8200
+    engine: kv
+    version: v2
+    prefix: bis/staging/kes
+    approle:
+      id: ${VAULT_KES_ROLE_ID}
+      secret: ${VAULT_KES_SECRET_ID}
+    tls:
+      ca: /etc/kes/tls/vault-ca.crt
+      cert: /etc/kes/tls/client.crt
+      key: /etc/kes/tls/client.key
+    status:
+      ping: 10s
