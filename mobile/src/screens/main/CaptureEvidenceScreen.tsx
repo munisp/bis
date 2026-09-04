@@ -1,66 +1,79 @@
-/**
- * CaptureEvidenceScreen — capture and upload photo/document evidence for an investigation.
- */
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, ScrollView, Image } from 'react-native';
 import { useRoute, useNavigation, type RouteProp } from '@react-navigation/native';
+import { pick, types, isCancel } from 'react-native-document-picker';
 import type { InvestigationsStackParamList } from '../../navigation/RootNavigator';
-import { evidenceApi } from '../../services/api';
+import { secureEvidenceQueue } from '../../offline/SecureEvidenceQueue';
 import { colors, typography, spacing } from '../../utils/theme';
 
 type Route = RouteProp<InvestigationsStackParamList, 'CaptureEvidence'>;
+type SelectedEvidence = { uri: string; name: string; contentType: 'image/jpeg' | 'image/png' | 'application/pdf' };
+
+function supportedMime(type?: string | null): SelectedEvidence['contentType'] | null {
+  if (type === 'image/jpeg' || type === 'image/png' || type === 'application/pdf') return type;
+  return null;
+}
 
 export function CaptureEvidenceScreen() {
   const route = useRoute<Route>();
   const navigation = useNavigation();
   const { investigationId } = route.params;
   const [description, setDescription] = useState('');
-  const [fileUri, setFileUri] = useState<string | null>(null);
-  const [mimeType, setMimeType] = useState('image/jpeg');
+  const [selected, setSelected] = useState<SelectedEvidence | null>(null);
   const [loading, setLoading] = useState(false);
+  const [pending, setPending] = useState(0);
 
-  // In a real app, this would use react-native-image-picker or expo-image-picker
-  const handlePickImage = () => {
-    Alert.alert('Camera / Gallery', 'In production, this opens the camera or gallery.\nFor demo, a placeholder URI is used.', [
-      { text: 'Use Placeholder', onPress: () => { setFileUri('file:///placeholder/evidence.jpg'); setMimeType('image/jpeg'); } },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
+  useEffect(() => { void secureEvidenceQueue.pendingCount().then(setPending); }, []);
+
+  const handlePickEvidence = async () => {
+    try {
+      const files = await pick({ type: [types.images, types.pdf], allowMultiSelection: false, copyTo: 'cachesDirectory', mode: 'import' });
+      const file = files[0];
+      const contentType = supportedMime(file.type);
+      const uri = file.fileCopyUri ?? file.uri;
+      if (!contentType || !uri) {
+        Alert.alert('Unsupported evidence', 'Select a JPEG, PNG, or PDF document.');
+        return;
+      }
+      setSelected({ uri, name: file.name ?? 'evidence', contentType });
+    } catch (error) {
+      if (!isCancel(error)) Alert.alert('Selection failed', error instanceof Error ? error.message : 'Could not select evidence');
+    }
   };
 
-  const handleUpload = async () => {
-    if (!fileUri) { Alert.alert('No file', 'Please select a photo or document first'); return; }
-    if (!description.trim()) { Alert.alert('Validation', 'Please add a description'); return; }
+  const handleQueueAndSync = async () => {
+    if (!selected) { Alert.alert('No file', 'Select a JPEG, PNG, or PDF document first.'); return; }
+    if (description.trim().length < 3) { Alert.alert('Description required', 'Enter at least three characters describing the evidence.'); return; }
     setLoading(true);
     try {
-      await evidenceApi.upload(investigationId, fileUri, mimeType, description.trim());
-      Alert.alert('Uploaded', 'Evidence uploaded successfully', [{ text: 'OK', onPress: () => navigation.goBack() }]);
-    } catch (err) {
-      Alert.alert('Error', err instanceof Error ? err.message : 'Upload failed');
+      await secureEvidenceQueue.enqueue({ investigationId: Number(investigationId), fileUri: selected.uri, contentType: selected.contentType, description: description.trim() });
+      const result = await secureEvidenceQueue.sync();
+      setPending(result.pending);
+      if (result.pending === 0) {
+        Alert.alert('Evidence verified', 'Evidence was encrypted locally, uploaded directly to protected storage, and verified by its server-side custody record.', [{ text: 'OK', onPress: () => navigation.goBack() }]);
+      } else {
+        Alert.alert('Evidence queued securely', 'The encrypted evidence will synchronize automatically when a verified network connection is available.');
+      }
+    } catch (error) {
+      Alert.alert('Evidence protected', error instanceof Error ? error.message : 'Evidence could not be encrypted and queued. No upload was attempted.');
     } finally { setLoading(false); }
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <ScrollView style={styles.container} contentContainerStyle={styles.content} accessibilityLabel="Secure evidence capture">
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>Capture Evidence</Text>
-        <Text style={styles.cardSubtitle}>Investigation: {investigationId}</Text>
-        <TouchableOpacity style={styles.photoArea} onPress={handlePickImage}>
-          {fileUri ? (
-            <Image source={{ uri: fileUri }} style={styles.preview} resizeMode="cover" />
-          ) : (
-            <View style={styles.photoPlaceholder}>
-              <Text style={styles.photoIcon}>📷</Text>
-              <Text style={styles.photoHint}>Tap to capture photo or select document</Text>
-            </View>
-          )}
+        <Text style={styles.cardTitle}>Secure Evidence Capture</Text>
+        <Text style={styles.cardSubtitle}>Investigation: {investigationId}. Files are AES-256-GCM encrypted on this device before sync.</Text>
+        <TouchableOpacity style={styles.photoArea} onPress={() => void handlePickEvidence()} accessibilityRole="button" accessibilityLabel="Select evidence file">
+          {selected?.contentType.startsWith('image/') ? <Image source={{ uri: selected.uri }} style={styles.preview} resizeMode="cover" /> : <View style={styles.photoPlaceholder}><Text style={styles.fileName}>{selected?.name ?? 'Select JPEG, PNG, or PDF'}</Text><Text style={styles.photoHint}>Maximum file size: 25 MB</Text></View>}
         </TouchableOpacity>
         <View style={styles.field}>
-          <Text style={styles.label}>Description</Text>
-          <TextInput style={[styles.input, styles.multiline]} placeholder="Describe the evidence…"
-            placeholderTextColor={colors.textMuted} value={description} onChangeText={setDescription} multiline numberOfLines={3} />
+          <Text style={styles.label}>Chain-of-custody description</Text>
+          <TextInput style={[styles.input, styles.multiline]} placeholder="Describe the evidence, source, and collection context" placeholderTextColor={colors.textMuted} value={description} onChangeText={setDescription} multiline numberOfLines={3} maxLength={2000} />
         </View>
-        <TouchableOpacity style={[styles.submitBtn, !fileUri && styles.submitBtnDisabled]} onPress={handleUpload} disabled={loading || !fileUri}>
-          {loading ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.submitText}>Upload Evidence</Text>}
+        {pending > 0 && <Text style={styles.pendingNotice}>{pending} encrypted evidence item{pending === 1 ? '' : 's'} waiting to synchronize.</Text>}
+        <TouchableOpacity style={[styles.submitBtn, (!selected || loading) && styles.submitBtnDisabled]} onPress={() => void handleQueueAndSync()} disabled={loading || !selected} accessibilityRole="button" accessibilityLabel="Encrypt and synchronize evidence">
+          {loading ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.submitText}>Encrypt and Synchronize</Text>}
         </TouchableOpacity>
       </View>
     </ScrollView>
@@ -68,21 +81,13 @@ export function CaptureEvidenceScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
-  content: { padding: spacing.md },
+  container: { flex: 1, backgroundColor: colors.background }, content: { padding: spacing.md },
   card: { backgroundColor: colors.card, borderRadius: 12, padding: spacing.md, borderWidth: 1, borderColor: colors.border },
-  cardTitle: { ...typography.h3, color: colors.text, marginBottom: 4 },
-  cardSubtitle: { fontSize: 12, color: colors.textMuted, marginBottom: spacing.md },
+  cardTitle: { ...typography.h3, color: colors.text, marginBottom: 4 }, cardSubtitle: { fontSize: 12, color: colors.textMuted, marginBottom: spacing.md, lineHeight: 18 },
   photoArea: { borderRadius: 10, overflow: 'hidden', marginBottom: spacing.md, borderWidth: 2, borderColor: colors.border, borderStyle: 'dashed', minHeight: 180 },
   photoPlaceholder: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl, minHeight: 180 },
-  photoIcon: { fontSize: 40, marginBottom: 8 },
-  photoHint: { fontSize: 13, color: colors.textMuted, textAlign: 'center' },
-  preview: { width: '100%', height: 200 },
-  field: { marginBottom: spacing.md },
-  label: { fontSize: 12, color: colors.textMuted, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 },
-  input: { backgroundColor: colors.backgroundSecondary, borderRadius: 8, padding: 12, color: colors.text, fontSize: 14, borderWidth: 1, borderColor: colors.border },
-  multiline: { minHeight: 80, textAlignVertical: 'top' },
-  submitBtn: { backgroundColor: colors.primary, borderRadius: 10, paddingVertical: 14, alignItems: 'center', marginTop: 8 },
-  submitBtnDisabled: { opacity: 0.5 },
-  submitText: { color: '#fff', fontWeight: '600', fontSize: 15 },
+  fileName: { color: colors.text, fontWeight: '600', textAlign: 'center', marginBottom: 8 }, photoHint: { fontSize: 13, color: colors.textMuted, textAlign: 'center' },
+  preview: { width: '100%', height: 220 }, field: { marginBottom: spacing.md }, label: { fontSize: 12, color: colors.textMuted, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 },
+  input: { backgroundColor: colors.backgroundSecondary, borderRadius: 8, padding: 12, color: colors.text, fontSize: 14, borderWidth: 1, borderColor: colors.border }, multiline: { minHeight: 80, textAlignVertical: 'top' },
+  pendingNotice: { color: colors.warning ?? '#d97706', marginBottom: spacing.md, fontSize: 13 }, submitBtn: { backgroundColor: colors.primary, borderRadius: 10, paddingVertical: 14, alignItems: 'center', marginTop: 8 }, submitBtnDisabled: { opacity: 0.5 }, submitText: { color: '#fff', fontWeight: '600', fontSize: 15 },
 });

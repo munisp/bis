@@ -98,8 +98,8 @@ export const investigationsApi = {
   addNote: (id: string, note: string) =>
     request<void>('POST', `/investigations/${id}/notes`, { note }),
 
-  dispatchFieldAgent: (id: string, agentId: string, location: string) =>
-    request<void>('POST', `/investigations/${id}/dispatch`, { agentId, location }),
+  dispatchFieldAgent: (id: string, agentId: string, agentName: string, location: string, idempotencyKey: string) =>
+    request<void>('POST', `/investigations/${id}/dispatch`, { agentId, agentName, location, idempotencyKey }),
 };
 
 // ── Alerts ─────────────────────────────────────────────────────────────────────
@@ -163,23 +163,15 @@ export const consumerDiscoveryApi = {
 // ── Evidence ───────────────────────────────────────────────────────────────────
 
 export const evidenceApi = {
-  upload: async (investigationId: string, fileUri: string, mimeType: string, description: string) => {
-    const formData = new FormData();
-    formData.append('file', { uri: fileUri, type: mimeType, name: 'evidence' } as unknown as Blob);
-    formData.append('investigationId', investigationId);
-    formData.append('description', description);
-
-    const token = getStoredToken();
-    const response = await fetch(`${BIS_API_URL}/evidence/upload`, {
-      method: 'POST',
-      headers: {
-        Authorization: token ? `Bearer ${token}` : '',
-        Accept: 'application/json',
-      },
-      body: formData,
-    });
-    return response.json();
-  },
+  initiate: (input: {
+    investigationId: number;
+    contentType: 'image/jpeg' | 'image/png' | 'application/pdf';
+    contentLength: number;
+    sha256: string;
+    description: string;
+    idempotencyKey: string;
+  }) => request<{ uploadId: string; objectKey: string; uploadUrl: string; expiresAt: string; headers: Record<string, string> }>('POST', '/evidence/initiate', input),
+  complete: (uploadId: string) => request<{ uploadId: string; status: 'verified'; objectVersionId: string | null }>('POST', `/evidence/${uploadId}/complete`),
 };
 
 // ── Field Agent ────────────────────────────────────────────────────────────────

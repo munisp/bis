@@ -921,6 +921,8 @@ describe("Canonical PostgreSQL Baseline", () => {
       "0002_africa_consumer_intelligence",
       "0003_consumer_governance",
       "0004_gateway_transactional_outbox",
+      "0005_outbox_and_archive_encryption",
+      "0006_field_evidence_uploads",
     ]);
   });
 

@@ -23,6 +23,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+	"github.com/minio/minio-go/v7/pkg/encrypt"
 	"github.com/xitongsys/parquet-go-source/local"
 	"github.com/xitongsys/parquet-go/reader"
 	"github.com/xitongsys/parquet-go/writer"
@@ -41,6 +42,7 @@ type Config struct {
 	S3SecretKey    string
 	S3Bucket       string
 	S3Region       string
+	S3KMSKeyID     string
 	PushgatewayURL string
 	BatchSize      int
 	ColdAgeDays    int
@@ -96,6 +98,9 @@ func loadConfig() (Config, error) {
 	if config.S3Region, err = requireEnv("BIS_ARCHIVE_S3_REGION"); err != nil {
 		return Config{}, err
 	}
+	if config.S3KMSKeyID, err = requireEnv("BIS_ARCHIVE_S3_KMS_KEY_ID"); err != nil {
+		return Config{}, err
+	}
 	config.PushgatewayURL = strings.TrimSpace(os.Getenv("BIS_ARCHIVE_PUSHGATEWAY_URL"))
 	if strings.EqualFold(os.Getenv("BIS_ENV"), "production") && config.PushgatewayURL == "" {
 		return Config{}, errors.New("BIS_ARCHIVE_PUSHGATEWAY_URL is required in production")
@@ -147,16 +152,18 @@ type ArchiveBatch struct {
 }
 
 type ArchiveManifest struct {
-	SchemaVersion          string    `json:"schemaVersion"`
-	ArchiveBatchID         string    `json:"archiveBatchId"`
-	ObjectKey              string    `json:"objectKey"`
-	ObjectVersionID        string    `json:"objectVersionId,omitempty"`
-	ManifestKey            string    `json:"manifestKey"`
-	RowCount               int       `json:"rowCount"`
-	ByteCount              int64     `json:"byteCount"`
-	SHA256                 string    `json:"sha256"`
-	SourceQueryFingerprint string    `json:"sourceQueryFingerprint"`
-	CreatedAt              time.Time `json:"createdAt"`
+	SchemaVersion             string    `json:"schemaVersion"`
+	ArchiveBatchID            string    `json:"archiveBatchId"`
+	ObjectKey                 string    `json:"objectKey"`
+	ObjectVersionID           string    `json:"objectVersionId,omitempty"`
+	ManifestKey               string    `json:"manifestKey"`
+	RowCount                  int       `json:"rowCount"`
+	ByteCount                 int64     `json:"byteCount"`
+	SHA256                    string    `json:"sha256"`
+	SourceQueryFingerprint    string    `json:"sourceQueryFingerprint"`
+	ObjectEncryptionAlgorithm string    `json:"objectEncryptionAlgorithm"`
+	ObjectEncryptionKeyID     string    `json:"objectEncryptionKeyId"`
+	CreatedAt                 time.Time `json:"createdAt"`
 }
 
 type Repository struct{ pool *pgxpool.Pool }
@@ -276,8 +283,9 @@ func (r Repository) commitVerified(ctx context.Context, batch ArchiveBatch, mani
 	defer func() { _ = tx.Rollback(ctx) }()
 	command, err := tx.Exec(ctx, `
 		UPDATE cold_archive_batches
-		SET status = 'verified', sha256_hex = $2, byte_count = $3, object_version_id = $4, manifest_key = $5, verified_at = NOW()
-		WHERE id = $1 AND status = 'uploading'`, batch.ID, manifest.SHA256, manifest.ByteCount, manifest.ObjectVersionID, manifest.ManifestKey)
+		SET status = 'verified', sha256_hex = $2, byte_count = $3, object_version_id = $4, manifest_key = $5,
+		    object_encryption_algorithm = $6, object_encryption_key_id = $7, verified_at = NOW()
+		WHERE id = $1 AND status = 'uploading'`, batch.ID, manifest.SHA256, manifest.ByteCount, manifest.ObjectVersionID, manifest.ManifestKey, manifest.ObjectEncryptionAlgorithm, manifest.ObjectEncryptionKeyID)
 	if err != nil {
 		return fmt.Errorf("mark archive verified: %w", err)
 	}
@@ -415,8 +423,13 @@ func uploadFile(ctx context.Context, client *minio.Client, config Config, key, p
 	if _, err := client.StatObject(ctx, config.S3Bucket, key, minio.StatObjectOptions{}); err == nil {
 		return "", fmt.Errorf("archive object already exists: %s", key)
 	}
+	sse, err := encrypt.NewSSEKMS(config.S3KMSKeyID, nil)
+	if err != nil {
+		return "", fmt.Errorf("configure archive SSE-KMS: %w", err)
+	}
 	result, err := client.FPutObject(ctx, config.S3Bucket, key, path, minio.PutObjectOptions{
-		ContentType: "application/vnd.apache.parquet",
+		ContentType:          "application/vnd.apache.parquet",
+		ServerSideEncryption: sse,
 		UserMetadata: map[string]string{
 			"schema-version": schemaVersion,
 			"sha256":         checksum,
@@ -454,7 +467,11 @@ func uploadManifest(ctx context.Context, client *minio.Client, config Config, ma
 	if err != nil {
 		return fmt.Errorf("marshal archive manifest: %w", err)
 	}
-	_, err = client.PutObject(ctx, config.S3Bucket, manifest.ManifestKey, strings.NewReader(string(body)), int64(len(body)), minio.PutObjectOptions{ContentType: "application/json", UserMetadata: map[string]string{"schema-version": schemaVersion, "sha256": manifest.SHA256}})
+	sse, err := encrypt.NewSSEKMS(config.S3KMSKeyID, nil)
+	if err != nil {
+		return fmt.Errorf("configure manifest SSE-KMS: %w", err)
+	}
+	_, err = client.PutObject(ctx, config.S3Bucket, manifest.ManifestKey, strings.NewReader(string(body)), int64(len(body)), minio.PutObjectOptions{ContentType: "application/json", ServerSideEncryption: sse, UserMetadata: map[string]string{"schema-version": schemaVersion, "sha256": manifest.SHA256}})
 	if err != nil {
 		return fmt.Errorf("upload archive manifest: %w", err)
 	}
@@ -531,7 +548,7 @@ func run(ctx context.Context, config Config, logger *slog.Logger) error {
 		return err
 	}
 	fingerprintBytes := sha256.Sum256([]byte("transactions-cold-v1|" + archiveStatuses))
-	manifest := ArchiveManifest{SchemaVersion: schemaVersion, ArchiveBatchID: batch.ID.String(), ObjectKey: batch.ObjectKey, ObjectVersionID: versionID, ManifestKey: batch.ManifestKey, RowCount: batch.RowCount, ByteCount: byteCount, SHA256: checksum, SourceQueryFingerprint: hex.EncodeToString(fingerprintBytes[:]), CreatedAt: time.Now().UTC()}
+	manifest := ArchiveManifest{SchemaVersion: schemaVersion, ArchiveBatchID: batch.ID.String(), ObjectKey: batch.ObjectKey, ObjectVersionID: versionID, ManifestKey: batch.ManifestKey, RowCount: batch.RowCount, ByteCount: byteCount, SHA256: checksum, SourceQueryFingerprint: hex.EncodeToString(fingerprintBytes[:]), ObjectEncryptionAlgorithm: "aws:kms", ObjectEncryptionKeyID: config.S3KMSKeyID, CreatedAt: time.Now().UTC()}
 	if err := uploadManifest(ctx, storage, config, manifest); err != nil {
 		repository.markFailed(ctx, batch.ID, err)
 		return err

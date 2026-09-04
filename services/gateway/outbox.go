@@ -28,14 +28,19 @@ type outboxEvent struct {
 	ID             string
 	Topic          string
 	Payload        []byte
+	Ciphertext     []byte
+	Nonce          []byte
+	KeyVersion     string
+	PayloadSHA256  string
 	AttemptCount   int
 	IdempotencyKey string
 }
 
 type transactionalOutbox struct {
-	db     *sql.DB
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	db      *sql.DB
+	keyring *outboxKeyring
+	cancel  context.CancelFunc
+	wg      sync.WaitGroup
 }
 
 var gatewayOutbox *transactionalOutbox
@@ -46,6 +51,10 @@ func newTransactionalOutbox(databaseURL string) (*transactionalOutbox, error) {
 	}
 	if !strings.HasPrefix(databaseURL, "postgres://") && !strings.HasPrefix(databaseURL, "postgresql://") {
 		return nil, errors.New("gateway transactional outbox requires a PostgreSQL DATABASE_URL")
+	}
+	keyring, err := loadOutboxKeyringFromEnv()
+	if err != nil {
+		return nil, fmt.Errorf("load transactional outbox keyring: %w", err)
 	}
 	db, err := sql.Open("postgres", databaseURL)
 	if err != nil {
@@ -60,7 +69,7 @@ func newTransactionalOutbox(databaseURL string) (*transactionalOutbox, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("ping transactional outbox database: %w", err)
 	}
-	return &transactionalOutbox{db: db}, nil
+	return &transactionalOutbox{db: db, keyring: keyring}, nil
 }
 
 func (o *transactionalOutbox) close() error {
@@ -89,7 +98,7 @@ func stableEventKey(topic string, payload []byte) string {
 }
 
 func (o *transactionalOutbox) enqueue(topic string, payload any) error {
-	if o == nil || o.db == nil {
+	if o == nil || o.db == nil || o.keyring == nil {
 		return errors.New("gateway transactional outbox is unavailable")
 	}
 	if strings.TrimSpace(topic) == "" {
@@ -101,14 +110,18 @@ func (o *transactionalOutbox) enqueue(topic string, payload any) error {
 	}
 	hash := sha256.Sum256(encoded)
 	idempotencyKey := stableEventKey(topic, encoded)
+	ciphertext, nonce, keyVersion, err := o.keyring.encrypt(topic, idempotencyKey, encoded)
+	if err != nil {
+		return fmt.Errorf("encrypt outbox payload for %s: %w", topic, err)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_, err = o.db.ExecContext(ctx, `
 		INSERT INTO gateway_transactional_outbox
-		  (id, topic, payload, payload_sha256, idempotency_key, state, available_at)
-		VALUES ($1, $2, $3::jsonb, $4, $5, 'pending', NOW())
+		  (id, topic, payload, payload_ciphertext, payload_nonce, payload_key_version, payload_algorithm, payload_sha256, idempotency_key, state, available_at)
+		VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, $8, 'pending', NOW())
 		ON CONFLICT (topic, idempotency_key) DO NOTHING`,
-		uuid.NewString(), topic, string(encoded), hex.EncodeToString(hash[:]), idempotencyKey)
+		uuid.NewString(), topic, ciphertext, nonce, keyVersion, outboxCipherAlgorithm, hex.EncodeToString(hash[:]), idempotencyKey)
 	if err != nil {
 		controlPlaneMetrics.outboxEvents.WithLabelValues("persistence_error").Inc()
 		return fmt.Errorf("persist durable event %s: %w", topic, err)
@@ -151,7 +164,7 @@ func (o *transactionalOutbox) dispatchPending(ctx context.Context) error {
 		return fmt.Errorf("begin outbox lease transaction: %w", err)
 	}
 	rows, err := tx.QueryContext(ctx, `
-		SELECT id, topic, payload::text, attempt_count, idempotency_key
+		SELECT id, topic, payload_ciphertext, payload_nonce, payload_key_version, payload_sha256, attempt_count, idempotency_key
 		FROM gateway_transactional_outbox
 		WHERE state = 'pending' AND available_at <= NOW()
 		ORDER BY available_at ASC, created_at ASC
@@ -164,13 +177,16 @@ func (o *transactionalOutbox) dispatchPending(ctx context.Context) error {
 	events := make([]outboxEvent, 0, outboxBatchSize)
 	for rows.Next() {
 		var event outboxEvent
-		var payload string
-		if err := rows.Scan(&event.ID, &event.Topic, &payload, &event.AttemptCount, &event.IdempotencyKey); err != nil {
+		if err := rows.Scan(&event.ID, &event.Topic, &event.Ciphertext, &event.Nonce, &event.KeyVersion, &event.PayloadSHA256, &event.AttemptCount, &event.IdempotencyKey); err != nil {
 			_ = rows.Close()
 			_ = tx.Rollback()
-			return fmt.Errorf("scan outbox event: %w", err)
+			return fmt.Errorf("scan encrypted outbox event: %w", err)
 		}
-		event.Payload = []byte(payload)
+		if len(event.Ciphertext) == 0 || event.KeyVersion == "" {
+			_ = rows.Close()
+			_ = tx.Rollback()
+			return fmt.Errorf("outbox event %s is not encrypted; migrate or quarantine legacy row before dispatch", event.ID)
+		}
 		events = append(events, event)
 	}
 	if err := rows.Err(); err != nil {
@@ -190,6 +206,33 @@ func (o *transactionalOutbox) dispatchPending(ctx context.Context) error {
 	}
 
 	for _, event := range events {
+		plaintext, err := o.keyring.decrypt(event.Topic, event.IdempotencyKey, event.KeyVersion, event.Ciphertext, event.Nonce)
+		if err != nil {
+			if markErr := o.markFailed(ctx, event, err); markErr != nil {
+				return markErr
+			}
+			continue
+		}
+		hash := sha256.Sum256(plaintext)
+		if hex.EncodeToString(hash[:]) != event.PayloadSHA256 {
+			if markErr := o.markFailed(ctx, event, errors.New("outbox plaintext digest mismatch")); markErr != nil {
+				return markErr
+			}
+			continue
+		}
+		if o.keyring.needsRotation(event.KeyVersion) {
+			ciphertext, nonce, version, rotateErr := o.keyring.encrypt(event.Topic, event.IdempotencyKey, plaintext)
+			if rotateErr != nil {
+				if markErr := o.markFailed(ctx, event, rotateErr); markErr != nil {
+					return markErr
+				}
+				continue
+			}
+			if _, rotateErr = o.db.ExecContext(ctx, `UPDATE gateway_transactional_outbox SET payload_ciphertext = $2, payload_nonce = $3, payload_key_version = $4, payload_algorithm = $5, updated_at = NOW() WHERE id = $1 AND state = 'dispatching'`, event.ID, ciphertext, nonce, version, outboxCipherAlgorithm); rotateErr != nil {
+				return fmt.Errorf("rotate outbox event %s: %w", event.ID, rotateErr)
+			}
+		}
+		event.Payload = plaintext
 		if err := kafkaProducer.Publish(event.Topic, event.Payload); err != nil {
 			if markErr := o.markFailed(ctx, event, err); markErr != nil {
 				return markErr

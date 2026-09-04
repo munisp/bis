@@ -130,6 +130,7 @@ import { analyticsRouter } from "./orm/analyticsRouter"; // analytics.getDashboa
 import { caddyRouter } from "./caddy";
 import { consumerIntelligenceRouter } from "./consumerIntelligence";
 import { consumerGovernanceRouter } from "./consumerGovernance";
+import { fieldEvidenceRouter } from "./fieldEvidence";
 
 // ─── Service URLs ─────────────────────────────────────────────────────────────
 
@@ -2857,11 +2858,14 @@ const fieldTasksRouter = router({
       deadline: z.string().optional(),
       instructions: z.string().optional(),
       investigationId: z.number().optional(),
+      idempotencyKey: z.string().uuid().optional(),
     }))
     .mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new Error("Database unavailable");
-      const taskRef = generateRef("FT");
+      const taskRef = input.idempotencyKey ? `FT-${input.idempotencyKey.replaceAll('-', '').slice(0, 20).toUpperCase()}` : generateRef("FT");
+      const [existing] = await db.select().from(fieldTasks).where(eq(fieldTasks.taskRef, taskRef)).limit(1);
+      if (existing) return { taskRef: existing.taskRef, idempotentReplay: true };
       await db.insert(fieldTasks).values({
         taskRef,
         agentId: input.agentId,
@@ -2882,7 +2886,7 @@ const fieldTasksRouter = router({
       });
       await writeAuditLog(db, { userId: ctx.user!.id, category: "investigation", action: `Field task dispatched to ${input.agentName}`, targetRef: taskRef });
       await publishEvent("FIELD_TASK_DISPATCHED", taskRef, "info", { agentName: input.agentName, taskType: input.taskType });
-      return { taskRef };
+      return { taskRef, idempotentReplay: false };
     }),
 
   checkIn: writeProcedure
@@ -7606,5 +7610,6 @@ export const appRouter = router({
   caddy: caddyRouter,
   consumerIntelligence: consumerIntelligenceRouter,
   consumerGovernance: consumerGovernanceRouter,
+  fieldEvidence: fieldEvidenceRouter,
 });
 export type AppRouter = typeof appRouter;

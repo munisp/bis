@@ -106,7 +106,7 @@ export function DashboardScreen() {
         {insiderLoading ? (
           <ActivityIndicator color="#f59e0b" size="small" style={{ marginTop: 8 }} />
         ) : (
-          (insiderData?.rows ?? []).slice(0, 3).map((evt: any) => (
+          (insiderData?.data ?? []).slice(0, 3).map((evt: any) => (
             <View key={evt.id} style={styles.insiderRow}>
               <View style={[styles.insiderDot, { backgroundColor: getSeverityColor(evt.severity) }]} />
               <Text style={styles.insiderRowText} numberOfLines={1}>

@@ -10,6 +10,7 @@ func setValidConfig(t *testing.T) {
 	t.Setenv("BIS_ARCHIVE_S3_SECRET_KEY", "secret")
 	t.Setenv("BIS_ARCHIVE_S3_BUCKET", "cold-archive")
 	t.Setenv("BIS_ARCHIVE_S3_REGION", "us-east-1")
+	t.Setenv("BIS_ARCHIVE_S3_KMS_KEY_ID", "archive-prod-v1")
 	t.Setenv("BIS_COLD_ARCHIVE_BATCH_SIZE", "5000")
 	t.Setenv("BIS_COLD_ARCHIVE_AGE_DAYS", "365")
 }
@@ -48,6 +49,13 @@ func TestLoadConfigRejectsUnsafeOrMissingConfiguration(t *testing.T) {
 		t.Setenv("BIS_ARCHIVE_S3_ENDPOINT", "http://minio.example.test")
 		if _, err := loadConfig(); err == nil {
 			t.Fatal("plaintext object storage endpoint accepted")
+		}
+	})
+	t.Run("missing KMS key", func(t *testing.T) {
+		setValidConfig(t)
+		t.Setenv("BIS_ARCHIVE_S3_KMS_KEY_ID", "")
+		if _, err := loadConfig(); err == nil {
+			t.Fatal("missing archive KMS key accepted")
 		}
 	})
 	t.Run("oversized batch", func(t *testing.T) {

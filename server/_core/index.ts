@@ -521,6 +521,55 @@ async function startServer() {
     }
   });
 
+  // Mobile evidence adapter delegates to the same protected tRPC procedures.
+  // It authorizes direct-to-object-store uploads; evidence bytes do not transit this server.
+  app.post("/api/evidence/initiate", async (req: Request, res: Response) => {
+    try {
+      const ctx = await createContextFromRequest(req, res);
+      const result = await appRouter.createCaller(ctx).fieldEvidence.initiate(req.body);
+      res.status(201).json(result);
+    } catch (error) {
+      respondConsumerAdapterError(req, res, error, "evidence_initiate");
+    }
+  });
+
+  app.post("/api/evidence/:uploadId/complete", async (req: Request, res: Response) => {
+    try {
+      const ctx = await createContextFromRequest(req, res);
+      const rawUploadId = req.params.uploadId;
+      const uploadId = Array.isArray(rawUploadId) ? rawUploadId[0] : rawUploadId;
+      const result = await appRouter.createCaller(ctx).fieldEvidence.complete({ uploadId });
+      res.status(200).json(result);
+    } catch (error) {
+      respondConsumerAdapterError(req, res, error, "evidence_complete");
+    }
+  });
+
+  // Mobile field-dispatch adapter delegates to the existing idempotent field-task procedure.
+  app.post("/api/investigations/:investigationId/dispatch", async (req: Request, res: Response) => {
+    try {
+      const rawInvestigationId = req.params.investigationId;
+      const investigationId = Number(Array.isArray(rawInvestigationId) ? rawInvestigationId[0] : rawInvestigationId);
+      if (!Number.isInteger(investigationId) || investigationId <= 0) {
+        res.status(400).json({ error: "A valid investigation ID is required", code: "BAD_REQUEST" });
+        return;
+      }
+      const ctx = await createContextFromRequest(req, res);
+      const result = await appRouter.createCaller(ctx).fieldTasks.dispatch({
+        agentId: req.body?.agentId,
+        agentName: req.body?.agentName,
+        taskType: "address_verification",
+        priority: "medium",
+        address: req.body?.location,
+        investigationId,
+        idempotencyKey: req.body?.idempotencyKey,
+      });
+      res.status(201).json(result);
+    } catch (error) {
+      respondConsumerAdapterError(req, res, error, "field_dispatch");
+    }
+  });
+
   // ── CSRF token endpoint ────────────────────────────────────────────────────
   // Provides a per-session CSRF token for state-changing requests from the frontend.
   // tRPC mutations should include X-CSRF-Token header; validated in context.ts.

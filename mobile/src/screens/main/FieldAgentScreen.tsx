@@ -1,11 +1,13 @@
 /**
  * FieldAgentScreen — dispatch a field agent to an investigation site.
  */
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, ScrollView } from 'react-native';
 import { useRoute, useNavigation, type RouteProp } from '@react-navigation/native';
 import type { InvestigationsStackParamList } from '../../navigation/RootNavigator';
 import { investigationsApi } from '../../services/api';
+import { secureFieldOperationQueue } from '../../offline/SecureFieldOperationQueue';
+import { randomBytes } from 'react-native-quick-crypto';
 import { colors, typography, spacing } from '../../utils/theme';
 
 type Route = RouteProp<InvestigationsStackParamList, 'FieldAgent'>;
@@ -15,20 +17,34 @@ export function FieldAgentScreen() {
   const navigation = useNavigation();
   const { investigationId } = route.params;
   const [agentId, setAgentId] = useState('');
+  const [agentName, setAgentName] = useState('');
   const [location, setLocation] = useState('');
   const [loading, setLoading] = useState(false);
 
+  useEffect(() => {
+    let stop: (() => void) | undefined;
+    void secureFieldOperationQueue.start(async operation => {
+      await investigationsApi.dispatchFieldAgent(operation.investigationId, operation.agentId, operation.agentName, operation.location, operation.idempotencyKey);
+    }).then(unsubscribe => { stop = unsubscribe; });
+    return () => stop?.();
+  }, []);
+
   const handleDispatch = async () => {
-    if (!agentId.trim() || !location.trim()) {
-      Alert.alert('Validation', 'Agent ID and location are required');
+    if (!agentId.trim() || !agentName.trim() || !location.trim()) {
+      Alert.alert('Validation', 'Agent ID, agent name, and location are required');
       return;
     }
     setLoading(true);
     try {
-      await investigationsApi.dispatchFieldAgent(investigationId, agentId.trim(), location.trim());
+      await investigationsApi.dispatchFieldAgent(investigationId, agentId.trim(), agentName.trim(), location.trim(), randomBytes(16).toString('hex'));
       Alert.alert('Success', 'Field agent dispatched successfully', [{ text: 'OK', onPress: () => navigation.goBack() }]);
-    } catch (err) {
-      Alert.alert('Error', err instanceof Error ? err.message : 'Dispatch failed');
+    } catch {
+      try {
+        await secureFieldOperationQueue.enqueue({ investigationId, agentId: agentId.trim(), agentName: agentName.trim(), location: location.trim() });
+        Alert.alert('Queued securely', 'The encrypted field dispatch will synchronize automatically when connectivity returns.', [{ text: 'OK', onPress: () => navigation.goBack() }]);
+      } catch (queueError) {
+        Alert.alert('Dispatch protected', queueError instanceof Error ? queueError.message : 'Dispatch could not be securely queued');
+      }
     } finally { setLoading(false); }
   };
 
@@ -41,6 +57,11 @@ export function FieldAgentScreen() {
           <Text style={styles.label}>Agent ID</Text>
           <TextInput style={styles.input} placeholder="e.g. AGT-001" placeholderTextColor={colors.textMuted}
             value={agentId} onChangeText={setAgentId} autoCapitalize="none" />
+        </View>
+        <View style={styles.field}>
+          <Text style={styles.label}>Agent Name</Text>
+          <TextInput style={styles.input} placeholder="Verified agent full name" placeholderTextColor={colors.textMuted}
+            value={agentName} onChangeText={setAgentName} />
         </View>
         <View style={styles.field}>
           <Text style={styles.label}>Location / Address</Text>
