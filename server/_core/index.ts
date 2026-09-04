@@ -19,7 +19,7 @@ import { appRouter } from "../routers";
 import { createContext, createContextFromRequest } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { notifyOwner } from "./notification";
-import { creditTenantAccount } from "../billing";
+import { recordPaystackWebhook } from "../billingSettlement";
 import crypto from "crypto";
 import { createOpenClawRouter } from "../openclawEndpoints";
 import swaggerUi from "swagger-ui-express";
@@ -410,77 +410,48 @@ async function startServer() {
   app.use("/api/oauth", authLimiter);
 
   // ── Body parsers ───────────────────────────────────────────────────────────
-  // Note: Paystack webhook needs raw body — registered BEFORE json parser below
-  app.post("/api/webhooks/paystack", express.raw({ type: "application/json" }), async (req, res) => {
+  // Paystack signs raw bytes. This route precedes the JSON parser and performs
+  // no settlement/network work: it validates HMAC then persists a minimised,
+  // idempotent delivery record. A non-2xx response deliberately causes Paystack
+  // retry rather than accepting a payment event that cannot be reconciled.
+  app.post("/api/webhooks/paystack", express.raw({ type: "application/json", limit: "256kb" }), async (req, res) => {
+    const secret = ENV.paystackSecretKey;
+    if (!secret) {
+      log("error", "Paystack webhook rejected because settlement is not configured", { reqId: (req as Request & { id?: string }).id });
+      res.status(503).json({ error: "Payment settlement is unavailable" });
+      return;
+    }
+    const rawBody = req.body;
+    if (!Buffer.isBuffer(rawBody) || rawBody.length === 0) {
+      res.status(400).json({ error: "A non-empty raw JSON webhook body is required" });
+      return;
+    }
+    const signature = req.headers["x-paystack-signature"];
+    if (typeof signature !== "string" || !/^[0-9a-f]{128}$/i.test(signature)) {
+      res.status(401).json({ error: "A valid x-paystack-signature header is required" });
+      return;
+    }
+    const expected = crypto.createHmac("sha512", secret).update(rawBody).digest();
+    const supplied = Buffer.from(signature, "hex");
+    if (supplied.length !== expected.length || !crypto.timingSafeEqual(expected, supplied)) {
+      log("warn", "Paystack webhook rejected due to invalid signature", { reqId: (req as Request & { id?: string }).id });
+      res.status(401).json({ error: "Invalid webhook signature" });
+      return;
+    }
+    let body: unknown;
     try {
-      const PAYSTACK_SECRET = ENV.paystackSecretKey;
-      const signature = req.headers["x-paystack-signature"] as string | undefined;
-
-      // Validate HMAC-SHA512 signature when secret is configured
-      if (PAYSTACK_SECRET && signature) {
-        const expected = crypto
-          .createHmac("sha512", PAYSTACK_SECRET)
-          .update(req.body as Buffer)
-          .digest("hex");
-        // Use timingSafeEqual to prevent timing attacks
-        const expectedBuf = Buffer.from(expected, "hex");
-        const signatureBuf = Buffer.from(signature, "hex");
-        const isValid =
-          expectedBuf.length === signatureBuf.length &&
-          crypto.timingSafeEqual(expectedBuf, signatureBuf);
-        if (!isValid) {
-          console.warn("[PaystackWebhook] Invalid signature — request rejected");
-          res.status(401).json({ error: "Invalid signature" });
-          return;
-        }
-      } else if (PAYSTACK_SECRET && !signature) {
-        res.status(401).json({ error: "Missing x-paystack-signature header" });
-        return;
-      }
-
-      const body = JSON.parse((req.body as Buffer).toString("utf8")) as {
-        event?: string;
-        data?: {
-          reference?: string;
-          amount?: number;
-          status?: string;
-          metadata?: { tenant_id?: string; [key: string]: unknown };
-          customer?: { email?: string };
-        };
-      };
-
-      console.log(`[PaystackWebhook] event=${body.event} ref=${body.data?.reference}`);
-
-      if (body.event === "charge.success" && body.data?.status === "success") {
-        const reference = body.data.reference ?? "";
-        const amountKobo = body.data.amount ?? 0;
-        const tenantId = String(body.data.metadata?.tenant_id ?? body.data.customer?.email ?? "unknown");
-
-        if (amountKobo > 0 && tenantId !== "unknown") {
-          const result = await creditTenantAccount({ tenantId, amountKobo, reference });
-          console.log(`[PaystackWebhook] Credited tenant=${tenantId} amount=${amountKobo} kobo recorded=${result.recorded} transferId=${result.transferId}`);
-          // If TigerBeetle recording failed, enqueue for retry with exponential backoff
-          if (!result.recorded) {
-            const { enqueueFailedWebhook } = await import("../webhookRetry");
-            await enqueueFailedWebhook({
-              reference,
-              tenantId,
-              amountKobo,
-              error: "Initial credit attempt failed — TB unavailable",
-            });
-            console.warn(`[PaystackWebhook] TB credit failed for ${reference} — enqueued for retry`);
-          }
-          await notifyOwner({
-            title: `Payment Received — ₦${(amountKobo / 100).toLocaleString()}`,
-            content: `Tenant **${tenantId}** topped up ₦${(amountKobo / 100).toLocaleString()} via Paystack.\nReference: \`${reference}\`\nTigerBeetle transfer: \`${result.transferId}\` (recorded=${result.recorded})`,
-          });
-        }
-      }
-
-      res.status(200).json({ received: true });
-    } catch (err) {
-      console.error("[PaystackWebhook] Error:", err);
-      res.status(200).json({ received: true, error: "Processing error" });
+      body = JSON.parse(rawBody.toString("utf8"));
+    } catch {
+      res.status(400).json({ error: "Webhook body is not valid JSON" });
+      return;
+    }
+    try {
+      const stored = await recordPaystackWebhook(rawBody, body);
+      log("info", "Paystack webhook durably accepted", { reqId: (req as Request & { id?: string }).id, duplicate: stored.duplicate, eventHash: stored.eventHash.slice(0, 16) });
+      res.status(200).json({ received: true, duplicate: stored.duplicate });
+    } catch (error) {
+      log("error", "Paystack webhook durable intake failed", { reqId: (req as Request & { id?: string }).id, error: error instanceof Error ? error.message : "unknown" });
+      res.status(503).json({ error: "Webhook intake is temporarily unavailable" });
     }
   });
 
@@ -744,6 +715,62 @@ async function startServer() {
     } catch (error) {
       respondConsumerAdapterError(req, res, error, "field_dispatch");
     }
+  });
+
+  // Institutional and informal-sector adapters retain the same tRPC tenant, purpose,
+  // consent, approval, and audit enforcement used by the PWA.
+  app.post("/api/biometric/consents", async (req: Request, res: Response) => {
+    try { const ctx = await createContextFromRequest(req, res); const result = await appRouter.createCaller(ctx).biometric.grantConsent(req.body); res.status(201).json(result); }
+    catch (error) { respondConsumerAdapterError(req, res, error, "biometric_consent_grant"); }
+  });
+  app.post("/api/biometric/consents/withdraw", async (req: Request, res: Response) => {
+    try { const ctx = await createContextFromRequest(req, res); const result = await appRouter.createCaller(ctx).biometric.withdrawConsent(req.body); res.status(202).json(result); }
+    catch (error) { respondConsumerAdapterError(req, res, error, "biometric_consent_withdraw"); }
+  });
+  app.post("/api/biometric/reviews/:reviewCaseId/resolve", async (req: Request, res: Response) => {
+    try { const ctx = await createContextFromRequest(req, res); const result = await appRouter.createCaller(ctx).biometric.resolveReview({ reviewCaseId: Array.isArray(req.params.reviewCaseId) ? req.params.reviewCaseId[0] : req.params.reviewCaseId, decision: req.body?.decision, rationale: req.body?.rationale }); res.status(200).json(result); }
+    catch (error) { respondConsumerAdapterError(req, res, error, "biometric_review_resolve"); }
+  });
+
+  app.post("/api/institutional-authorizations", async (req: Request, res: Response) => {
+    try { const ctx = await createContextFromRequest(req, res); const result = await appRouter.createCaller(ctx).institutionalAccess.submitAuthorization(req.body); res.status(201).json(result); }
+    catch (error) { respondConsumerAdapterError(req, res, error, "institution_authorization_submit"); }
+  });
+  app.post("/api/institutional-authorizations/:authorizationId/approve", async (req: Request, res: Response) => {
+    try { const ctx = await createContextFromRequest(req, res); const result = await appRouter.createCaller(ctx).institutionalAccess.approveAuthorization({ authorizationId: Array.isArray(req.params.authorizationId) ? req.params.authorizationId[0] : req.params.authorizationId, rationale: req.body?.rationale }); res.status(200).json(result); }
+    catch (error) { respondConsumerAdapterError(req, res, error, "institution_authorization_approve"); }
+  });
+  app.post("/api/institutional-authorizations/:authorizationId/revoke", async (req: Request, res: Response) => {
+    try { const ctx = await createContextFromRequest(req, res); const result = await appRouter.createCaller(ctx).institutionalAccess.revokeAuthorization({ authorizationId: Array.isArray(req.params.authorizationId) ? req.params.authorizationId[0] : req.params.authorizationId, rationale: req.body?.rationale }); res.status(200).json(result); }
+    catch (error) { respondConsumerAdapterError(req, res, error, "institution_authorization_revoke"); }
+  });
+  app.post("/api/restricted-criminal-requests", async (req: Request, res: Response) => {
+    try { const ctx = await createContextFromRequest(req, res); const result = await appRouter.createCaller(ctx).institutionalAccess.createRestrictedRequest(req.body); res.status(201).json(result); }
+    catch (error) { respondConsumerAdapterError(req, res, error, "restricted_request_create"); }
+  });
+  app.post("/api/restricted-criminal-requests/:requestAuthorizationId/approve", async (req: Request, res: Response) => {
+    try { const ctx = await createContextFromRequest(req, res); const result = await appRouter.createCaller(ctx).institutionalAccess.approveRestrictedRequest({ requestAuthorizationId: Array.isArray(req.params.requestAuthorizationId) ? req.params.requestAuthorizationId[0] : req.params.requestAuthorizationId, approvalNote: req.body?.approvalNote }); res.status(200).json(result); }
+    catch (error) { respondConsumerAdapterError(req, res, error, "restricted_request_approve"); }
+  });
+  app.post("/api/informal-verifications", async (req: Request, res: Response) => {
+    try { const ctx = await createContextFromRequest(req, res); const result = await appRouter.createCaller(ctx).informalVerification.openCase(req.body); res.status(201).json(result); }
+    catch (error) { respondConsumerAdapterError(req, res, error, "informal_verification_open"); }
+  });
+  app.post("/api/informal-verifications/:caseId/references", async (req: Request, res: Response) => {
+    try { const ctx = await createContextFromRequest(req, res); const result = await appRouter.createCaller(ctx).informalVerification.addReference({ ...req.body, caseId: Array.isArray(req.params.caseId) ? req.params.caseId[0] : req.params.caseId }); res.status(201).json(result); }
+    catch (error) { respondConsumerAdapterError(req, res, error, "informal_reference_add"); }
+  });
+  app.post("/api/informal-verifications/:caseId/corroborations", async (req: Request, res: Response) => {
+    try { const ctx = await createContextFromRequest(req, res); const result = await appRouter.createCaller(ctx).informalVerification.recordCorroboration({ ...req.body, caseId: Array.isArray(req.params.caseId) ? req.params.caseId[0] : req.params.caseId }); res.status(201).json(result); }
+    catch (error) { respondConsumerAdapterError(req, res, error, "informal_reference_corroborate"); }
+  });
+  app.post("/api/informal-verifications/:caseId/review", async (req: Request, res: Response) => {
+    try { const ctx = await createContextFromRequest(req, res); const result = await appRouter.createCaller(ctx).informalVerification.submitForReview({ caseId: Array.isArray(req.params.caseId) ? req.params.caseId[0] : req.params.caseId }); res.status(200).json(result); }
+    catch (error) { respondConsumerAdapterError(req, res, error, "informal_verification_review"); }
+  });
+  app.post("/api/informal-verifications/:caseId/complete", async (req: Request, res: Response) => {
+    try { const ctx = await createContextFromRequest(req, res); const result = await appRouter.createCaller(ctx).informalVerification.completeCase({ caseId: Array.isArray(req.params.caseId) ? req.params.caseId[0] : req.params.caseId, rationale: req.body?.rationale }); res.status(200).json(result); }
+    catch (error) { respondConsumerAdapterError(req, res, error, "informal_verification_complete"); }
   });
 
   // ── CSRF token endpoint ────────────────────────────────────────────────────

@@ -228,11 +228,12 @@ interface CameraStepProps {
   challengeLabel?: string;
   onCapture: (imageB64: string) => void;
   onLivenessResult?: (result: { passed: boolean; score: number }) => void;
+  subjectRef: string;
   t: Record<string, string>;
   isLiveness?: boolean;
 }
 
-function CameraStep({ title, description, challenge, challengeLabel, onCapture, onLivenessResult, t, isLiveness }: CameraStepProps) {
+function CameraStep({ title, description, challenge, challengeLabel, onCapture, onLivenessResult, subjectRef, t, isLiveness }: CameraStepProps) {
   const livenessCheck = trpc.biometric.checkLiveness.useMutation();
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -324,7 +325,7 @@ function CameraStep({ title, description, challenge, challengeLabel, onCapture, 
 
     setError('');
     livenessCheck.mutate(
-      { imageBase64: captured, challenge: challenge ?? 'blink' },
+      { imageBase64: captured, challenge: challenge ?? 'blink', subjectRef },
       {
         onSuccess: (rawResult) => {
           const result = rawResult as { passed?: boolean; live?: boolean; score?: number; sandbox?: boolean };
@@ -345,7 +346,7 @@ function CameraStep({ title, description, challenge, challengeLabel, onCapture, 
         },
       }
     );
-  }, [captured, isLiveness, challenge, livenessCheck, onCapture, onLivenessResult]);
+  }, [captured, isLiveness, challenge, livenessCheck, onCapture, onLivenessResult, subjectRef]);
 
   const handleRetake = useCallback(() => {
     setCaptured(null);
@@ -1038,6 +1039,7 @@ function BiometricEnrollmentPageInner() {
               title="ArcFace Facial Enrollment"
               description="Capture a clear, well-lit photo of the subject's face. This will be used for future identity verification."
               onCapture={handleEnrollCapture}
+              subjectRef={state.subjectInfo.nin || state.subjectInfo.bvn || state.subjectInfo.fullName}
               t={t}
             />
 
@@ -1070,6 +1072,7 @@ function BiometricEnrollmentPageInner() {
               title="Document Scan"
               description="Hold the identity document flat and steady in front of the camera. Ensure all text is visible and not obscured."
               onCapture={handleDocumentCapture}
+              subjectRef={state.subjectInfo.nin || state.subjectInfo.bvn || state.subjectInfo.fullName}
               t={t}
             />
 

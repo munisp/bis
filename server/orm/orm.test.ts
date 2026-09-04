@@ -926,6 +926,7 @@ describe("Canonical PostgreSQL Baseline", () => {
       "0007_kyc_document_uploads",
       "0008_consumer_dispute_reinvestigation",
       "0009_consumer_dispute_integrity_and_delivery",
+      "0010_institutional_commercial_biometric_governance",
     ]);
   });
 

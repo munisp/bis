@@ -20,6 +20,7 @@
     "db:seed-extended": "tsx server/seed-extended.ts",
     "consumer-disputes:deadlines": "tsx server/consumerDisputeDeadlineWorker.ts",
     "consumer-disputes:provider-outbox": "tsx server/consumerDisputeProviderOutboxWorker.ts",
+    "billing:paystack-reconcile": "tsx server/paystackWebhookWorker.ts",
     "staging:sse-kms-evidence": "node scripts/run-staging-sse-kms-evidence-acceptance.mjs",
     "permify:apply-schema": "node scripts/apply-permify-schema.mjs",
     "validate:onprem-s3-kms": "node scripts/validate-onprem-s3-kms-profile.mjs",

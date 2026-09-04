@@ -27,6 +27,8 @@ import { redisRouter } from "./redisRouter";
 import { messagingRouter } from "./messaging";
 import { socialMonitoringRouter } from "./socialMonitoring";
 import { biometricRouter } from "./biometric";
+import { institutionalAccessRouter } from "./institutionalAccess";
+import { informalVerificationRouter } from "./informalVerification";
 import { lakehouseRouter } from "./lakehouse";
 import { lexRouter } from "./lex";
 import { sessionsRouter, totpRouter, notificationsRouter, investigationLinksRouter, exportSchedulesRouter, decryptTotpSecret, validateTotp } from "./platform";
@@ -6405,6 +6407,14 @@ const criminalRecordsRouter = router({
       notes:             z.string().optional(),
     }))
     .mutation(async ({ input, ctx }) => {
+      // This endpoint predates institutional authority controls and therefore
+      // must never dispatch or create a restricted request. Callers must use
+      // institutionalAccess.createRestrictedRequest followed by an independent
+      // institutionalAccess.approveRestrictedRequest instead.
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: "Legacy restricted-record requests are disabled; submit an authorised institutional request",
+      });
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
       const requestRef = generateRef("CRR");
@@ -7574,6 +7584,8 @@ export const appRouter = router({
    messaging: messagingRouter,
   socialMonitoring: socialMonitoringRouter,
   biometric: biometricRouter,
+  institutionalAccess: institutionalAccessRouter,
+  informalVerification: informalVerificationRouter,
   lakehouse: lakehouseRouter,
   playbooks: playbooksRouter,
   duplicateCheck: duplicateCheckRouter,

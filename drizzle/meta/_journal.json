@@ -71,6 +71,13 @@
       "when": 1788584400000,
       "tag": "0009_consumer_dispute_integrity_and_delivery",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1788588000000,
+      "tag": "0010_institutional_commercial_biometric_governance",
+      "breakpoints": true
     }
   ]
 }
