@@ -1,4 +1,4 @@
-import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomUUID } from "node:crypto";
 import { HeadObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import type { PoolClient } from "pg";
@@ -7,7 +7,8 @@ import { z } from "zod";
 import { getPgPool } from "./db";
 import { adminProcedure, protectedProcedure, router, writeProcedure } from "./_core/trpc";
 import { ENV } from "./_core/env";
-import { evidenceStorage } from "./fieldEvidence";
+import { evidenceStorage, s3ChecksumMatchesSha256Hex, s3ChecksumSha256FromHex } from "./fieldEvidence";
+import { consumerDisputeOutboxAad, encryptConsumerDisputeOutboxPayload, loadConsumerDisputeOutboxKeyring } from "./consumerDisputeOutboxCrypto";
 import { permifyCheck } from "./permify";
 
 const FCRA_REINVESTIGATION_DAYS = 30;
@@ -27,14 +28,15 @@ const caseTypeSchema = z.enum([
 const dispositionSchema = z.enum(["verified", "corrected", "deleted", "partially_resolved", "unverifiable", "not_in_scope"]);
 const sourceResponseSchema = z.enum(["verified", "corrected", "deleted", "unverifiable", "no_response"]);
 
-type EventActor = "consumer" | "caseworker" | "supervisor" | "provider" | "system";
-type EventName =
+export type ConsumerDisputeEventActor = "consumer" | "caseworker" | "supervisor" | "provider" | "system";
+export type ConsumerDisputeEventName =
   | "submitted" | "identity_verified" | "accepted" | "assigned" | "item_held" | "source_task_created"
   | "source_task_dispatched" | "source_response_recorded" | "extension_applied" | "frivolous_determined"
   | "item_corrected" | "item_deleted" | "item_verified" | "item_unverifiable" | "notice_queued"
   | "notice_delivered" | "method_description_requested" | "method_description_delivered" | "withdrawn"
   | "completed" | "reinserted" | "recipient_remediation_queued" | "evidence_initiated"
-  | "evidence_verified" | "evidence_quarantined";
+  | "evidence_verified" | "evidence_quarantined" | "deadline_escalated" | "deadline_acknowledged"
+  | "deadline_resolved" | "provider_outbox_enqueued" | "provider_outbox_delivered" | "provider_outbox_failed";
 
 type CaseRow = {
   id: string;
@@ -92,8 +94,8 @@ function calculateFcraClock(receivedAt: Date, framework: z.infer<typeof framewor
 function eventDigest(input: {
   caseRef: string;
   actorUserId: number | null;
-  actorKind: EventActor;
-  eventType: EventName;
+  actorKind: ConsumerDisputeEventActor;
+  eventType: ConsumerDisputeEventName;
   detail: Record<string, unknown>;
   occurredAt: string;
 }): string {
@@ -110,12 +112,12 @@ function eventDigest(input: {
   return createHmac("sha256", auditKey).update(canonical).digest("hex");
 }
 
-async function appendEvent(client: PoolClient, input: {
+export async function appendConsumerDisputeEvent(client: PoolClient, input: {
   caseId: string;
   caseRef: string;
   actorUserId: number | null;
-  actorKind: EventActor;
-  eventType: EventName;
+  actorKind: ConsumerDisputeEventActor;
+  eventType: ConsumerDisputeEventName;
   detail?: Record<string, unknown>;
 }): Promise<void> {
   const occurredAt = new Date().toISOString();
@@ -143,7 +145,7 @@ async function queueNotice(client: PoolClient, input: {
   recipientKind: "consumer" | "institution" | "furnisher" | "provider";
   templateVersion: string;
   actorUserId: number | null;
-  actorKind: EventActor;
+  actorKind: ConsumerDisputeEventActor;
   payload: Record<string, unknown>;
 }): Promise<string> {
   const noticeRef = makeRef("BIS-NOT");
@@ -155,7 +157,7 @@ async function queueNotice(client: PoolClient, input: {
      VALUES ($1, $2, $3, $4, 'portal', $5, 'queued', $6)`,
     [noticeRef, input.caseId, input.noticeType, input.templateVersion, input.recipientKind, contentHash],
   );
-  await appendEvent(client, {
+  await appendConsumerDisputeEvent(client, {
     caseId: input.caseId,
     caseRef: input.caseRef,
     actorUserId: input.actorUserId,
@@ -397,12 +399,12 @@ export const consumerDisputesRouter = router({
             JSON.stringify(item.disputedValue ?? {}), input.statement],
         );
       }
-      await appendEvent(client, {
+      await appendConsumerDisputeEvent(client, {
         caseId, caseRef, actorUserId: ctx.user.id, actorKind: "consumer", eventType: "submitted",
         detail: { framework: input.framework, jurisdictionCode: input.jurisdictionCode, caseType: input.caseType, itemCount: input.items.length },
       });
       for (const item of input.items) {
-        await appendEvent(client, {
+        await appendConsumerDisputeEvent(client, {
           caseId, caseRef, actorUserId: ctx.user.id, actorKind: "consumer", eventType: "item_held",
           detail: { reportItemKey: item.reportItemKey },
         });
@@ -481,7 +483,7 @@ export const consumerDisputesRouter = router({
       await client.query(`UPDATE consumer_dispute_source_tasks SET status = 'cancelled', updated_at = NOW()
                            WHERE case_id = $1 AND status IN ('pending', 'dispatched', 'acknowledged')`, [caseRow.id]);
       await client.query(`UPDATE consumer_dispute_cases SET status = 'withdrawn', completed_at = NOW(), updated_at = NOW() WHERE id = $1`, [caseRow.id]);
-      await appendEvent(client, { caseId: caseRow.id, caseRef: caseRow.case_ref, actorUserId: ctx.user.id, actorKind: "consumer", eventType: "withdrawn" });
+      await appendConsumerDisputeEvent(client, { caseId: caseRow.id, caseRef: caseRow.case_ref, actorUserId: ctx.user.id, actorKind: "consumer", eventType: "withdrawn" });
       await client.query("COMMIT");
       return { caseRef: caseRow.case_ref, status: "withdrawn" as const };
     } catch (error) {
@@ -506,7 +508,7 @@ export const consumerDisputesRouter = router({
         caseId: caseRow.id, caseRef: caseRow.case_ref, noticeType: "method_description", recipientKind: "consumer",
         templateVersion: "fcra-method-description-v1", actorUserId: ctx.user.id, actorKind: "consumer", payload: {},
       });
-      await appendEvent(client, { caseId: caseRow.id, caseRef: caseRow.case_ref, actorUserId: ctx.user.id, actorKind: "consumer", eventType: "method_description_requested" });
+      await appendConsumerDisputeEvent(client, { caseId: caseRow.id, caseRef: caseRow.case_ref, actorUserId: ctx.user.id, actorKind: "consumer", eventType: "method_description_requested" });
       await client.query("COMMIT");
       return { caseRef: caseRow.case_ref, noticeRef, status: "queued" as const };
     } catch (error) {
@@ -533,6 +535,7 @@ export const consumerDisputesRouter = router({
     let evidenceRef: string;
     let objectKey: string;
     let expiresAt: Date;
+    let committed = false;
     try {
       await client.query("BEGIN");
       const caseRow = await assertConsumerCaseOwner(client, { caseRef: input.caseRef, userId: ctx.user.id, tenantId });
@@ -555,8 +558,10 @@ export const consumerDisputesRouter = router({
         objectKey = current.object_key;
         expiresAt = new Date(current.expires_at);
         if (expiresAt <= new Date()) {
-          await client.query(`UPDATE consumer_dispute_evidence SET custody_status = 'quarantined' WHERE evidence_ref = $1`, [evidenceRef]);
-          await appendEvent(client, { caseId: caseRow.id, caseRef: caseRow.case_ref, actorUserId: ctx.user.id, actorKind: "consumer", eventType: "evidence_quarantined", detail: { evidenceRef, reason: "upload_authorization_expired" } });
+          await client.query(`UPDATE consumer_dispute_evidence SET custody_status = 'quarantined' WHERE evidence_ref = $1 AND custody_status = 'initiated'`, [evidenceRef]);
+          await appendConsumerDisputeEvent(client, { caseId: caseRow.id, caseRef: caseRow.case_ref, actorUserId: ctx.user.id, actorKind: "consumer", eventType: "evidence_quarantined", detail: { evidenceRef, reason: "upload_authorization_expired" } });
+          await client.query("COMMIT");
+          committed = true;
           throw new TRPCError({ code: "CONFLICT", message: "The prior evidence upload authorization expired; use a new idempotency key." });
         }
       } else {
@@ -571,22 +576,26 @@ export const consumerDisputesRouter = router({
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'initiated', $10)`,
           [evidenceRef, caseRow.id, ctx.user.id, input.idempotencyKey, objectKey, storage.kmsKeyId, input.sha256, input.contentType, input.contentLength, expiresAt],
         );
-        await appendEvent(client, { caseId: caseRow.id, caseRef: caseRow.case_ref, actorUserId: ctx.user.id, actorKind: "consumer", eventType: "evidence_initiated", detail: { evidenceRef, contentType: input.contentType, contentLength: input.contentLength } });
+        await appendConsumerDisputeEvent(client, { caseId: caseRow.id, caseRef: caseRow.case_ref, actorUserId: ctx.user.id, actorKind: "consumer", eventType: "evidence_initiated", detail: { evidenceRef, contentType: input.contentType, contentLength: input.contentLength } });
       }
       await client.query("COMMIT");
+      committed = true;
     } catch (error) {
-      await client.query("ROLLBACK");
+      if (!committed) await client.query("ROLLBACK").catch(() => undefined);
       throw error;
     } finally {
       client.release();
     }
     const storage = evidenceStorage();
+    const objectChecksum = s3ChecksumSha256FromHex(input.sha256);
     const command = new PutObjectCommand({
       Bucket: storage.bucket,
       Key: objectKey,
       ContentType: input.contentType,
       ContentLength: input.contentLength,
       Metadata: { "dispute-evidence-id": evidenceRef, sha256: input.sha256 },
+      ChecksumAlgorithm: "SHA256",
+      ChecksumSHA256: objectChecksum,
       ServerSideEncryption: "aws:kms",
       SSEKMSKeyId: storage.kmsKeyId,
     });
@@ -599,6 +608,7 @@ export const consumerDisputesRouter = router({
         "content-type": input.contentType,
         "x-amz-meta-dispute-evidence-id": evidenceRef,
         "x-amz-meta-sha256": input.sha256,
+        "x-amz-checksum-sha256": objectChecksum,
         "x-amz-server-side-encryption": "aws:kms",
         "x-amz-server-side-encryption-aws-kms-key-id": storage.kmsKeyId,
       },
@@ -633,20 +643,20 @@ export const consumerDisputesRouter = router({
       const storage = evidenceStorage();
       let object;
       try {
-        object = await storage.client.send(new HeadObjectCommand({ Bucket: storage.bucket, Key: row.object_key }));
+        object = await storage.client.send(new HeadObjectCommand({ Bucket: storage.bucket, Key: row.object_key, ChecksumMode: "ENABLED" }));
       } catch {
         await client.query("BEGIN");
         await client.query(`UPDATE consumer_dispute_evidence SET custody_status = 'quarantined' WHERE evidence_ref = $1 AND custody_status = 'initiated'`, [input.evidenceRef]);
-        await appendEvent(client, { caseId: row.case_id, caseRef: row.case_ref, actorUserId: ctx.user.id, actorKind: "consumer", eventType: "evidence_quarantined", detail: { evidenceRef: input.evidenceRef, reason: "object_not_available_for_verification" } });
+        await appendConsumerDisputeEvent(client, { caseId: row.case_id, caseRef: row.case_ref, actorUserId: ctx.user.id, actorKind: "consumer", eventType: "evidence_quarantined", detail: { evidenceRef: input.evidenceRef, reason: "object_not_available_for_verification" } });
         await client.query("COMMIT");
         throw new TRPCError({ code: "BAD_REQUEST", message: "Evidence object could not be verified." });
       }
       const observedSha = object.Metadata?.sha256 ?? "";
       const observedId = object.Metadata?.["dispute-evidence-id"] ?? "";
-      const expectedSha = Buffer.from(row.ciphertext_sha256, "utf8");
-      const observedShaBuffer = Buffer.from(observedSha, "utf8");
-      const valid = expectedSha.length === observedShaBuffer.length
-        && timingSafeEqual(expectedSha, observedShaBuffer)
+      const metadataDigestValid = observedSha === row.ciphertext_sha256;
+      const objectChecksumValid = s3ChecksumMatchesSha256Hex(row.ciphertext_sha256, object.ChecksumSHA256);
+      const valid = metadataDigestValid
+        && objectChecksumValid
         && observedId === input.evidenceRef
         && object.ContentType === row.content_type
         && Number(object.ContentLength) === Number(row.byte_size)
@@ -654,15 +664,36 @@ export const consumerDisputesRouter = router({
         && object.SSEKMSKeyId === row.kms_key_id;
       await client.query("BEGIN");
       if (!valid) {
-        await client.query(`UPDATE consumer_dispute_evidence SET custody_status = 'quarantined' WHERE evidence_ref = $1 AND custody_status = 'initiated'`, [input.evidenceRef]);
-        await appendEvent(client, { caseId: row.case_id, caseRef: row.case_ref, actorUserId: ctx.user.id, actorKind: "consumer", eventType: "evidence_quarantined", detail: { evidenceRef: input.evidenceRef, reason: "object_integrity_or_encryption_validation_failed" } });
+        const quarantined = await client.query<{ custody_status: string }>(
+          `UPDATE consumer_dispute_evidence SET custody_status = 'quarantined'
+            WHERE evidence_ref = $1 AND custody_status = 'initiated'
+            RETURNING custody_status`,
+          [input.evidenceRef],
+        );
+        if (quarantined.rows[0]) {
+          await appendConsumerDisputeEvent(client, { caseId: row.case_id, caseRef: row.case_ref, actorUserId: ctx.user.id, actorKind: "consumer", eventType: "evidence_quarantined", detail: { evidenceRef: input.evidenceRef, reason: "object_integrity_or_encryption_validation_failed" } });
+        }
         await client.query("COMMIT");
+        if (!quarantined.rows[0]) {
+          throw new TRPCError({ code: "CONFLICT", message: "Evidence custody was finalized by another request." });
+        }
         throw new TRPCError({ code: "BAD_REQUEST", message: "Evidence object integrity or encryption verification failed." });
       }
-      await client.query(`UPDATE consumer_dispute_evidence SET custody_status = 'verified', object_version_id = $2, verified_at = NOW() WHERE evidence_ref = $1 AND custody_status = 'initiated'`, [input.evidenceRef, object.VersionId ?? null]);
-      await appendEvent(client, { caseId: row.case_id, caseRef: row.case_ref, actorUserId: ctx.user.id, actorKind: "consumer", eventType: "evidence_verified", detail: { evidenceRef: input.evidenceRef, objectVersionId: object.VersionId ?? null, kmsKeyId: row.kms_key_id } });
+      const verified = await client.query<{ object_version_id: string | null }>(
+        `UPDATE consumer_dispute_evidence
+            SET custody_status = 'verified', object_version_id = $2, verified_at = NOW()
+          WHERE evidence_ref = $1 AND custody_status = 'initiated'
+          RETURNING object_version_id`,
+        [input.evidenceRef, object.VersionId ?? null],
+      );
+      if (verified.rows[0]) {
+        await appendConsumerDisputeEvent(client, { caseId: row.case_id, caseRef: row.case_ref, actorUserId: ctx.user.id, actorKind: "consumer", eventType: "evidence_verified", detail: { evidenceRef: input.evidenceRef, objectVersionId: verified.rows[0].object_version_id, kmsKeyId: row.kms_key_id } });
+      }
       await client.query("COMMIT");
-      return { evidenceRef: input.evidenceRef, status: "verified" as const, objectVersionId: object.VersionId ?? null };
+      if (!verified.rows[0]) {
+        throw new TRPCError({ code: "CONFLICT", message: "Evidence custody was finalized by another request." });
+      }
+      return { evidenceRef: input.evidenceRef, status: "verified" as const, objectVersionId: verified.rows[0].object_version_id };
     } catch (error) {
       await client.query("ROLLBACK").catch(() => undefined);
       throw error;
@@ -703,7 +734,7 @@ export const consumerDisputesRouter = router({
       if (["resolved", "withdrawn"].includes(caseRow.status)) throw new TRPCError({ code: "CONFLICT", message: "A terminal case cannot be assigned." });
       await client.query(`UPDATE consumer_dispute_cases SET assigned_to_user_id = $1, status = CASE WHEN status = 'received' THEN 'accepted' ELSE status END,
                           accepted_at = COALESCE(accepted_at, NOW()), updated_at = NOW() WHERE id = $2`, [input.assigneeUserId, caseRow.id]);
-      await appendEvent(client, { caseId: caseRow.id, caseRef: caseRow.case_ref, actorUserId: ctx.user!.id, actorKind: "supervisor", eventType: "assigned", detail: { assigneeUserId: input.assigneeUserId } });
+      await appendConsumerDisputeEvent(client, { caseId: caseRow.id, caseRef: caseRow.case_ref, actorUserId: ctx.user!.id, actorKind: "supervisor", eventType: "assigned", detail: { assigneeUserId: input.assigneeUserId } });
       await client.query("COMMIT");
       return { caseRef: caseRow.case_ref, assignedToUserId: input.assigneeUserId };
     } catch (error) {
@@ -736,8 +767,9 @@ export const consumerDisputesRouter = router({
           WHERE authorization_ref = $1 AND data_source_id = $2 AND status = 'active' AND environment = $3
             AND effective_at <= NOW() AND expires_at > NOW()
             AND approved_jurisdictions ? $4 AND approved_use_cases ? 'reinvestigation'
+            AND (tenant_id IS NULL OR tenant_id = $5)
           FOR UPDATE`,
-        [input.providerAuthorizationRef, input.dataSourceId, environment, caseRow.jurisdiction_code],
+        [input.providerAuthorizationRef, input.dataSourceId, environment, caseRow.jurisdiction_code, caseRow.tenant_id],
       );
       if (!authorization.rows[0]) {
         throw new TRPCError({ code: "FORBIDDEN", message: "Provider authorization is missing, inactive, expired, or out of scope; no source request was sent." });
@@ -749,18 +781,38 @@ export const consumerDisputesRouter = router({
       const manifest = JSON.stringify(evidence.rows.map((row) => ({ evidenceRef: row.evidence_ref, ciphertextSha256: row.ciphertext_sha256, objectVersionId: row.object_version_id })));
       const taskRef = makeRef("BIS-DST");
       const idempotencyKey = createHash("sha256").update(`${caseRow.case_ref}|${input.disputeItemRef}|${input.providerAuthorizationRef}|${manifest}`).digest("hex");
-      await client.query(
+      const task = await client.query<{ id: string; task_ref: string }>(
         `INSERT INTO consumer_dispute_source_tasks
            (task_ref, case_id, dispute_item_id, provider_authorization_id, data_source_id, source_record_ref, idempotency_key,
             status, all_relevant_evidence_manifest_sha256, response_due_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8, $9)`,
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8, $9)
+         ON CONFLICT (provider_authorization_id, idempotency_key) DO UPDATE SET updated_at = consumer_dispute_source_tasks.updated_at
+         RETURNING id, task_ref`,
         [taskRef, caseRow.id, item.rows[0].id, authorization.rows[0].id, input.dataSourceId, input.sourceRecordRef ?? null,
           idempotencyKey, createHash("sha256").update(manifest).digest("hex"), input.responseDueAt ?? caseRow.reinvestigation_due_at],
       );
+      const sourceTask = task.rows[0];
+      if (!sourceTask) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Unable to persist the source task." });
+      const keyring = loadConsumerDisputeOutboxKeyring();
+      const eventType = "provider_reinvestigation_request";
+      const outboxId = randomUUID();
+      const outboxPayload = { caseRef: caseRow.case_ref, sourceTaskRef: taskRef, providerAuthorizationRef: input.providerAuthorizationRef, dataSourceId: input.dataSourceId };
+      const outboxPlaintext = JSON.stringify(outboxPayload);
+      const encryptedOutboxPayload = encryptConsumerDisputeOutboxPayload(keyring, consumerDisputeOutboxAad(eventType, idempotencyKey), outboxPayload);
+      await client.query(
+        `INSERT INTO consumer_dispute_provider_outbox
+           (id, case_id, source_task_id, event_type, payload_ciphertext, payload_nonce, payload_key_version, payload_algorithm,
+            payload_sha256, idempotency_key, state, available_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending', NOW())
+         ON CONFLICT (event_type, idempotency_key) DO NOTHING`,
+        [outboxId, caseRow.id, sourceTask.id, eventType, encryptedOutboxPayload.ciphertext, encryptedOutboxPayload.nonce,
+          encryptedOutboxPayload.keyVersion, encryptedOutboxPayload.algorithm, createHash("sha256").update(outboxPlaintext).digest("hex"), idempotencyKey],
+      );
       await client.query(`UPDATE consumer_dispute_cases SET status = 'source_pending', updated_at = NOW() WHERE id = $1`, [caseRow.id]);
-      await appendEvent(client, { caseId: caseRow.id, caseRef: caseRow.case_ref, actorUserId: ctx.user!.id, actorKind: "caseworker", eventType: "source_task_created", detail: { taskRef, disputeItemRef: input.disputeItemRef, providerAuthorizationRef: input.providerAuthorizationRef, evidenceCount: evidence.rows.length } });
+      await appendConsumerDisputeEvent(client, { caseId: caseRow.id, caseRef: caseRow.case_ref, actorUserId: ctx.user!.id, actorKind: "caseworker", eventType: "source_task_created", detail: { taskRef, disputeItemRef: input.disputeItemRef, providerAuthorizationRef: input.providerAuthorizationRef, evidenceCount: evidence.rows.length } });
+      await appendConsumerDisputeEvent(client, { caseId: caseRow.id, caseRef: caseRow.case_ref, actorUserId: ctx.user!.id, actorKind: "caseworker", eventType: "provider_outbox_enqueued", detail: { outboxId, taskRef, providerAuthorizationRef: input.providerAuthorizationRef } });
       await client.query("COMMIT");
-      return { taskRef, status: "pending" as const };
+      return { taskRef: sourceTask.task_ref, status: "pending" as const };
     } catch (error) {
       await client.query("ROLLBACK");
       throw error;
@@ -786,7 +838,7 @@ export const consumerDisputesRouter = router({
       await client.query(`UPDATE consumer_dispute_source_tasks SET status = 'responded', response_received_at = NOW(), response_disposition = $1,
                            response_manifest = $2::jsonb, updated_at = NOW() WHERE id = $3`, [input.disposition, JSON.stringify(input.responseManifest), task.rows[0].id]);
       await client.query(`UPDATE consumer_dispute_cases SET status = 'investigating', updated_at = NOW() WHERE id = $1`, [caseRow.id]);
-      await appendEvent(client, { caseId: caseRow.id, caseRef: caseRow.case_ref, actorUserId: ctx.user!.id, actorKind: "caseworker", eventType: "source_response_recorded", detail: { taskRef: input.taskRef, disposition: input.disposition } });
+      await appendConsumerDisputeEvent(client, { caseId: caseRow.id, caseRef: caseRow.case_ref, actorUserId: ctx.user!.id, actorKind: "caseworker", eventType: "source_response_recorded", detail: { taskRef: input.taskRef, disposition: input.disposition } });
       await client.query("COMMIT");
       return { taskRef: input.taskRef, status: "responded" as const };
     } catch (error) {
@@ -813,8 +865,8 @@ export const consumerDisputesRouter = router({
       if (!item.rows[0]) throw new TRPCError({ code: "NOT_FOUND", message: "Dispute item not found in this case." });
       if (item.rows[0].disposition !== "pending") throw new TRPCError({ code: "CONFLICT", message: "Dispute item has already been dispositioned." });
       await client.query(`UPDATE consumer_dispute_items SET disposition = $1, disposition_rationale = $2, resolved_at = NOW() WHERE id = $3`, [input.disposition, input.rationale, item.rows[0].id]);
-      const eventType: EventName = input.disposition === "corrected" ? "item_corrected" : input.disposition === "deleted" ? "item_deleted" : input.disposition === "verified" ? "item_verified" : "item_unverifiable";
-      await appendEvent(client, { caseId: caseRow.id, caseRef: caseRow.case_ref, actorUserId: ctx.user!.id, actorKind: "caseworker", eventType, detail: { itemRef: input.itemRef, disposition: input.disposition } });
+      const eventType: ConsumerDisputeEventName = input.disposition === "corrected" ? "item_corrected" : input.disposition === "deleted" ? "item_deleted" : input.disposition === "verified" ? "item_verified" : "item_unverifiable";
+      await appendConsumerDisputeEvent(client, { caseId: caseRow.id, caseRef: caseRow.case_ref, actorUserId: ctx.user!.id, actorKind: "caseworker", eventType, detail: { itemRef: input.itemRef, disposition: input.disposition } });
       await client.query("COMMIT");
       return { itemRef: input.itemRef, disposition: input.disposition };
     } catch (error) {
@@ -844,7 +896,7 @@ export const consumerDisputesRouter = router({
         caseId: caseRow.id, caseRef: caseRow.case_ref, noticeType: "result", recipientKind: "consumer", templateVersion: "consumer-dispute-result-v1",
         actorUserId: ctx.user!.id, actorKind: "supervisor", payload: { framework: caseRow.framework },
       });
-      await appendEvent(client, { caseId: caseRow.id, caseRef: caseRow.case_ref, actorUserId: ctx.user!.id, actorKind: "supervisor", eventType: "completed" });
+      await appendConsumerDisputeEvent(client, { caseId: caseRow.id, caseRef: caseRow.case_ref, actorUserId: ctx.user!.id, actorKind: "supervisor", eventType: "completed" });
       await client.query("COMMIT");
       return { caseRef: caseRow.case_ref, status: "resolved" as const, resultNoticeRef };
     } catch (error) {

@@ -64,6 +64,13 @@
       "when": 1788580800000,
       "tag": "0008_consumer_dispute_reinvestigation",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1788584400000,
+      "tag": "0009_consumer_dispute_integrity_and_delivery",
+      "breakpoints": true
     }
   ]
 }

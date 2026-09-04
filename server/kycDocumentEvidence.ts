@@ -9,6 +9,8 @@ import {
   evidencePoolOrThrow,
   evidenceStorage,
   loadEvidenceKeyring,
+  s3ChecksumMatchesSha256Hex,
+  s3ChecksumSha256FromHex,
 } from "./fieldEvidence";
 import { protectedProcedure, router } from "./_core/trpc";
 
@@ -134,12 +136,15 @@ export const kycDocumentEvidenceRouter = router({
       }
     }
 
+    const objectChecksum = s3ChecksumSha256FromHex(input.sha256);
     const command = new PutObjectCommand({
       Bucket: storage.bucket,
       Key: objectKey,
       ContentType: input.contentType,
       ContentLength: input.contentLength,
       Metadata: { "kyc-upload-id": uploadId, sha256: input.sha256 },
+      ChecksumAlgorithm: "SHA256",
+      ChecksumSHA256: objectChecksum,
       ServerSideEncryption: "aws:kms",
       SSEKMSKeyId: storage.kmsKeyId,
     });
@@ -155,6 +160,7 @@ export const kycDocumentEvidenceRouter = router({
         "content-type": input.contentType,
         "x-amz-meta-kyc-upload-id": uploadId,
         "x-amz-meta-sha256": input.sha256,
+        "x-amz-checksum-sha256": objectChecksum,
         "x-amz-server-side-encryption": "aws:kms",
         "x-amz-server-side-encryption-aws-kms-key-id": storage.kmsKeyId,
       },
@@ -192,11 +198,13 @@ export const kycDocumentEvidenceRouter = router({
       throw new TRPCError({ code: "CONFLICT", message: "KYC document upload authorization expired" });
     }
 
-    const object = await storage.client.send(new HeadObjectCommand({ Bucket: storage.bucket, Key: row.object_key }));
+    const object = await storage.client.send(new HeadObjectCommand({ Bucket: storage.bucket, Key: row.object_key, ChecksumMode: "ENABLED" }));
     const observedSha256 = object.Metadata?.sha256 ?? "";
+    const checksumValid = s3ChecksumMatchesSha256Hex(row.expected_sha256, object.ChecksumSHA256);
     const expected = Buffer.from(row.expected_sha256, "utf8");
     const observed = Buffer.from(observedSha256, "utf8");
     const valid =
+      checksumValid &&
       expected.length === observed.length &&
       timingSafeEqual(expected, observed) &&
       object.ContentType === row.content_type &&

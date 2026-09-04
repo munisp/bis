@@ -18,6 +18,8 @@
     "e2e:auth": "tsx e2e/setup-auth.ts",
     "e2e:report": "playwright show-report",
     "db:seed-extended": "tsx server/seed-extended.ts",
+    "consumer-disputes:deadlines": "tsx server/consumerDisputeDeadlineWorker.ts",
+    "consumer-disputes:provider-outbox": "tsx server/consumerDisputeProviderOutboxWorker.ts",
     "smoke": "tsx scripts/smoke-test.ts"
   },
   "dependencies": {

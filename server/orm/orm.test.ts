@@ -925,6 +925,7 @@ describe("Canonical PostgreSQL Baseline", () => {
       "0006_field_evidence_uploads",
       "0007_kyc_document_uploads",
       "0008_consumer_dispute_reinvestigation",
+      "0009_consumer_dispute_integrity_and_delivery",
     ]);
   });
 

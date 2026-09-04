@@ -66,6 +66,29 @@ export function custodyDigest(uploadId: string, eventType: string, metadata: Rec
   return createHash("sha256").update(`${uploadId}|${eventType}|${JSON.stringify(metadata)}`).digest("hex");
 }
 
+/** Converts the API's canonical lower-case hexadecimal SHA-256 digest to the
+ * base64 representation required by S3's x-amz-checksum-sha256 header. */
+export function s3ChecksumSha256FromHex(sha256Hex: string): string {
+  if (!/^[0-9a-f]{64}$/.test(sha256Hex)) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "A canonical SHA-256 digest is required." });
+  }
+  return Buffer.from(sha256Hex, "hex").toString("base64");
+}
+
+/** Compares a stored hexadecimal content hash to the object store's base64
+ * SHA-256 checksum without exposing either value in an error response. */
+export function s3ChecksumMatchesSha256Hex(expectedHex: string, observedBase64: string | undefined): boolean {
+  if (!/^[0-9a-f]{64}$/.test(expectedHex) || !observedBase64) return false;
+  const expected = Buffer.from(expectedHex, "hex");
+  let observed: Buffer;
+  try {
+    observed = Buffer.from(observedBase64, "base64");
+  } catch {
+    return false;
+  }
+  return expected.length === observed.length && timingSafeEqual(expected, observed);
+}
+
 const initiateSchema = z.object({
   investigationId: z.number().int().positive(),
   contentType: z.enum(["image/jpeg", "image/png", "application/pdf"]),
@@ -120,7 +143,8 @@ export const fieldEvidenceRouter = router({
         throw error;
       }
     }
-    const command = new PutObjectCommand({ Bucket: storage.bucket, Key: objectKey, ContentType: input.contentType, ContentLength: input.contentLength, Metadata: { "evidence-id": uploadId, "sha256": input.sha256 }, ServerSideEncryption: "aws:kms", SSEKMSKeyId: storage.kmsKeyId });
+    const objectChecksum = s3ChecksumSha256FromHex(input.sha256);
+    const command = new PutObjectCommand({ Bucket: storage.bucket, Key: objectKey, ContentType: input.contentType, ContentLength: input.contentLength, Metadata: { "evidence-id": uploadId, "sha256": input.sha256 }, ChecksumAlgorithm: "SHA256", ChecksumSHA256: objectChecksum, ServerSideEncryption: "aws:kms", SSEKMSKeyId: storage.kmsKeyId });
     const uploadUrl = await getSignedUrl(storage.client, command, { expiresIn: Math.max(1, Math.floor((expiresAt.getTime() - Date.now()) / 1000)) });
     return {
       uploadId,
@@ -131,6 +155,7 @@ export const fieldEvidenceRouter = router({
         "content-type": input.contentType,
         "x-amz-meta-evidence-id": uploadId,
         "x-amz-meta-sha256": input.sha256,
+        "x-amz-checksum-sha256": objectChecksum,
         "x-amz-server-side-encryption": "aws:kms",
         "x-amz-server-side-encryption-aws-kms-key-id": storage.kmsKeyId,
       },
@@ -149,11 +174,12 @@ export const fieldEvidenceRouter = router({
     if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Evidence upload authorization was not found" });
     if (row.status === "verified") return { uploadId: input.uploadId, status: "verified" as const };
     if (new Date(row.expires_at) <= new Date()) throw new TRPCError({ code: "CONFLICT", message: "Evidence upload authorization expired" });
-    const object = await storage.client.send(new HeadObjectCommand({ Bucket: storage.bucket, Key: row.object_key }));
+    const object = await storage.client.send(new HeadObjectCommand({ Bucket: storage.bucket, Key: row.object_key, ChecksumMode: "ENABLED" }));
     const observedSha256 = object.Metadata?.sha256 ?? "";
+    const checksumValid = s3ChecksumMatchesSha256Hex(row.expected_sha256, object.ChecksumSHA256);
     const expected = Buffer.from(row.expected_sha256, "utf8");
     const observed = Buffer.from(observedSha256, "utf8");
-    const valid = expected.length === observed.length && timingSafeEqual(expected, observed) && object.ContentType === row.content_type && Number(object.ContentLength) === Number(row.content_length) && object.ServerSideEncryption === "aws:kms" && object.SSEKMSKeyId === storage.kmsKeyId;
+    const valid = checksumValid && expected.length === observed.length && timingSafeEqual(expected, observed) && object.ContentType === row.content_type && Number(object.ContentLength) === Number(row.content_length) && object.ServerSideEncryption === "aws:kms" && object.SSEKMSKeyId === storage.kmsKeyId;
     if (!valid) {
       const metadata = { reason: "object_integrity_or_encryption_validation_failed" };
       await pool.query(`UPDATE field_evidence_uploads SET status = 'rejected', observed_sha256 = $2, updated_at = NOW() WHERE id = $1`, [input.uploadId, observedSha256 || null]);
