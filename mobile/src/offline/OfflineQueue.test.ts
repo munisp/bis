@@ -292,7 +292,7 @@ describe('OfflineQueue.drain', () => {
     let drainCount = 0;
     const slowExecutor: OperationExecutor = async () => {
       drainCount++;
-      await new Promise((r) => setTimeout(r, 50));
+      await new Promise<void>((resolve) => setTimeout(resolve, 50));
     };
     const { queue } = makeQueue(slowExecutor);
     await queue.enqueue({ type: 'kyc.submit', payload: {}, tenantId: 'tenant-001' });
@@ -381,7 +381,7 @@ describe('OfflineQueue network integration', () => {
 
     network.setConnected(true);
     // Give async drain a tick to complete
-    await new Promise((r) => setTimeout(r, 10));
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
     expect(executed.length).toBe(1);
 
     queue.stop();

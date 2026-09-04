@@ -126,6 +126,40 @@ export const quickCheckApi = {
     request<{ data: unknown[] }>('GET', '/quickcheck/history'),
 };
 
+// ── Consumer Discovery — Nigeria-first, synthetic fixtures only ──────────────────
+export type ConsumerDiscoveryPurpose = 'self' | 'personal_safety' | 'fraud_prevention' | 'account_security' | 'compliance_investigation' | 'legal_authority';
+export type ConsumerDiscoveryMode = 'consumer' | 'institutional';
+export type ConsumerDiscoveryProfile = {
+  profileRef: string;
+  name: string;
+  countryCode: 'NG';
+  contact: { phone: string | null; email: string | null };
+  location: { stateOrRegion: string | null; cityOrLocality: string | null; addressLine: string | null; postalCode: string | null };
+  occupation: string | null;
+  provenance: { datasetOrigin: 'synthetic_demo'; isSynthetic: true; notice: string; observedAt: string; expiresAt: string | null };
+};
+
+export const consumerDiscoveryApi = {
+  grantConsent: (input: {
+    purpose: ConsumerDiscoveryPurpose;
+    legalBasis: 'consent' | 'legal_obligation' | 'legitimate_interest' | 'legal_authority';
+    policyVersion: string;
+    scopes: Array<'consumer_discovery' | 'profile_detail' | 'provenance' | 'relationship_linkage'>;
+  }) => request<{ consentId: string; grantedAt: string }>('POST', '/consumer-discovery/consent', input),
+  search: (input: {
+    mode: ConsumerDiscoveryMode;
+    purpose: ConsumerDiscoveryPurpose;
+    consentConfirmed: true;
+    countryCode: 'NG';
+    name?: string;
+    phone?: string;
+    email?: string;
+    address?: string;
+  }) => request<{ countryCode: 'NG'; datasetOrigin: 'synthetic_demo'; isSynthetic: true; notice: string; declaredPurpose: ConsumerDiscoveryPurpose; results: ConsumerDiscoveryProfile[] }>(
+    'POST', '/consumer-discovery/search', input,
+  ),
+};
+
 // ── Evidence ───────────────────────────────────────────────────────────────────
 
 export const evidenceApi = {

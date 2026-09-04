@@ -1,0 +1,56 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Control-Plane Dependencies Healthy",
+      "targets": [{ "expr": "sum(bis_gateway_control_plane_dependency_healthy)", "refId": "A" }],
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 4 }] }, "unit": "none" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 6, "x": 0, "y": 0 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Permify Decisions by Outcome",
+      "targets": [{ "expr": "sum(rate(bis_gateway_permify_checks_total[5m])) by (outcome)", "legendFormat": "{{outcome}}", "refId": "A" }],
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 9, "x": 6, "y": 0 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Transactional Outbox Pending Events",
+      "targets": [{ "expr": "bis_gateway_transactional_outbox_pending_events", "legendFormat": "pending", "refId": "A" }],
+      "fieldConfig": { "defaults": { "unit": "none", "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 50 }, { "color": "red", "value": 100 }] } }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 9, "x": 15, "y": 0 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Outbox State Transitions",
+      "targets": [{ "expr": "sum(rate(bis_gateway_transactional_outbox_events_total[5m])) by (state)", "legendFormat": "{{state}}", "refId": "A" }],
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Cold Archive Run Outcomes",
+      "targets": [{ "expr": "increase(bis_cold_archive_runs_total[7d])", "legendFormat": "{{outcome}}", "refId": "A" }],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 8 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Cold Archive Duration p95",
+      "targets": [{ "expr": "histogram_quantile(0.95, sum(rate(bis_cold_archive_run_duration_seconds_bucket[7d])) by (le))", "legendFormat": "p95", "refId": "A" }],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 8 }
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["bis", "gateway", "cold-archive", "obs-001"],
+  "templating": { "list": [] },
+  "time": { "from": "now-6h", "to": "now" },
+  "timezone": "utc",
+  "title": "BIS Gateway & Parquet Archive Operations",
+  "uid": "bis-gateway-archive-ops",
+  "version": 1
+}

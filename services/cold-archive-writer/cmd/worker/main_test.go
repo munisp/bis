@@ -38,7 +38,7 @@ func TestLoadConfigRejectsUnsafeOrMissingConfiguration(t *testing.T) {
 	})
 	t.Run("non postgres database", func(t *testing.T) {
 		setValidConfig(t)
-		t.Setenv("DATABASE_URL", "mysql://archive:secret@localhost/bis")
+		t.Setenv("DATABASE_URL", "invalid-db-scheme://archive:secret@localhost/bis")
 		if _, err := loadConfig(); err == nil {
 			t.Fatal("non-PostgreSQL URL accepted")
 		}

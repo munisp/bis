@@ -16,7 +16,7 @@ import { register as promRegister, collectDefaultMetrics, Counter, Histogram, Ga
 import { registerOAuthRoutes } from "./oauth";
 import { registerStorageProxy } from "./storageProxy";
 import { appRouter } from "../routers";
-import { createContext } from "./context";
+import { createContext, createContextFromRequest } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { notifyOwner } from "./notification";
 import { creditTenantAccount } from "../billing";
@@ -488,6 +488,38 @@ async function startServer() {
   // Limit to 4mb for normal API calls; file uploads use base64 in JSON which is larger
   app.use(express.json({ limit: "4mb" }));
   app.use(express.urlencoded({ limit: "4mb", extended: true }));
+
+  // Mobile REST adapter for the same purpose-bound synthetic consumer discovery
+  // contract exposed by tRPC. It contains no separate data access logic.
+  const respondConsumerAdapterError = (req: Request, res: Response, error: unknown, operation: string) => {
+    const code = error && typeof error === "object" && "code" in error ? String((error as { code: unknown }).code) : "INTERNAL_SERVER_ERROR";
+    const status = code === "UNAUTHORIZED" ? 401 : code === "FORBIDDEN" ? 403 : code === "BAD_REQUEST" ? 400 : code === "NOT_FOUND" ? 404 : 503;
+    const message = error instanceof Error ? error.message : "Consumer discovery request failed";
+    log(status >= 500 ? "error" : "warn", "consumer discovery request rejected", { status, code, operation, reqId: (req as Request & { id?: string }).id });
+    res.status(status).json({ error: message, code });
+  };
+
+  app.post("/api/consumer-discovery/consent", async (req: Request, res: Response) => {
+    try {
+      const ctx = await createContextFromRequest(req, res);
+      const caller = appRouter.createCaller(ctx);
+      const result = await caller.consumerGovernance.consent.grant(req.body);
+      res.status(201).json(result);
+    } catch (error) {
+      respondConsumerAdapterError(req, res, error, "consent_grant");
+    }
+  });
+
+  app.post("/api/consumer-discovery/search", async (req: Request, res: Response) => {
+    try {
+      const ctx = await createContextFromRequest(req, res);
+      const caller = appRouter.createCaller(ctx);
+      const result = await caller.consumerIntelligence.search(req.body);
+      res.status(200).json(result);
+    } catch (error) {
+      respondConsumerAdapterError(req, res, error, "search");
+    }
+  });
 
   // ── CSRF token endpoint ────────────────────────────────────────────────────
   // Provides a per-session CSRF token for state-changing requests from the frontend.

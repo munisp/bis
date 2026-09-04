@@ -151,6 +151,7 @@ const BASE_NAV_GROUPS: NavGroup[] = [
     defaultOpen: true,
     items: [
       { label: 'QuickCheck', href: '/quickcheck', icon: <UserSearch size={15} /> },
+      { label: 'Consumer Discovery', href: '/consumer-discovery', icon: <UserSearch size={15} /> },
       { label: 'goAML STR Wizard', href: '/goaml', icon: <Shield size={15} /> },
       { label: 'Lakehouse Analytics', href: '/lakehouse', icon: <BarChart2 size={15} /> },
       { label: 'Duplicate ID Check', href: '/duplicate-check', icon: <UserSearch size={15} /> },

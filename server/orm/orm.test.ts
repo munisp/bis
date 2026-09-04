@@ -915,7 +915,13 @@ describe("Canonical PostgreSQL Baseline", () => {
     expect(fs.existsSync(baselinePath)).toBe(true);
     const journal = JSON.parse(fs.readFileSync(journalPath, "utf8")) as { dialect: string; entries: Array<{ tag: string }> };
     expect(journal.dialect).toBe("postgresql");
-    expect(journal.entries.map((entry) => entry.tag)).toEqual(["0000_postgresql_baseline"]);
+    expect(journal.entries.map((entry) => entry.tag)).toEqual([
+      "0000_postgresql_baseline",
+      "0001_cold_archive_parquet",
+      "0002_africa_consumer_intelligence",
+      "0003_consumer_governance",
+      "0004_gateway_transactional_outbox",
+    ]);
   });
 
   it("includes jsonb columns and soft-delete fields", async () => {

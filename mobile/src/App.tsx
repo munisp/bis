@@ -41,7 +41,7 @@ export default function App() {
             <View style={{ flex: 1 }}>
               {/* OfflineBanner sits above the navigator so it is visible on all screens */}
               <OfflineBanner />
-              <NavigationContainer style={{ flex: 1 }}>
+              <NavigationContainer>
                 <StatusBar
                   barStyle={isDarkMode ? 'light-content' : 'dark-content'}
                   backgroundColor={isDarkMode ? '#0f172a' : '#ffffff'}

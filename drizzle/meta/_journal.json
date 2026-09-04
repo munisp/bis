@@ -15,6 +15,27 @@
       "when": 1788472000000,
       "tag": "0001_cold_archive_parquet",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1788559200000,
+      "tag": "0002_africa_consumer_intelligence",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1788562800000,
+      "tag": "0003_consumer_governance",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1788566400000,
+      "tag": "0004_gateway_transactional_outbox",
+      "breakpoints": true
     }
   ]
 }

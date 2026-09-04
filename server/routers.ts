@@ -128,6 +128,8 @@ import { z } from "zod";
 import { ENV } from "./_core/env";
 import { analyticsRouter } from "./orm/analyticsRouter"; // analytics.getDashboardStats is separate from db.getDashboardStats
 import { caddyRouter } from "./caddy";
+import { consumerIntelligenceRouter } from "./consumerIntelligence";
+import { consumerGovernanceRouter } from "./consumerGovernance";
 
 // ─── Service URLs ─────────────────────────────────────────────────────────────
 
@@ -7602,5 +7604,7 @@ export const appRouter = router({
   collectionSites: collectionSitesRouter,
   analytics: analyticsRouter,
   caddy: caddyRouter,
+  consumerIntelligence: consumerIntelligenceRouter,
+  consumerGovernance: consumerGovernanceRouter,
 });
 export type AppRouter = typeof appRouter;

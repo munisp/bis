@@ -20,7 +20,7 @@ vi.mock('react-native-mmkv', () => {
 
 // ─── Mock global fetch ────────────────────────────────────────────────────────
 const mockFetch = vi.fn();
-global.fetch = mockFetch;
+globalThis.fetch = mockFetch as unknown as typeof fetch;
 
 // ─── Import under test ────────────────────────────────────────────────────────
 import {

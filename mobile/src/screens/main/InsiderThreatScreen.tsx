@@ -51,13 +51,13 @@ export function InsiderThreatScreen() {
   // Mobile session anomaly alert — show native dialog when concurrent sessions detected
   useEffect(() => {
     const sessionAnomalyEvents = events.filter(
-      (e) => e.category === 'session_anomaly' && e.status === 'open' && e.severity !== 'info'
+      (e) => e.eventType === 'session_anomaly' && e.status === 'open' && e.severity !== 'info'
     );
     if (sessionAnomalyEvents.length > 0) {
       const evt = sessionAnomalyEvents[0];
       Alert.alert(
-        '⚠️ Session Anomaly Detected',
-        `Concurrent sessions from different IPs detected for user ${evt.subjectId}. ` +
+        'Session Anomaly Detected',
+        `Concurrent sessions from different IPs detected for user ${evt.userId}. ` +
           'This may indicate account compromise. Please review immediately.',
         [
           { text: 'Dismiss', style: 'cancel' },

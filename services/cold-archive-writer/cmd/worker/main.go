@@ -35,15 +35,16 @@ const (
 )
 
 type Config struct {
-	DatabaseURL string
-	S3Endpoint  string
-	S3AccessKey string
-	S3SecretKey string
-	S3Bucket    string
-	S3Region    string
-	BatchSize   int
-	ColdAgeDays int
-	TempDir     string
+	DatabaseURL    string
+	S3Endpoint     string
+	S3AccessKey    string
+	S3SecretKey    string
+	S3Bucket       string
+	S3Region       string
+	PushgatewayURL string
+	BatchSize      int
+	ColdAgeDays    int
+	TempDir        string
 }
 
 func requireEnv(key string) (string, error) {
@@ -94,6 +95,10 @@ func loadConfig() (Config, error) {
 	}
 	if config.S3Region, err = requireEnv("BIS_ARCHIVE_S3_REGION"); err != nil {
 		return Config{}, err
+	}
+	config.PushgatewayURL = strings.TrimSpace(os.Getenv("BIS_ARCHIVE_PUSHGATEWAY_URL"))
+	if strings.EqualFold(os.Getenv("BIS_ENV"), "production") && config.PushgatewayURL == "" {
+		return Config{}, errors.New("BIS_ARCHIVE_PUSHGATEWAY_URL is required in production")
 	}
 	if config.BatchSize, err = positiveIntEnv("BIS_COLD_ARCHIVE_BATCH_SIZE", 5000); err != nil {
 		return Config{}, err
@@ -482,10 +487,6 @@ func run(ctx context.Context, config Config, logger *slog.Logger) error {
 		return nil
 	}
 	defer repository.releaseLock(context.Background())
-	if err := repository.requireNoInflightBatch(ctx); err != nil {
-		return err
-	}
-
 	storage, err := minio.New(config.S3Endpoint, &minio.Options{Creds: credentials.NewStaticV4(config.S3AccessKey, config.S3SecretKey, ""), Secure: true, Region: config.S3Region})
 	if err != nil {
 		return fmt.Errorf("create object store client: %w", err)
@@ -496,6 +497,12 @@ func run(ctx context.Context, config Config, logger *slog.Logger) error {
 	}
 	if !exists {
 		return fmt.Errorf("archive bucket %q does not exist; buckets and retention policy must be pre-provisioned", config.S3Bucket)
+	}
+	if err := repository.recoverInFlightBatches(ctx, storage, config.S3Bucket, logger); err != nil {
+		return err
+	}
+	if err := repository.requireNoInflightBatch(ctx); err != nil {
+		return err
 	}
 
 	batch, err := repository.planBatch(ctx, config.ColdAgeDays, config.BatchSize)
@@ -551,9 +558,19 @@ func main() {
 		logger.Error("cold archive configuration invalid", "error", err)
 		os.Exit(1)
 	}
+	metrics := newArchiveMetrics()
+	startedAt := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
-	if err := run(ctx, config, logger); err != nil {
+	err = run(ctx, config, logger)
+	metrics.observeRun(startedAt, err)
+	if pushErr := metrics.push(config.PushgatewayURL, "bis-cold-archive-writer"); pushErr != nil {
+		logger.Error("cold archive metrics export failed", "error", pushErr)
+		if err == nil && strings.EqualFold(os.Getenv("BIS_ENV"), "production") {
+			err = pushErr
+		}
+	}
+	if err != nil {
 		logger.Error("cold archive failed", "error", err)
 		os.Exit(1)
 	}

@@ -3,8 +3,7 @@
  */
 import React, { useEffect, useState } from "react";
 import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity } from "react-native";
-import { useRoute, useNavigation } from "@react-navigation/native";
-import type { RouteProp } from "@react-navigation/native-stack";
+import { useRoute, useNavigation, type RouteProp } from "@react-navigation/native";
 import type { QuickCheckStackParamList } from "../../navigation/RootNavigator";
 import { quickCheckApi } from "../../services/api";
 import { colors, typography, spacing } from "../../utils/theme";

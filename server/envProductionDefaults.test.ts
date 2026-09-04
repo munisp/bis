@@ -34,7 +34,7 @@ describe("production environment defaults", () => {
   it("rejects non-PostgreSQL database URLs in every environment", () => {
     expect(() => resolveDatabaseUrl({
       NODE_ENV: "development",
-      DATABASE_URL: "mysql://platform-injected.example/bis",
+      DATABASE_URL: "invalid-db-scheme://platform-injected.example/bis",
     })).toThrow("must use a PostgreSQL URL");
   });
 

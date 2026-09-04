@@ -103,8 +103,12 @@ func initMiddleware() {
 			log.Printf("[WARN] Redis unavailable: %v — caching disabled", err)
 		} else {
 			redisClient = c
+			controlPlaneMetrics.setDependencyHealth("redis", true)
 			log.Printf("[INFO] Redis connected: %s", redisAddr)
 		}
+	}
+	if redisClient == nil {
+		controlPlaneMetrics.setDependencyHealth("redis", false)
 	}
 
 	// Kafka — durable-event handlers reject when this dependency is unavailable.
@@ -116,9 +120,13 @@ func initMiddleware() {
 			log.Printf("[ERROR] Kafka initialization failed; durable-event operations will reject: %v", err)
 		} else {
 			kafkaProducer = p
+			controlPlaneMetrics.setDependencyHealth("kafka", true)
 			log.Printf("[INFO] Kafka producer configured: %s", kafkaBrokers)
 			startDLQReplay()
 		}
+	}
+	if kafkaProducer == nil {
+		controlPlaneMetrics.setDependencyHealth("kafka", false)
 	}
 
 	// Keycloak
@@ -135,8 +143,10 @@ func initMiddleware() {
 	// Permify — a missing or incomplete configuration is non-authorizing.
 	permifyClient = permifypkg.New()
 	if !permifyClient.IsConfigured() {
+		controlPlaneMetrics.setDependencyHealth("permify", false)
 		log.Printf("[WARN] Permify is not fully configured; protected permissions will deny")
 	} else {
+		controlPlaneMetrics.setDependencyHealth("permify", true)
 		log.Printf("[INFO] Permify client configured: %s", permifyURL)
 	}
 
@@ -360,25 +370,35 @@ func cacheSet(ctx context.Context, key string, val []byte, ttl time.Duration) {
 	}
 }
 
-// publishEvent sends an event to Kafka with a durable DLQ fallback. Callers that
-// require an audit event for acceptance must return this error to the client.
+// publishEvent persists an event in PostgreSQL before asynchronous Kafka dispatch.
+// Callers that require an audit event for acceptance must return this error to the client.
 func publishEvent(topic string, payload any) error {
-	return publishEventWithDLQ(topic, payload)
+	if gatewayOutbox == nil {
+		return fmt.Errorf("transactional outbox is unavailable for topic %s", topic)
+	}
+	return gatewayOutbox.enqueue(topic, payload)
 }
 
 // checkPermify verifies fine-grained authorization. Authorization fails closed
 // whenever the policy service is unavailable or cannot evaluate a request.
 func checkPermify(ctx context.Context, subject, action, resource string) bool {
 	if permifyClient == nil {
+		controlPlaneMetrics.permifyChecks.WithLabelValues("unconfigured").Inc()
 		log.Printf("[WARN] Permify is not configured; denying %s on %s", action, resource)
 		return false
 	}
 	allowed, err := permifyClient.Check(ctx, "user", subject, action, resource)
 	if err != nil {
+		controlPlaneMetrics.permifyChecks.WithLabelValues("error").Inc()
 		log.Printf("[WARN] Permify check failed: %v — denying request", err)
 		return false
 	}
-	return allowed
+	if !allowed {
+		controlPlaneMetrics.permifyChecks.WithLabelValues("denied").Inc()
+		return false
+	}
+	controlPlaneMetrics.permifyChecks.WithLabelValues("allowed").Inc()
+	return true
 }
 
 // proxyExternalAPI makes a real HTTP call to an external API.
@@ -1275,6 +1295,9 @@ func newRouter() http.Handler {
 	}
 
 	mux.HandleFunc("/health", public(handleHealth))
+	mux.Handle("/internal/metrics", protected(func(w http.ResponseWriter, r *http.Request) {
+		controlPlaneMetrics.handler().ServeHTTP(w, r)
+	}))
 	mux.HandleFunc("/v1/nin/", protected(handleNINLookup))
 	mux.HandleFunc("/v1/bvn/", protected(handleBVNLookup))
 	mux.HandleFunc("/v1/cac/", protected(handleCACLookup))
@@ -1362,6 +1385,9 @@ func validateStartupConfig() {
 		if redisAddr == "" || redisClient == nil {
 			log.Fatal("production requires a reachable Redis client for rate limiting and durable workflow state")
 		}
+		if gatewayOutbox == nil {
+			log.Fatal("production requires a reachable PostgreSQL transactional outbox for durable event delivery")
+		}
 		if os.Getenv("BIS_CORS_ORIGIN") == "" {
 			log.Fatal("production requires BIS_CORS_ORIGIN when browser access is enabled")
 		}
@@ -1369,19 +1395,24 @@ func validateStartupConfig() {
 }
 
 func main() {
-	// Ensure OpenSearch indices exist at startup (non-fatal)
-	if err := ospkg.EnsureIndices(); err != nil {
-		log.Printf("[OpenSearch] index setup warning: %v", err)
-	}
-	// Ensure all Kafka topics exist at startup (best-effort)
-	RegisterCriminalRecordsTopics()
-
 	log.Printf("BIS API Gateway v2.0 starting on :%s", port)
 	log.Printf("Risk Engine URL: %s", riskEngineURL)
 	log.Printf("Event Processor URL: %s", eventProcURL)
 
 	initMiddleware()
+	if err := initializeTransactionalOutbox(); err != nil {
+		if strings.EqualFold(os.Getenv("BIS_ENV"), "production") {
+			log.Fatal(err)
+		}
+		log.Printf("[WARN] transactional outbox unavailable; durable event operations will reject: %v", err)
+	}
 	validateStartupConfig()
+
+	// These integrations only run after their clients and durable outbox are ready.
+	if err := ospkg.EnsureIndices(); err != nil {
+		log.Printf("[OpenSearch] index setup warning: %v", err)
+	}
+	RegisterCriminalRecordsTopics()
 
 	srv := &http.Server{
 		Addr:         ":" + port,
