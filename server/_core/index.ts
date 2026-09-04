@@ -545,6 +545,30 @@ async function startServer() {
     }
   });
 
+  // Mobile KYC document adapters delegate to the encrypted, tenant-scoped custody router.
+  // Binary content is sent directly to a short-lived SSE-KMS object-store authorization.
+  app.post("/api/kyc/documents/initiate", async (req: Request, res: Response) => {
+    try {
+      const ctx = await createContextFromRequest(req, res);
+      const result = await appRouter.createCaller(ctx).kycDocumentEvidence.initiate(req.body);
+      res.status(201).json(result);
+    } catch (error) {
+      respondConsumerAdapterError(req, res, error, "kyc_document_initiate");
+    }
+  });
+
+  app.post("/api/kyc/documents/:uploadId/complete", async (req: Request, res: Response) => {
+    try {
+      const ctx = await createContextFromRequest(req, res);
+      const rawUploadId = req.params.uploadId;
+      const uploadId = Array.isArray(rawUploadId) ? rawUploadId[0] : rawUploadId;
+      const result = await appRouter.createCaller(ctx).kycDocumentEvidence.complete({ uploadId });
+      res.status(200).json(result);
+    } catch (error) {
+      respondConsumerAdapterError(req, res, error, "kyc_document_complete");
+    }
+  });
+
   // Mobile field-dispatch adapter delegates to the existing idempotent field-task procedure.
   app.post("/api/investigations/:investigationId/dispatch", async (req: Request, res: Response) => {
     try {

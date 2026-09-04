@@ -23,9 +23,20 @@ export function FieldAgentScreen() {
 
   useEffect(() => {
     let stop: (() => void) | undefined;
-    void secureFieldOperationQueue.start(async operation => {
-      await investigationsApi.dispatchFieldAgent(operation.investigationId, operation.agentId, operation.agentName, operation.location, operation.idempotencyKey);
-    }).then(unsubscribe => { stop = unsubscribe; });
+    const startSecureReplay = async () => {
+      stop = await secureFieldOperationQueue.start(async (operation) => {
+        await investigationsApi.dispatchFieldAgent(
+          operation.investigationId,
+          operation.agentId,
+          operation.agentName,
+          operation.location,
+          operation.idempotencyKey,
+        );
+      });
+    };
+    startSecureReplay().catch(() => {
+      Alert.alert('Secure synchronization unavailable', 'Encrypted queued dispatches will remain protected on this device until synchronization can be initialized.');
+    });
     return () => stop?.();
   }, []);
 

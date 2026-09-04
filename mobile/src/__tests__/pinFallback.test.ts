@@ -8,16 +8,6 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-// ─── Mock react-native-mmkv (used by api.ts) ─────────────────────────────────
-vi.mock('react-native-mmkv', () => {
-  class MMKV {
-    getString() { return 'mock-jwt-token'; }
-    set() {}
-    delete() {}
-  }
-  return { MMKV };
-});
-
 // ─── Mock global fetch ────────────────────────────────────────────────────────
 const mockFetch = vi.fn();
 globalThis.fetch = mockFetch as unknown as typeof fetch;
@@ -29,6 +19,11 @@ import {
   revokePin,
   getPinStatus,
 } from '../services/pinFallbackApi';
+import {
+  clearStoredToken,
+  resetSessionCacheForTests,
+  setStoredToken,
+} from '../services/secureSession';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -43,11 +38,15 @@ function mockResponse(status: number, body: unknown) {
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe('pinFallbackApi', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     mockFetch.mockReset();
+    resetSessionCacheForTests();
+    await setStoredToken('mock-jwt-token-2026');
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await clearStoredToken();
+    resetSessionCacheForTests();
     vi.clearAllMocks();
   });
 
@@ -237,7 +236,7 @@ describe('pinFallbackApi', () => {
       await getPinStatus('user-abc-123');
       const [, init] = mockFetch.mock.calls[0];
       expect(init.method).toBe('GET');
-      expect(init.headers['Authorization']).toBe('Bearer mock-jwt-token');
+      expect(init.headers.Authorization).toBe('Bearer mock-jwt-token-2026');
     });
   });
 });

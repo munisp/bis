@@ -247,7 +247,7 @@ export function InsiderThreatScreen() {
               <View style={styles.modalActions}>
                 {selected.status === 'open' && (
                   <TouchableOpacity
-                    style={[styles.actionButton, { backgroundColor: '#8b5cf6' }]}
+                    style={[styles.actionButton, styles.investigateActionButton]}
                     onPress={() => handleUpdateStatus(selected.id, 'investigating')}
                     disabled={actionLoading}
                   >
@@ -257,14 +257,14 @@ export function InsiderThreatScreen() {
                   </TouchableOpacity>
                 )}
                 <TouchableOpacity
-                  style={[styles.actionButton, { backgroundColor: '#22c55e' }]}
+                  style={[styles.actionButton, styles.resolveActionButton]}
                   onPress={() => handleUpdateStatus(selected.id, 'resolved')}
                   disabled={actionLoading}
                 >
                   <Text style={styles.actionButtonText}>Resolve</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={[styles.actionButton, { backgroundColor: '#64748b' }]}
+                  style={[styles.actionButton, styles.falsePositiveActionButton]}
                   onPress={() => handleUpdateStatus(selected.id, 'false_positive')}
                   disabled={actionLoading}
                 >
@@ -366,5 +366,8 @@ const styles = StyleSheet.create({
     borderTopColor: colors.border,
   },
   actionButton: { flex: 1, borderRadius: radius.md, paddingVertical: 13, alignItems: 'center' },
+  investigateActionButton: { backgroundColor: '#8b5cf6' },
+  resolveActionButton: { backgroundColor: '#22c55e' },
+  falsePositiveActionButton: { backgroundColor: '#64748b' },
   actionButtonText: { color: '#fff', fontWeight: '600', fontSize: 13 },
 });

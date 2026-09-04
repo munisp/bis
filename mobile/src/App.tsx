@@ -5,12 +5,12 @@
  * - React Navigation v6 with bottom tabs + native stack
  * - Redux Toolkit for global state (auth, notifications)
  * - React Query for server state (investigations, alerts, etc.)
- * - MMKV for fast local storage (session tokens, offline cache)
+ * - Device Keychain/Keystore for session tokens and encrypted offline queue keys
  * - Biometric authentication via react-native-biometrics
  */
 
 import React from 'react';
-import { StatusBar, View, useColorScheme } from 'react-native';
+import { StatusBar, View, StyleSheet, useColorScheme } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -34,11 +34,11 @@ export default function App() {
   const isDarkMode = useColorScheme() === 'dark';
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
+    <GestureHandlerRootView style={styles.flex}>
       <SafeAreaProvider>
         <ReduxProvider store={store}>
           <QueryClientProvider client={queryClient}>
-            <View style={{ flex: 1 }}>
+            <View style={styles.flex}>
               {/* OfflineBanner sits above the navigator so it is visible on all screens */}
               <OfflineBanner />
               <NavigationContainer>
@@ -55,3 +55,7 @@ export default function App() {
     </GestureHandlerRootView>
   );
 }
+
+const styles = StyleSheet.create({
+  flex: { flex: 1 },
+});

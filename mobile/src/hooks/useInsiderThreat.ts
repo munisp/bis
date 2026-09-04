@@ -76,7 +76,7 @@ export function useInsiderEvents(params?: Record<string, string | number>) {
     setError(null);
     try {
       const result = await insiderThreatApi.listEvents({ limit: 50, ...params });
-      setEvents((result.data ?? []) as InsiderEvent[]);
+      setEvents(result.data ?? []);
       setTotal(result.total ?? 0);
     } catch (err) {
       setError(err instanceof Error ? err : new Error('Failed to load insider events'));
@@ -89,7 +89,7 @@ export function useInsiderEvents(params?: Record<string, string | number>) {
     fetch();
     timerRef.current = setInterval(fetch, REFRESH_INTERVAL_MS);
     return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
+      if (timerRef.current) {clearInterval(timerRef.current);}
     };
   }, [fetch]);
 
@@ -128,7 +128,7 @@ export function useDashboardSummary() {
     fetch();
     timerRef.current = setInterval(fetch, REFRESH_INTERVAL_MS);
     return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
+      if (timerRef.current) {clearInterval(timerRef.current);}
     };
   }, [fetch]);
 
@@ -162,7 +162,7 @@ export function useUebaProfiles(params?: Record<string, string | number>) {
     fetch();
     timerRef.current = setInterval(fetch, REFRESH_INTERVAL_MS);
     return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
+      if (timerRef.current) {clearInterval(timerRef.current);}
     };
   }, [fetch]);
 
@@ -201,7 +201,7 @@ export function useAccessReviews(params?: Record<string, string | number>) {
     fetch();
     timerRef.current = setInterval(fetch, REFRESH_INTERVAL_MS);
     return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
+      if (timerRef.current) {clearInterval(timerRef.current);}
     };
   }, [fetch]);
 

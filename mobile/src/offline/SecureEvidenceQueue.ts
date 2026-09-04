@@ -5,7 +5,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'react
 import { Buffer } from '@craftzdog/react-native-buffer';
 import { evidenceApi } from '../services/api';
 
-const KEYCHAIN_SERVICE = 'bis.field-evidence.encryption.v1';
+const KEYCHAIN_SERVICE = 'bis.field-evidence.encryption.v2';
 const QUEUE_DIR = `${RNFS.DocumentDirectoryPath}/bis-field-evidence`;
 const QUEUE_FILE = `${QUEUE_DIR}/queue.v1.enc`;
 const MAX_EVIDENCE_BYTES = 25 * 1024 * 1024;
@@ -30,19 +30,19 @@ function toBase64(value: Uint8Array): string { return Buffer.from(value).toStrin
 function fromBase64(value: string): Buffer { return Buffer.from(value, 'base64'); }
 
 async function ensureDirectory(): Promise<void> {
-  if (!(await RNFS.exists(QUEUE_DIR))) await RNFS.mkdir(QUEUE_DIR);
+  if (!(await RNFS.exists(QUEUE_DIR))) {await RNFS.mkdir(QUEUE_DIR);}
 }
 
 async function deviceKey(): Promise<Buffer> {
   const stored = await Keychain.getGenericPassword({ service: KEYCHAIN_SERVICE });
-  if (stored) return fromBase64(stored.password);
+  if (stored) {return fromBase64(stored.password);}
   const key = randomBytes(32);
   const ok = await Keychain.setGenericPassword('bis-field-evidence', toBase64(key), {
     service: KEYCHAIN_SERVICE,
     accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
     securityLevel: Keychain.SECURITY_LEVEL.SECURE_HARDWARE,
   });
-  if (!ok) throw new Error('A hardware-backed evidence encryption key is required; this device cannot securely store field evidence');
+  if (!ok) {throw new Error('A hardware-backed evidence encryption key is required; this device cannot securely store field evidence');}
   return Buffer.from(key);
 }
 
@@ -65,7 +65,7 @@ function eventId(): string { return randomBytes(16).toString('hex'); }
 function delayMs(attempts: number): number { return Math.min(60_000, 1_000 * (2 ** Math.min(attempts, 6))); }
 
 async function loadQueue(): Promise<EvidenceQueueItem[]> {
-  if (!(await RNFS.exists(QUEUE_FILE))) return [];
+  if (!(await RNFS.exists(QUEUE_FILE))) {return [];}
   const raw = await RNFS.readFile(QUEUE_FILE, 'utf8');
   const encrypted = JSON.parse(raw) as EncryptedValue;
   return JSON.parse((await decryptBytes(encrypted)).toString('utf8')) as EvidenceQueueItem[];
@@ -83,7 +83,7 @@ export class SecureEvidenceQueue {
   async enqueue(input: { investigationId: number; fileUri: string; contentType: EvidenceQueueItem['contentType']; description: string }): Promise<EvidenceQueueItem> {
     const stat = await RNFS.stat(input.fileUri);
     const contentLength = Number(stat.size);
-    if (!Number.isFinite(contentLength) || contentLength <= 0 || contentLength > MAX_EVIDENCE_BYTES) throw new Error('Evidence must be between 1 byte and 25 MB');
+    if (!Number.isFinite(contentLength) || contentLength <= 0 || contentLength > MAX_EVIDENCE_BYTES) {throw new Error('Evidence must be between 1 byte and 25 MB');}
     const original = Buffer.from(await RNFS.readFile(input.fileUri, 'base64'), 'base64');
     const sha256 = createHash('sha256').update(original).digest('hex');
     const encrypted = await encryptBytes(original);
@@ -99,9 +99,9 @@ export class SecureEvidenceQueue {
   }
 
   async sync(): Promise<{ uploaded: number; pending: number }> {
-    if (this.draining) return { uploaded: 0, pending: (await loadQueue()).length };
+    if (this.draining) {return { uploaded: 0, pending: (await loadQueue()).length };}
     const network = await NetInfo.fetch();
-    if (!network.isConnected || !network.isInternetReachable) return { uploaded: 0, pending: (await loadQueue()).length };
+    if (!network.isConnected || !network.isInternetReachable) {return { uploaded: 0, pending: (await loadQueue()).length };}
     this.draining = true;
     try {
       const queue = await loadQueue();
@@ -125,7 +125,11 @@ export class SecureEvidenceQueue {
 
   async start(): Promise<() => void> {
     await this.sync();
-    const unsubscribe = NetInfo.addEventListener(state => { if (state.isConnected && state.isInternetReachable) void this.sync(); });
+    const unsubscribe = NetInfo.addEventListener((state) => {
+      if (state.isConnected && state.isInternetReachable) {
+        this.sync().catch(() => undefined);
+      }
+    });
     return unsubscribe;
   }
 
@@ -135,13 +139,13 @@ export class SecureEvidenceQueue {
     const encrypted = JSON.parse(await RNFS.readFile(item.encryptedPath, 'utf8')) as EncryptedValue;
     const plaintext = await decryptBytes(encrypted);
     const digest = createHash('sha256').update(plaintext).digest('hex');
-    if (digest !== item.sha256 || plaintext.length !== item.contentLength) throw new Error('Encrypted evidence integrity verification failed locally');
+    if (digest !== item.sha256 || plaintext.length !== item.contentLength) {throw new Error('Encrypted evidence integrity verification failed locally');}
     const session = await evidenceApi.initiate({ investigationId: item.investigationId, contentType: item.contentType, contentLength: item.contentLength, sha256: item.sha256, description: item.description, idempotencyKey: item.idempotencyKey });
-    const temporaryPath = `${QUEUE_DIR}/${item.id}.upload`;
+    const temporaryPath = `${RNFS.CachesDirectoryPath}/bis-field-evidence-upload-${item.id}`;
     try {
       await RNFS.writeFile(temporaryPath, plaintext.toString('base64'), 'base64');
       const result = await RNFS.uploadFiles({ toUrl: session.uploadUrl, files: [{ name: 'file', filename: item.id, filepath: temporaryPath, filetype: item.contentType }], method: 'PUT', headers: session.headers, binaryStreamOnly: true }).promise;
-      if (result.statusCode < 200 || result.statusCode >= 300) throw new Error(`Evidence object upload failed with HTTP ${result.statusCode}`);
+      if (result.statusCode < 200 || result.statusCode >= 300) {throw new Error(`Evidence object upload failed with HTTP ${result.statusCode}`);}
       await evidenceApi.complete(session.uploadId);
     } finally {
       await RNFS.unlink(temporaryPath).catch(() => undefined);

@@ -10,7 +10,7 @@ type Route = RouteProp<InvestigationsStackParamList, 'CaptureEvidence'>;
 type SelectedEvidence = { uri: string; name: string; contentType: 'image/jpeg' | 'image/png' | 'application/pdf' };
 
 function supportedMime(type?: string | null): SelectedEvidence['contentType'] | null {
-  if (type === 'image/jpeg' || type === 'image/png' || type === 'application/pdf') return type;
+  if (type === 'image/jpeg' || type === 'image/png' || type === 'application/pdf') {return type;}
   return null;
 }
 
@@ -23,7 +23,9 @@ export function CaptureEvidenceScreen() {
   const [loading, setLoading] = useState(false);
   const [pending, setPending] = useState(0);
 
-  useEffect(() => { void secureEvidenceQueue.pendingCount().then(setPending); }, []);
+  useEffect(() => {
+    secureEvidenceQueue.pendingCount().then(setPending).catch(() => setPending(0));
+  }, []);
 
   const handlePickEvidence = async () => {
     try {
@@ -37,7 +39,7 @@ export function CaptureEvidenceScreen() {
       }
       setSelected({ uri, name: file.name ?? 'evidence', contentType });
     } catch (error) {
-      if (!isCancel(error)) Alert.alert('Selection failed', error instanceof Error ? error.message : 'Could not select evidence');
+      if (!isCancel(error)) {Alert.alert('Selection failed', error instanceof Error ? error.message : 'Could not select evidence');}
     }
   };
 
@@ -64,7 +66,7 @@ export function CaptureEvidenceScreen() {
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Secure Evidence Capture</Text>
         <Text style={styles.cardSubtitle}>Investigation: {investigationId}. Files are AES-256-GCM encrypted on this device before sync.</Text>
-        <TouchableOpacity style={styles.photoArea} onPress={() => void handlePickEvidence()} accessibilityRole="button" accessibilityLabel="Select evidence file">
+        <TouchableOpacity style={styles.photoArea} onPress={handlePickEvidence} accessibilityRole="button" accessibilityLabel="Select evidence file">
           {selected?.contentType.startsWith('image/') ? <Image source={{ uri: selected.uri }} style={styles.preview} resizeMode="cover" /> : <View style={styles.photoPlaceholder}><Text style={styles.fileName}>{selected?.name ?? 'Select JPEG, PNG, or PDF'}</Text><Text style={styles.photoHint}>Maximum file size: 25 MB</Text></View>}
         </TouchableOpacity>
         <View style={styles.field}>
@@ -72,7 +74,7 @@ export function CaptureEvidenceScreen() {
           <TextInput style={[styles.input, styles.multiline]} placeholder="Describe the evidence, source, and collection context" placeholderTextColor={colors.textMuted} value={description} onChangeText={setDescription} multiline numberOfLines={3} maxLength={2000} />
         </View>
         {pending > 0 && <Text style={styles.pendingNotice}>{pending} encrypted evidence item{pending === 1 ? '' : 's'} waiting to synchronize.</Text>}
-        <TouchableOpacity style={[styles.submitBtn, (!selected || loading) && styles.submitBtnDisabled]} onPress={() => void handleQueueAndSync()} disabled={loading || !selected} accessibilityRole="button" accessibilityLabel="Encrypt and synchronize evidence">
+        <TouchableOpacity style={[styles.submitBtn, (!selected || loading) && styles.submitBtnDisabled]} onPress={handleQueueAndSync} disabled={loading || !selected} accessibilityRole="button" accessibilityLabel="Encrypt and synchronize evidence">
           {loading ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.submitText}>Encrypt and Synchronize</Text>}
         </TouchableOpacity>
       </View>

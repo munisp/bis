@@ -23,7 +23,6 @@ import {
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
-  Alert,
 } from 'react-native';
 import React from 'react';
 import { verifyPin } from '../services/pinFallbackApi';

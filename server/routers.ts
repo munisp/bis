@@ -131,6 +131,7 @@ import { caddyRouter } from "./caddy";
 import { consumerIntelligenceRouter } from "./consumerIntelligence";
 import { consumerGovernanceRouter } from "./consumerGovernance";
 import { fieldEvidenceRouter } from "./fieldEvidence";
+import { kycDocumentEvidenceRouter } from "./kycDocumentEvidence";
 
 // ─── Service URLs ─────────────────────────────────────────────────────────────
 
@@ -7611,5 +7612,6 @@ export const appRouter = router({
   consumerIntelligence: consumerIntelligenceRouter,
   consumerGovernance: consumerGovernanceRouter,
   fieldEvidence: fieldEvidenceRouter,
+  kycDocumentEvidence: kycDocumentEvidenceRouter,
 });
 export type AppRouter = typeof appRouter;

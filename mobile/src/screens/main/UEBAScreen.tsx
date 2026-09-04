@@ -34,9 +34,13 @@ function RiskBar({ score }: { score: number }) {
     pct >= 40 ? '#eab308' : '#22c55e';
   return (
     <View style={riskBarStyles.track}>
-      <View style={[riskBarStyles.fill, { width: `${pct}%` as any, backgroundColor: barColor }]} />
+      <View style={[riskBarStyles.fill, { width: `${pct}%` as `${number}%`, backgroundColor: barColor }]} />
     </View>
   );
+}
+
+function riskTierTextStyle(riskTier: string) {
+  return { color: RISK_TIER_COLOR[riskTier] ?? colors.textMuted };
 }
 
 const riskBarStyles = StyleSheet.create({
@@ -62,7 +66,7 @@ export function UEBAScreen() {
       // Update selected if it's the same user
       if (selected?.userId === userId) {
         const updated = profiles.find(p => p.userId === userId);
-        if (updated) setSelected(updated);
+        if (updated) {setSelected(updated);}
       }
     } finally {
       setRefreshing(false);
@@ -194,7 +198,7 @@ export function UEBAScreen() {
               <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>Risk Score</Text>
                 <View style={styles.scoreWithBar}>
-                  <Text style={[styles.detailValue, { color: RISK_TIER_COLOR[selected.riskTier], marginRight: 12 }]}>
+                  <Text style={[styles.detailValue, styles.detailScoreValue, riskTierTextStyle(selected.riskTier)]}>
                     {selected.riskScore.toFixed(2)}
                   </Text>
                   <RiskBar score={selected.riskScore} />
@@ -318,6 +322,7 @@ const styles = StyleSheet.create({
   detailRow: { marginBottom: spacing.md },
   detailLabel: { fontSize: 11, color: colors.textMuted, marginBottom: 3, textTransform: 'uppercase', letterSpacing: 0.5 },
   detailValue: { fontSize: 14, color: colors.text, lineHeight: 20 },
+  detailScoreValue: { marginRight: 12 },
   scoreWithBar: { flexDirection: 'row', alignItems: 'center', marginTop: 4 },
   flagItem: { flexDirection: 'row', alignItems: 'flex-start', marginTop: 4 },
   flagDot: { color: colors.warning, marginRight: 6, fontSize: 14 },

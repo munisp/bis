@@ -76,14 +76,14 @@ async function pinRequest<T>(
   path: string,
   body?: unknown,
 ): Promise<T> {
-  const token = getStoredToken();
+  const token = await getStoredToken();
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     Accept: 'application/json',
   };
   if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
+    headers.Authorization = `Bearer ${token}`;
   }
 
   const res = await fetch(`${getBiometricEngineBase()}${path}`, {

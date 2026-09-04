@@ -10,13 +10,13 @@ const MAX_EVIDENCE_BYTES = 25 * 1024 * 1024;
 const EVIDENCE_TTL_SECONDS = 15 * 60;
 const APPROVED_CONTENT_TYPES = new Set(["image/jpeg", "image/png", "application/pdf"]);
 
-type Keyring = { activeVersion: string; keys: Map<string, Buffer> };
+export type EvidenceKeyring = { activeVersion: string; keys: Map<string, Buffer> };
 
-function serviceUnavailable(message: string): never {
+export function serviceUnavailable(message: string): never {
   throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message });
 }
 
-function loadKeyring(): Keyring {
+export function loadEvidenceKeyring(): EvidenceKeyring {
   const activeVersion = (process.env.BIS_EVIDENCE_ACTIVE_KEY_VERSION ?? "").trim();
   const encoded = (process.env.BIS_EVIDENCE_KEYRING ?? "").trim();
   if (!activeVersion || !encoded) serviceUnavailable("Evidence encryption keyring is not configured");
@@ -32,14 +32,14 @@ function loadKeyring(): Keyring {
   return { activeVersion, keys };
 }
 
-function encryptDescription(keyring: Keyring, description: string) {
+export function encryptEvidenceDescription(keyring: EvidenceKeyring, description: string) {
   const nonce = randomBytes(12);
   const cipher = createCipheriv("aes-256-gcm", keyring.keys.get(keyring.activeVersion)!, nonce);
   const ciphertext = Buffer.concat([cipher.update(description, "utf8"), cipher.final(), cipher.getAuthTag()]);
   return { ciphertext, nonce, keyVersion: keyring.activeVersion };
 }
 
-function evidenceStorage() {
+export function evidenceStorage() {
   const endpoint = (process.env.BIS_EVIDENCE_S3_ENDPOINT ?? "").trim();
   const region = (process.env.BIS_EVIDENCE_S3_REGION ?? "").trim();
   const bucket = (process.env.BIS_EVIDENCE_S3_BUCKET ?? "").trim();
@@ -56,13 +56,13 @@ function evidenceStorage() {
   };
 }
 
-async function poolOrThrow() {
+export async function evidencePoolOrThrow() {
   const pool = await getPgPool();
   if (!pool) serviceUnavailable("PostgreSQL is unavailable");
   return pool;
 }
 
-function custodyDigest(uploadId: string, eventType: string, metadata: Record<string, unknown>) {
+export function custodyDigest(uploadId: string, eventType: string, metadata: Record<string, unknown>) {
   return createHash("sha256").update(`${uploadId}|${eventType}|${JSON.stringify(metadata)}`).digest("hex");
 }
 
@@ -81,8 +81,8 @@ export const fieldEvidenceRouter = router({
   initiate: protectedProcedure.input(initiateSchema).mutation(async ({ ctx, input }) => {
     if (!ctx.tenantId) throw new TRPCError({ code: "FORBIDDEN", message: "Tenant context is required for evidence upload" });
     if (!APPROVED_CONTENT_TYPES.has(input.contentType)) throw new TRPCError({ code: "BAD_REQUEST", message: "Evidence content type is not allowed" });
-    const pool = await poolOrThrow();
-    const keyring = loadKeyring();
+    const pool = await evidencePoolOrThrow();
+    const keyring = loadEvidenceKeyring();
     const storage = evidenceStorage();
     const existing = await pool.query<{ id: string; object_key: string; expires_at: string }>(
       `SELECT id, object_key, expires_at FROM field_evidence_uploads WHERE tenant_id = $1 AND actor_user_id = $2 AND idempotency_key = $3`,
@@ -100,7 +100,7 @@ export const fieldEvidenceRouter = router({
       uploadId = randomUUID();
       objectKey = `evidence/${ctx.tenantId}/${input.investigationId}/${uploadId}`;
       expiresAt = new Date(Date.now() + EVIDENCE_TTL_SECONDS * 1000);
-      const encrypted = encryptDescription(keyring, input.description);
+      const encrypted = encryptEvidenceDescription(keyring, input.description);
       await pool.query("BEGIN");
       try {
         await pool.query(
@@ -127,7 +127,7 @@ export const fieldEvidenceRouter = router({
 
   complete: protectedProcedure.input(completeSchema).mutation(async ({ ctx, input }) => {
     if (!ctx.tenantId) throw new TRPCError({ code: "FORBIDDEN", message: "Tenant context is required for evidence upload" });
-    const pool = await poolOrThrow();
+    const pool = await evidencePoolOrThrow();
     const storage = evidenceStorage();
     const upload = await pool.query<{ object_key: string; expected_sha256: string; content_type: string; content_length: string; status: string; expires_at: string }>(
       `SELECT object_key, expected_sha256, content_type, content_length, status, expires_at FROM field_evidence_uploads WHERE id = $1 AND tenant_id = $2 AND actor_user_id = $3 FOR UPDATE`,

@@ -50,6 +50,13 @@
       "when": 1788573600000,
       "tag": "0006_field_evidence_uploads",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1788577200000,
+      "tag": "0007_kyc_document_uploads",
+      "breakpoints": true
     }
   ]
 }

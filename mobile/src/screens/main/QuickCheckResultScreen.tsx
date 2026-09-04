@@ -1,17 +1,17 @@
 /**
  * QuickCheckResultScreen — display the result of a QuickCheck vetting.
  */
-import React, { useEffect, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity } from "react-native";
-import { useRoute, useNavigation, type RouteProp } from "@react-navigation/native";
-import type { QuickCheckStackParamList } from "../../navigation/RootNavigator";
-import { quickCheckApi } from "../../services/api";
-import { colors, typography, spacing } from "../../utils/theme";
+import React, { useEffect, useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity } from 'react-native';
+import { useRoute, useNavigation, type RouteProp } from '@react-navigation/native';
+import type { QuickCheckStackParamList } from '../../navigation/RootNavigator';
+import { quickCheckApi } from '../../services/api';
+import { colors, spacing } from '../../utils/theme';
 
-type Route = RouteProp<QuickCheckStackParamList, "QuickCheckResult">;
+type Route = RouteProp<QuickCheckStackParamList, 'QuickCheckResult'>;
 
 const RISK_COLORS: Record<string, string> = {
-  high: "#ef4444", medium: "#eab308", low: "#22c55e", clear: "#22c55e", unknown: "#64748b",
+  high: '#ef4444', medium: '#eab308', low: '#22c55e', clear: '#22c55e', unknown: '#64748b',
 };
 
 export function QuickCheckResultScreen() {
@@ -24,14 +24,14 @@ export function QuickCheckResultScreen() {
   useEffect(() => {
     quickCheckApi.getResult(requestId)
       .then(r => setResult(r as Record<string, unknown>))
-      .catch(() => setResult({ error: true, riskLevel: "unknown", message: "Failed to load result" }))
+      .catch(() => setResult({ error: true, riskLevel: 'unknown', message: 'Failed to load result' }))
       .finally(() => setLoading(false));
   }, [requestId]);
 
-  if (loading) return <View style={styles.centered}><ActivityIndicator color={colors.primary} size="large" /></View>;
+  if (loading) {return <View style={styles.centered}><ActivityIndicator color={colors.primary} size="large" /></View>;}
 
-  const riskLevel = String(result?.riskLevel ?? result?.risk ?? "unknown");
-  const riskColor = RISK_COLORS[riskLevel] ?? "#64748b";
+  const riskLevel = String(result?.riskLevel ?? result?.risk ?? 'unknown');
+  const riskColor = RISK_COLORS[riskLevel] ?? '#64748b';
   const checks = (result?.checks as unknown[]) ?? [];
   const watchlistHits = (result?.watchlistHits as unknown[]) ?? [];
 
@@ -49,10 +49,10 @@ export function QuickCheckResultScreen() {
             const check = c as Record<string, unknown>;
             return (
               <View key={i} style={styles.checkRow}>
-                <Text style={styles.checkName}>{String(check.name ?? check.type ?? "Check " + (i + 1))}</Text>
-                <View style={[styles.checkBadge, { backgroundColor: check.passed ? "#22c55e22" : "#ef444422" }]}>
-                  <Text style={[styles.checkBadgeText, { color: check.passed ? "#22c55e" : "#ef4444" }]}>
-                    {check.passed ? "PASS" : "FAIL"}
+                <Text style={styles.checkName}>{String(check.name ?? check.type ?? 'Check ' + (i + 1))}</Text>
+                <View style={[styles.checkBadge, check.passed ? styles.checkBadgePassed : styles.checkBadgeFailed]}>
+                  <Text style={[styles.checkBadgeText, check.passed ? styles.checkBadgeTextPassed : styles.checkBadgeTextFailed]}>
+                    {check.passed ? 'PASS' : 'FAIL'}
                   </Text>
                 </View>
               </View>
@@ -67,8 +67,8 @@ export function QuickCheckResultScreen() {
             const hit = h as Record<string, unknown>;
             return (
               <View key={i} style={styles.hitCard}>
-                <Text style={styles.hitName}>{String(hit.name ?? hit.subject ?? "Hit " + (i + 1))}</Text>
-                <Text style={styles.hitDetail}>{String(hit.list ?? hit.source ?? "")}</Text>
+                <Text style={styles.hitName}>{String(hit.name ?? hit.subject ?? 'Hit ' + (i + 1))}</Text>
+                <Text style={styles.hitDetail}>{String(hit.list ?? hit.source ?? '')}</Text>
               </View>
             );
           })}
@@ -90,21 +90,25 @@ export function QuickCheckResultScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   content: { padding: spacing.md, paddingBottom: spacing.xxl },
-  centered: { flex: 1, alignItems: "center", justifyContent: "center" },
-  riskCard: { backgroundColor: colors.card, borderRadius: 12, padding: spacing.lg, marginBottom: spacing.md, borderWidth: 2, alignItems: "center" },
-  riskLabel: { fontSize: 12, color: colors.textMuted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 },
-  riskValue: { fontSize: 36, fontWeight: "700", marginBottom: 8 },
-  riskId: { fontSize: 11, color: colors.textMuted, fontFamily: "Courier" },
+  centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  riskCard: { backgroundColor: colors.card, borderRadius: 12, padding: spacing.lg, marginBottom: spacing.md, borderWidth: 2, alignItems: 'center' },
+  riskLabel: { fontSize: 12, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 },
+  riskValue: { fontSize: 36, fontWeight: '700', marginBottom: 8 },
+  riskId: { fontSize: 11, color: colors.textMuted, fontFamily: 'Courier' },
   section: { backgroundColor: colors.card, borderRadius: 12, padding: spacing.md, marginBottom: spacing.md, borderWidth: 1, borderColor: colors.border },
-  sectionTitle: { fontSize: 11, color: colors.textMuted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: spacing.sm },
-  checkRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.border },
+  sectionTitle: { fontSize: 11, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: spacing.sm },
+  checkRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.border },
   checkName: { fontSize: 13, color: colors.text },
   checkBadge: { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
-  checkBadgeText: { fontSize: 10, fontWeight: "700" },
+  checkBadgePassed: { backgroundColor: '#22c55e22' },
+  checkBadgeFailed: { backgroundColor: '#ef444422' },
+  checkBadgeText: { fontSize: 10, fontWeight: '700' },
+  checkBadgeTextPassed: { color: '#22c55e' },
+  checkBadgeTextFailed: { color: '#ef4444' },
   hitCard: { backgroundColor: colors.backgroundSecondary, borderRadius: 8, padding: 10, marginBottom: 8 },
-  hitName: { fontSize: 13, color: colors.text, fontWeight: "500" },
+  hitName: { fontSize: 13, color: colors.text, fontWeight: '500' },
   hitDetail: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
   bodyText: { fontSize: 14, color: colors.textSecondary, lineHeight: 20 },
-  backBtn: { backgroundColor: colors.primary, borderRadius: 10, paddingVertical: 14, alignItems: "center" },
-  backBtnText: { color: "#fff", fontWeight: "600", fontSize: 15 },
+  backBtn: { backgroundColor: colors.primary, borderRadius: 10, paddingVertical: 14, alignItems: 'center' },
+  backBtnText: { color: '#fff', fontWeight: '600', fontSize: 15 },
 });

@@ -1,28 +1,20 @@
 /**
  * BIS Mobile API Service
  * Thin wrapper around fetch for the BIS REST API.
- * Uses MMKV for token storage and automatic token refresh.
+ * Uses the operating-system Keychain/Keystore for device-protected session storage.
  */
 
-import { MMKV } from 'react-native-mmkv';
-
-const storage = new MMKV({ id: 'bis-auth' });
+import {
+  clearStoredToken,
+  getStoredToken,
+  setStoredToken,
+} from './secureSession';
 
 export const BIS_API_URL = __DEV__
   ? 'http://10.0.2.2:3000/api' // Android emulator → host machine
   : 'https://bis.example.ng/api';
 
-export function getStoredToken(): string | undefined {
-  return storage.getString('access_token');
-}
-
-export function setStoredToken(token: string): void {
-  storage.set('access_token', token);
-}
-
-export function clearStoredToken(): void {
-  storage.delete('access_token');
-}
+export { clearStoredToken, getStoredToken, setStoredToken };
 
 async function request<T>(
   method: string,
@@ -36,17 +28,17 @@ async function request<T>(
       .filter(([, v]) => v !== undefined)
       .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
       .join('&');
-    if (qs) url += `?${qs}`;
+    if (qs) {url += `?${qs}`;}
   }
 
-  const token = getStoredToken();
+  const token = await getStoredToken();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     Accept: 'application/json',
     'User-Agent': 'bis-mobile/1.0.0',
   };
   if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
+    headers.Authorization = `Bearer ${token}`;
   }
 
   const response = await fetch(url, {
@@ -104,9 +96,23 @@ export const investigationsApi = {
 
 // ── Alerts ─────────────────────────────────────────────────────────────────────
 
+export type MobileAlert = {
+  id: number;
+  ruleId: number;
+  ruleName: string;
+  severity: 'critical' | 'high' | 'medium' | 'low';
+  status: 'open' | 'acknowledged' | 'resolved' | 'escalated';
+  subject: string;
+  description: string;
+  triggeredAt: string;
+  acknowledgedAt?: string;
+  resolvedAt?: string;
+  assignedTo?: string;
+};
+
 export const alertsApi = {
   list: (params?: Record<string, string | number>) =>
-    request<{ data: unknown[]; total: number }>('GET', '/alerts', undefined, params),
+    request<{ data: MobileAlert[]; total: number }>('GET', '/alerts', undefined, params),
 
   markRead: (id: string) => request<void>('POST', `/alerts/${id}/read`),
 
@@ -172,6 +178,19 @@ export const evidenceApi = {
     idempotencyKey: string;
   }) => request<{ uploadId: string; objectKey: string; uploadUrl: string; expiresAt: string; headers: Record<string, string> }>('POST', '/evidence/initiate', input),
   complete: (uploadId: string) => request<{ uploadId: string; status: 'verified'; objectVersionId: string | null }>('POST', `/evidence/${uploadId}/complete`),
+};
+
+export const kycDocumentEvidenceApi = {
+  initiate: (input: {
+    kycRecordId: number;
+    documentType: 'nin_slip' | 'passport' | 'drivers_license' | 'voters_card' | 'utility_bill' | 'bank_statement' | 'cac_certificate' | 'other';
+    contentType: 'image/jpeg' | 'image/png';
+    contentLength: number;
+    sha256: string;
+    description: string;
+    idempotencyKey: string;
+  }) => request<{ uploadId: string; objectKey: string; uploadUrl: string; expiresAt: string; headers: Record<string, string> }>('POST', '/kyc/documents/initiate', input),
+  complete: (uploadId: string) => request<{ uploadId: string; status: 'verified'; objectVersionId: string | null }>('POST', `/kyc/documents/${uploadId}/complete`),
 };
 
 // ── Field Agent ────────────────────────────────────────────────────────────────
@@ -606,10 +625,26 @@ export const lakehouseApi = {
 };
 
 // ── Insider Threat ────────────────────────────────────────────────────────────
+export type MobileInsiderEvent = {
+  id: number;
+  userId: string;
+  userName: string;
+  eventType: string;
+  severity: 'critical' | 'high' | 'medium' | 'low' | 'info';
+  status: 'open' | 'investigating' | 'resolved' | 'false_positive';
+  description: string;
+  sourceIp?: string;
+  resourceAccessed?: string;
+  anomalyScore: number;
+  detectedAt: string;
+  resolvedAt?: string;
+  tenantId?: number;
+};
+
 export const insiderThreatApi = {
   // Events
   listEvents: (params?: Record<string, string | number>) =>
-    request<{ data: unknown[]; total: number }>('GET', '/insider-threat/events', undefined, params),
+    request<{ data: MobileInsiderEvent[]; total: number }>('GET', '/insider-threat/events', undefined, params),
   getEvent: (id: number) =>
     request<{ data: unknown }>('GET', `/insider-threat/events/${id}`),
   ingestEvent: (data: Record<string, unknown>) =>

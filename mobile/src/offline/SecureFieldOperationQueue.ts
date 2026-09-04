@@ -4,7 +4,7 @@ import RNFS from 'react-native-fs';
 import { createCipheriv, createDecipheriv, randomBytes } from 'react-native-quick-crypto';
 import { Buffer } from '@craftzdog/react-native-buffer';
 
-const KEYCHAIN_SERVICE = 'bis.field-operation.encryption.v1';
+const KEYCHAIN_SERVICE = 'bis.field-operation.encryption.v2';
 const QUEUE_DIRECTORY = `${RNFS.DocumentDirectoryPath}/bis-field-operations`;
 const QUEUE_PATH = `${QUEUE_DIRECTORY}/queue.v1.enc`;
 
@@ -17,10 +17,10 @@ function operationId(): string { return randomBytes(16).toString('hex'); }
 
 async function key(): Promise<Buffer> {
   const stored = await Keychain.getGenericPassword({ service: KEYCHAIN_SERVICE });
-  if (stored) return bytes(stored.password);
+  if (stored) {return bytes(stored.password);}
   const material = randomBytes(32);
   const written = await Keychain.setGenericPassword('bis-field-operation', base64(material), { service: KEYCHAIN_SERVICE, accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY, securityLevel: Keychain.SECURITY_LEVEL.SECURE_HARDWARE });
-  if (!written) throw new Error('A hardware-backed field-operation encryption key is required; this device cannot securely queue dispatches');
+  if (!written) {throw new Error('A hardware-backed field-operation encryption key is required; this device cannot securely queue dispatches');}
   return Buffer.from(material);
 }
 
@@ -37,12 +37,12 @@ async function decrypt<T>(value: Ciphertext): Promise<T> {
 }
 
 async function read(): Promise<FieldDispatchOperation[]> {
-  if (!(await RNFS.exists(QUEUE_PATH))) return [];
+  if (!(await RNFS.exists(QUEUE_PATH))) {return [];}
   return decrypt<FieldDispatchOperation[]>(JSON.parse(await RNFS.readFile(QUEUE_PATH, 'utf8')) as Ciphertext);
 }
 
 async function write(operations: FieldDispatchOperation[]): Promise<void> {
-  if (!(await RNFS.exists(QUEUE_DIRECTORY))) await RNFS.mkdir(QUEUE_DIRECTORY);
+  if (!(await RNFS.exists(QUEUE_DIRECTORY))) {await RNFS.mkdir(QUEUE_DIRECTORY);}
   await RNFS.writeFile(QUEUE_PATH, JSON.stringify(await encrypt(operations)), 'utf8');
 }
 
@@ -55,7 +55,7 @@ export class SecureFieldOperationQueue {
   }
 
   async drain(executor: (operation: FieldDispatchOperation) => Promise<void>): Promise<{ sent: number; pending: number }> {
-    if (this.draining || !(await NetInfo.fetch()).isConnected) return { sent: 0, pending: (await read()).length };
+    if (this.draining || !(await NetInfo.fetch()).isConnected) {return { sent: 0, pending: (await read()).length };}
     this.draining = true;
     try {
       let sent = 0; const remaining: FieldDispatchOperation[] = [];
@@ -70,7 +70,11 @@ export class SecureFieldOperationQueue {
 
   async start(executor: (operation: FieldDispatchOperation) => Promise<void>): Promise<() => void> {
     await this.drain(executor);
-    return NetInfo.addEventListener(state => { if (state.isConnected && state.isInternetReachable) void this.drain(executor); });
+    return NetInfo.addEventListener((state) => {
+      if (state.isConnected && state.isInternetReachable) {
+        this.drain(executor).catch(() => undefined);
+      }
+    });
   }
 }
 
