@@ -72,6 +72,34 @@ function topupTransferId(reference: string): string {
   return createHash("sha256").update(`bis:paystack-topup:v2:${reference}`).digest("hex").slice(0, 32);
 }
 
+export function intelligenceAssessmentTransferId(billingEventId: string): string {
+  return createHash("sha256").update(`bis:intelligence-assessment:v1:${billingEventId}`).digest("hex").slice(0, 32);
+}
+
+/**
+ * Records a deterministic TigerBeetle debit for a completed, tenant-authorised
+ * assessment usage event. Calling this more than once for the same event is
+ * safe only when the TigerBeetle deployment enforces transfer-ID idempotency.
+ */
+export async function debitTenantForIntelligenceAssessment(input: { tenantId: number; billingEventId: string; amountKobo: number }): Promise<string> {
+  if (!Number.isInteger(input.tenantId) || input.tenantId <= 0 || !Number.isSafeInteger(input.amountKobo) || input.amountKobo <= 0) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "A valid tenant and positive NGN assessment charge are required" });
+  }
+  const transferId = intelligenceAssessmentTransferId(input.billingEventId);
+  await ensureLedgerAccounts(input.tenantId);
+  await tigerBeetlePost("/transfers/create", [{
+    id: transferId,
+    debit_account_id: `${ACCOUNT_TENANT_PREFIX}${input.tenantId}`,
+    credit_account_id: ACCOUNT_REVENUE,
+    amount: input.amountKobo,
+    ledger: LEDGER_NGN,
+    code: 3,
+    flags: 0,
+    user_data_128: input.billingEventId,
+  }]);
+  return transferId;
+}
+
 function webhookHash(rawBody: Buffer): string {
   return createHash("sha256").update(rawBody).digest("hex");
 }
@@ -387,4 +415,4 @@ export async function processDuePaystackWebhooks(limit = 50): Promise<number> {
   return claimed.rowCount ?? 0;
 }
 
-export const __billingSettlementInternals = { webhookHash, topupTransferId, parseProviderEnvelope };
+export const __billingSettlementInternals = { webhookHash, topupTransferId, intelligenceAssessmentTransferId, parseProviderEnvelope };

@@ -928,6 +928,7 @@ describe("Canonical PostgreSQL Baseline", () => {
       "0009_consumer_dispute_integrity_and_delivery",
       "0010_institutional_commercial_biometric_governance",
       "0011_investigation_intelligence_controls",
+      "0012_investigation_intelligence_billing_events",
     ]);
   });
 

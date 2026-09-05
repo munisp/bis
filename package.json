@@ -22,6 +22,8 @@
     "consumer-disputes:provider-outbox": "tsx server/consumerDisputeProviderOutboxWorker.ts",
     "billing:paystack-reconcile": "tsx server/paystackWebhookWorker.ts",
     "intelligence:maintenance": "tsx server/investigationIntelligenceMaintenanceWorker.ts",
+    "intelligence:bill-assessments": "tsx server/intelligenceAssessmentBillingWorker.ts",
+    "test:intelligence-triggers": "node scripts/test-0011-intelligence-triggers.mjs",
     "staging:sse-kms-evidence": "node scripts/run-staging-sse-kms-evidence-acceptance.mjs",
     "permify:apply-schema": "node scripts/apply-permify-schema.mjs",
     "validate:onprem-s3-kms": "node scripts/validate-onprem-s3-kms-profile.mjs",

@@ -85,6 +85,13 @@
       "when": 1788591600000,
       "tag": "0011_investigation_intelligence_controls",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1788595200000,
+      "tag": "0012_investigation_intelligence_billing_events",
+      "breakpoints": true
     }
   ]
 }
