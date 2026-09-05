@@ -127,25 +127,25 @@ ALTER TABLE compliance_notice_delivery_outbox
   );
 
 CREATE OR REPLACE FUNCTION enforce_pii_envelope_tenant() RETURNS trigger LANGUAGE plpgsql AS $$
-DECLARE subject_tenant INTEGER; registry_tenant INTEGER; registry_version TEXT; registry_status TEXT; registry_provider TEXT;
+DECLARE subject_tenant INTEGER; registry_tenant INTEGER; registry_version TEXT; registry_status TEXT; registry_provider TEXT; registry_provider_version INTEGER;
 BEGIN
   IF NEW.subject_kind = 'candidate_profile' THEN SELECT "tenantId" INTO subject_tenant FROM candidate_profiles WHERE id = NEW.subject_id;
   ELSE SELECT "tenantId" INTO subject_tenant FROM criminal_records WHERE id = NEW.subject_id; END IF;
-  SELECT tenant_id, key_version, status, provider INTO registry_tenant, registry_version, registry_status, registry_provider FROM pii_encryption_key_registry WHERE id = NEW.key_registry_id;
+  SELECT tenant_id, key_version, status, provider, provider_key_version INTO registry_tenant, registry_version, registry_status, registry_provider, registry_provider_version FROM pii_encryption_key_registry WHERE id = NEW.key_registry_id;
   IF NOT FOUND OR subject_tenant IS DISTINCT FROM NEW.tenant_id OR registry_tenant IS DISTINCT FROM NEW.tenant_id THEN RAISE EXCEPTION 'PII envelope subject and key registry must belong to the same tenant'; END IF;
-  IF NEW.key_version IS DISTINCT FROM registry_version OR NEW.crypto_provider IS DISTINCT FROM registry_provider THEN RAISE EXCEPTION 'PII envelope version and provider must match registered tenant key'; END IF;
+  IF NEW.key_version IS DISTINCT FROM registry_version OR NEW.crypto_provider IS DISTINCT FROM registry_provider OR (NEW.crypto_provider = 'vault_transit' AND NEW.provider_key_version IS DISTINCT FROM registry_provider_version) THEN RAISE EXCEPTION 'PII envelope version, provider, and provider key version must match registered tenant key'; END IF;
   IF TG_OP = 'INSERT' AND registry_status <> 'active' THEN RAISE EXCEPTION 'new PII envelopes require an active tenant encryption key'; END IF;
   RETURN NEW;
 END; $$;
 
 CREATE OR REPLACE FUNCTION enforce_pii_blind_index_tenant() RETURNS trigger LANGUAGE plpgsql AS $$
-DECLARE subject_tenant INTEGER; registry_tenant INTEGER; registry_version TEXT; registry_status TEXT; registry_provider TEXT;
+DECLARE subject_tenant INTEGER; registry_tenant INTEGER; registry_version TEXT; registry_status TEXT; registry_provider TEXT; registry_provider_version INTEGER;
 BEGIN
   IF NEW.subject_kind = 'candidate_profile' THEN SELECT "tenantId" INTO subject_tenant FROM candidate_profiles WHERE id = NEW.subject_id;
   ELSE SELECT "tenantId" INTO subject_tenant FROM criminal_records WHERE id = NEW.subject_id; END IF;
-  SELECT tenant_id, key_version, status, provider INTO registry_tenant, registry_version, registry_status, registry_provider FROM pii_blind_index_key_registry WHERE id = NEW.key_registry_id;
+  SELECT tenant_id, key_version, status, provider, provider_key_version INTO registry_tenant, registry_version, registry_status, registry_provider, registry_provider_version FROM pii_blind_index_key_registry WHERE id = NEW.key_registry_id;
   IF NOT FOUND OR subject_tenant IS DISTINCT FROM NEW.tenant_id OR registry_tenant IS DISTINCT FROM NEW.tenant_id THEN RAISE EXCEPTION 'PII blind-index subject and key registry must belong to the same tenant'; END IF;
-  IF NEW.key_version IS DISTINCT FROM registry_version OR NEW.crypto_provider IS DISTINCT FROM registry_provider THEN RAISE EXCEPTION 'PII blind-index version and provider must match registered tenant key'; END IF;
+  IF NEW.key_version IS DISTINCT FROM registry_version OR NEW.crypto_provider IS DISTINCT FROM registry_provider OR (NEW.crypto_provider = 'vault_transit' AND NEW.provider_key_version IS DISTINCT FROM registry_provider_version) THEN RAISE EXCEPTION 'PII blind-index version, provider, and provider key version must match registered tenant key'; END IF;
   IF TG_OP = 'INSERT' AND registry_status <> 'active' THEN RAISE EXCEPTION 'new PII blind indexes require an active tenant blind-index key'; END IF;
   RETURN NEW;
 END; $$;
