@@ -26,15 +26,13 @@ async function run(): Promise<void> {
     const result = await runPiiRotationWorker(rotationRef);
     if (result.leased !== 1 || result.dryRuns !== 1 || result.rotated !== 0 || result.failed !== 0) throw new Error("PII rotation dry-run result violated no-write invariants.");
     const after = await pool.query<{ state: string; dry_run: boolean; active_envelopes: string; planned: string; rotated: string; failed: string }>(
-      `SELECT j.state,j.dry_run,COUNT(e.id)::text AS active_envelopes,
-              COUNT(i.id) FILTER (WHERE i.state='planned')::text AS planned,
-              COUNT(i.id) FILTER (WHERE i.state='rotated')::text AS rotated,
-              COUNT(i.id) FILTER (WHERE i.state='failed')::text AS failed
+      `SELECT j.state,j.dry_run,
+              (SELECT COUNT(*)::text FROM pii_envelope_records e WHERE e.tenant_id=j.tenant_id AND e.retired_at IS NULL) AS active_envelopes,
+              (SELECT COUNT(*)::text FROM pii_rotation_job_items i WHERE i.rotation_job_id=j.id AND i.state='planned') AS planned,
+              (SELECT COUNT(*)::text FROM pii_rotation_job_items i WHERE i.rotation_job_id=j.id AND i.state='rotated') AS rotated,
+              (SELECT COUNT(*)::text FROM pii_rotation_job_items i WHERE i.rotation_job_id=j.id AND i.state='failed') AS failed
          FROM pii_rotation_jobs j
-         LEFT JOIN pii_envelope_records e ON e.tenant_id=j.tenant_id AND e.retired_at IS NULL
-         LEFT JOIN pii_rotation_job_items i ON i.rotation_job_id=j.id
-        WHERE j.rotation_ref=$1
-        GROUP BY j.state,j.dry_run`,
+        WHERE j.rotation_ref=$1`,
       [rotationRef],
     );
     const evidence = after.rows[0];
