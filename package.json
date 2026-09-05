@@ -21,6 +21,7 @@
     "db:seed-extended": "tsx server/seed-extended.ts",
     "consumer-disputes:deadlines": "tsx server/consumerDisputeDeadlineWorker.ts",
     "consumer-disputes:provider-outbox": "tsx server/consumerDisputeProviderOutboxWorker.ts",
+    "compliance:notices:deliver": "tsx server/complianceNoticeDeliveryWorker.ts",
     "billing:paystack-reconcile": "tsx server/paystackWebhookWorker.ts",
     "intelligence:maintenance": "tsx server/investigationIntelligenceMaintenanceWorker.ts",
     "intelligence:bill-assessments": "tsx server/intelligenceAssessmentBillingWorker.ts",

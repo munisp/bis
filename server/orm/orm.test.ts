@@ -931,6 +931,7 @@ describe("Canonical PostgreSQL Baseline", () => {
       "0012_investigation_intelligence_billing_events",
       "0013_intelligence_billing_reconciliation",
       "0014_compliance_adverse_action_and_pii_encryption",
+      "0015_compliance_workflow_hardening",
     ]);
   });
 

@@ -36,6 +36,7 @@ export BIS_ARCHIVE_S3_KMS_KEY_ID="alias/bis-archive-test"
 cd "$ROOT"
 run postgres_connection node scripts/assert-postgres-connection.mjs
 run postgres_migration pnpm db:migrate
+run compliance_workflow_integrity node scripts/test-0015-compliance-triggers.mjs
 run node_tests pnpm test
 run typescript pnpm check
 run pwa_build pnpm build

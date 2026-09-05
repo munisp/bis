@@ -34,6 +34,10 @@ async function main() {
   if (!schema.includes("permission supervise_consumer_disputes = admin or consumer_dispute_supervisor")) {
     throw new Error("schema file does not contain the reviewed supervisor-only consumer-dispute permission");
   }
+  if (!schema.includes("permission manage_adverse_actions = admin or adverse_action_supervisor or adverse_action_adjudicator")
+    || !schema.includes("permission supervise_adverse_actions = admin or adverse_action_supervisor")) {
+    throw new Error("schema file does not contain the reviewed tenant-scoped adverse-action permissions");
+  }
 
   const response = await fetch(new URL(`/v1/tenants/${encodeURIComponent(tenantId)}/schemas/write`, baseUrl), {
     method: "POST",

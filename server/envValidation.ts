@@ -293,6 +293,51 @@ const ENV_SPECS: EnvSpec[] = [
     defaultValue: "redis://redis:6379",
     description: "Redis connection URL for session store, rate limiting, and cache",
   },
+  // ── Compliance / PII envelope encryption ──────────────────────────────────
+  {
+    key: "BIS_COMPLIANCE_ADVERSE_ACTION_ENABLED",
+    required: false,
+    secret: false,
+    defaultValue: "false",
+    description: "Set to 'true' only after counsel approval and compliance delivery readiness have been recorded",
+  },
+  {
+    key: "BIS_PII_ACTIVE_KEY_VERSION",
+    required: false,
+    secret: false,
+    description: "Active tenant envelope-encryption key version",
+  },
+  {
+    key: "BIS_PII_KEYRING",
+    required: false,
+    secret: true,
+    description: "Injected AES-256-GCM envelope keyring; never place key material in source control",
+  },
+  {
+    key: "BIS_PII_BLIND_INDEX_ACTIVE_KEY_VERSION",
+    required: false,
+    secret: false,
+    description: "Active tenant HMAC blind-index key version",
+  },
+  {
+    key: "BIS_PII_BLIND_INDEX_KEYRING",
+    required: false,
+    secret: true,
+    description: "Injected HMAC-SHA-256 blind-index keyring; never place key material in source control",
+  },
+  {
+    key: "BIS_PII_KEY_EXPIRIES_JSON",
+    required: false,
+    secret: false,
+    description: "JSON future-expiry map for every configured PII encryption and blind-index key version",
+  },
+  {
+    key: "BIS_PII_ENFORCE_KEY_EXPIRY",
+    required: false,
+    secret: false,
+    defaultValue: "true",
+    description: "Set to 'true' to reject expired or expiry-less PII keys",
+  },
   // ── SMTP / Email ──────────────────────────────────────────────────────────
   {
     key: "SMTP_HOST",
@@ -391,6 +436,26 @@ export function validateEnv(): void {
       ? "BUILT_IN_FORGE_API_KEY fallback must be at least 20 characters in production"
       : "BIS_SESSION_SIGNING_SECRET (or JWT_SECRET fallback) must be at least 32 characters in production";
     errors.push(`WEAK SESSION SIGNING SECRET: ${requirement}`);
+  }
+
+  if (isProduction && process.env.BIS_COMPLIANCE_ADVERSE_ACTION_ENABLED === "true") {
+    const requiredComplianceSettings = [
+      "BIS_PII_ACTIVE_KEY_VERSION",
+      "BIS_PII_KEYRING",
+      "BIS_PII_BLIND_INDEX_ACTIVE_KEY_VERSION",
+      "BIS_PII_BLIND_INDEX_KEYRING",
+      "BIS_PII_KEY_EXPIRIES_JSON",
+      "AUDIT_HMAC_SECRET",
+      "PERMIFY_URL",
+      "PERMIFY_TENANT_ID",
+      "PERMIFY_API_KEY",
+    ];
+    for (const key of requiredComplianceSettings) {
+      if (!process.env[key]?.trim()) errors.push(`MISSING COMPLIANCE ACTIVATION SETTING: ${key}`);
+    }
+    if (process.env.BIS_PII_ENFORCE_KEY_EXPIRY !== "true") {
+      errors.push("INSECURE COMPLIANCE ACTIVATION: BIS_PII_ENFORCE_KEY_EXPIRY must be true");
+    }
   }
 
   // Log summary

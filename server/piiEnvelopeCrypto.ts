@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { TRPCError } from "@trpc/server";
 import { ENV } from "./_core/env";
 
@@ -56,7 +56,7 @@ export function encryptPiiEnvelope(keyring: PiiEnvelopeKeyring, aad: string, pla
   const nonce = randomBytes(NONCE_BYTES); const cipher = createCipheriv(ALGORITHM, keyring.keys.get(keyring.activeVersion)!, nonce);
   cipher.setAAD(Buffer.from(aad)); const encoded = Buffer.from(JSON.stringify(plaintext));
   const ciphertext = Buffer.concat([cipher.update(encoded), cipher.final(), cipher.getAuthTag()]);
-  return { ciphertext, nonce, keyVersion: keyring.activeVersion, plaintextSha256: createHmac("sha256", keyring.keys.get(keyring.activeVersion)!).update(encoded).digest("hex") };
+  return { ciphertext, nonce, keyVersion: keyring.activeVersion, plaintextSha256: createHash("sha256").update(encoded).digest("hex") };
 }
 export function decryptPiiEnvelope(keyring: PiiEnvelopeKeyring, aad: string, encrypted: { ciphertext: Buffer; nonce: Buffer; keyVersion: string }): Record<string, unknown> {
   if (encrypted.nonce.length !== NONCE_BYTES || encrypted.ciphertext.length <= AUTH_TAG_BYTES) unavailable("PII envelope metadata is invalid.");

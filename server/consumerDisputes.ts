@@ -10,6 +10,7 @@ import { ENV } from "./_core/env";
 import { evidenceStorage, s3ChecksumMatchesSha256Hex, s3ChecksumSha256FromHex } from "./fieldEvidence";
 import { consumerDisputeOutboxAad, encryptConsumerDisputeOutboxPayload, loadConsumerDisputeOutboxKeyring } from "./consumerDisputeOutboxCrypto";
 import { permifyCheck } from "./permify";
+import { pauseAdverseActionsForOpenDispute } from "./complianceWorkflow";
 
 const FCRA_REINVESTIGATION_DAYS = 30;
 const CONSERVATIVE_NOTICE_DAYS = 5;
@@ -393,6 +394,12 @@ export const consumerDisputesRouter = router({
         ],
       );
       const caseId = caseInsert.rows[0]!.id;
+      await pauseAdverseActionsForOpenDispute(client, {
+        tenantId,
+        candidateId: Number(subject.candidate_id),
+        disputeCaseRef: caseRef,
+        actorUserId: ctx.user.id,
+      });
       for (const item of input.items) {
         const itemRef = makeRef("BIS-DI");
         await client.query(

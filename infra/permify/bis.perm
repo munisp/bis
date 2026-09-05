@@ -5,9 +5,14 @@ entity platform {
   relation consumer_dispute_supervisor @user
   relation consumer_dispute_caseworker @user
   relation consumer_dispute_auditor @user
+  relation adverse_action_adjudicator @user
+  relation adverse_action_supervisor @user
+  relation adverse_action_auditor @user
 
   permission manage_consumer_disputes = admin or consumer_dispute_supervisor or consumer_dispute_caseworker
   permission supervise_consumer_disputes = admin or consumer_dispute_supervisor
+  permission manage_adverse_actions = admin or adverse_action_supervisor or adverse_action_adjudicator
+  permission supervise_adverse_actions = admin or adverse_action_supervisor
 }
 
 entity consumer_dispute_case {

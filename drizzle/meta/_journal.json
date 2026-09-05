@@ -106,6 +106,13 @@
       "when": 1788602400000,
       "tag": "0014_compliance_adverse_action_and_pii_encryption",
       "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1788606000000,
+      "tag": "0015_compliance_workflow_hardening",
+      "breakpoints": true
     }
   ]
 }

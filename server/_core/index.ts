@@ -648,6 +648,122 @@ async function startServer() {
     }
   });
 
+  // Compliance/adverse-action adapters delegate to the same tenant-scoped tRPC procedures.
+  // They expose workflow references only; no template plaintext, provider payload, or PII is returned.
+  const complianceCaseRef = (value: unknown): string | null => {
+    const candidate = Array.isArray(value) ? value[0] : value;
+    return typeof candidate === "string" && /^BIS-AA-[A-Z0-9]{18}$/.test(candidate) ? candidate : null;
+  };
+
+  app.post("/api/compliance/notice-templates", async (req: Request, res: Response) => {
+    try {
+      const result = await appRouter.createCaller(await createContextFromRequest(req, res)).complianceWorkflow.createNoticeTemplate(req.body);
+      res.status(201).json(result);
+    } catch (error) {
+      respondConsumerAdapterError(req, res, error, "compliance_notice_template_create");
+    }
+  });
+
+  app.post("/api/compliance/notice-templates/:templateId/supersede", async (req: Request, res: Response) => {
+    const templateId = Array.isArray(req.params.templateId) ? req.params.templateId[0] : req.params.templateId;
+    if (typeof templateId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(templateId)) {
+      res.status(400).json({ error: "A valid notice template identifier is required", code: "BAD_REQUEST" });
+      return;
+    }
+    try {
+      const result = await appRouter.createCaller(await createContextFromRequest(req, res)).complianceWorkflow.supersedeNoticeTemplate({ ...req.body, templateId });
+      res.status(200).json(result);
+    } catch (error) {
+      respondConsumerAdapterError(req, res, error, "compliance_notice_template_supersede");
+    }
+  });
+
+  app.post("/api/compliance/adverse-actions", async (req: Request, res: Response) => {
+    try {
+      const result = await appRouter.createCaller(await createContextFromRequest(req, res)).complianceWorkflow.initiatePreAdverse(req.body);
+      res.status(201).json(result);
+    } catch (error) {
+      respondConsumerAdapterError(req, res, error, "compliance_adverse_action_initiate");
+    }
+  });
+
+  app.get("/api/compliance/adverse-actions", async (req: Request, res: Response) => {
+    const status = typeof req.query.status === "string" ? req.query.status : undefined;
+    try {
+      const result = await appRouter.createCaller(await createContextFromRequest(req, res)).complianceWorkflow.list(status ? { status } : undefined);
+      res.status(200).json(result);
+    } catch (error) {
+      respondConsumerAdapterError(req, res, error, "compliance_adverse_action_list");
+    }
+  });
+
+  app.post("/api/compliance/adverse-actions/:caseRef/deliveries/:deliveryId", async (req: Request, res: Response) => {
+    const caseRef = complianceCaseRef(req.params.caseRef);
+    const deliveryId = Array.isArray(req.params.deliveryId) ? req.params.deliveryId[0] : req.params.deliveryId;
+    if (!caseRef || typeof deliveryId !== "string") { res.status(400).json({ error: "A valid adverse-action case and delivery identifier are required", code: "BAD_REQUEST" }); return; }
+    try {
+      const result = await appRouter.createCaller(await createContextFromRequest(req, res)).complianceWorkflow.recordDelivery({ ...req.body, caseRef, deliveryId });
+      res.status(200).json(result);
+    } catch (error) {
+      respondConsumerAdapterError(req, res, error, "compliance_adverse_action_delivery_record");
+    }
+  });
+
+  app.post("/api/compliance/adverse-actions/:caseRef/pause-dispute", async (req: Request, res: Response) => {
+    const caseRef = complianceCaseRef(req.params.caseRef);
+    if (!caseRef) { res.status(400).json({ error: "A valid adverse-action case reference is required", code: "BAD_REQUEST" }); return; }
+    try {
+      const result = await appRouter.createCaller(await createContextFromRequest(req, res)).complianceWorkflow.pauseForDispute({ ...req.body, caseRef });
+      res.status(200).json(result);
+    } catch (error) {
+      respondConsumerAdapterError(req, res, error, "compliance_adverse_action_pause_dispute");
+    }
+  });
+
+  app.post("/api/compliance/adverse-actions/:caseRef/resume", async (req: Request, res: Response) => {
+    const caseRef = complianceCaseRef(req.params.caseRef);
+    if (!caseRef) { res.status(400).json({ error: "A valid adverse-action case reference is required", code: "BAD_REQUEST" }); return; }
+    try {
+      const result = await appRouter.createCaller(await createContextFromRequest(req, res)).complianceWorkflow.resumeAfterDispute({ ...req.body, caseRef });
+      res.status(200).json(result);
+    } catch (error) {
+      respondConsumerAdapterError(req, res, error, "compliance_adverse_action_resume");
+    }
+  });
+
+  app.post("/api/compliance/adverse-actions/:caseRef/final-adverse", async (req: Request, res: Response) => {
+    const caseRef = complianceCaseRef(req.params.caseRef);
+    if (!caseRef) { res.status(400).json({ error: "A valid adverse-action case reference is required", code: "BAD_REQUEST" }); return; }
+    try {
+      const result = await appRouter.createCaller(await createContextFromRequest(req, res)).complianceWorkflow.queueFinalAdverse({ ...req.body, caseRef });
+      res.status(202).json(result);
+    } catch (error) {
+      respondConsumerAdapterError(req, res, error, "compliance_adverse_action_final_queue");
+    }
+  });
+
+  app.post("/api/compliance/adverse-actions/:caseRef/manual-delivery", async (req: Request, res: Response) => {
+    const caseRef = complianceCaseRef(req.params.caseRef);
+    if (!caseRef) { res.status(400).json({ error: "A valid adverse-action case reference is required", code: "BAD_REQUEST" }); return; }
+    try {
+      const result = await appRouter.createCaller(await createContextFromRequest(req, res)).complianceWorkflow.resolveManualDelivery({ ...req.body, caseRef });
+      res.status(202).json(result);
+    } catch (error) {
+      respondConsumerAdapterError(req, res, error, "compliance_adverse_action_manual_delivery");
+    }
+  });
+
+  app.post("/api/compliance/adverse-actions/:caseRef/cancel", async (req: Request, res: Response) => {
+    const caseRef = complianceCaseRef(req.params.caseRef);
+    if (!caseRef) { res.status(400).json({ error: "A valid adverse-action case reference is required", code: "BAD_REQUEST" }); return; }
+    try {
+      const result = await appRouter.createCaller(await createContextFromRequest(req, res)).complianceWorkflow.cancel({ ...req.body, caseRef });
+      res.status(200).json(result);
+    } catch (error) {
+      respondConsumerAdapterError(req, res, error, "compliance_adverse_action_cancel");
+    }
+  });
+
   // Mobile evidence adapter delegates to the same protected tRPC procedures.
   // It authorizes direct-to-object-store uploads; evidence bytes do not transit this server.
   app.post("/api/evidence/initiate", async (req: Request, res: Response) => {
