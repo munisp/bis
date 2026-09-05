@@ -16,9 +16,9 @@ entity platform {
   permission supervise_consumer_disputes = admin or consumer_dispute_supervisor
   permission manage_adverse_actions = admin or adverse_action_supervisor or adverse_action_adjudicator
   permission supervise_adverse_actions = admin or adverse_action_supervisor
-  permission manage_pii_key_custody = admin or pii_key_custodian or pii_incident_commander
-  permission supervise_pii_key_custody = admin or pii_incident_commander
-  permission view_pii_forensics = admin or pii_key_custodian or pii_incident_commander or pii_forensic_auditor
+  permission manage_pii_key_custody = pii_key_custodian or pii_incident_commander
+  permission supervise_pii_key_custody = pii_incident_commander
+  permission view_pii_forensics = pii_key_custodian or pii_incident_commander or pii_forensic_auditor
 }
 
 entity consumer_dispute_case {

@@ -38,10 +38,13 @@ async function main() {
     || !schema.includes("permission supervise_adverse_actions = admin or adverse_action_supervisor")) {
     throw new Error("schema file does not contain the reviewed tenant-scoped adverse-action permissions");
   }
-  if (!schema.includes("permission manage_pii_key_custody = admin or pii_key_custodian or pii_incident_commander")
-    || !schema.includes("permission supervise_pii_key_custody = admin or pii_incident_commander")
-    || !schema.includes("permission view_pii_forensics = admin or pii_key_custodian or pii_incident_commander or pii_forensic_auditor")) {
-    throw new Error("schema file does not contain the reviewed tenant-scoped PII key-custody and forensic permissions");
+  if (!schema.includes("permission manage_pii_key_custody = pii_key_custodian or pii_incident_commander")
+    || !schema.includes("permission supervise_pii_key_custody = pii_incident_commander")
+    || !schema.includes("permission view_pii_forensics = pii_key_custodian or pii_incident_commander or pii_forensic_auditor")
+    || schema.includes("permission manage_pii_key_custody = admin")
+    || schema.includes("permission supervise_pii_key_custody = admin")
+    || schema.includes("permission view_pii_forensics = admin")) {
+    throw new Error("schema file does not contain the reviewed dedicated PII key-custody and forensic permissions");
   }
 
   const response = await fetch(new URL(`/v1/tenants/${encodeURIComponent(tenantId)}/schemas/write`, baseUrl), {

@@ -31,12 +31,12 @@ function custodyProcedure(permission: "manage_pii_key_custody" | "supervise_pii_
     return next({ ctx });
   });
 }
-const custodianProcedure = custodyProcedure("manage_pii_key_custody", ["admin", "supervisor"]);
-const commanderProcedure = custodyProcedure("supervise_pii_key_custody", ["admin", "supervisor"]);
+const custodianProcedure = custodyProcedure("manage_pii_key_custody", ["supervisor"]);
+const commanderProcedure = custodyProcedure("supervise_pii_key_custody", ["supervisor"]);
 
 async function registryForUpdate(client: import("pg").PoolClient, tenantId: number, kind: "encryption" | "blind_index", registryId: number) {
   const table = kind === "encryption" ? "pii_encryption_key_registry" : "pii_blind_index_key_registry";
-  const row = await client.query<{ id: number; key_version: string; external_key_ref: string; provider: string; provider_key_name: string | null; provider_key_version: number | null; status: string }>(`SELECT id,key_version,external_key_ref,provider,provider_key_name,provider_key_version,status FROM ${table} WHERE id=$1 AND tenant_id=$2 FOR UPDATE`, [registryId, tenantId]);
+  const row = await client.query<{ id: number; key_version: string; external_key_ref: string; provider: string; provider_key_name: string | null; provider_key_version: number | null; status: string; created_by: number }>(`SELECT id,key_version,external_key_ref,provider,provider_key_name,provider_key_version,status,created_by FROM ${table} WHERE id=$1 AND tenant_id=$2 FOR UPDATE`, [registryId, tenantId]);
   if (!row.rows[0]) throw new TRPCError({ code: "NOT_FOUND", message: "Tenant key registry not found." });
   return { table, row: row.rows[0] };
 }
@@ -69,6 +69,7 @@ export const piiKeyCustodyRouter = router({
       await client.query("BEGIN");
       const { table, row } = await registryForUpdate(client, tenantId, input.kind, input.registryId);
       if (row.status !== "staged" || row.provider !== "vault_transit" || !row.provider_key_version) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Only a staged Vault Transit registry can be activated." });
+      if (row.created_by === ctx.user.id) throw new TRPCError({ code: "FORBIDDEN", message: "A separate authorized incident commander must activate a staged Vault Transit key." });
       const vault = loadVaultTransitClient();
       await assertTransitKeyReference(vault, { keyVersion: row.key_version, externalKeyRef: row.external_key_ref, providerKeyVersion: row.provider_key_version }, input.kind);
       await client.query(`UPDATE ${table} SET status='retiring',retires_at=COALESCE(retires_at,NOW()+INTERVAL '90 days') WHERE tenant_id=$1 AND status='active'`, [tenantId]);
