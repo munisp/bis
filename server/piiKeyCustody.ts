@@ -42,7 +42,7 @@ async function registryForUpdate(client: import("pg").PoolClient, tenantId: numb
 }
 
 export const piiKeyCustodyRouter = router({
-  registerStagedVaultKey: commanderProcedure.input(z.object({ kind: registryKindSchema, keyVersion: z.string().trim().regex(/^[A-Za-z0-9._-]{1,64}$/), externalKeyRef: z.string().trim().min(20).max(512) })).mutation(async ({ ctx, input }) => {
+  registerStagedVaultKey: custodianProcedure.input(z.object({ kind: registryKindSchema, keyVersion: z.string().trim().regex(/^[A-Za-z0-9._-]{1,64}$/), externalKeyRef: z.string().trim().min(20).max(512) })).mutation(async ({ ctx, input }) => {
     const tenantId = tenant(ctx); const db = await pool(); const client = await db.connect();
     try {
       await client.query("BEGIN");
