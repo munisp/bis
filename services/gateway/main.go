@@ -293,9 +293,10 @@ func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 func loggingMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		log.Printf("[%s] %s %s", r.Method, r.URL.Path, r.RemoteAddr)
+		traceContext := traceContextFromRequest(r)
+		log.Printf("method=%s path=%s remote=%s request_id=%s trace_id=%s span_id=%s event=request_started", r.Method, r.URL.Path, r.RemoteAddr, traceContext.RequestID, traceContext.TraceID, traceContext.SpanID)
 		next(w, r)
-		log.Printf("[%s] %s completed in %s", r.Method, r.URL.Path, time.Since(start))
+		log.Printf("method=%s path=%s request_id=%s trace_id=%s span_id=%s duration=%s event=request_completed", r.Method, r.URL.Path, traceContext.RequestID, traceContext.TraceID, traceContext.SpanID, time.Since(start))
 	}
 }
 
@@ -1370,7 +1371,7 @@ func newRouter() http.Handler {
 	mux.HandleFunc("/dapr/subscribe/payment-events", protected(daprpkg.HandlePaymentEvent))
 	// Insider Threat — Dapr subscription handler
 	mux.HandleFunc("/dapr/subscribe/insider-events", protected(insiderpkg.HandleInsiderEvent))
-	return mux
+	return traceCorrelationMiddleware(mux)
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────

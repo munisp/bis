@@ -21,6 +21,7 @@ import { serveStatic, setupVite } from "./vite";
 import { notifyOwner } from "./notification";
 import { recordPaystackWebhook } from "../billingSettlement";
 import { registerIntelligenceBillingMetrics } from "../intelligenceBillingMetrics";
+import { traceCorrelationMiddleware, traceLogFields } from "../traceContext";
 import crypto from "crypto";
 import { createOpenClawRouter } from "../openclawEndpoints";
 import swaggerUi from "swagger-ui-express";
@@ -42,7 +43,7 @@ import { startWebhookRetryScheduler } from "../webhookRetry";
 
 // ── Structured logger ─────────────────────────────────────────────────────────
 function log(level: "info" | "warn" | "error", msg: string, meta?: Record<string, unknown>) {
-  const entry = JSON.stringify({ ts: new Date().toISOString(), level, msg, ...meta });
+  const entry = JSON.stringify({ ts: new Date().toISOString(), level, msg, ...traceLogFields(), ...meta });
   if (level === "error") process.stderr.write(entry + "\n");
   else process.stdout.write(entry + "\n");
 }
@@ -72,6 +73,7 @@ async function startServer() {
 
   const app = express();
   const server = createServer(app);
+  app.use(traceCorrelationMiddleware);
   // Trust the first proxy hop (Manus reverse proxy) for correct IP detection
   app.set("trust proxy", 1);
 

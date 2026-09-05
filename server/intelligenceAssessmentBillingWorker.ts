@@ -2,6 +2,7 @@ import "dotenv/config";
 import { randomUUID } from "node:crypto";
 import { getPgPool } from "./db";
 import { debitTenantForIntelligenceAssessment, intelligenceAssessmentTransferId } from "./billingSettlement";
+import { runWorkerTrace, traceLogFields } from "./traceContext";
 
 const MAX_ATTEMPTS = 10;
 const LEASE_TIMEOUT_SECONDS = 300;
@@ -164,9 +165,9 @@ export async function processDueIntelligenceAssessmentBillingEvents(limit = 50):
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  processDueIntelligenceAssessmentBillingEvents()
-    .then((processed) => process.stdout.write(`${JSON.stringify({ event: "intelligence_assessment_billing_complete", processed })}\n`))
-    .catch((error) => { process.stderr.write(`${JSON.stringify({ event: "intelligence_assessment_billing_failed", error: error instanceof Error ? error.message : "unknown" })}\n`); process.exitCode = 1; });
+  runWorkerTrace("billing-worker", "intelligence-assessment-settlement", processDueIntelligenceAssessmentBillingEvents)
+    .then((processed) => process.stdout.write(`${JSON.stringify({ event: "intelligence_assessment_billing_complete", processed, ...traceLogFields() })}\n`))
+    .catch((error) => { process.stderr.write(`${JSON.stringify({ event: "intelligence_assessment_billing_failed", error: error instanceof Error ? error.message : "unknown", ...traceLogFields() })}\n`); process.exitCode = 1; });
 }
 
 export const __intelligenceAssessmentBillingInternals = { amount, MAX_ATTEMPTS, LEASE_TIMEOUT_SECONDS, intelligenceAssessmentTransferId };
