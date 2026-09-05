@@ -5,6 +5,7 @@ import { appendPiiForensicAuditEvent } from "./piiForensicAudit";
 import { tenantBlindIndexRegistryById, tenantEncryptionRegistryById } from "./piiKeyRegistry";
 import { loadVaultTransitClient } from "./vaultTransit";
 import { beginTenantTransaction } from "./tenantRls";
+import { piiRotationDispatchQueueAgeSeconds, piiRotationDispatchTotal, piiRotationTenantScopeMismatchTotal, piiRotationWorkerFailuresTotal, recordRlsPolicyDenial } from "./piiRlsMetrics";
 
 const LEASE_SECONDS = 300;
 const WORKER_VERSION = "pii-rotation-v1";
@@ -56,10 +57,18 @@ async function leaseJob(rotationRef?: string): Promise<RotationJob | null> {
   let dispatch: { rotation_job_id: string; rotation_ref: string; tenant_id: number } | null = null;
   try {
     await dispatchClient.query("BEGIN");
-    await dispatchClient.query(`UPDATE pii_rotation_dispatch_queue SET state='queued',leased_at=NULL,updated_at=NOW() WHERE state='leased' AND leased_at < NOW()-make_interval(secs=>$1)`, [LEASE_SECONDS]);
+    const recovered = await dispatchClient.query(`UPDATE pii_rotation_dispatch_queue SET state='queued',leased_at=NULL,updated_at=NOW() WHERE state='leased' AND leased_at < NOW()-make_interval(secs=>$1)`, [LEASE_SECONDS]);
+    if (recovered.rowCount) piiRotationDispatchTotal.inc({ outcome: "lease_recovered", component: "pii_rotation_worker" }, recovered.rowCount);
+    const age = await dispatchClient.query<{ age_seconds: string | null }>(`SELECT EXTRACT(EPOCH FROM NOW()-MIN(created_at))::text AS age_seconds FROM pii_rotation_dispatch_queue WHERE state='queued'`);
+    piiRotationDispatchQueueAgeSeconds.set({ component: "pii_rotation_worker" }, Number(age.rows[0]?.age_seconds ?? 0));
     const selected = await dispatchClient.query<{ rotation_job_id: string; rotation_ref: string; tenant_id: number }>(`SELECT rotation_job_id,rotation_ref,tenant_id FROM pii_rotation_dispatch_queue WHERE state='queued' AND ($1::text IS NULL OR rotation_ref=$1) ORDER BY created_at ASC FOR UPDATE SKIP LOCKED LIMIT 1`, [rotationRef ?? null]);
     dispatch = selected.rows[0] ?? null;
-    if (dispatch) await dispatchClient.query(`UPDATE pii_rotation_dispatch_queue SET state='leased',leased_at=NOW(),attempt_count=attempt_count+1,updated_at=NOW() WHERE rotation_job_id=$1 AND state='queued'`, [dispatch.rotation_job_id]);
+    if (dispatch) {
+      await dispatchClient.query(`UPDATE pii_rotation_dispatch_queue SET state='leased',leased_at=NOW(),attempt_count=attempt_count+1,updated_at=NOW() WHERE rotation_job_id=$1 AND state='queued'`, [dispatch.rotation_job_id]);
+      piiRotationDispatchTotal.inc({ outcome: "leased", component: "pii_rotation_worker" });
+    } else {
+      piiRotationDispatchTotal.inc({ outcome: "empty", component: "pii_rotation_worker" });
+    }
     await dispatchClient.query("COMMIT");
   } catch (error) { await dispatchClient.query("ROLLBACK").catch(() => undefined); throw error; } finally { dispatchClient.release(); }
   if (!dispatch) return null;
@@ -70,10 +79,12 @@ async function leaseJob(rotationRef?: string): Promise<RotationJob | null> {
     await tenantClient.query(`UPDATE pii_rotation_jobs SET state='queued',leased_at=NULL,updated_at=NOW(),last_error_code=COALESCE(last_error_code,'PII_ROTATION_LEASE_EXPIRED') WHERE id=$1 AND tenant_id=$2 AND state='leased' AND leased_at < NOW()-make_interval(secs=>$3)`, [dispatch.rotation_job_id, dispatch.tenant_id, LEASE_SECONDS]);
     const selected = await tenantClient.query<RotationJob>(`SELECT id,rotation_ref,tenant_id,source_encryption_key_registry_id,target_encryption_key_registry_id,source_blind_index_key_registry_id,target_blind_index_key_registry_id,compromise_incident_id,mode,dry_run,max_batch_size,requested_by FROM pii_rotation_jobs WHERE id=$1 AND rotation_ref=$2 AND tenant_id=$3 AND state='queued' FOR UPDATE`, [dispatch.rotation_job_id, dispatch.rotation_ref, dispatch.tenant_id]);
     const job = selected.rows[0] ?? null;
+    if (!job) piiRotationDispatchTotal.inc({ outcome: "tenant_job_missing", component: "pii_rotation_worker" });
     if (job) await tenantClient.query(`UPDATE pii_rotation_jobs SET state='leased',leased_at=NOW(),attempt_count=attempt_count+1,updated_at=NOW() WHERE id=$1`, [job.id]);
     await tenantClient.query("COMMIT");
     return job;
   } catch (error) {
+    recordRlsPolicyDenial("tenant_dispatch_handoff", "pii_rotation_worker", error);
     await tenantClient.query("ROLLBACK").catch(() => undefined);
     const restoreClient = await pool.connect();
     try { await restoreClient.query(`UPDATE pii_rotation_dispatch_queue SET state='queued',leased_at=NULL,updated_at=NOW() WHERE rotation_job_id=$1 AND state='leased'`, [dispatch.rotation_job_id]); }
@@ -100,7 +111,10 @@ async function materializeItems(client: import("pg").PoolClient, job: RotationJo
 async function sourceRegistry(client: import("pg").PoolClient, job: RotationJob): Promise<SourceRegistry> {
   const result = await client.query<SourceRegistry>(`SELECT id,tenant_id,key_version,external_key_ref,provider,provider_key_name,provider_key_version,status FROM pii_encryption_key_registry WHERE id=$1 FOR SHARE`, [job.source_encryption_key_registry_id]);
   const row = result.rows[0];
-  if (!row || row.tenant_id !== job.tenant_id || !["legacy_local_aes", "vault_transit"].includes(row.provider) || !["active", "retiring", "compromised"].includes(row.status)) fail("PII rotation source registry is invalid.");
+  if (!row || row.tenant_id !== job.tenant_id || !["legacy_local_aes", "vault_transit"].includes(row.provider) || !["active", "retiring", "compromised"].includes(row.status)) {
+    if (!row || row.tenant_id !== job.tenant_id) piiRotationTenantScopeMismatchTotal.inc({ component: "pii_rotation_worker" });
+    fail("PII rotation source registry is invalid.");
+  }
   return row;
 }
 
@@ -185,6 +199,7 @@ async function rotateOne(job: RotationJob, item: PlannedItem): Promise<"rotated"
 }
 
 async function markJobFailed(job: RotationJob, code: string): Promise<void> {
+  piiRotationWorkerFailuresTotal.inc({ reason_code: code, component: "pii_rotation_worker" });
   const pool = await poolOrThrow(); const client = await pool.connect();
   try { await beginTenantTransaction(client, job.tenant_id); await client.query(`UPDATE pii_rotation_jobs SET state='failed',failed_count=failed_count+1,last_error_code=$2,updated_at=NOW() WHERE id=$1 AND state='leased'`, [job.id, code]); await appendPiiForensicAuditEvent(client, { incidentId: job.compromise_incident_id, tenantId: job.tenant_id, rotationJobId: job.id, eventType: "rotation_failed", detail: { error_code: code, worker_version: WORKER_VERSION } }); await client.query("COMMIT"); }
   catch (error) { await client.query("ROLLBACK").catch(() => undefined); throw error; } finally { client.release(); }

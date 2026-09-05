@@ -1,4 +1,5 @@
 import type { PoolClient } from "pg";
+import { piiRlsPoolContextResidualTotal, recordTenantRlsContextSetup } from "./piiRlsMetrics";
 
 export type TenantScopedClient = PoolClient;
 
@@ -15,11 +16,18 @@ function assertTenantId(tenantId: number): void {
  */
 export async function setTenantRlsContext(client: TenantScopedClient, tenantId: number): Promise<void> {
   assertTenantId(tenantId);
-  await client.query("SELECT set_config('bis.tenant_id', $1, true)", [String(tenantId)]);
+  try {
+    await client.query("SELECT set_config('bis.tenant_id', $1, true)", [String(tenantId)]);
+  } catch (error) {
+    recordTenantRlsContextSetup("set_failed", "tenant_rls");
+    throw error;
+  }
   const verified = await client.query<{ tenant_id: string | null }>("SELECT current_setting('bis.tenant_id', true) AS tenant_id");
   if (verified.rows[0]?.tenant_id !== String(tenantId)) {
+    recordTenantRlsContextSetup("verify_failed", "tenant_rls");
     throw new Error("PostgreSQL RLS tenant context could not be verified.");
   }
+  recordTenantRlsContextSetup("success", "tenant_rls");
 }
 
 /**
@@ -28,9 +36,16 @@ export async function setTenantRlsContext(client: TenantScopedClient, tenantId: 
  * rollbackTenantTransaction before releasing the client.
  */
 async function clearSessionTenantRlsContext(client: TenantScopedClient): Promise<void> {
-  await client.query("RESET bis.tenant_id");
+  try {
+    await client.query("RESET bis.tenant_id");
+  } catch (error) {
+    recordTenantRlsContextSetup("reset_failed", "tenant_rls");
+    throw error;
+  }
   const verified = await client.query<{ tenant_id: string | null }>("SELECT current_setting('bis.tenant_id', true) AS tenant_id");
   if (verified.rows[0]?.tenant_id) {
+    piiRlsPoolContextResidualTotal.inc({ component: "tenant_rls" });
+    recordTenantRlsContextSetup("residual_detected", "tenant_rls");
     throw new Error("PostgreSQL pooled session retained an unexpected tenant context.");
   }
 }
