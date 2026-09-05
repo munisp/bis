@@ -2,6 +2,14 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { getPgPool } from "../server/db";
 import { runPiiRotationWorker } from "../server/piiRotationWorker";
+import {
+  piiForensicAppendTotal,
+  piiRlsPoolContextResidualTotal,
+  piiRlsTenantContextSetupTotal,
+  piiRotationDispatchTotal,
+  piiRotationTenantScopeMismatchTotal,
+  piiRotationWorkerFailuresTotal,
+} from "../server/piiRlsMetrics";
 
 const TENANT_COUNT = Number.parseInt(process.env.BIS_RLS_STRESS_TENANTS ?? "48", 10);
 const WORKER_CONCURRENCY = Number.parseInt(process.env.BIS_RLS_STRESS_WORKERS ?? "64", 10);
@@ -126,6 +134,15 @@ async function main(): Promise<void> {
   assert.equal(forensicEvents, TENANT_COUNT * 2);
     const checkedConnections = await verifyNoPooledSessionLeak(pool);
 
+    const metricSnapshot = {
+      tenantContextSetup: (await piiRlsTenantContextSetupTotal.get()).values,
+      pooledSessionResidual: (await piiRlsPoolContextResidualTotal.get()).values,
+      dispatch: (await piiRotationDispatchTotal.get()).values,
+      workerFailures: (await piiRotationWorkerFailuresTotal.get()).values,
+      tenantScopeMismatch: (await piiRotationTenantScopeMismatchTotal.get()).values,
+      forensicAppend: (await piiForensicAppendTotal.get()).values,
+    };
+
     process.stdout.write(`${JSON.stringify({
       status: "pass",
       synthetic: true,
@@ -141,6 +158,7 @@ async function main(): Promise<void> {
       forensicEvents,
       elapsedMs: Math.round(elapsedMs),
       jobsPerSecond: Number((TENANT_COUNT / (elapsedMs / 1000)).toFixed(2)),
+      metricSnapshot,
     })}\n`);
   } finally {
     await pool.end();
