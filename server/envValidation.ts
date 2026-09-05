@@ -302,41 +302,55 @@ const ENV_SPECS: EnvSpec[] = [
     description: "Set to 'true' only after counsel approval and compliance delivery readiness have been recorded",
   },
   {
-    key: "BIS_PII_ACTIVE_KEY_VERSION",
+    key: "BIS_PII_KEY_CUSTODY_ENABLED",
     required: false,
     secret: false,
-    description: "Active tenant envelope-encryption key version",
+    defaultValue: "false",
+    description: "Set to true only after security approval for Vault Transit key registration, compromise containment, and rotation operations",
   },
   {
-    key: "BIS_PII_KEYRING",
+    key: "BIS_PII_CRYPTO_PROVIDER",
+    required: false,
+    secret: false,
+    defaultValue: "disabled",
+    description: "Set to vault_transit only after tenant registries and Vault Transit policy have been provisioned",
+  },
+  {
+    key: "BIS_VAULT_TRANSIT_ADDR",
+    required: false,
+    secret: false,
+    description: "HTTPS address of the approved HashiCorp Vault Transit service",
+  },
+  {
+    key: "BIS_VAULT_TRANSIT_TOKEN",
     required: false,
     secret: true,
-    description: "Injected AES-256-GCM envelope keyring; never place key material in source control",
+    description: "Short-lived Vault workload token with only tenant Transit encrypt, decrypt, HMAC, and rewrap capabilities",
   },
   {
-    key: "BIS_PII_BLIND_INDEX_ACTIVE_KEY_VERSION",
+    key: "BIS_VAULT_TRANSIT_MOUNT",
     required: false,
     secret: false,
-    description: "Active tenant HMAC blind-index key version",
+    description: "Approved Vault Transit mount path",
   },
   {
-    key: "BIS_PII_BLIND_INDEX_KEYRING",
+    key: "BIS_VAULT_TRANSIT_NAMESPACE",
+    required: false,
+    secret: false,
+    description: "Optional Vault Enterprise namespace",
+  },
+  {
+    key: "BIS_VAULT_TRANSIT_TIMEOUT_MS",
+    required: false,
+    secret: false,
+    defaultValue: "5000",
+    description: "Fail-closed Vault Transit request timeout in milliseconds",
+  },
+  {
+    key: "BIS_PII_LEGACY_CUTOVER_KEYRING",
     required: false,
     secret: true,
-    description: "Injected HMAC-SHA-256 blind-index keyring; never place key material in source control",
-  },
-  {
-    key: "BIS_PII_KEY_EXPIRIES_JSON",
-    required: false,
-    secret: false,
-    description: "JSON future-expiry map for every configured PII encryption and blind-index key version",
-  },
-  {
-    key: "BIS_PII_ENFORCE_KEY_EXPIRY",
-    required: false,
-    secret: false,
-    defaultValue: "true",
-    description: "Set to 'true' to reject expired or expiry-less PII keys",
+    description: "Temporary one-time legacy keyring available only to an explicitly confirmed migration cutover worker",
   },
   // ── SMTP / Email ──────────────────────────────────────────────────────────
   {
@@ -438,13 +452,13 @@ export function validateEnv(): void {
     errors.push(`WEAK SESSION SIGNING SECRET: ${requirement}`);
   }
 
-  if (isProduction && process.env.BIS_COMPLIANCE_ADVERSE_ACTION_ENABLED === "true") {
+  const complianceOrKeyCustodyEnabled = process.env.BIS_COMPLIANCE_ADVERSE_ACTION_ENABLED === "true" || process.env.BIS_PII_KEY_CUSTODY_ENABLED === "true";
+  if (isProduction && complianceOrKeyCustodyEnabled) {
     const requiredComplianceSettings = [
-      "BIS_PII_ACTIVE_KEY_VERSION",
-      "BIS_PII_KEYRING",
-      "BIS_PII_BLIND_INDEX_ACTIVE_KEY_VERSION",
-      "BIS_PII_BLIND_INDEX_KEYRING",
-      "BIS_PII_KEY_EXPIRIES_JSON",
+      "BIS_PII_CRYPTO_PROVIDER",
+      "BIS_VAULT_TRANSIT_ADDR",
+      "BIS_VAULT_TRANSIT_TOKEN",
+      "BIS_VAULT_TRANSIT_MOUNT",
       "AUDIT_HMAC_SECRET",
       "PERMIFY_URL",
       "PERMIFY_TENANT_ID",
@@ -453,8 +467,14 @@ export function validateEnv(): void {
     for (const key of requiredComplianceSettings) {
       if (!process.env[key]?.trim()) errors.push(`MISSING COMPLIANCE ACTIVATION SETTING: ${key}`);
     }
-    if (process.env.BIS_PII_ENFORCE_KEY_EXPIRY !== "true") {
-      errors.push("INSECURE COMPLIANCE ACTIVATION: BIS_PII_ENFORCE_KEY_EXPIRY must be true");
+    if (process.env.BIS_PII_CRYPTO_PROVIDER !== "vault_transit") {
+      errors.push("INSECURE PII ACTIVATION: BIS_PII_CRYPTO_PROVIDER must be vault_transit");
+    }
+    if (process.env.BIS_PII_KEYRING || process.env.BIS_PII_BLIND_INDEX_KEYRING) {
+      errors.push("INSECURE PII ACTIVATION: local PII keyring variables must be absent when Vault Transit is enabled");
+    }
+    if (process.env.BIS_VAULT_TRANSIT_ADDR && !process.env.BIS_VAULT_TRANSIT_ADDR.startsWith("https://")) {
+      errors.push("INSECURE PII ACTIVATION: Vault Transit must use HTTPS");
     }
   }
 

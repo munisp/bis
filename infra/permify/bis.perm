@@ -8,11 +8,17 @@ entity platform {
   relation adverse_action_adjudicator @user
   relation adverse_action_supervisor @user
   relation adverse_action_auditor @user
+  relation pii_key_custodian @user
+  relation pii_incident_commander @user
+  relation pii_forensic_auditor @user
 
   permission manage_consumer_disputes = admin or consumer_dispute_supervisor or consumer_dispute_caseworker
   permission supervise_consumer_disputes = admin or consumer_dispute_supervisor
   permission manage_adverse_actions = admin or adverse_action_supervisor or adverse_action_adjudicator
   permission supervise_adverse_actions = admin or adverse_action_supervisor
+  permission manage_pii_key_custody = admin or pii_key_custodian or pii_incident_commander
+  permission supervise_pii_key_custody = admin or pii_incident_commander
+  permission view_pii_forensics = admin or pii_key_custodian or pii_incident_commander or pii_forensic_auditor
 }
 
 entity consumer_dispute_case {

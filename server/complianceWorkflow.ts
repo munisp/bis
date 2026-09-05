@@ -6,7 +6,8 @@ import { ENV } from "./_core/env";
 import { getPgPool } from "./db";
 import { protectedProcedure, router, writeProcedure } from "./_core/trpc";
 import { permifyCheck } from "./permify";
-import { encryptPiiEnvelope, loadPiiEnvelopeKeyring, piiAad } from "./piiEnvelopeCrypto";
+import { encryptPiiEnvelope, piiAad } from "./piiEnvelopeCrypto";
+import { activeTenantEncryptionRegistry } from "./piiKeyRegistry";
 
 const CASE_REF = /^BIS-AA-[A-Z0-9]{18}$/;
 const FCRA_MIN_WAIT_DAYS = 5;
@@ -94,14 +95,14 @@ async function queueNotice(client: PoolClient, input: { tenantId: number; caseId
   );
   if (input.channel === "manual") return { deliveryId, outboxId: null };
   const outboxId = randomUUID();
-  const keyring = loadPiiEnvelopeKeyring();
+  const key = await activeTenantEncryptionRegistry(client, input.tenantId);
   const payload = { caseRef: input.caseRef, candidateId: input.candidateId, templateId: input.template.id, templateKey: input.template.template_key, jurisdictionCode: input.template.jurisdiction_code, templateVersion: input.template.version, noticeType: input.noticeType, channel: input.channel, deliveryId };
-  const encrypted = encryptPiiEnvelope(keyring, piiAad(input.tenantId, "candidate_profile", input.candidateId, `compliance-notice-outbox:${outboxId}`), payload);
+  const encrypted = await encryptPiiEnvelope(key, piiAad(input.tenantId, "candidate_profile", input.candidateId, `compliance-notice-outbox:${outboxId}`), payload);
   await client.query(
     `INSERT INTO compliance_notice_delivery_outbox
-       (id,tenant_id,adverse_action_case_id,delivery_id,payload_ciphertext,payload_nonce,payload_key_version,payload_sha256,idempotency_key)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-    [outboxId, input.tenantId, input.caseId, deliveryId, encrypted.ciphertext, encrypted.nonce, encrypted.keyVersion, sha256(payload), randomUUID()],
+       (id,tenant_id,adverse_action_case_id,delivery_id,payload_ciphertext,payload_nonce,payload_key_version,payload_sha256,idempotency_key,payload_crypto_provider,payload_provider_key_version,payload_key_registry_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+    [outboxId, input.tenantId, input.caseId, deliveryId, encrypted.ciphertext, encrypted.nonce, encrypted.keyVersion, sha256(payload), randomUUID(), encrypted.cryptoProvider, encrypted.providerKeyVersion, key.id],
   );
   return { deliveryId, outboxId };
 }
@@ -143,14 +144,15 @@ function assertFcraEnabled(framework: "ndpa" | "fcra" | "dual", jurisdictionCode
 
 export const complianceWorkflowRouter = router({
   createNoticeTemplate: administratorProcedure.input(z.object({ templateKey: noticeTypeSchema, jurisdictionCode: z.string().trim().regex(/^[A-Z]{2}(-[A-Z0-9]{1,8})?$/), version: z.string().trim().min(1).max(32), body: z.string().trim().min(32).max(100_000), counselApprovalReference: z.string().trim().min(12).max(256) })).mutation(async ({ ctx, input }) => {
-    const tenantId = tenant(ctx); const keyring = loadPiiEnvelopeKeyring(); const db = await pool(); const client = await db.connect();
+    const tenantId = tenant(ctx); const db = await pool(); const client = await db.connect();
     try {
       await client.query("BEGIN");
-      const encrypted = encryptPiiEnvelope(keyring, `bis-compliance-template:v1|${tenantId}|${input.templateKey}|${input.jurisdictionCode}|${input.version}`, { body: input.body });
+      const key = await activeTenantEncryptionRegistry(client, tenantId);
+      const encrypted = await encryptPiiEnvelope(key, `bis-compliance-template:v2|${tenantId}|${input.templateKey}|${input.jurisdictionCode}|${input.version}`, { body: input.body });
       const inserted = await client.query<{ id: string }>(
-        `INSERT INTO compliance_notice_templates (tenant_id,template_key,jurisdiction_code,version,body_ciphertext,body_nonce,body_key_version,content_sha256,approved_by,counsel_approval_reference)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
-        [tenantId, input.templateKey, input.jurisdictionCode, input.version, encrypted.ciphertext, encrypted.nonce, encrypted.keyVersion, encrypted.plaintextSha256, ctx.user.id, input.counselApprovalReference],
+        `INSERT INTO compliance_notice_templates (tenant_id,template_key,jurisdiction_code,version,body_ciphertext,body_nonce,body_key_version,content_sha256,approved_by,counsel_approval_reference,body_crypto_provider,body_provider_key_version,body_key_registry_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`,
+        [tenantId, input.templateKey, input.jurisdictionCode, input.version, encrypted.ciphertext, encrypted.nonce, encrypted.keyVersion, encrypted.plaintextSha256, ctx.user.id, input.counselApprovalReference, encrypted.cryptoProvider, encrypted.providerKeyVersion, key.id],
       );
       await appendTemplateEvent(client, inserted.rows[0]!.id, ctx.user.id, "created", { templateKey: input.templateKey, jurisdictionCode: input.jurisdictionCode, version: input.version, counselApprovalReference: input.counselApprovalReference });
       await client.query("COMMIT");
@@ -190,12 +192,12 @@ export const complianceWorkflowRouter = router({
          VALUES ($1,$2,$3,$4,$5,$6,$7,'pre_notice_queued',$8,$9,NOW(),$10,$11,$12) RETURNING id`,
         [caseRef, tenantId, input.screeningOrderId, source.rows[0].candidate_id, input.reportSnapshotId, input.jurisdictionCode, input.framework, input.waitingPeriodDays, ctx.user.id, input.employerAttestation, input.framework === "ndpa" ? null : new Date(), input.framework === "ndpa" ? null : input.fcraEligibilityAttestation],
       );
-      const keyring = loadPiiEnvelopeKeyring();
+      const key = await activeTenantEncryptionRegistry(client, tenantId);
       for (const item of input.items) {
         const result = await client.query(`SELECT 1 FROM screening_results WHERE id=$1 AND "orderId"=$2 FOR UPDATE`, [item.screeningResultId, input.screeningOrderId]);
         if (!result.rowCount) throw new TRPCError({ code: "BAD_REQUEST", message: "Selected adverse-action item is not in this screening order." });
-        const encrypted = encryptPiiEnvelope(keyring, piiAad(tenantId, "candidate_profile", source.rows[0].candidate_id, `adverse-rationale:${caseRef}:${item.screeningResultId}`), { rationale: item.rationale });
-        await client.query(`INSERT INTO compliance_adverse_action_items (adverse_action_case_id,screening_result_id,rationale_ciphertext,rationale_nonce,rationale_key_version) VALUES ($1,$2,$3,$4,$5)`, [inserted.rows[0]!.id, item.screeningResultId, encrypted.ciphertext, encrypted.nonce, encrypted.keyVersion]);
+        const encrypted = await encryptPiiEnvelope(key, piiAad(tenantId, "candidate_profile", source.rows[0].candidate_id, `adverse-rationale:${caseRef}:${item.screeningResultId}`), { rationale: item.rationale });
+        await client.query(`INSERT INTO compliance_adverse_action_items (adverse_action_case_id,screening_result_id,rationale_ciphertext,rationale_nonce,rationale_key_version,rationale_crypto_provider,rationale_provider_key_version,rationale_key_registry_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, [inserted.rows[0]!.id, item.screeningResultId, encrypted.ciphertext, encrypted.nonce, encrypted.keyVersion, encrypted.cryptoProvider, encrypted.providerKeyVersion, key.id]);
       }
       const queued = await queueNotice(client, { tenantId, caseId: inserted.rows[0]!.id, caseRef, candidateId: source.rows[0].candidate_id, template, noticeType: "pre_adverse", channel: input.channel });
       await appendEvent(client, inserted.rows[0]!.id, ctx.user.id, "created", { caseRef, framework: input.framework, itemCount: input.items.length, jurisdiction: input.jurisdictionCode });

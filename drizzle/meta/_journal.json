@@ -113,6 +113,13 @@
       "when": 1788606000000,
       "tag": "0015_compliance_workflow_hardening",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1788609600000,
+      "tag": "0016_pii_transit_rotation_and_forensics",
+      "breakpoints": true
     }
   ]
 }

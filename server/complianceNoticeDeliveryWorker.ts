@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { getPgPool } from "./db";
-import { decryptPiiEnvelope, loadPiiEnvelopeKeyring, piiAad } from "./piiEnvelopeCrypto";
+import { decryptPiiEnvelope, piiAad } from "./piiEnvelopeCrypto";
+import { tenantEncryptionRegistryById } from "./piiKeyRegistry";
 
 const DISPATCH_BATCH_SIZE = 25;
 const MAX_DISPATCH_ATTEMPTS = 12;
@@ -17,8 +18,11 @@ type LeasedNotice = {
   delivery_status: string;
   candidate_id: number;
   payload_ciphertext: Buffer;
-  payload_nonce: Buffer;
+  payload_nonce: Buffer | null;
   payload_key_version: string;
+  payload_crypto_provider: "legacy_local_aes" | "vault_transit";
+  payload_provider_key_version: number | null;
+  payload_key_registry_id: number | null;
   payload_sha256: string;
   attempt_count: number;
 };
@@ -66,7 +70,7 @@ async function leaseNotices(): Promise<LeasedNotice[]> {
     const rows = await client.query<LeasedNotice>(
       `SELECT o.id, o.tenant_id, o.adverse_action_case_id AS case_id, c.case_ref, c.status AS case_status,
               o.delivery_id, d.notice_type, d.channel, d.status AS delivery_status, c.candidate_id,
-              o.payload_ciphertext, o.payload_nonce, o.payload_key_version, o.payload_sha256, o.attempt_count
+              o.payload_ciphertext, o.payload_nonce, o.payload_key_version, o.payload_crypto_provider, o.payload_provider_key_version, o.payload_key_registry_id, o.payload_sha256, o.attempt_count
          FROM compliance_notice_delivery_outbox o
          JOIN compliance_adverse_action_cases c ON c.id = o.adverse_action_case_id
          JOIN compliance_notice_deliveries d ON d.id = o.delivery_id
@@ -160,8 +164,17 @@ async function markDelivered(event: LeasedNotice, providerMessageRef: string): P
   } catch (error) { await client.query("ROLLBACK").catch(() => undefined); throw error; } finally { client.release(); }
 }
 
+async function deliveryKey(event: LeasedNotice) {
+  if (event.payload_crypto_provider !== "vault_transit" || !event.payload_key_registry_id || !event.payload_provider_key_version) {
+    throw new Error("COMPLIANCE_NOTICE_VAULT_TRANSIT_METADATA_INVALID");
+  }
+  const pool = await poolOrThrow();
+  const client = await pool.connect();
+  try { return await tenantEncryptionRegistryById(client, event.tenant_id, event.payload_key_registry_id); }
+  finally { client.release(); }
+}
+
 export async function runComplianceNoticeDeliveryWorker(): Promise<ComplianceNoticeDeliveryResult> {
-  const keyring = loadPiiEnvelopeKeyring();
   const events = await leaseNotices();
   const result: ComplianceNoticeDeliveryResult = { leased: events.length, delivered: 0, retried: 0, deadLettered: 0, cancelled: 0 };
   for (const event of events) {
@@ -169,7 +182,8 @@ export async function runComplianceNoticeDeliveryWorker(): Promise<ComplianceNot
       if (event.delivery_status !== "queued" || ["canceled", "paused_for_dispute", "undeliverable", "manual_delivery", "completed"].includes(event.case_status)) {
         await cancelLeased(event, "COMPLIANCE_NOTICE_CASE_OR_DELIVERY_NOT_DISPATCHABLE"); result.cancelled += 1; continue;
       }
-      const payload = decryptPiiEnvelope(keyring, piiAad(event.tenant_id, "candidate_profile", event.candidate_id, `compliance-notice-outbox:${event.id}`), { ciphertext: event.payload_ciphertext, nonce: event.payload_nonce, keyVersion: event.payload_key_version });
+      const key = await deliveryKey(event);
+      const payload = await decryptPiiEnvelope(key, piiAad(event.tenant_id, "candidate_profile", event.candidate_id, `compliance-notice-outbox:${event.id}`), { ciphertext: event.payload_ciphertext, keyVersion: event.payload_key_version, cryptoProvider: event.payload_crypto_provider });
       const calculated = createHash("sha256").update(JSON.stringify(payload)).digest("hex");
       if (calculated !== event.payload_sha256) throw new Error("COMPLIANCE_NOTICE_PAYLOAD_DIGEST_INVALID");
       const delivery = await dispatchWithApprovedAdapter(event, payload);

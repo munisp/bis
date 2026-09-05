@@ -12,6 +12,8 @@
     "test": "vitest run",
     "db:migrate": "tsx scripts/migrate-postgres.ts",
     "pii:backfill": "tsx scripts/backfill-pii-envelopes.ts",
+    "pii:rotate": "tsx server/piiRotationWorker.ts",
+    "pii:rotate:dry-run": "tsx scripts/validate-pii-rotation-dry-run.ts",
     "db:push": "pnpm db:migrate",
     "db:seed": "tsx server/seed.ts",
     "e2e": "playwright test",

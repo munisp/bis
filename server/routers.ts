@@ -138,6 +138,7 @@ import { consumerDisputesRouter } from "./consumerDisputes";
 import { fieldEvidenceRouter } from "./fieldEvidence";
 import { kycDocumentEvidenceRouter } from "./kycDocumentEvidence";
 import { complianceWorkflowRouter } from "./complianceWorkflow";
+import { piiKeyCustodyRouter } from "./piiKeyCustody";
 
 // ─── Service URLs ─────────────────────────────────────────────────────────────
 
@@ -7631,6 +7632,7 @@ export const appRouter = router({
   consumerGovernance: consumerGovernanceRouter,
   consumerDisputes: consumerDisputesRouter,
   complianceWorkflow: complianceWorkflowRouter,
+  piiKeyCustody: piiKeyCustodyRouter,
   fieldEvidence: fieldEvidenceRouter,
   kycDocumentEvidence: kycDocumentEvidenceRouter,
 });

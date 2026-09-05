@@ -1,67 +1,95 @@
-import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { TRPCError } from "@trpc/server";
-import { ENV } from "./_core/env";
+import { loadVaultTransitClient, parseVaultTransitRef, VaultTransitClient } from "./vaultTransit";
 
-const ALGORITHM = "aes-256-gcm";
-const NONCE_BYTES = 12;
-const AUTH_TAG_BYTES = 16;
+export type SubjectKind = "candidate_profile" | "criminal_record";
+export type BlindAttribute = "nin" | "bvn" | "passport_number" | "email" | "phone";
+export type TransitKeyReference = { keyVersion: string; externalKeyRef: string; providerKeyVersion: number };
+export type PiiEnvelope = {
+  ciphertext: Buffer;
+  nonce: null;
+  keyVersion: string;
+  providerKeyVersion: number;
+  plaintextSha256: string;
+  cryptoProvider: "vault_transit";
+};
+export type PiiBlindIndex = { normalizedHmac: string; keyVersion: string; providerKeyVersion: number; cryptoProvider: "vault_transit" };
 
-export type PiiEnvelopeKeyring = { activeVersion: string; blindIndexVersion: string; keys: Map<string, Buffer>; expiries: Map<string, Date>; blindIndexKeys: Map<string, Buffer> };
-export type PiiEnvelope = { ciphertext: Buffer; nonce: Buffer; keyVersion: string; plaintextSha256: string };
+function unavailable(message: string): never {
+  throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message });
+}
 
-function unavailable(message: string): never { throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message }); }
-function parseKeyring(raw: string, label: string): Map<string, Buffer> {
-  const values = new Map<string, Buffer>();
-  for (const entry of raw.split(",")) {
-    const [version, material, ...rest] = entry.trim().split(":");
-    if (!version || !material || rest.length || values.has(version)) unavailable(`${label} keyring is invalid.`);
-    const key = Buffer.from(material, "base64");
-    if (key.length !== 32) unavailable(`${label} keys must be 32-byte base64 values.`);
-    values.set(version, key);
+function encodedJson(value: Record<string, unknown>): Buffer {
+  const encoded = Buffer.from(JSON.stringify(value));
+  if (!encoded.length || encoded.length > 1_000_000) unavailable("PII envelope plaintext is invalid or exceeds the approved size limit.");
+  return encoded;
+}
+
+function parsePlaintext(value: Buffer): Record<string, unknown> {
+  try {
+    const parsed: unknown = JSON.parse(value.toString("utf8"));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) unavailable("PII envelope plaintext is invalid.");
+    return parsed as Record<string, unknown>;
+  } catch (error) {
+    if (error instanceof TRPCError) throw error;
+    unavailable("PII envelope plaintext is invalid.");
   }
-  return values;
 }
 
-export function loadPiiEnvelopeKeyring(now = new Date()): PiiEnvelopeKeyring {
-  const activeVersion = (process.env.BIS_PII_ACTIVE_KEY_VERSION ?? "").trim();
-  const keyringRaw = (process.env.BIS_PII_KEYRING ?? "").trim();
-  const blindIndexVersion = (process.env.BIS_PII_BLIND_INDEX_ACTIVE_KEY_VERSION ?? "").trim();
-  const blindIndexRaw = (process.env.BIS_PII_BLIND_INDEX_KEYRING ?? "").trim();
-  const expiryRaw = (process.env.BIS_PII_KEY_EXPIRIES_JSON ?? "").trim();
-  if (!activeVersion || !keyringRaw || !blindIndexVersion || !blindIndexRaw) unavailable("PII envelope encryption keyrings are not configured.");
-  const keys = parseKeyring(keyringRaw, "PII envelope");
-  const blindIndexKeys = parseKeyring(blindIndexRaw, "PII blind-index");
-  if (!keys.has(activeVersion) || !blindIndexKeys.has(blindIndexVersion)) unavailable("Active PII key version is absent from its keyring.");
-  let parsed: unknown;
-  try { parsed = JSON.parse(expiryRaw); } catch { unavailable("PII key expiry policy is invalid JSON."); }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) unavailable("PII key expiry policy must be an object.");
-  const expiries = new Map<string, Date>();
-  for (const [version, value] of Object.entries(parsed)) {
-    if (typeof value !== "string") unavailable("PII key expiry must be ISO-8601.");
-    const expiry = new Date(value);
-    if (Number.isNaN(expiry.getTime())) unavailable("PII key expiry is invalid.");
-    expiries.set(version, expiry);
-  }
-  if (ENV.isProduction || process.env.BIS_PII_ENFORCE_KEY_EXPIRY === "true") {
-    keys.forEach((_key, version) => { const expiry = expiries.get(version); if (!expiry || expiry <= now) unavailable(`PII encryption key '${version}' lacks a valid future expiry.`); });
-    blindIndexKeys.forEach((_key, version) => { const expiry = expiries.get(version); if (!expiry || expiry <= now) unavailable(`PII blind-index key '${version}' lacks a valid future expiry.`); });
-  }
-  return { activeVersion, blindIndexVersion, keys, expiries, blindIndexKeys };
+function vaultKey(client: VaultTransitClient, key: TransitKeyReference): string {
+  if (!key.keyVersion.trim() || !key.externalKeyRef.trim()) unavailable("PII Transit key reference is invalid.");
+  return parseVaultTransitRef(key.externalKeyRef, client.mount).keyName;
 }
 
-export function piiAad(tenantId: number, subjectKind: "candidate_profile" | "criminal_record", subjectId: number, purpose: string): string {
-  return `bis-pii-envelope:v1|${tenantId}|${subjectKind}|${subjectId}|${purpose}`;
+export function piiAad(tenantId: number, subjectKind: SubjectKind, subjectId: number, purpose: string): string {
+  if (!Number.isInteger(tenantId) || tenantId < 1 || !Number.isInteger(subjectId) || subjectId < 1 || !/^[a-z0-9:_-]{1,128}$/i.test(purpose)) {
+    unavailable("PII authenticated-data binding is invalid.");
+  }
+  return `bis-pii-envelope:v2|${tenantId}|${subjectKind}|${subjectId}|${purpose}`;
 }
-export function encryptPiiEnvelope(keyring: PiiEnvelopeKeyring, aad: string, plaintext: Record<string, unknown>): PiiEnvelope {
-  const nonce = randomBytes(NONCE_BYTES); const cipher = createCipheriv(ALGORITHM, keyring.keys.get(keyring.activeVersion)!, nonce);
-  cipher.setAAD(Buffer.from(aad)); const encoded = Buffer.from(JSON.stringify(plaintext));
-  const ciphertext = Buffer.concat([cipher.update(encoded), cipher.final(), cipher.getAuthTag()]);
-  return { ciphertext, nonce, keyVersion: keyring.activeVersion, plaintextSha256: createHash("sha256").update(encoded).digest("hex") };
+
+export function piiBlindIndexContext(tenantId: number, attribute: BlindAttribute): string {
+  if (!Number.isInteger(tenantId) || tenantId < 1) unavailable("PII blind-index context is invalid.");
+  return `bis-pii-blind-index:v1|${tenantId}|${attribute}`;
 }
-export function decryptPiiEnvelope(keyring: PiiEnvelopeKeyring, aad: string, encrypted: { ciphertext: Buffer; nonce: Buffer; keyVersion: string }): Record<string, unknown> {
-  if (encrypted.nonce.length !== NONCE_BYTES || encrypted.ciphertext.length <= AUTH_TAG_BYTES) unavailable("PII envelope metadata is invalid.");
-  const key = keyring.keys.get(encrypted.keyVersion); if (!key) unavailable("PII decryption key is unavailable.");
-  try { const decipher = createDecipheriv(ALGORITHM, key, encrypted.nonce); decipher.setAAD(Buffer.from(aad)); decipher.setAuthTag(encrypted.ciphertext.subarray(-AUTH_TAG_BYTES)); const parsed: unknown = JSON.parse(Buffer.concat([decipher.update(encrypted.ciphertext.subarray(0, -AUTH_TAG_BYTES)), decipher.final()]).toString("utf8")); if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) unavailable("PII envelope plaintext is invalid."); return parsed as Record<string, unknown>; } catch (error) { if (error instanceof TRPCError) throw error; unavailable("PII envelope authentication failed."); }
+
+export async function assertTransitKeyReference(client: VaultTransitClient, key: TransitKeyReference, kind: "encryption" | "blind_index"): Promise<void> {
+  const name = vaultKey(client, key);
+  const metadata = kind === "encryption" ? await client.assertDerivedAes256Gcm(name) : await client.assertDerivedHmac(name);
+  if (metadata.latestVersion !== key.providerKeyVersion) unavailable("Vault Transit key metadata differs from the approved tenant registry version.");
 }
-export function piiBlindIndex(keyring: PiiEnvelopeKeyring, normalizedValue: string): string { return createHmac("sha256", keyring.blindIndexKeys.get(keyring.blindIndexVersion)!).update(normalizedValue).digest("hex"); }
-export function constantTimeDigestMatches(a: string, b: string): boolean { if (!/^[0-9a-f]{64}$/.test(a) || !/^[0-9a-f]{64}$/.test(b)) return false; return timingSafeEqual(Buffer.from(a, "hex"), Buffer.from(b, "hex")); }
+
+export async function encryptPiiEnvelope(key: TransitKeyReference, aad: string, plaintext: Record<string, unknown>, client = loadVaultTransitClient()): Promise<PiiEnvelope> {
+  const encoded = encodedJson(plaintext);
+  const keyName = vaultKey(client, key);
+  const encrypted = await client.encrypt(keyName, aad, encoded);
+  if (encrypted.keyVersion !== key.providerKeyVersion) unavailable("Vault Transit encryption key version differs from the approved tenant registry version.");
+  return {
+    ciphertext: Buffer.from(encrypted.ciphertext, "utf8"),
+    nonce: null,
+    keyVersion: key.keyVersion,
+    providerKeyVersion: encrypted.keyVersion,
+    plaintextSha256: createHash("sha256").update(encoded).digest("hex"),
+    cryptoProvider: "vault_transit",
+  };
+}
+
+export async function decryptPiiEnvelope(key: TransitKeyReference, aad: string, encrypted: { ciphertext: Buffer; keyVersion: string; cryptoProvider?: string }, client = loadVaultTransitClient()): Promise<Record<string, unknown>> {
+  if (encrypted.cryptoProvider && encrypted.cryptoProvider !== "vault_transit") unavailable("PII envelope does not use the configured Vault Transit provider.");
+  if (encrypted.keyVersion !== key.keyVersion) unavailable("PII envelope key version does not match its registry reference.");
+  const ciphertext = encrypted.ciphertext.toString("utf8");
+  const decoded = await client.decrypt(vaultKey(client, key), aad, ciphertext);
+  return parsePlaintext(decoded);
+}
+
+export async function piiBlindIndex(key: TransitKeyReference, tenantId: number, attribute: BlindAttribute, normalizedValue: string, client = loadVaultTransitClient()): Promise<PiiBlindIndex> {
+  if (!normalizedValue || normalizedValue.length > 512) unavailable("PII blind-index input is invalid.");
+  const result = await client.hmac(vaultKey(client, key), piiBlindIndexContext(tenantId, attribute), normalizedValue);
+  if (result.keyVersion !== key.providerKeyVersion) unavailable("Vault Transit blind-index key version differs from the approved tenant registry version.");
+  return { normalizedHmac: result.hmac, keyVersion: key.keyVersion, providerKeyVersion: result.keyVersion, cryptoProvider: "vault_transit" };
+}
+
+export function constantTimeDigestMatches(a: string, b: string): boolean {
+  if (!/^[0-9a-f]{64}$/.test(a) || !/^[0-9a-f]{64}$/.test(b)) return false;
+  return timingSafeEqual(Buffer.from(a, "hex"), Buffer.from(b, "hex"));
+}
