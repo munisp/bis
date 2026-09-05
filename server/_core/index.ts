@@ -20,6 +20,7 @@ import { createContext, createContextFromRequest } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { notifyOwner } from "./notification";
 import { recordPaystackWebhook } from "../billingSettlement";
+import { registerIntelligenceBillingMetrics } from "../intelligenceBillingMetrics";
 import crypto from "crypto";
 import { createOpenClawRouter } from "../openclawEndpoints";
 import swaggerUi from "swagger-ui-express";
@@ -273,6 +274,7 @@ async function startServer() {
   // ── Prometheus Metrics ──────────────────────────────────────────────────────
   // Collect default Node.js metrics (heap, GC, event loop lag, etc.)
   collectDefaultMetrics({ prefix: 'bis_' });
+  registerIntelligenceBillingMetrics();
   const httpRequestDuration = new Histogram({
     name: 'bis_http_request_duration_seconds',
     help: 'Duration of HTTP requests in seconds',

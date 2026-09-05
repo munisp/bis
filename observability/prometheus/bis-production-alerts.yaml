@@ -240,3 +240,56 @@ groups:
           summary: "BIS cold-archive p95 duration exceeds 20 minutes"
           description: "Review PostgreSQL selection query, object storage throughput, batch size, and worker resource limits before the job overlaps its next schedule."
           runbook: "docs/operations/GATEWAY_AND_PARQUET_ARCHIVE_RUNBOOK.md#cold-archive-incident"
+
+  - name: bis-intelligence-billing-reconciliation
+    rules:
+      - alert: BISIntelligenceBillingMetricsCollectionFailed
+        expr: bis_intelligence_billing_metrics_collection_healthy == 0
+        for: 5m
+        labels:
+          severity: critical
+          service: billing
+        annotations:
+          summary: "Intelligence billing reconciliation metrics cannot query PostgreSQL"
+          description: "The protected BFF metrics collector cannot read durable assessment billing state. Queue and reconciliation release gates are unreliable until PostgreSQL access is restored."
+          runbook: "docs/operations/INTELLIGENCE_BILLING_RECONCILIATION_AND_SPLIT_BRAIN_RUNBOOK.md#stale-lease-monitoring-and-recovery"
+      - alert: BISIntelligenceBillingStaleLease
+        expr: bis_intelligence_billing_stale_leases > 0
+        for: 10m
+        labels:
+          severity: warning
+          service: billing
+        annotations:
+          summary: "Intelligence assessment billing lease is stale"
+          description: "At least one worker lease has exceeded the five-minute recovery interval for ten minutes. Inspect worker fencing, PostgreSQL health, and deterministic transfer reconciliation before manual intervention."
+          runbook: "docs/operations/INTELLIGENCE_BILLING_RECONCILIATION_AND_SPLIT_BRAIN_RUNBOOK.md#stale-lease-monitoring-and-recovery"
+      - alert: BISIntelligenceBillingReconciliationBacklog
+        expr: bis_intelligence_billing_open_reconciliations > 0
+        for: 30m
+        labels:
+          severity: critical
+          service: billing
+        annotations:
+          summary: "Intelligence billing event requires human reconciliation"
+          description: "A retry-exhausted or uncertain deterministic TigerBeetle transfer has remained open for 30 minutes. A different tenant-scoped administrator must claim and reconcile it; do not create a new transfer ID."
+          runbook: "docs/operations/INTELLIGENCE_BILLING_RECONCILIATION_AND_SPLIT_BRAIN_RUNBOOK.md#reconciliation-workflow"
+      - alert: BISIntelligenceBillingReconciliationSLOExceeded
+        expr: bis_intelligence_billing_oldest_open_reconciliation_age_seconds > 14400
+        for: 15m
+        labels:
+          severity: critical
+          service: billing
+        annotations:
+          summary: "Oldest intelligence billing reconciliation exceeds four hours"
+          description: "An unresolved ledger uncertainty breached the four-hour reconciliation objective. Freeze automated replay for the event and apply the split-brain containment procedure if multiple workers or ledgers are involved."
+          runbook: "docs/operations/INTELLIGENCE_BILLING_RECONCILIATION_AND_SPLIT_BRAIN_RUNBOOK.md#split-brain-containment"
+      - alert: BISIntelligenceBillingLegacyDeadLetter
+        expr: bis_intelligence_billing_events{state="dead_letter"} > 0
+        for: 5m
+        labels:
+          severity: critical
+          service: billing
+        annotations:
+          summary: "Legacy intelligence billing event is in dead-letter state"
+          description: "A billing event must be migrated into a four-eyes reconciliation case before any replay. Automated replay is prohibited."
+          runbook: "docs/operations/INTELLIGENCE_BILLING_RECONCILIATION_AND_SPLIT_BRAIN_RUNBOOK.md#reconciliation-workflow"
