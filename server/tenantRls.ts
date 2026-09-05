@@ -27,7 +27,18 @@ export async function setTenantRlsContext(client: TenantScopedClient, tenantId: 
  * protected-table queries and must finish with commitTenantTransaction or
  * rollbackTenantTransaction before releasing the client.
  */
+async function clearSessionTenantRlsContext(client: TenantScopedClient): Promise<void> {
+  await client.query("RESET bis.tenant_id");
+  const verified = await client.query<{ tenant_id: string | null }>("SELECT current_setting('bis.tenant_id', true) AS tenant_id");
+  if (verified.rows[0]?.tenant_id) {
+    throw new Error("PostgreSQL pooled session retained an unexpected tenant context.");
+  }
+}
+
 export async function beginTenantTransaction(client: TenantScopedClient, tenantId: number): Promise<void> {
+  // Clear an accidental session-level SET before BEGIN. This protects the next
+  // transaction even if a legacy query path contaminated a pooled connection.
+  await clearSessionTenantRlsContext(client);
   await client.query("BEGIN");
   try {
     await setTenantRlsContext(client, tenantId);

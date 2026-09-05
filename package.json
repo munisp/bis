@@ -16,6 +16,7 @@
     "pii:rotate:dry-run": "tsx scripts/validate-pii-rotation-dry-run.ts",
     "pii:post-cutover:verify": "tsx scripts/verify-pii-transit-post-cutover.ts",
     "pii:rls:test": "node scripts/test-0017-pii-rls.mjs",
+    "pii:rls:stress": "tsx scripts/stress-0017-rls-dispatch.ts",
     "db:push": "pnpm db:migrate",
     "db:seed": "tsx server/seed.ts",
     "e2e": "playwright test",
