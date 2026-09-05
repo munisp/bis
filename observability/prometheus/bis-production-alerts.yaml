@@ -293,3 +293,56 @@ groups:
           summary: "Legacy intelligence billing event is in dead-letter state"
           description: "A billing event must be migrated into a four-eyes reconciliation case before any replay. Automated replay is prohibited."
           runbook: "docs/operations/INTELLIGENCE_BILLING_RECONCILIATION_AND_SPLIT_BRAIN_RUNBOOK.md#reconciliation-workflow"
+
+  - name: bis-distributed-tracing
+    rules:
+      - alert: BISGatewayTraceLatencyP95High
+        expr: histogram_quantile(0.95, sum(rate(bis_gateway_trace_request_duration_seconds_bucket[10m])) by (le)) > 2
+        for: 10m
+        labels:
+          severity: warning
+          service: gateway
+        annotations:
+          summary: "Gateway trace-correlated request p95 exceeds two seconds"
+          description: "The W3C-trace-correlated gateway request p95 has exceeded two seconds for ten minutes. Review downstream latency using trace_id and request_id; do not sample payloads or credentials."
+          runbook: "docs/operations/PRODUCTION_SECURITY_HARDENING_AND_RBAC.md#supply-chain-resilience-and-operations"
+      - alert: BISGatewayTraceLatencyP99Critical
+        expr: histogram_quantile(0.99, sum(rate(bis_gateway_trace_request_duration_seconds_bucket[5m])) by (le)) > 10
+        for: 5m
+        labels:
+          severity: critical
+          service: gateway
+        annotations:
+          summary: "Gateway trace-correlated request p99 exceeds ten seconds"
+          description: "The gateway p99 latency is above the request timeout safety margin. Contain dependency failures, inspect only sanitized trace/request identifiers, and verify gateway readiness before rollback."
+          runbook: "docs/operations/PRODUCTION_SECURITY_HARDENING_AND_RBAC.md#network-and-runtime"
+      - alert: BISGatewayInvalidTraceContextRate
+        expr: sum(rate(bis_gateway_trace_correlation_total{outcome="invalid_replaced"}[10m])) / clamp_min(sum(rate(bis_gateway_trace_correlation_total[10m])), 1) > 0.01
+        for: 10m
+        labels:
+          severity: warning
+          service: gateway
+        annotations:
+          summary: "More than one percent of gateway requests have invalid W3C trace context"
+          description: "The gateway safely replaces malformed or zero trace contexts. Investigate ingress, BFF, and worker header propagation; malformed headers must not be accepted or logged verbatim."
+          runbook: "docs/operations/PRODUCTION_SECURITY_HARDENING_AND_RBAC.md#network-and-runtime"
+      - alert: BISGatewayNewTraceRootRateHigh
+        expr: sum(rate(bis_gateway_trace_correlation_total{outcome="new_root"}[10m])) / clamp_min(sum(rate(bis_gateway_trace_correlation_total[10m])), 1) > 0.5
+        for: 15m
+        labels:
+          severity: warning
+          service: gateway
+        annotations:
+          summary: "Gateway is receiving an unusually high rate of new trace roots"
+          description: "More than half of requests lack a valid upstream W3C trace context. This can be legitimate for direct callers but may indicate BFF, ingress, or worker correlation propagation loss."
+          runbook: "docs/operations/PRODUCTION_SECURITY_HARDENING_AND_RBAC.md#network-and-runtime"
+      - alert: BISGatewayTraceMetricsAbsent
+        expr: absent(bis_gateway_trace_correlation_total)
+        for: 5m
+        labels:
+          severity: critical
+          service: gateway
+        annotations:
+          summary: "Gateway distributed-tracing metrics are absent"
+          description: "The protected metrics scrape is present but no trace continuity series is exported. Verify the deployed gateway image digest and metric registry before relying on correlation-based incident analysis."
+          runbook: "docs/operations/PRODUCTION_SECURITY_HARDENING_AND_RBAC.md#release-evidence"

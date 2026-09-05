@@ -26,6 +26,8 @@ type gatewayMetrics struct {
 	outboxDispatchDuration         prometheus.Histogram
 	outboxKeyRotationDue           prometheus.Gauge
 	outboxKeyExpirySeconds         prometheus.Gauge
+	traceCorrelation               *prometheus.CounterVec
+	traceRequestDuration           *prometheus.HistogramVec
 }
 
 func newGatewayMetrics() *gatewayMetrics {
@@ -76,6 +78,15 @@ func newGatewayMetrics() *gatewayMetrics {
 			Namespace: "bis", Subsystem: "gateway", Name: "transactional_outbox_active_key_expiry_seconds",
 			Help: "Seconds until the active transactional-outbox key expires; zero indicates no expiry is available.",
 		}),
+		traceCorrelation: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "bis", Subsystem: "gateway", Name: "trace_correlation_total",
+			Help: "W3C trace-context continuity outcomes at the API gateway boundary.",
+		}, []string{"outcome"}),
+		traceRequestDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: "bis", Subsystem: "gateway", Name: "trace_request_duration_seconds",
+			Help:    "End-to-end gateway request duration by trace correlation outcome.",
+			Buckets: []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30},
+		}, []string{"outcome"}),
 	}
 	metrics.registry.MustRegister(
 		metrics.permifyChecks,
@@ -89,6 +100,8 @@ func newGatewayMetrics() *gatewayMetrics {
 		metrics.outboxDispatchDuration,
 		metrics.outboxKeyRotationDue,
 		metrics.outboxKeyExpirySeconds,
+		metrics.traceCorrelation,
+		metrics.traceRequestDuration,
 	)
 	return metrics
 }
@@ -189,6 +202,11 @@ func (m *gatewayMetrics) refreshOutboxState(ctx context.Context, db *sql.DB) {
 			state.metric.Set(age.Float64)
 		}
 	}
+}
+
+func (m *gatewayMetrics) observeTrace(outcome string, start time.Time) {
+	m.traceCorrelation.WithLabelValues(outcome).Inc()
+	m.traceRequestDuration.WithLabelValues(outcome).Observe(time.Since(start).Seconds())
 }
 
 func (m *gatewayMetrics) observeOutboxDispatch(start time.Time) {
