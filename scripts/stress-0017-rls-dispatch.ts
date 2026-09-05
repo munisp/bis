@@ -21,12 +21,12 @@ async function setLocalTenant(client: import("pg").PoolClient, tenantId: number)
 async function seedSyntheticJob(pool: import("pg").Pool, n: number, runSuffix: string): Promise<{ tenantId: number; jobId: string }> {
   const client = await pool.connect();
   try {
+    await client.query("BEGIN");
     const tenant = await client.query<{ id: number }>(`INSERT INTO tenants (name,slug,status) VALUES ($1,$2,'active') RETURNING id`, [`RLS stress tenant ${n}`, `rls-stress-${runSuffix}-${n}`]);
     const tenantId = tenant.rows[0]!.id;
     const user = await client.query<{ id: number }>(`INSERT INTO users ("openId","tenantId",name,email,role) VALUES ($1,$2,$3,$4,'supervisor') RETURNING id`, [`rls-stress-${runSuffix}-${n}`, tenantId, `RLS Stress ${n}`, `stress-${runSuffix}-${n}@example.invalid`]);
     const candidate = await client.query<{ id: number }>(`INSERT INTO candidate_profiles ("candidateRef","tenantId","firstName","lastName",email) VALUES ($1,$2,'Synthetic','Stress',$3) RETURNING id`, [`CAN-RLS-STRESS-${runSuffix}-${n}`, tenantId, `candidate-${runSuffix}-${n}@example.invalid`]);
 
-    await client.query("BEGIN");
     await setLocalTenant(client, tenantId);
     const source = await client.query<{ id: number; key_version: string; provider_key_version: number }>(`INSERT INTO pii_encryption_key_registry (tenant_id,key_version,external_key_ref,algorithm,status,created_by,provider,provider_key_name,provider_key_version) VALUES ($1,$2,$3,'VAULT-TRANSIT-AES256-GCM96','active',$4,'vault_transit',$5,1) RETURNING id,key_version,provider_key_version`, [tenantId, `stress-source-${runSuffix}-${n}`, `vault-transit://transit/stress-${runSuffix}-${n}-source`, user.rows[0]!.id, `stress-${runSuffix}-${n}-source`]);
     await client.query(`INSERT INTO pii_envelope_records (tenant_id,subject_kind,subject_id,purpose,ciphertext,nonce,key_registry_id,key_version,crypto_provider,provider_key_version) VALUES ($1,'candidate_profile',$2,'identity',$3,NULL,$4,$5,'vault_transit',$6)`, [tenantId, candidate.rows[0]!.id, Buffer.from(`vault:v1:stress-${runSuffix}-${n}`), source.rows[0]!.id, source.rows[0]!.key_version, source.rows[0]!.provider_key_version]);
@@ -41,8 +41,19 @@ async function seedSyntheticJob(pool: import("pg").Pool, n: number, runSuffix: s
   } finally { client.release(); }
 }
 
+async function acquirePoolClients(pool: import("pg").Pool, count: number): Promise<import("pg").PoolClient[]> {
+  const clients: import("pg").PoolClient[] = [];
+  try {
+    for (let index = 0; index < count; index += 1) clients.push(await pool.connect());
+    return clients;
+  } catch (error) {
+    clients.forEach((client) => client.release());
+    throw error;
+  }
+}
+
 async function poisonSharedPool(pool: import("pg").Pool): Promise<number> {
-  const clients = await Promise.all(Array.from({ length: 20 }, () => pool.connect()));
+  const clients = await acquirePoolClients(pool, 20);
   try {
     await Promise.all(clients.map((client) => client.query("SELECT set_config('bis.tenant_id', $1, false)", [CONTAMINANT_TENANT_ID])));
     const checks = await Promise.all(clients.map((client) => client.query<{ tenant_id: string | null }>("SELECT current_setting('bis.tenant_id', true) AS tenant_id")));
@@ -52,7 +63,7 @@ async function poisonSharedPool(pool: import("pg").Pool): Promise<number> {
 }
 
 async function verifyNoPooledSessionLeak(pool: import("pg").Pool): Promise<number> {
-  const clients = await Promise.all(Array.from({ length: 20 }, () => pool.connect()));
+  const clients = await acquirePoolClients(pool, 20);
   try {
     const states = await Promise.all(clients.map((client) => client.query<{ tenant_id: string | null }>("SELECT current_setting('bis.tenant_id', true) AS tenant_id")));
     const contaminated = states.filter((result) => Boolean(result.rows[0]?.tenant_id)).length;
@@ -67,15 +78,19 @@ async function main(): Promise<void> {
   if (!process.env.AUDIT_HMAC_SECRET) throw new Error("AUDIT_HMAC_SECRET is required for synthetic forensic audit events.");
   const pool = await getPgPool();
   if (!pool) throw new Error("PostgreSQL is unavailable.");
-  const runSuffix = suffix();
-  const jobs: Array<{ tenantId: number; jobId: string }> = [];
-  for (let index = 1; index <= TENANT_COUNT; index += 1) jobs.push(await seedSyntheticJob(pool, index, runSuffix));
-  const contaminatedConnections = await poisonSharedPool(pool);
+  try {
+    const runSuffix = suffix();
+    const jobs: Array<{ tenantId: number; jobId: string }> = [];
+    for (let index = 1; index <= TENANT_COUNT; index += 1) jobs.push(await seedSyntheticJob(pool, index, runSuffix));
+    const contaminatedConnections = await poisonSharedPool(pool);
 
-  const started = process.hrtime.bigint();
-  const results = await Promise.all(Array.from({ length: WORKER_CONCURRENCY }, () => runPiiRotationWorker()));
-  const elapsedMs = Number(process.hrtime.bigint() - started) / 1_000_000;
-  const leaseCount = results.reduce((total, item) => total + item.leased, 0);
+    const started = process.hrtime.bigint();
+    const settled = await Promise.allSettled(Array.from({ length: WORKER_CONCURRENCY }, () => runPiiRotationWorker()));
+    const rejected = settled.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+    assert.equal(rejected.length, 0, "all concurrent workers must settle successfully before aggregate assertions");
+    const results = settled.map((result) => (result as PromiseFulfilledResult<Awaited<ReturnType<typeof runPiiRotationWorker>>>).value);
+    const elapsedMs = Number(process.hrtime.bigint() - started) / 1_000_000;
+    const leaseCount = results.reduce((total, item) => total + item.leased, 0);
   const plannedCount = results.reduce((total, item) => total + item.planned, 0);
   const dryRunCount = results.reduce((total, item) => total + item.dryRuns, 0);
   const failureCount = results.reduce((total, item) => total + item.failed, 0);
@@ -109,25 +124,27 @@ async function main(): Promise<void> {
   assert.equal(completedJobs, TENANT_COUNT);
   assert.equal(plannedItems, TENANT_COUNT);
   assert.equal(forensicEvents, TENANT_COUNT * 2);
-  const checkedConnections = await verifyNoPooledSessionLeak(pool);
+    const checkedConnections = await verifyNoPooledSessionLeak(pool);
 
-  process.stdout.write(`${JSON.stringify({
-    status: "pass",
-    synthetic: true,
-    tenantCount: TENANT_COUNT,
-    workerConcurrency: WORKER_CONCURRENCY,
-    deliberatelyContaminatedConnections: contaminatedConnections,
-    checkedPooledConnections: checkedConnections,
-    jobLeases: leaseCount,
-    plannedItems: plannedCount,
-    dryRuns: dryRunCount,
-    workerFailures: failureCount,
-    completedJobs,
-    forensicEvents,
-    elapsedMs: Math.round(elapsedMs),
-    jobsPerSecond: Number((TENANT_COUNT / (elapsedMs / 1000)).toFixed(2)),
-  })}\n`);
-  await pool.end();
+    process.stdout.write(`${JSON.stringify({
+      status: "pass",
+      synthetic: true,
+      tenantCount: TENANT_COUNT,
+      workerConcurrency: WORKER_CONCURRENCY,
+      deliberatelyContaminatedConnections: contaminatedConnections,
+      checkedPooledConnections: checkedConnections,
+      jobLeases: leaseCount,
+      plannedItems: plannedCount,
+      dryRuns: dryRunCount,
+      workerFailures: failureCount,
+      completedJobs,
+      forensicEvents,
+      elapsedMs: Math.round(elapsedMs),
+      jobsPerSecond: Number((TENANT_COUNT / (elapsedMs / 1000)).toFixed(2)),
+    })}\n`);
+  } finally {
+    await pool.end();
+  }
 }
 
 main().catch((error: unknown) => {
