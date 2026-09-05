@@ -108,12 +108,38 @@ export async function processIntelligenceAssessmentBillingEvent(eventId: string,
     if (settled.rowCount !== 1) throw new Error("TigerBeetle transfer completed but assessment billing state requires reconciliation");
   } catch (error) {
     const retryable = error instanceof Error && /unavailable|timeout|connection|reconciliation/i.test(error.message);
+    const errorCode = retryable ? "ledger_unavailable" : "payment_or_integrity_failure";
+    if (retryable && event.attempt_count >= MAX_ATTEMPTS) {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query(
+          `UPDATE intelligence_assessment_billing_events
+           SET status = 'awaiting_reconciliation', tigerbeetle_transfer_id = COALESCE(tigerbeetle_transfer_id, $2),
+               last_error_code = $3, updated_at = now()
+           WHERE id = $1 AND status = 'leased'`,
+          [event.id, intelligenceAssessmentTransferId(event.id), errorCode],
+        );
+        await client.query(
+          `INSERT INTO intelligence_assessment_billing_reconciliations
+            (id, billing_event_id, tenant_id, deterministic_transfer_id, status, last_error_code, requested_by)
+           VALUES ($1, $2, $3, $4, 'open', $5, $6)
+           ON CONFLICT (billing_event_id) DO NOTHING`,
+          [randomUUID(), event.id, event.tenant_id, intelligenceAssessmentTransferId(event.id), errorCode, event.requested_by],
+        );
+        await client.query("COMMIT");
+      } catch (reconciliationError) {
+        await client.query("ROLLBACK").catch(() => undefined);
+        throw reconciliationError;
+      } finally { client.release(); }
+      return;
+    }
     await pool.query(
       `UPDATE intelligence_assessment_billing_events
-       SET status = CASE WHEN attempt_count >= $2 THEN 'dead_letter' WHEN $3 THEN 'retryable_failure' ELSE 'payment_required' END,
-           available_at = CASE WHEN $3 THEN now() + interval '5 minutes' ELSE available_at END,
-           last_error_code = $4, updated_at = now()
-       WHERE id = $1`, [event.id, MAX_ATTEMPTS, retryable, retryable ? "ledger_unavailable" : "payment_or_integrity_failure"],
+       SET status = CASE WHEN $2 THEN 'retryable_failure' ELSE 'payment_required' END,
+           available_at = CASE WHEN $2 THEN now() + interval '5 minutes' ELSE available_at END,
+           last_error_code = $3, updated_at = now()
+       WHERE id = $1`, [event.id, retryable, errorCode],
     );
     if (retryable) throw error;
   }

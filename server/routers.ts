@@ -30,6 +30,7 @@ import { biometricRouter } from "./biometric";
 import { institutionalAccessRouter } from "./institutionalAccess";
 import { informalVerificationRouter } from "./informalVerification";
 import { investigationIntelligenceRouter } from "./investigationIntelligence";
+import { intelligenceBillingReconciliationRouter } from "./intelligenceBillingReconciliation";
 import { lakehouseRouter } from "./lakehouse";
 import { lexRouter } from "./lex";
 import { sessionsRouter, totpRouter, notificationsRouter, investigationLinksRouter, exportSchedulesRouter, decryptTotpSecret, validateTotp } from "./platform";
@@ -7588,6 +7589,7 @@ export const appRouter = router({
   institutionalAccess: institutionalAccessRouter,
   informalVerification: informalVerificationRouter,
   investigationIntelligence: investigationIntelligenceRouter,
+  intelligenceBillingReconciliation: intelligenceBillingReconciliationRouter,
   lakehouse: lakehouseRouter,
   playbooks: playbooksRouter,
   duplicateCheck: duplicateCheckRouter,
