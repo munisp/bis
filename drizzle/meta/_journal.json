@@ -99,6 +99,13 @@
       "when": 1788598800000,
       "tag": "0013_intelligence_billing_reconciliation",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1788602400000,
+      "tag": "0014_compliance_adverse_action_and_pii_encryption",
+      "breakpoints": true
     }
   ]
 }

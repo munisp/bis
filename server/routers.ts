@@ -137,6 +137,7 @@ import { consumerGovernanceRouter } from "./consumerGovernance";
 import { consumerDisputesRouter } from "./consumerDisputes";
 import { fieldEvidenceRouter } from "./fieldEvidence";
 import { kycDocumentEvidenceRouter } from "./kycDocumentEvidence";
+import { complianceWorkflowRouter } from "./complianceWorkflow";
 
 // ─── Service URLs ─────────────────────────────────────────────────────────────
 
@@ -7629,6 +7630,7 @@ export const appRouter = router({
   consumerIntelligence: consumerIntelligenceRouter,
   consumerGovernance: consumerGovernanceRouter,
   consumerDisputes: consumerDisputesRouter,
+  complianceWorkflow: complianceWorkflowRouter,
   fieldEvidence: fieldEvidenceRouter,
   kycDocumentEvidence: kycDocumentEvidenceRouter,
 });
