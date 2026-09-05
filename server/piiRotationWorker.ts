@@ -41,19 +41,21 @@ type SourceRegistry = { id: number; tenant_id: number; key_version: string; exte
 
 export type PiiRotationWorkerResult = { leased: number; planned: number; rotated: number; skipped: number; failed: number; dryRuns: number };
 export type PiiRotationTimingStage = "pool_checkout" | "tenant_context_setup";
-export type PiiRotationTimingObserver = (stage: PiiRotationTimingStage, elapsedMs: number) => void;
+export type PiiRotationTimingSample = { poolWaitingCount?: number; poolTotalCount?: number; poolIdleCount?: number };
+export type PiiRotationTimingObserver = (stage: PiiRotationTimingStage, elapsedMs: number, sample?: PiiRotationTimingSample) => void;
 
 function fail(message: string): never { throw new Error(message); }
-async function observeLatency<T>(stage: PiiRotationTimingStage, observer: PiiRotationTimingObserver | undefined, work: () => Promise<T>): Promise<T> {
+async function observeLatency<T>(stage: PiiRotationTimingStage, observer: PiiRotationTimingObserver | undefined, work: () => Promise<T>, sample?: PiiRotationTimingSample): Promise<T> {
   const started = process.hrtime.bigint();
   try {
     return await work();
   } finally {
-    observer?.(stage, Number(process.hrtime.bigint() - started) / 1_000_000);
+    observer?.(stage, Number(process.hrtime.bigint() - started) / 1_000_000, sample);
   }
 }
 async function checkoutClient(pool: import("pg").Pool, observer?: PiiRotationTimingObserver): Promise<import("pg").PoolClient> {
-  return observeLatency("pool_checkout", observer, () => pool.connect());
+  const sample: PiiRotationTimingSample = { poolWaitingCount: pool.waitingCount, poolTotalCount: pool.totalCount, poolIdleCount: pool.idleCount };
+  return observeLatency("pool_checkout", observer, () => pool.connect(), sample);
 }
 async function beginScopedTenantTransaction(client: import("pg").PoolClient, tenantId: number, observer?: PiiRotationTimingObserver): Promise<void> {
   await observeLatency("tenant_context_setup", observer, () => beginTenantTransaction(client, tenantId));

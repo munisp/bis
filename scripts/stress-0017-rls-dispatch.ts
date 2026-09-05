@@ -99,7 +99,7 @@ async function verifyNoPooledSessionLeak(pool: import("pg").Pool): Promise<numbe
 
 async function main(): Promise<void> {
   assertPositiveInteger(TENANT_COUNT, "BIS_RLS_STRESS_TENANTS", 200);
-  assertPositiveInteger(WORKER_CONCURRENCY, "BIS_RLS_STRESS_WORKERS", 256);
+  assertPositiveInteger(WORKER_CONCURRENCY, "BIS_RLS_STRESS_WORKERS", 512);
   if (!process.env.AUDIT_HMAC_SECRET) throw new Error("AUDIT_HMAC_SECRET is required for synthetic forensic audit events.");
   const pool = await getPgPool();
   if (!pool) throw new Error("PostgreSQL is unavailable.");
@@ -113,9 +113,14 @@ async function main(): Promise<void> {
     const poolCheckoutSamplesMs: number[] = [];
     const tenantContextSetupSamplesMs: number[] = [];
     const workerEndToEndSamplesMs: number[] = [];
-    const observer: PiiRotationTimingObserver = (stage, elapsedMs) => {
-      if (stage === "pool_checkout") poolCheckoutSamplesMs.push(elapsedMs);
-      else tenantContextSetupSamplesMs.push(elapsedMs);
+    let peakObservedPoolWaitingCount = 0;
+    let peakObservedPoolTotalCount = 0;
+    const observer: PiiRotationTimingObserver = (stage, elapsedMs, sample) => {
+      if (stage === "pool_checkout") {
+        poolCheckoutSamplesMs.push(elapsedMs);
+        peakObservedPoolWaitingCount = Math.max(peakObservedPoolWaitingCount, sample?.poolWaitingCount ?? 0);
+        peakObservedPoolTotalCount = Math.max(peakObservedPoolTotalCount, sample?.poolTotalCount ?? 0);
+      } else tenantContextSetupSamplesMs.push(elapsedMs);
     };
     const started = process.hrtime.bigint();
     const settled = await Promise.allSettled(Array.from({ length: WORKER_CONCURRENCY }, async () => {
@@ -180,6 +185,10 @@ async function main(): Promise<void> {
       synthetic: true,
       tenantCount: TENANT_COUNT,
       workerConcurrency: WORKER_CONCURRENCY,
+      configuredPoolMax: pool.options.max,
+      configuredConnectionTimeoutMs: pool.options.connectionTimeoutMillis,
+      peakObservedPoolWaitingCount,
+      peakObservedPoolTotalCount,
       deliberatelyContaminatedConnections: contaminatedConnections,
       checkedPooledConnections: checkedConnections,
       jobLeases: leaseCount,
