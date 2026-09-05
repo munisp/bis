@@ -40,8 +40,24 @@ type PlannedItem = {
 type SourceRegistry = { id: number; tenant_id: number; key_version: string; external_key_ref: string; provider: "legacy_local_aes" | "vault_transit"; provider_key_name: string | null; provider_key_version: number | null; status: string };
 
 export type PiiRotationWorkerResult = { leased: number; planned: number; rotated: number; skipped: number; failed: number; dryRuns: number };
+export type PiiRotationTimingStage = "pool_checkout" | "tenant_context_setup";
+export type PiiRotationTimingObserver = (stage: PiiRotationTimingStage, elapsedMs: number) => void;
 
 function fail(message: string): never { throw new Error(message); }
+async function observeLatency<T>(stage: PiiRotationTimingStage, observer: PiiRotationTimingObserver | undefined, work: () => Promise<T>): Promise<T> {
+  const started = process.hrtime.bigint();
+  try {
+    return await work();
+  } finally {
+    observer?.(stage, Number(process.hrtime.bigint() - started) / 1_000_000);
+  }
+}
+async function checkoutClient(pool: import("pg").Pool, observer?: PiiRotationTimingObserver): Promise<import("pg").PoolClient> {
+  return observeLatency("pool_checkout", observer, () => pool.connect());
+}
+async function beginScopedTenantTransaction(client: import("pg").PoolClient, tenantId: number, observer?: PiiRotationTimingObserver): Promise<void> {
+  await observeLatency("tenant_context_setup", observer, () => beginTenantTransaction(client, tenantId));
+}
 function isProduction(): boolean { return process.env.NODE_ENV === "production" || process.env.BIS_ENV === "production"; }
 function normalize(value: unknown): string | null { if (typeof value !== "string") return null; const normalized = value.trim().toUpperCase().replace(/[^A-Z0-9@.+-]/g, ""); return normalized || null; }
 function itemValue(payload: Record<string, unknown>, attribute: BlindAttribute): unknown {
@@ -51,9 +67,9 @@ function itemValue(payload: Record<string, unknown>, attribute: BlindAttribute):
 
 async function poolOrThrow() { const pool = await getPgPool(); if (!pool) fail("PII rotation worker requires PostgreSQL."); return pool; }
 
-async function leaseJob(rotationRef?: string): Promise<RotationJob | null> {
+async function leaseJob(rotationRef?: string, observer?: PiiRotationTimingObserver): Promise<RotationJob | null> {
   const pool = await poolOrThrow();
-  const dispatchClient = await pool.connect();
+  const dispatchClient = await checkoutClient(pool, observer);
   let dispatch: { rotation_job_id: string; rotation_ref: string; tenant_id: number } | null = null;
   try {
     await dispatchClient.query("BEGIN");
@@ -73,9 +89,9 @@ async function leaseJob(rotationRef?: string): Promise<RotationJob | null> {
   } catch (error) { await dispatchClient.query("ROLLBACK").catch(() => undefined); throw error; } finally { dispatchClient.release(); }
   if (!dispatch) return null;
 
-  const tenantClient = await pool.connect();
+  const tenantClient = await checkoutClient(pool, observer);
   try {
-    await beginTenantTransaction(tenantClient, dispatch.tenant_id);
+    await beginScopedTenantTransaction(tenantClient, dispatch.tenant_id, observer);
     await tenantClient.query(`UPDATE pii_rotation_jobs SET state='queued',leased_at=NULL,updated_at=NOW(),last_error_code=COALESCE(last_error_code,'PII_ROTATION_LEASE_EXPIRED') WHERE id=$1 AND tenant_id=$2 AND state='leased' AND leased_at < NOW()-make_interval(secs=>$3)`, [dispatch.rotation_job_id, dispatch.tenant_id, LEASE_SECONDS]);
     const selected = await tenantClient.query<RotationJob>(`SELECT id,rotation_ref,tenant_id,source_encryption_key_registry_id,target_encryption_key_registry_id,source_blind_index_key_registry_id,target_blind_index_key_registry_id,compromise_incident_id,mode,dry_run,max_batch_size,requested_by FROM pii_rotation_jobs WHERE id=$1 AND rotation_ref=$2 AND tenant_id=$3 AND state='queued' FOR UPDATE`, [dispatch.rotation_job_id, dispatch.rotation_ref, dispatch.tenant_id]);
     const job = selected.rows[0] ?? null;
@@ -86,7 +102,7 @@ async function leaseJob(rotationRef?: string): Promise<RotationJob | null> {
   } catch (error) {
     recordRlsPolicyDenial("tenant_dispatch_handoff", "pii_rotation_worker", error);
     await tenantClient.query("ROLLBACK").catch(() => undefined);
-    const restoreClient = await pool.connect();
+    const restoreClient = await checkoutClient(pool, observer);
     try { await restoreClient.query(`UPDATE pii_rotation_dispatch_queue SET state='queued',leased_at=NULL,updated_at=NOW() WHERE rotation_job_id=$1 AND state='leased'`, [dispatch.rotation_job_id]); }
     finally { restoreClient.release(); }
     throw error;
@@ -150,10 +166,10 @@ async function decryptForRotation(job: RotationJob, source: SourceRegistry, item
   return decryptPiiEnvelope(key, piiAad(item.tenant_id, item.subject_kind, item.subject_id, item.purpose), { ciphertext: item.ciphertext, keyVersion: item.key_version, cryptoProvider: item.crypto_provider }, client);
 }
 
-async function rotateOne(job: RotationJob, item: PlannedItem): Promise<"rotated" | "skipped"> {
-  const pool = await poolOrThrow(); const client = await pool.connect();
+async function rotateOne(job: RotationJob, item: PlannedItem, observer?: PiiRotationTimingObserver): Promise<"rotated" | "skipped"> {
+  const pool = await poolOrThrow(); const client = await checkoutClient(pool, observer);
   try {
-    await beginTenantTransaction(client, job.tenant_id);
+    await beginScopedTenantTransaction(client, job.tenant_id, observer);
     const current = await client.query<PlannedItem>(`SELECT i.id,i.envelope_id,i.tenant_id,i.subject_kind,i.subject_id,i.purpose,e.ciphertext,e.nonce,e.key_version,e.crypto_provider,e.provider_key_version FROM pii_rotation_job_items i JOIN pii_envelope_records e ON e.id=i.envelope_id WHERE i.id=$1 AND i.rotation_job_id=$2 AND i.state='planned' FOR UPDATE OF i,e`, [item.id, job.id]);
     const fresh = current.rows[0];
     if (!fresh || fresh.crypto_provider !== item.crypto_provider || fresh.key_version !== item.key_version) { await client.query(`UPDATE pii_rotation_job_items SET state='skipped',error_code='PII_ROTATION_SOURCE_CHANGED',completed_at=NOW() WHERE id=$1 AND state='planned'`, [item.id]); await client.query("COMMIT"); return "skipped"; }
@@ -198,42 +214,42 @@ async function rotateOne(job: RotationJob, item: PlannedItem): Promise<"rotated"
   } catch (error) { await client.query("ROLLBACK").catch(() => undefined); throw error; } finally { client.release(); }
 }
 
-async function markJobFailed(job: RotationJob, code: string): Promise<void> {
+async function markJobFailed(job: RotationJob, code: string, observer?: PiiRotationTimingObserver): Promise<void> {
   piiRotationWorkerFailuresTotal.inc({ reason_code: code, component: "pii_rotation_worker" });
-  const pool = await poolOrThrow(); const client = await pool.connect();
-  try { await beginTenantTransaction(client, job.tenant_id); await client.query(`UPDATE pii_rotation_jobs SET state='failed',failed_count=failed_count+1,last_error_code=$2,updated_at=NOW() WHERE id=$1 AND state='leased'`, [job.id, code]); await appendPiiForensicAuditEvent(client, { incidentId: job.compromise_incident_id, tenantId: job.tenant_id, rotationJobId: job.id, eventType: "rotation_failed", detail: { error_code: code, worker_version: WORKER_VERSION } }); await client.query("COMMIT"); }
+  const pool = await poolOrThrow(); const client = await checkoutClient(pool, observer);
+  try { await beginScopedTenantTransaction(client, job.tenant_id, observer); await client.query(`UPDATE pii_rotation_jobs SET state='failed',failed_count=failed_count+1,last_error_code=$2,updated_at=NOW() WHERE id=$1 AND state='leased'`, [job.id, code]); await appendPiiForensicAuditEvent(client, { incidentId: job.compromise_incident_id, tenantId: job.tenant_id, rotationJobId: job.id, eventType: "rotation_failed", detail: { error_code: code, worker_version: WORKER_VERSION } }); await client.query("COMMIT"); }
   catch (error) { await client.query("ROLLBACK").catch(() => undefined); throw error; } finally { client.release(); }
 }
 
-async function finishJob(job: RotationJob, eventType: "rotation_dry_run_completed" | "rotation_completed", state: "dry_run_complete" | "completed", expected: number): Promise<void> {
-  const pool = await poolOrThrow(); const client = await pool.connect();
-  try { await beginTenantTransaction(client, job.tenant_id); await client.query(`UPDATE pii_rotation_jobs SET state=$2,processed_count=CASE WHEN $2='dry_run_complete' THEN $3 ELSE processed_count END,completed_at=NOW(),leased_at=NULL,updated_at=NOW() WHERE id=$1 AND state='leased'`, [job.id, state, expected]); await appendPiiForensicAuditEvent(client, { incidentId: job.compromise_incident_id, tenantId: job.tenant_id, rotationJobId: job.id, eventType, detail: { record_count: expected, dry_run: state === "dry_run_complete", state, worker_version: WORKER_VERSION } }); await client.query("COMMIT"); }
+async function finishJob(job: RotationJob, eventType: "rotation_dry_run_completed" | "rotation_completed", state: "dry_run_complete" | "completed", expected: number, observer?: PiiRotationTimingObserver): Promise<void> {
+  const pool = await poolOrThrow(); const client = await checkoutClient(pool, observer);
+  try { await beginScopedTenantTransaction(client, job.tenant_id, observer); await client.query(`UPDATE pii_rotation_jobs SET state=$2,processed_count=CASE WHEN $2='dry_run_complete' THEN $3 ELSE processed_count END,completed_at=NOW(),leased_at=NULL,updated_at=NOW() WHERE id=$1 AND state='leased'`, [job.id, state, expected]); await appendPiiForensicAuditEvent(client, { incidentId: job.compromise_incident_id, tenantId: job.tenant_id, rotationJobId: job.id, eventType, detail: { record_count: expected, dry_run: state === "dry_run_complete", state, worker_version: WORKER_VERSION } }); await client.query("COMMIT"); }
   catch (error) { await client.query("ROLLBACK").catch(() => undefined); throw error; } finally { client.release(); }
 }
 
-export async function runPiiRotationWorker(rotationRef?: string): Promise<PiiRotationWorkerResult> {
+export async function runPiiRotationWorker(rotationRef?: string, observer?: PiiRotationTimingObserver): Promise<PiiRotationWorkerResult> {
   const result: PiiRotationWorkerResult = { leased: 0, planned: 0, rotated: 0, skipped: 0, failed: 0, dryRuns: 0 };
-  const job = await leaseJob(rotationRef);
+  const job = await leaseJob(rotationRef, observer);
   if (!job) return result;
   result.leased = 1;
-  const pool = await poolOrThrow(); const planningClient = await pool.connect();
+  const pool = await poolOrThrow(); const planningClient = await checkoutClient(pool, observer);
   let expected: number;
-  try { await beginTenantTransaction(planningClient, job.tenant_id); expected = await materializeItems(planningClient, job); await appendPiiForensicAuditEvent(planningClient, { incidentId: job.compromise_incident_id, tenantId: job.tenant_id, rotationJobId: job.id, actorUserId: job.requested_by, eventType: "rotation_created", detail: { record_count: expected, source_registry_id: job.source_encryption_key_registry_id, target_registry_id: job.target_encryption_key_registry_id, dry_run: job.dry_run, worker_version: WORKER_VERSION } }); await planningClient.query("COMMIT"); }
-  catch (error) { await planningClient.query("ROLLBACK").catch(() => undefined); await markJobFailed(job, "PII_ROTATION_PLAN_FAILURE"); throw error; } finally { planningClient.release(); }
+  try { await beginScopedTenantTransaction(planningClient, job.tenant_id, observer); expected = await materializeItems(planningClient, job); await appendPiiForensicAuditEvent(planningClient, { incidentId: job.compromise_incident_id, tenantId: job.tenant_id, rotationJobId: job.id, actorUserId: job.requested_by, eventType: "rotation_created", detail: { record_count: expected, source_registry_id: job.source_encryption_key_registry_id, target_registry_id: job.target_encryption_key_registry_id, dry_run: job.dry_run, worker_version: WORKER_VERSION } }); await planningClient.query("COMMIT"); }
+  catch (error) { await planningClient.query("ROLLBACK").catch(() => undefined); await markJobFailed(job, "PII_ROTATION_PLAN_FAILURE", observer); throw error; } finally { planningClient.release(); }
   result.planned = expected!;
-  if (job.dry_run) { await finishJob(job, "rotation_dry_run_completed", "dry_run_complete", expected!); result.dryRuns = 1; return result; }
-  if (process.env.BIS_PII_ROTATION_CONFIRM !== "ROTATE_PII_ENVELOPES" || (isProduction() && process.env.BIS_PII_PRODUCTION_ROTATION_APPROVED !== "true")) { await markJobFailed(job, "PII_ROTATION_CONFIRMATION_MISSING"); fail("Refusing PII rotation without explicit cutover confirmation and production approval."); }
+  if (job.dry_run) { await finishJob(job, "rotation_dry_run_completed", "dry_run_complete", expected!, observer); result.dryRuns = 1; return result; }
+  if (process.env.BIS_PII_ROTATION_CONFIRM !== "ROTATE_PII_ENVELOPES" || (isProduction() && process.env.BIS_PII_PRODUCTION_ROTATION_APPROVED !== "true")) { await markJobFailed(job, "PII_ROTATION_CONFIRMATION_MISSING", observer); fail("Refusing PII rotation without explicit cutover confirmation and production approval."); }
   for (;;) {
-    const claimPool = await poolOrThrow(); const claimClient = await claimPool.connect(); let items: PlannedItem[];
-    try { await beginTenantTransaction(claimClient, job.tenant_id); items = await nextItems(claimClient, job); await claimClient.query("COMMIT"); }
+    const claimPool = await poolOrThrow(); const claimClient = await checkoutClient(claimPool, observer); let items: PlannedItem[];
+    try { await beginScopedTenantTransaction(claimClient, job.tenant_id, observer); items = await nextItems(claimClient, job); await claimClient.query("COMMIT"); }
     catch (error) { await claimClient.query("ROLLBACK").catch(() => undefined); throw error; } finally { claimClient.release(); }
     if (!items!.length) break;
     for (const item of items!) {
-      try { const state = await rotateOne(job, item); result[state] += 1; }
-      catch { result.failed += 1; await markJobFailed(job, "PII_ROTATION_ITEM_FAILURE"); return result; }
+      try { const state = await rotateOne(job, item, observer); result[state] += 1; }
+      catch { result.failed += 1; await markJobFailed(job, "PII_ROTATION_ITEM_FAILURE", observer); return result; }
     }
   }
-  await finishJob(job, "rotation_completed", "completed", expected!);
+  await finishJob(job, "rotation_completed", "completed", expected!, observer);
   return result;
 }
 

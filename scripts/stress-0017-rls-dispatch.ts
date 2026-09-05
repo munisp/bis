@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { getPgPool } from "../server/db";
-import { runPiiRotationWorker } from "../server/piiRotationWorker";
+import { runPiiRotationWorker, type PiiRotationTimingObserver } from "../server/piiRotationWorker";
 import {
   piiForensicAppendTotal,
   piiRlsPoolContextResidualTotal,
@@ -20,6 +20,23 @@ function assertPositiveInteger(value: number, label: string, max: number): void 
 }
 function suffix(): string { return randomUUID().replace(/-/g, "").slice(0, 12); }
 function rotationRef(): string { return `BIS-PR-${randomUUID().replace(/-/g, "").slice(0, 18).toUpperCase()}`; }
+
+type LatencySummary = { count: number; minMs: number; meanMs: number; p50Ms: number; p95Ms: number; p99Ms: number; maxMs: number };
+function latencySummary(samples: readonly number[]): LatencySummary {
+  assert.ok(samples.length > 0, "latency samples must not be empty");
+  const sorted = [...samples].sort((left, right) => left - right);
+  const nearestRank = (quantile: number) => sorted[Math.max(0, Math.ceil(sorted.length * quantile) - 1)]!;
+  const rounded = (value: number) => Number(value.toFixed(3));
+  return {
+    count: sorted.length,
+    minMs: rounded(sorted[0]!),
+    meanMs: rounded(sorted.reduce((total, value) => total + value, 0) / sorted.length),
+    p50Ms: rounded(nearestRank(0.50)),
+    p95Ms: rounded(nearestRank(0.95)),
+    p99Ms: rounded(nearestRank(0.99)),
+    maxMs: rounded(sorted.at(-1)!),
+  };
+}
 async function setLocalTenant(client: import("pg").PoolClient, tenantId: number): Promise<void> {
   await client.query("SELECT set_config('bis.tenant_id', $1, true)", [String(tenantId)]);
   const state = await client.query<{ tenant_id: string | null }>("SELECT current_setting('bis.tenant_id', true) AS tenant_id");
@@ -86,14 +103,29 @@ async function main(): Promise<void> {
   if (!process.env.AUDIT_HMAC_SECRET) throw new Error("AUDIT_HMAC_SECRET is required for synthetic forensic audit events.");
   const pool = await getPgPool();
   if (!pool) throw new Error("PostgreSQL is unavailable.");
+  assert.equal(pool.options.max, 20, "the RLS stress rehearsal must use the production-constrained 20-connection pool");
   try {
     const runSuffix = suffix();
     const jobs: Array<{ tenantId: number; jobId: string }> = [];
     for (let index = 1; index <= TENANT_COUNT; index += 1) jobs.push(await seedSyntheticJob(pool, index, runSuffix));
     const contaminatedConnections = await poisonSharedPool(pool);
 
+    const poolCheckoutSamplesMs: number[] = [];
+    const tenantContextSetupSamplesMs: number[] = [];
+    const workerEndToEndSamplesMs: number[] = [];
+    const observer: PiiRotationTimingObserver = (stage, elapsedMs) => {
+      if (stage === "pool_checkout") poolCheckoutSamplesMs.push(elapsedMs);
+      else tenantContextSetupSamplesMs.push(elapsedMs);
+    };
     const started = process.hrtime.bigint();
-    const settled = await Promise.allSettled(Array.from({ length: WORKER_CONCURRENCY }, () => runPiiRotationWorker()));
+    const settled = await Promise.allSettled(Array.from({ length: WORKER_CONCURRENCY }, async () => {
+      const workerStarted = process.hrtime.bigint();
+      try {
+        return await runPiiRotationWorker(undefined, observer);
+      } finally {
+        workerEndToEndSamplesMs.push(Number(process.hrtime.bigint() - workerStarted) / 1_000_000);
+      }
+    }));
     const rejected = settled.filter((result): result is PromiseRejectedResult => result.status === "rejected");
     assert.equal(rejected.length, 0, "all concurrent workers must settle successfully before aggregate assertions");
     const results = settled.map((result) => (result as PromiseFulfilledResult<Awaited<ReturnType<typeof runPiiRotationWorker>>>).value);
@@ -158,6 +190,12 @@ async function main(): Promise<void> {
       forensicEvents,
       elapsedMs: Math.round(elapsedMs),
       jobsPerSecond: Number((TENANT_COUNT / (elapsedMs / 1000)).toFixed(2)),
+      latency: {
+        percentileMethod: "nearest_rank",
+        poolCheckoutWaitMs: latencySummary(poolCheckoutSamplesMs),
+        tenantContextSetupMs: latencySummary(tenantContextSetupSamplesMs),
+        workerEndToEndMs: latencySummary(workerEndToEndSamplesMs),
+      },
       metricSnapshot,
     })}\n`);
   } finally {
