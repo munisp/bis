@@ -51,6 +51,8 @@ async function clearSessionTenantRlsContext(client: TenantScopedClient): Promise
 }
 
 export async function beginTenantTransaction(client: TenantScopedClient, tenantId: number): Promise<void> {
+  // Reject malformed runtime values before issuing any query on a pooled client.
+  assertTenantId(tenantId);
   // Clear an accidental session-level SET before BEGIN. This protects the next
   // transaction even if a legacy query path contaminated a pooled connection.
   await clearSessionTenantRlsContext(client);
