@@ -127,6 +127,13 @@
       "when": 1788613200000,
       "tag": "0017_pii_tenant_rls_and_dispatch",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1788616800000,
+      "tag": "0018_pii_rotation_dispatch_dead_letter",
+      "breakpoints": true
     }
   ]
 }

@@ -39,6 +39,7 @@ run postgres_migration pnpm db:migrate
 run compliance_workflow_integrity node scripts/test-0015-compliance-triggers.mjs
 run pii_transit_rotation_forensics_integrity node scripts/test-0016-pii-transit-triggers.mjs
 run pii_tenant_rls_and_dispatch_integrity node scripts/test-0017-pii-rls.mjs
+run pii_rotation_dispatch_dead_letter_integrity node scripts/test-0018-pii-dispatch-dead-letter.mjs
 run node_tests pnpm test
 run typescript pnpm check
 run pwa_build pnpm build

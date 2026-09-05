@@ -10,6 +10,9 @@ import { piiRotationDispatchQueueAgeSeconds, piiRotationDispatchTotal, piiRotati
 const LEASE_SECONDS = 300;
 const WORKER_VERSION = "pii-rotation-v1";
 
+const DISPATCH_MAX_ATTEMPTS = 12;
+const DISPATCH_ATTEMPTS_EXHAUSTED = "PII_ROTATION_ATTEMPTS_EXHAUSTED";
+
 type RotationJob = {
   id: string;
   rotation_ref: string;
@@ -78,20 +81,77 @@ function itemValue(payload: Record<string, unknown>, attribute: BlindAttribute):
 
 async function poolOrThrow() { const pool = await getPgPool(); if (!pool) fail("PII rotation worker requires PostgreSQL."); return pool; }
 
+type DispatchRecord = { rotation_job_id: string; rotation_ref: string; tenant_id: number; state: "queued" | "terminalizing"; attempt_count: number };
+
+async function terminalizeDispatch(pool: import("pg").Pool, dispatch: DispatchRecord, observer?: PiiRotationTimingObserver): Promise<void> {
+  const tenantClient = await checkoutClient(pool, observer);
+  try {
+    await beginScopedTenantTransaction(tenantClient, dispatch.tenant_id, observer);
+    const job = await tenantClient.query<{ id: string; compromise_incident_id: string | null }>(
+      `SELECT id,compromise_incident_id FROM pii_rotation_jobs
+       WHERE id=$1 AND tenant_id=$2 AND state IN ('queued','leased') FOR UPDATE`,
+      [dispatch.rotation_job_id, dispatch.tenant_id],
+    );
+    const row = job.rows[0];
+    if (row) {
+      await tenantClient.query(
+        `UPDATE pii_rotation_jobs
+         SET state='failed',failed_count=failed_count+1,last_error_code=$2,leased_at=NULL,updated_at=NOW()
+         WHERE id=$1 AND state IN ('queued','leased')`,
+        [row.id, DISPATCH_ATTEMPTS_EXHAUSTED],
+      );
+      await appendPiiForensicAuditEvent(tenantClient, {
+        incidentId: row.compromise_incident_id,
+        tenantId: dispatch.tenant_id,
+        rotationJobId: row.id,
+        eventType: "rotation_failed",
+        detail: { error_code: DISPATCH_ATTEMPTS_EXHAUSTED, worker_version: WORKER_VERSION },
+      });
+    }
+    await tenantClient.query("COMMIT");
+  } catch (error) {
+    await tenantClient.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    tenantClient.release();
+  }
+
+  const dispatchClient = await checkoutClient(pool, observer);
+  try {
+    await dispatchClient.query(
+      `UPDATE pii_rotation_dispatch_queue
+       SET state='dead_letter',leased_at=NULL,dead_lettered_at=NOW(),updated_at=NOW()
+       WHERE rotation_job_id=$1 AND state='terminalizing' AND dead_letter_reason=$2`,
+      [dispatch.rotation_job_id, DISPATCH_ATTEMPTS_EXHAUSTED],
+    );
+    piiRotationDispatchTotal.inc({ outcome: "dead_lettered", component: "pii_rotation_worker" });
+  } finally {
+    dispatchClient.release();
+  }
+}
+
 async function leaseJob(rotationRef?: string, observer?: PiiRotationTimingObserver): Promise<RotationJob | null> {
   const pool = await poolOrThrow();
   const dispatchClient = await checkoutClient(pool, observer);
-  let dispatch: { rotation_job_id: string; rotation_ref: string; tenant_id: number } | null = null;
+  let dispatch: DispatchRecord | null = null;
   try {
     await dispatchClient.query("BEGIN");
     const recovered = await dispatchClient.query(`UPDATE pii_rotation_dispatch_queue SET state='queued',leased_at=NULL,updated_at=NOW() WHERE state='leased' AND leased_at < NOW()-make_interval(secs=>$1)`, [LEASE_SECONDS]);
     if (recovered.rowCount) piiRotationDispatchTotal.inc({ outcome: "lease_recovered", component: "pii_rotation_worker" }, recovered.rowCount);
     const age = await dispatchClient.query<{ age_seconds: string | null }>(`SELECT EXTRACT(EPOCH FROM NOW()-MIN(created_at))::text AS age_seconds FROM pii_rotation_dispatch_queue WHERE state='queued'`);
     piiRotationDispatchQueueAgeSeconds.set({ component: "pii_rotation_worker" }, Number(age.rows[0]?.age_seconds ?? 0));
-    const selected = await dispatchClient.query<{ rotation_job_id: string; rotation_ref: string; tenant_id: number }>(`SELECT rotation_job_id,rotation_ref,tenant_id FROM pii_rotation_dispatch_queue WHERE state='queued' AND ($1::text IS NULL OR rotation_ref=$1) ORDER BY created_at ASC FOR UPDATE SKIP LOCKED LIMIT 1`, [rotationRef ?? null]);
+    const selected = await dispatchClient.query<DispatchRecord>(`SELECT rotation_job_id,rotation_ref,tenant_id,state,attempt_count FROM pii_rotation_dispatch_queue WHERE ((state='terminalizing' AND leased_at < NOW()-make_interval(secs=>$2)) OR (state='queued' AND ($1::text IS NULL OR rotation_ref=$1))) ORDER BY (state='terminalizing') DESC,created_at ASC FOR UPDATE SKIP LOCKED LIMIT 1`, [rotationRef ?? null, LEASE_SECONDS]);
     dispatch = selected.rows[0] ?? null;
-    if (dispatch) {
-      await dispatchClient.query(`UPDATE pii_rotation_dispatch_queue SET state='leased',leased_at=NOW(),attempt_count=attempt_count+1,updated_at=NOW() WHERE rotation_job_id=$1 AND state='queued'`, [dispatch.rotation_job_id]);
+    if (dispatch?.state === "terminalizing") {
+      await dispatchClient.query(`UPDATE pii_rotation_dispatch_queue SET leased_at=NOW(),updated_at=NOW() WHERE rotation_job_id=$1 AND state='terminalizing' AND dead_letter_reason=$2`, [dispatch.rotation_job_id, DISPATCH_ATTEMPTS_EXHAUSTED]);
+      piiRotationDispatchTotal.inc({ outcome: "terminalization_recovered", component: "pii_rotation_worker" });
+    } else if (dispatch && dispatch.attempt_count >= DISPATCH_MAX_ATTEMPTS) {
+      await dispatchClient.query(`UPDATE pii_rotation_dispatch_queue SET state='terminalizing',leased_at=NOW(),dead_letter_reason=$2,updated_at=NOW() WHERE rotation_job_id=$1 AND state='queued' AND attempt_count >= $3`, [dispatch.rotation_job_id, DISPATCH_ATTEMPTS_EXHAUSTED, DISPATCH_MAX_ATTEMPTS]);
+      dispatch = { ...dispatch, state: "terminalizing" };
+      piiRotationDispatchTotal.inc({ outcome: "terminalizing", component: "pii_rotation_worker" });
+    } else if (dispatch) {
+      await dispatchClient.query(`UPDATE pii_rotation_dispatch_queue SET state='leased',leased_at=NOW(),attempt_count=attempt_count+1,updated_at=NOW() WHERE rotation_job_id=$1 AND state='queued' AND attempt_count < $2`, [dispatch.rotation_job_id, DISPATCH_MAX_ATTEMPTS]);
+      dispatch = { ...dispatch, state: "queued", attempt_count: dispatch.attempt_count + 1 };
       piiRotationDispatchTotal.inc({ outcome: "leased", component: "pii_rotation_worker" });
     } else {
       piiRotationDispatchTotal.inc({ outcome: "empty", component: "pii_rotation_worker" });
@@ -99,6 +159,10 @@ async function leaseJob(rotationRef?: string, observer?: PiiRotationTimingObserv
     await dispatchClient.query("COMMIT");
   } catch (error) { await dispatchClient.query("ROLLBACK").catch(() => undefined); throw error; } finally { dispatchClient.release(); }
   if (!dispatch) return null;
+  if (dispatch.state === "terminalizing") {
+    await terminalizeDispatch(pool, dispatch, observer);
+    return null;
+  }
 
   const tenantClient = await checkoutClient(pool, observer);
   try {
