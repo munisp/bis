@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { getPgPool } from "./db";
 import { decryptPiiEnvelope, piiAad } from "./piiEnvelopeCrypto";
 import { tenantEncryptionRegistryById } from "./piiKeyRegistry";
+import { beginTenantTransaction } from "./tenantRls";
 
 const DISPATCH_BATCH_SIZE = 25;
 const MAX_DISPATCH_ATTEMPTS = 12;
@@ -170,8 +171,15 @@ async function deliveryKey(event: LeasedNotice) {
   }
   const pool = await poolOrThrow();
   const client = await pool.connect();
-  try { return await tenantEncryptionRegistryById(client, event.tenant_id, event.payload_key_registry_id); }
-  finally { client.release(); }
+  try {
+    await beginTenantTransaction(client, event.tenant_id);
+    const key = await tenantEncryptionRegistryById(client, event.tenant_id, event.payload_key_registry_id);
+    await client.query("COMMIT");
+    return key;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally { client.release(); }
 }
 
 export async function runComplianceNoticeDeliveryWorker(): Promise<ComplianceNoticeDeliveryResult> {

@@ -8,6 +8,7 @@ import { protectedProcedure, router, writeProcedure } from "./_core/trpc";
 import { permifyCheck } from "./permify";
 import { encryptPiiEnvelope, piiAad } from "./piiEnvelopeCrypto";
 import { activeTenantEncryptionRegistry } from "./piiKeyRegistry";
+import { beginTenantTransaction } from "./tenantRls";
 
 const CASE_REF = /^BIS-AA-[A-Z0-9]{18}$/;
 const FCRA_MIN_WAIT_DAYS = 5;
@@ -146,7 +147,7 @@ export const complianceWorkflowRouter = router({
   createNoticeTemplate: administratorProcedure.input(z.object({ templateKey: noticeTypeSchema, jurisdictionCode: z.string().trim().regex(/^[A-Z]{2}(-[A-Z0-9]{1,8})?$/), version: z.string().trim().min(1).max(32), body: z.string().trim().min(32).max(100_000), counselApprovalReference: z.string().trim().min(12).max(256) })).mutation(async ({ ctx, input }) => {
     const tenantId = tenant(ctx); const db = await pool(); const client = await db.connect();
     try {
-      await client.query("BEGIN");
+      await beginTenantTransaction(client, tenantId);
       const key = await activeTenantEncryptionRegistry(client, tenantId);
       const encrypted = await encryptPiiEnvelope(key, `bis-compliance-template:v2|${tenantId}|${input.templateKey}|${input.jurisdictionCode}|${input.version}`, { body: input.body });
       const inserted = await client.query<{ id: string }>(
@@ -163,7 +164,7 @@ export const complianceWorkflowRouter = router({
   supersedeNoticeTemplate: administratorProcedure.input(z.object({ templateId: z.string().uuid(), reason: z.string().trim().min(20).max(4_000) })).mutation(async ({ ctx, input }) => {
     const tenantId = tenant(ctx); const db = await pool(); const client = await db.connect();
     try {
-      await client.query("BEGIN");
+      await beginTenantTransaction(client, tenantId);
       const updated = await client.query<{ id: string }>(`UPDATE compliance_notice_templates SET superseded_at=NOW() WHERE id=$1 AND tenant_id=$2 AND superseded_at IS NULL RETURNING id`, [input.templateId, tenantId]);
       if (!updated.rows[0]) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Active notice template not found." });
       await appendTemplateEvent(client, input.templateId, ctx.user.id, "superseded", { reason: input.reason });
@@ -174,7 +175,7 @@ export const complianceWorkflowRouter = router({
   initiatePreAdverse: adjudicatorProcedure.input(z.object({ screeningOrderId: z.number().int().positive(), reportSnapshotId: z.number().int().positive(), candidateConsentRef: z.string().trim().min(8).max(32), framework: frameworkSchema.default("ndpa"), jurisdictionCode: z.string().trim().regex(/^[A-Z]{2}$/), fcraEligibilityAttestation: z.string().trim().min(40).max(4_000).optional(), waitingPeriodDays: z.number().int().min(FCRA_MIN_WAIT_DAYS).max(30), templateVersion: z.string().trim().min(1).max(32), channel: deliveryChannelSchema.default("portal"), items: z.array(z.object({ screeningResultId: z.number().int().positive(), rationale: z.string().trim().min(20).max(4_000) })).min(1).max(50), employerAttestation: z.string().trim().min(40).max(4_000) })).mutation(async ({ ctx, input }) => {
     const tenantId = tenant(ctx); assertFcraEnabled(input.framework, input.jurisdictionCode, input.fcraEligibilityAttestation); const db = await pool(); const client = await db.connect();
     try {
-      await client.query("BEGIN");
+      await beginTenantTransaction(client, tenantId);
       const source = await client.query<{ candidate_id: number }>(
         `SELECT so."candidateId" AS candidate_id FROM screening_orders so
           JOIN consumer_report_snapshots rs ON rs.id=$2 AND rs.tenant_id=$1 AND rs.screening_order_id=so.id AND rs.candidate_id=so."candidateId"
@@ -209,7 +210,7 @@ export const complianceWorkflowRouter = router({
   recordDelivery: adjudicatorProcedure.input(z.object({ caseRef: caseRefSchema, deliveryId: z.string().uuid(), status: z.enum(["delivered", "undeliverable", "manual_required"]), providerMessageRef: z.string().trim().min(4).max(256).optional() })).mutation(async ({ ctx, input }) => {
     const tenantId = tenant(ctx); const db = await pool(); const client = await db.connect();
     try {
-      await client.query("BEGIN"); const c = await lockedCase(client, input.caseRef, tenantId);
+      await beginTenantTransaction(client, tenantId); const c = await lockedCase(client, input.caseRef, tenantId);
       const delivery = await client.query<{ notice_type: NoticeType; channel: DeliveryChannel; status: string }>(`SELECT notice_type,channel,status FROM compliance_notice_deliveries WHERE id=$1 AND adverse_action_case_id=$2 FOR UPDATE`, [input.deliveryId, c.id]);
       const current = delivery.rows[0];
       if (!current || !["queued", "manual_required"].includes(current.status) || (current.status === "manual_required" && current.channel !== "manual")) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "An eligible queued or manual notice delivery was not found." });
@@ -233,7 +234,7 @@ export const complianceWorkflowRouter = router({
   pauseForDispute: adjudicatorProcedure.input(z.object({ caseRef: caseRefSchema, disputeCaseRef: z.string().regex(/^BIS-DR-[A-Z0-9]{18}$/) })).mutation(async ({ ctx, input }) => {
     const tenantId = tenant(ctx); const db = await pool(); const client = await db.connect();
     try {
-      await client.query("BEGIN"); const c = await lockedCase(client, input.caseRef, tenantId);
+      await beginTenantTransaction(client, tenantId); const c = await lockedCase(client, input.caseRef, tenantId);
       if (!["waiting", "pre_notice_delivered"].includes(c.status)) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Only a delivered pre-adverse case in its waiting period can be paused." });
       const disputed = await client.query(`SELECT 1 FROM consumer_dispute_cases d JOIN consumer_subject_bindings b ON b.id=d.subject_binding_id WHERE d.case_ref=$1 AND d.tenant_id=$2 AND b.candidate_id=$3 AND d.status NOT IN ('resolved','withdrawn','frivolous')`, [input.disputeCaseRef, tenantId, c.candidate_id]);
       if (!disputed.rowCount) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "An open dispute bound to this candidate is required to pause adverse action." });
@@ -246,7 +247,7 @@ export const complianceWorkflowRouter = router({
   resumeAfterDispute: administratorProcedure.input(z.object({ caseRef: caseRefSchema, resolutionReference: z.string().trim().min(12).max(256) })).mutation(async ({ ctx, input }) => {
     const tenantId = tenant(ctx); const db = await pool(); const client = await db.connect();
     try {
-      await client.query("BEGIN"); const c = await lockedCase(client, input.caseRef, tenantId);
+      await beginTenantTransaction(client, tenantId); const c = await lockedCase(client, input.caseRef, tenantId);
       if (c.status !== "paused_for_dispute" || !["pre_notice_queued", "pre_notice_delivered", "waiting", "final_notice_queued"].includes(c.paused_from_status ?? "")) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Case is not eligible for dispute-resolution resumption." });
       await assertNoOpenDispute(client, c.candidate_id, tenantId);
       const pausedFrom = c.paused_from_status!;
@@ -269,7 +270,7 @@ export const complianceWorkflowRouter = router({
   queueFinalAdverse: adjudicatorProcedure.input(z.object({ caseRef: caseRefSchema, templateVersion: z.string().trim().min(1).max(32), channel: deliveryChannelSchema.default("portal") })).mutation(async ({ ctx, input }) => {
     const tenantId = tenant(ctx); const db = await pool(); const client = await db.connect();
     try {
-      await client.query("BEGIN"); const c = await lockedCase(client, input.caseRef, tenantId);
+      await beginTenantTransaction(client, tenantId); const c = await lockedCase(client, input.caseRef, tenantId);
       if (c.status !== "waiting" || !c.final_notice_eligible_at || new Date(c.final_notice_eligible_at) > new Date()) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Pre-adverse waiting period has not completed." });
       await assertNoOpenDispute(client, c.candidate_id, tenantId); const template = await templateFor(client, tenantId, "final_adverse", c.jurisdiction_code, input.templateVersion);
       const queued = await queueNotice(client, { tenantId, caseId: c.id, caseRef: input.caseRef, candidateId: c.candidate_id, template, noticeType: "final_adverse", channel: input.channel });
@@ -282,7 +283,7 @@ export const complianceWorkflowRouter = router({
   resolveManualDelivery: administratorProcedure.input(z.object({ caseRef: caseRefSchema, deliveryId: z.string().uuid(), channel: deliveryChannelSchema, resolutionReference: z.string().trim().min(12).max(256) })).mutation(async ({ ctx, input }) => {
     const tenantId = tenant(ctx); const db = await pool(); const client = await db.connect();
     try {
-      await client.query("BEGIN"); const c = await lockedCase(client, input.caseRef, tenantId);
+      await beginTenantTransaction(client, tenantId); const c = await lockedCase(client, input.caseRef, tenantId);
       if (!["manual_delivery", "undeliverable"].includes(c.status)) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Case does not require manual delivery recovery." });
       const original = await client.query<TemplateRow & { notice_type: NoticeType }>(`SELECT t.id,t.template_key,t.jurisdiction_code,t.version,t.content_sha256,d.notice_type FROM compliance_notice_deliveries d JOIN compliance_notice_templates t ON t.id=d.template_id WHERE d.id=$1 AND d.adverse_action_case_id=$2 AND d.status IN ('undeliverable','manual_required') FOR SHARE`, [input.deliveryId, c.id]);
       const source = original.rows[0]; if (!source) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Undeliverable or manual notice delivery not found." });
@@ -297,7 +298,7 @@ export const complianceWorkflowRouter = router({
   cancel: adjudicatorProcedure.input(z.object({ caseRef: caseRefSchema, reason: z.string().trim().min(20).max(4_000) })).mutation(async ({ ctx, input }) => {
     const tenantId = tenant(ctx); const db = await pool(); const client = await db.connect();
     try {
-      await client.query("BEGIN"); const c = await lockedCase(client, input.caseRef, tenantId);
+      await beginTenantTransaction(client, tenantId); const c = await lockedCase(client, input.caseRef, tenantId);
       if (["completed", "canceled"].includes(c.status)) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Completed or canceled adverse action cannot be changed." });
       await client.query(`UPDATE compliance_adverse_action_cases SET status='canceled',updated_at=NOW() WHERE id=$1`, [c.id]);
       await client.query(`UPDATE compliance_notice_deliveries SET status='canceled' WHERE adverse_action_case_id=$1 AND status IN ('queued','sent')`, [c.id]);

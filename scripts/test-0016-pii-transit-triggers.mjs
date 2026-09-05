@@ -11,6 +11,9 @@ async function expectReject(label, work) {
   try { await work(); throw new Error(`${label} unexpectedly succeeded`); }
   catch (error) { if (error instanceof Error && error.message.endsWith("unexpectedly succeeded")) throw error; }
 }
+async function setTenant(tenantId) {
+  await client.query("SELECT set_config('bis.tenant_id', $1, false)", [String(tenantId)]);
+}
 
 async function main() {
   await client.connect();
@@ -20,11 +23,14 @@ async function main() {
   const user = (await client.query(`INSERT INTO users ("openId","tenantId",name,email,role) VALUES ($1,$2,'Key Custodian',$3,'admin') RETURNING id`, [`transit-operator-${suffix}`, tenant1, `transit-${suffix}@example.invalid`])).rows[0].id;
   const candidate = (await client.query(`INSERT INTO candidate_profiles ("candidateRef","tenantId","firstName","lastName",email) VALUES ($1,$2,'Chidi','Transit',$3) RETURNING id`, [`CAN-TR-${suffix}`, tenant1, `candidate-${suffix}@example.invalid`])).rows[0].id;
 
+  await setTenant(tenant1);
   const source = (await client.query(`INSERT INTO pii_encryption_key_registry (tenant_id,key_version,external_key_ref,algorithm,status,created_by,provider,provider_key_name,provider_key_version) VALUES ($1,'pii-old','vault-transit://transit/tenant-one-pii','VAULT-TRANSIT-AES256-GCM96','active',$2,'vault_transit','tenant-one-pii',1) RETURNING id`, [tenant1, user])).rows[0].id;
   await client.query(`INSERT INTO pii_envelope_records (tenant_id,subject_kind,subject_id,purpose,ciphertext,nonce,key_registry_id,key_version,crypto_provider,provider_key_version) VALUES ($1,'candidate_profile',$2,'identity',$3,NULL,$4,'pii-old','vault_transit',1)`, [tenant1, candidate, Buffer.from("vault:v1:YWJjZA=="), source]);
   await client.query(`UPDATE pii_encryption_key_registry SET status='retiring' WHERE id=$1`, [source]);
   const target = (await client.query(`INSERT INTO pii_encryption_key_registry (tenant_id,key_version,external_key_ref,algorithm,status,created_by,provider,provider_key_name,provider_key_version) VALUES ($1,'pii-new','vault-transit://transit/tenant-one-pii','VAULT-TRANSIT-AES256-GCM96','active',$2,'vault_transit','tenant-one-pii',2) RETURNING id`, [tenant1, user])).rows[0].id;
+  await setTenant(tenant2);
   const foreignTarget = (await client.query(`INSERT INTO pii_encryption_key_registry (tenant_id,key_version,external_key_ref,algorithm,status,created_by,provider,provider_key_name,provider_key_version) VALUES ($1,'pii-foreign','vault-transit://transit/tenant-two-pii','VAULT-TRANSIT-AES256-GCM96','active',$2,'vault_transit','tenant-two-pii',1) RETURNING id`, [tenant2, user])).rows[0].id;
+  await setTenant(tenant1);
   const transitBlind = (await client.query(`INSERT INTO pii_blind_index_key_registry (tenant_id,key_version,external_key_ref,algorithm,status,created_by,provider,provider_key_name,provider_key_version) VALUES ($1,'blind-new','vault-transit://transit/tenant-one-blind','VAULT-TRANSIT-HMAC-SHA256','active',$2,'vault_transit','tenant-one-blind',2) RETURNING id`, [tenant1, user])).rows[0].id;
   assert.ok(transitBlind > 0);
 

@@ -1,6 +1,7 @@
 import { getPgPool } from "../server/db";
 import { encryptPiiEnvelope, piiAad, piiBlindIndex, type BlindAttribute, type SubjectKind } from "../server/piiEnvelopeCrypto";
 import { activeTenantBlindIndexRegistry, activeTenantEncryptionRegistry } from "../server/piiKeyRegistry";
+import { beginTenantTransaction } from "../server/tenantRls";
 
 const BATCH_SIZE = 100;
 const isProduction = process.env.NODE_ENV === "production" || process.env.BIS_ENV === "production";
@@ -64,19 +65,21 @@ async function run(): Promise<void> {
         [candidateCursor, BATCH_SIZE],
       );
       if (!rows.rowCount) break;
-      await client.query("BEGIN");
       for (const row of rows.rows) {
         const subjectId = Number(row.id); const tenantId = Number(row.tenantId);
         if (!Number.isInteger(tenantId) || tenantId < 1) throw new Error("Candidate profile tenant is invalid.");
-        await insertEnvelope(client, { tenantId, subjectKind: "candidate_profile", subjectId, purpose: "identity", payload: defined({ nin: row.nin, bvn: row.bvn, dob: row.dob, passportNumber: row.passportNumber, passportExpiry: row.passportExpiry }) });
-        await insertEnvelope(client, { tenantId, subjectKind: "candidate_profile", subjectId, purpose: "contact", payload: defined({ email: row.email, phone: row.phone }) });
-        await insertEnvelope(client, { tenantId, subjectKind: "candidate_profile", subjectId, purpose: "address", payload: defined({ currentAddress: row.currentAddress, addressHistory: row.addressHistory }) });
-        for (const [attribute, value] of [["nin", row.nin], ["bvn", row.bvn], ["passport_number", row.passportNumber], ["email", row.email], ["phone", row.phone]] as const) {
-          await insertBlindIndex(client, { tenantId, subjectKind: "candidate_profile", subjectId, attribute, value });
-        }
+        await beginTenantTransaction(client, tenantId);
+        try {
+          await insertEnvelope(client, { tenantId, subjectKind: "candidate_profile", subjectId, purpose: "identity", payload: defined({ nin: row.nin, bvn: row.bvn, dob: row.dob, passportNumber: row.passportNumber, passportExpiry: row.passportExpiry }) });
+          await insertEnvelope(client, { tenantId, subjectKind: "candidate_profile", subjectId, purpose: "contact", payload: defined({ email: row.email, phone: row.phone }) });
+          await insertEnvelope(client, { tenantId, subjectKind: "candidate_profile", subjectId, purpose: "address", payload: defined({ currentAddress: row.currentAddress, addressHistory: row.addressHistory }) });
+          for (const [attribute, value] of [["nin", row.nin], ["bvn", row.bvn], ["passport_number", row.passportNumber], ["email", row.email], ["phone", row.phone]] as const) {
+            await insertBlindIndex(client, { tenantId, subjectKind: "candidate_profile", subjectId, attribute, value });
+          }
+          await client.query("COMMIT");
+        } catch (error) { await client.query("ROLLBACK").catch(() => undefined); throw error; }
         candidateCursor = subjectId;
       }
-      await client.query("COMMIT");
     }
 
     let criminalCursor = 0;
@@ -87,15 +90,18 @@ async function run(): Promise<void> {
         [criminalCursor, BATCH_SIZE],
       );
       if (!rows.rowCount) break;
-      await client.query("BEGIN");
       for (const row of rows.rows) {
         const subjectId = Number(row.id); const tenantId = Number(row.tenantId);
-        await insertEnvelope(client, { tenantId, subjectKind: "criminal_record", subjectId, purpose: "criminal_record", payload: defined({ subjectName: row.subjectName, nin: row.nin, dob: row.dob, aliases: row.aliases, offenceDescription: row.offenceDescription, offenceLocation: row.offenceLocation, sentence: row.sentence, warrantDetails: row.warrantDetails }) });
-        await insertEnvelope(client, { tenantId, subjectKind: "criminal_record", subjectId, purpose: "provider_payload", payload: defined({ rawPayload: row.rawPayload }) });
-        await insertBlindIndex(client, { tenantId, subjectKind: "criminal_record", subjectId, attribute: "nin", value: row.nin });
+        if (!Number.isInteger(tenantId) || tenantId < 1) throw new Error("Criminal record tenant is invalid.");
+        await beginTenantTransaction(client, tenantId);
+        try {
+          await insertEnvelope(client, { tenantId, subjectKind: "criminal_record", subjectId, purpose: "criminal_record", payload: defined({ subjectName: row.subjectName, nin: row.nin, dob: row.dob, aliases: row.aliases, offenceDescription: row.offenceDescription, offenceLocation: row.offenceLocation, sentence: row.sentence, warrantDetails: row.warrantDetails }) });
+          await insertEnvelope(client, { tenantId, subjectKind: "criminal_record", subjectId, purpose: "provider_payload", payload: defined({ rawPayload: row.rawPayload }) });
+          await insertBlindIndex(client, { tenantId, subjectKind: "criminal_record", subjectId, attribute: "nin", value: row.nin });
+          await client.query("COMMIT");
+        } catch (error) { await client.query("ROLLBACK").catch(() => undefined); throw error; }
         criminalCursor = subjectId;
       }
-      await client.query("COMMIT");
     }
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);

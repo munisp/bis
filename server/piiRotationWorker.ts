@@ -4,6 +4,7 @@ import { decryptLegacyPiiEnvelope } from "./piiLegacyCutover";
 import { appendPiiForensicAuditEvent } from "./piiForensicAudit";
 import { tenantBlindIndexRegistryById, tenantEncryptionRegistryById } from "./piiKeyRegistry";
 import { loadVaultTransitClient } from "./vaultTransit";
+import { beginTenantTransaction } from "./tenantRls";
 
 const LEASE_SECONDS = 300;
 const WORKER_VERSION = "pii-rotation-v1";
@@ -50,15 +51,35 @@ function itemValue(payload: Record<string, unknown>, attribute: BlindAttribute):
 async function poolOrThrow() { const pool = await getPgPool(); if (!pool) fail("PII rotation worker requires PostgreSQL."); return pool; }
 
 async function leaseJob(rotationRef?: string): Promise<RotationJob | null> {
-  const pool = await poolOrThrow(); const client = await pool.connect();
+  const pool = await poolOrThrow();
+  const dispatchClient = await pool.connect();
+  let dispatch: { rotation_job_id: string; rotation_ref: string; tenant_id: number } | null = null;
   try {
-    await client.query("BEGIN");
-    await client.query(`UPDATE pii_rotation_jobs SET state='queued',leased_at=NULL,updated_at=NOW(),last_error_code=COALESCE(last_error_code,'PII_ROTATION_LEASE_EXPIRED') WHERE state='leased' AND leased_at < NOW()-make_interval(secs=>$1)`, [LEASE_SECONDS]);
-    const selected = await client.query<RotationJob>(`SELECT id,rotation_ref,tenant_id,source_encryption_key_registry_id,target_encryption_key_registry_id,source_blind_index_key_registry_id,target_blind_index_key_registry_id,compromise_incident_id,mode,dry_run,max_batch_size,requested_by FROM pii_rotation_jobs WHERE state='queued' AND ($1::text IS NULL OR rotation_ref=$1) ORDER BY created_at ASC FOR UPDATE SKIP LOCKED LIMIT 1`, [rotationRef ?? null]);
+    await dispatchClient.query("BEGIN");
+    await dispatchClient.query(`UPDATE pii_rotation_dispatch_queue SET state='queued',leased_at=NULL,updated_at=NOW() WHERE state='leased' AND leased_at < NOW()-make_interval(secs=>$1)`, [LEASE_SECONDS]);
+    const selected = await dispatchClient.query<{ rotation_job_id: string; rotation_ref: string; tenant_id: number }>(`SELECT rotation_job_id,rotation_ref,tenant_id FROM pii_rotation_dispatch_queue WHERE state='queued' AND ($1::text IS NULL OR rotation_ref=$1) ORDER BY created_at ASC FOR UPDATE SKIP LOCKED LIMIT 1`, [rotationRef ?? null]);
+    dispatch = selected.rows[0] ?? null;
+    if (dispatch) await dispatchClient.query(`UPDATE pii_rotation_dispatch_queue SET state='leased',leased_at=NOW(),attempt_count=attempt_count+1,updated_at=NOW() WHERE rotation_job_id=$1 AND state='queued'`, [dispatch.rotation_job_id]);
+    await dispatchClient.query("COMMIT");
+  } catch (error) { await dispatchClient.query("ROLLBACK").catch(() => undefined); throw error; } finally { dispatchClient.release(); }
+  if (!dispatch) return null;
+
+  const tenantClient = await pool.connect();
+  try {
+    await beginTenantTransaction(tenantClient, dispatch.tenant_id);
+    await tenantClient.query(`UPDATE pii_rotation_jobs SET state='queued',leased_at=NULL,updated_at=NOW(),last_error_code=COALESCE(last_error_code,'PII_ROTATION_LEASE_EXPIRED') WHERE id=$1 AND tenant_id=$2 AND state='leased' AND leased_at < NOW()-make_interval(secs=>$3)`, [dispatch.rotation_job_id, dispatch.tenant_id, LEASE_SECONDS]);
+    const selected = await tenantClient.query<RotationJob>(`SELECT id,rotation_ref,tenant_id,source_encryption_key_registry_id,target_encryption_key_registry_id,source_blind_index_key_registry_id,target_blind_index_key_registry_id,compromise_incident_id,mode,dry_run,max_batch_size,requested_by FROM pii_rotation_jobs WHERE id=$1 AND rotation_ref=$2 AND tenant_id=$3 AND state='queued' FOR UPDATE`, [dispatch.rotation_job_id, dispatch.rotation_ref, dispatch.tenant_id]);
     const job = selected.rows[0] ?? null;
-    if (job) await client.query(`UPDATE pii_rotation_jobs SET state='leased',leased_at=NOW(),attempt_count=attempt_count+1,updated_at=NOW() WHERE id=$1`, [job.id]);
-    await client.query("COMMIT"); return job;
-  } catch (error) { await client.query("ROLLBACK").catch(() => undefined); throw error; } finally { client.release(); }
+    if (job) await tenantClient.query(`UPDATE pii_rotation_jobs SET state='leased',leased_at=NOW(),attempt_count=attempt_count+1,updated_at=NOW() WHERE id=$1`, [job.id]);
+    await tenantClient.query("COMMIT");
+    return job;
+  } catch (error) {
+    await tenantClient.query("ROLLBACK").catch(() => undefined);
+    const restoreClient = await pool.connect();
+    try { await restoreClient.query(`UPDATE pii_rotation_dispatch_queue SET state='queued',leased_at=NULL,updated_at=NOW() WHERE rotation_job_id=$1 AND state='leased'`, [dispatch.rotation_job_id]); }
+    finally { restoreClient.release(); }
+    throw error;
+  } finally { tenantClient.release(); }
 }
 
 async function materializeItems(client: import("pg").PoolClient, job: RotationJob): Promise<number> {
@@ -118,7 +139,7 @@ async function decryptForRotation(job: RotationJob, source: SourceRegistry, item
 async function rotateOne(job: RotationJob, item: PlannedItem): Promise<"rotated" | "skipped"> {
   const pool = await poolOrThrow(); const client = await pool.connect();
   try {
-    await client.query("BEGIN");
+    await beginTenantTransaction(client, job.tenant_id);
     const current = await client.query<PlannedItem>(`SELECT i.id,i.envelope_id,i.tenant_id,i.subject_kind,i.subject_id,i.purpose,e.ciphertext,e.nonce,e.key_version,e.crypto_provider,e.provider_key_version FROM pii_rotation_job_items i JOIN pii_envelope_records e ON e.id=i.envelope_id WHERE i.id=$1 AND i.rotation_job_id=$2 AND i.state='planned' FOR UPDATE OF i,e`, [item.id, job.id]);
     const fresh = current.rows[0];
     if (!fresh || fresh.crypto_provider !== item.crypto_provider || fresh.key_version !== item.key_version) { await client.query(`UPDATE pii_rotation_job_items SET state='skipped',error_code='PII_ROTATION_SOURCE_CHANGED',completed_at=NOW() WHERE id=$1 AND state='planned'`, [item.id]); await client.query("COMMIT"); return "skipped"; }
@@ -165,13 +186,13 @@ async function rotateOne(job: RotationJob, item: PlannedItem): Promise<"rotated"
 
 async function markJobFailed(job: RotationJob, code: string): Promise<void> {
   const pool = await poolOrThrow(); const client = await pool.connect();
-  try { await client.query("BEGIN"); await client.query(`UPDATE pii_rotation_jobs SET state='failed',failed_count=failed_count+1,last_error_code=$2,updated_at=NOW() WHERE id=$1 AND state='leased'`, [job.id, code]); await appendPiiForensicAuditEvent(client, { incidentId: job.compromise_incident_id, tenantId: job.tenant_id, rotationJobId: job.id, eventType: "rotation_failed", detail: { error_code: code, worker_version: WORKER_VERSION } }); await client.query("COMMIT"); }
+  try { await beginTenantTransaction(client, job.tenant_id); await client.query(`UPDATE pii_rotation_jobs SET state='failed',failed_count=failed_count+1,last_error_code=$2,updated_at=NOW() WHERE id=$1 AND state='leased'`, [job.id, code]); await appendPiiForensicAuditEvent(client, { incidentId: job.compromise_incident_id, tenantId: job.tenant_id, rotationJobId: job.id, eventType: "rotation_failed", detail: { error_code: code, worker_version: WORKER_VERSION } }); await client.query("COMMIT"); }
   catch (error) { await client.query("ROLLBACK").catch(() => undefined); throw error; } finally { client.release(); }
 }
 
 async function finishJob(job: RotationJob, eventType: "rotation_dry_run_completed" | "rotation_completed", state: "dry_run_complete" | "completed", expected: number): Promise<void> {
   const pool = await poolOrThrow(); const client = await pool.connect();
-  try { await client.query("BEGIN"); await client.query(`UPDATE pii_rotation_jobs SET state=$2,processed_count=CASE WHEN $2='dry_run_complete' THEN $3 ELSE processed_count END,completed_at=NOW(),leased_at=NULL,updated_at=NOW() WHERE id=$1 AND state='leased'`, [job.id, state, expected]); await appendPiiForensicAuditEvent(client, { incidentId: job.compromise_incident_id, tenantId: job.tenant_id, rotationJobId: job.id, eventType, detail: { record_count: expected, dry_run: state === "dry_run_complete", state, worker_version: WORKER_VERSION } }); await client.query("COMMIT"); }
+  try { await beginTenantTransaction(client, job.tenant_id); await client.query(`UPDATE pii_rotation_jobs SET state=$2,processed_count=CASE WHEN $2='dry_run_complete' THEN $3 ELSE processed_count END,completed_at=NOW(),leased_at=NULL,updated_at=NOW() WHERE id=$1 AND state='leased'`, [job.id, state, expected]); await appendPiiForensicAuditEvent(client, { incidentId: job.compromise_incident_id, tenantId: job.tenant_id, rotationJobId: job.id, eventType, detail: { record_count: expected, dry_run: state === "dry_run_complete", state, worker_version: WORKER_VERSION } }); await client.query("COMMIT"); }
   catch (error) { await client.query("ROLLBACK").catch(() => undefined); throw error; } finally { client.release(); }
 }
 
@@ -182,14 +203,14 @@ export async function runPiiRotationWorker(rotationRef?: string): Promise<PiiRot
   result.leased = 1;
   const pool = await poolOrThrow(); const planningClient = await pool.connect();
   let expected: number;
-  try { await planningClient.query("BEGIN"); expected = await materializeItems(planningClient, job); await appendPiiForensicAuditEvent(planningClient, { incidentId: job.compromise_incident_id, tenantId: job.tenant_id, rotationJobId: job.id, actorUserId: job.requested_by, eventType: "rotation_created", detail: { record_count: expected, source_registry_id: job.source_encryption_key_registry_id, target_registry_id: job.target_encryption_key_registry_id, dry_run: job.dry_run, worker_version: WORKER_VERSION } }); await planningClient.query("COMMIT"); }
+  try { await beginTenantTransaction(planningClient, job.tenant_id); expected = await materializeItems(planningClient, job); await appendPiiForensicAuditEvent(planningClient, { incidentId: job.compromise_incident_id, tenantId: job.tenant_id, rotationJobId: job.id, actorUserId: job.requested_by, eventType: "rotation_created", detail: { record_count: expected, source_registry_id: job.source_encryption_key_registry_id, target_registry_id: job.target_encryption_key_registry_id, dry_run: job.dry_run, worker_version: WORKER_VERSION } }); await planningClient.query("COMMIT"); }
   catch (error) { await planningClient.query("ROLLBACK").catch(() => undefined); await markJobFailed(job, "PII_ROTATION_PLAN_FAILURE"); throw error; } finally { planningClient.release(); }
   result.planned = expected!;
   if (job.dry_run) { await finishJob(job, "rotation_dry_run_completed", "dry_run_complete", expected!); result.dryRuns = 1; return result; }
   if (process.env.BIS_PII_ROTATION_CONFIRM !== "ROTATE_PII_ENVELOPES" || (isProduction() && process.env.BIS_PII_PRODUCTION_ROTATION_APPROVED !== "true")) { await markJobFailed(job, "PII_ROTATION_CONFIRMATION_MISSING"); fail("Refusing PII rotation without explicit cutover confirmation and production approval."); }
   for (;;) {
     const claimPool = await poolOrThrow(); const claimClient = await claimPool.connect(); let items: PlannedItem[];
-    try { await claimClient.query("BEGIN"); items = await nextItems(claimClient, job); await claimClient.query("COMMIT"); }
+    try { await beginTenantTransaction(claimClient, job.tenant_id); items = await nextItems(claimClient, job); await claimClient.query("COMMIT"); }
     catch (error) { await claimClient.query("ROLLBACK").catch(() => undefined); throw error; } finally { claimClient.release(); }
     if (!items!.length) break;
     for (const item of items!) {

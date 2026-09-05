@@ -8,6 +8,7 @@ import { permifyCheck } from "./permify";
 import { appendPiiForensicAuditEvent } from "./piiForensicAudit";
 import { assertTransitKeyReference } from "./piiEnvelopeCrypto";
 import { loadVaultTransitClient, parseVaultTransitRef } from "./vaultTransit";
+import { beginTenantTransaction } from "./tenantRls";
 
 const registryKindSchema = z.enum(["encryption", "blind_index"]);
 const modeSchema = z.enum(["transit_rewrap", "transit_reencrypt", "legacy_cutover"]);
@@ -45,7 +46,7 @@ export const piiKeyCustodyRouter = router({
   registerStagedVaultKey: custodianProcedure.input(z.object({ kind: registryKindSchema, keyVersion: z.string().trim().regex(/^[A-Za-z0-9._-]{1,64}$/), externalKeyRef: z.string().trim().min(20).max(512) })).mutation(async ({ ctx, input }) => {
     const tenantId = tenant(ctx); const db = await pool(); const client = await db.connect();
     try {
-      await client.query("BEGIN");
+      await beginTenantTransaction(client, tenantId);
       const vault = loadVaultTransitClient();
       const parsed = parseVaultTransitRef(input.externalKeyRef, vault.mount);
       const metadata = input.kind === "encryption"
@@ -66,7 +67,7 @@ export const piiKeyCustodyRouter = router({
   activateStagedVaultKey: commanderProcedure.input(z.object({ kind: registryKindSchema, registryId: z.number().int().positive(), evidenceReference: z.string().trim().min(12).max(256) })).mutation(async ({ ctx, input }) => {
     const tenantId = tenant(ctx); const db = await pool(); const client = await db.connect();
     try {
-      await client.query("BEGIN");
+      await beginTenantTransaction(client, tenantId);
       const { table, row } = await registryForUpdate(client, tenantId, input.kind, input.registryId);
       if (row.status !== "staged" || row.provider !== "vault_transit" || !row.provider_key_version) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Only a staged Vault Transit registry can be activated." });
       if (row.created_by === ctx.user.id) throw new TRPCError({ code: "FORBIDDEN", message: "A separate authorized incident commander must activate a staged Vault Transit key." });
@@ -82,7 +83,7 @@ export const piiKeyCustodyRouter = router({
   reportSuspectedCompromise: commanderProcedure.input(z.object({ severity: severitySchema, encryptionRegistryIds: z.array(z.number().int().positive()).min(1).max(20), blindIndexRegistryIds: z.array(z.number().int().positive()).max(20).default([]), counselReference: z.string().trim().min(12).max(256).optional(), evidenceReference: z.string().trim().min(12).max(256) })).mutation(async ({ ctx, input }) => {
     const tenantId = tenant(ctx); const db = await pool(); const client = await db.connect();
     try {
-      await client.query("BEGIN");
+      await beginTenantTransaction(client, tenantId);
       const incident = await client.query<{ id: string; incident_ref: string }>(`INSERT INTO pii_key_compromise_incidents (incident_ref,tenant_id,severity,reported_by,commander_user_id,counsel_reference,evidence_reference) VALUES ($1,$2,$3,$4,$4,$5,$6) RETURNING id,incident_ref`, [incidentRef(), tenantId, input.severity, ctx.user.id, input.counselReference ?? null, input.evidenceReference]);
       const incidentRow = incident.rows[0]!;
       for (const id of input.encryptionRegistryIds) {
@@ -111,7 +112,7 @@ export const piiKeyCustodyRouter = router({
     if (!input.dryRun && ENV.isProduction && process.env.BIS_PII_PRODUCTION_ROTATION_APPROVED !== "true") throw new TRPCError({ code: "FORBIDDEN", message: "Production PII rotation requires recorded production approval." });
     const tenantId = tenant(ctx); const db = await pool(); const client = await db.connect();
     try {
-      await client.query("BEGIN");
+      await beginTenantTransaction(client, tenantId);
       const source = await registryForUpdate(client, tenantId, "encryption", input.sourceEncryptionRegistryId);
       const target = await registryForUpdate(client, tenantId, "encryption", input.targetEncryptionRegistryId);
       if (target.row.status !== "active" || target.row.provider !== "vault_transit") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Rotation target must be an active tenant Vault Transit key registry." });
@@ -137,7 +138,7 @@ export const piiKeyCustodyRouter = router({
   closeIncident: commanderProcedure.input(z.object({ incidentRef: incidentRefSchema, resolutionReference: z.string().trim().min(12).max(256), close: z.boolean().default(false) })).mutation(async ({ ctx, input }) => {
     const tenantId = tenant(ctx); const db = await pool(); const client = await db.connect();
     try {
-      await client.query("BEGIN");
+      await beginTenantTransaction(client, tenantId);
       const incident = await client.query<{ id: string; status: string }>(`SELECT id,status FROM pii_key_compromise_incidents WHERE incident_ref=$1 AND tenant_id=$2 FOR UPDATE`, [input.incidentRef, tenantId]);
       const row = incident.rows[0];
       if (!row || !["contained", "rotation_queued", "rotating", "recovering", "resolved"].includes(row.status)) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Incident cannot be resolved from its current state." });

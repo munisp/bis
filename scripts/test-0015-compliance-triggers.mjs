@@ -16,6 +16,9 @@ async function expectReject(label, work) {
     if (error instanceof Error && error.message.endsWith("unexpectedly succeeded")) throw error;
   }
 }
+async function setTenant(tenantId) {
+  await client.query("SELECT set_config('bis.tenant_id', $1, false)", [String(tenantId)]);
+}
 
 async function main() {
   await client.connect();
@@ -25,10 +28,13 @@ async function main() {
   const user1 = (await client.query(`INSERT INTO users ("openId","tenantId",name,email,role) VALUES ($1,$2,'Test Operator',$3,'admin') RETURNING id`, [`test-operator-${suffix}`, tenant1, `operator-${suffix}@example.invalid`])).rows[0].id;
   const candidate = (await client.query(`INSERT INTO candidate_profiles ("candidateRef","tenantId","firstName","lastName",email) VALUES ($1,$2,'Amina','Test',$3) RETURNING id`, [`CAN-${suffix}`, tenant1, `candidate-${suffix}@example.invalid`])).rows[0].id;
 
+  await setTenant(tenant1);
   const key1 = (await client.query(`INSERT INTO pii_encryption_key_registry (tenant_id,key_version,external_key_ref,created_by) VALUES ($1,'pii-test','vault://tenant-1/pii-test',$2) RETURNING id`, [tenant1, user1])).rows[0].id;
+  await setTenant(tenant2);
   const key2 = (await client.query(`INSERT INTO pii_encryption_key_registry (tenant_id,key_version,external_key_ref,created_by) VALUES ($1,'pii-test','vault://tenant-2/pii-test',$2) RETURNING id`, [tenant2, user1])).rows[0].id;
-  const blind1 = (await client.query(`INSERT INTO pii_blind_index_key_registry (tenant_id,key_version,external_key_ref,created_by) VALUES ($1,'blind-test','vault://tenant-1/blind-test',$2) RETURNING id`, [tenant1, user1])).rows[0].id;
   const blind2 = (await client.query(`INSERT INTO pii_blind_index_key_registry (tenant_id,key_version,external_key_ref,created_by) VALUES ($1,'blind-test','vault://tenant-2/blind-test',$2) RETURNING id`, [tenant2, user1])).rows[0].id;
+  await setTenant(tenant1);
+  const blind1 = (await client.query(`INSERT INTO pii_blind_index_key_registry (tenant_id,key_version,external_key_ref,created_by) VALUES ($1,'blind-test','vault://tenant-1/blind-test',$2) RETURNING id`, [tenant1, user1])).rows[0].id;
   const ciphertext = Buffer.alloc(32, 7); const nonce = Buffer.alloc(12, 1);
 
   await client.query(`INSERT INTO pii_envelope_records (tenant_id,subject_kind,subject_id,purpose,ciphertext,nonce,key_registry_id,key_version) VALUES ($1,'candidate_profile',$2,'identity',$3,$4,$5,'pii-test')`, [tenant1, candidate, ciphertext, nonce, key1]);

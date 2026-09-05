@@ -933,6 +933,7 @@ describe("Canonical PostgreSQL Baseline", () => {
       "0014_compliance_adverse_action_and_pii_encryption",
       "0015_compliance_workflow_hardening",
       "0016_pii_transit_rotation_and_forensics",
+      "0017_pii_tenant_rls_and_dispatch",
     ]);
   });
 
