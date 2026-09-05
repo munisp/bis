@@ -59,6 +59,8 @@ ALTER TABLE pii_encryption_key_registry
 
 ALTER TABLE pii_blind_index_key_registry
   DROP CONSTRAINT IF EXISTS pii_blind_index_key_registry_status_check,
+  DROP CONSTRAINT IF EXISTS pii_blind_index_key_registry_algorithm_check,
+  ADD CONSTRAINT pii_blind_index_key_registry_algorithm_check CHECK (algorithm IN ('HMAC-SHA-256','VAULT-TRANSIT-HMAC-SHA256')),
   ADD COLUMN provider TEXT NOT NULL DEFAULT 'legacy_local_aes' CHECK (provider IN ('legacy_local_aes','vault_transit')),
   ADD COLUMN provider_key_name TEXT,
   ADD COLUMN provider_key_version INTEGER,

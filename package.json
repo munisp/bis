@@ -14,6 +14,7 @@
     "pii:backfill": "tsx scripts/backfill-pii-envelopes.ts",
     "pii:rotate": "tsx server/piiRotationWorker.ts",
     "pii:rotate:dry-run": "tsx scripts/validate-pii-rotation-dry-run.ts",
+    "pii:post-cutover:verify": "tsx scripts/verify-pii-transit-post-cutover.ts",
     "db:push": "pnpm db:migrate",
     "db:seed": "tsx server/seed.ts",
     "e2e": "playwright test",
