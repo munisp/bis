@@ -45,6 +45,10 @@ export type PiiRotationTimingSample = { poolWaitingCount?: number; poolTotalCoun
 export type PiiRotationTimingObserver = (stage: PiiRotationTimingStage, elapsedMs: number, sample?: PiiRotationTimingSample) => void;
 
 function fail(message: string): never { throw new Error(message); }
+export function checkoutFailureOutcome(error: unknown): "checkout_timeout" | "checkout_failed" {
+  const message = error instanceof Error ? error.message : "";
+  return /timeout|timed out/i.test(message) ? "checkout_timeout" : "checkout_failed";
+}
 async function observeLatency<T>(stage: PiiRotationTimingStage, observer: PiiRotationTimingObserver | undefined, work: () => Promise<T>, sample?: PiiRotationTimingSample): Promise<T> {
   const started = process.hrtime.bigint();
   try {
@@ -55,7 +59,12 @@ async function observeLatency<T>(stage: PiiRotationTimingStage, observer: PiiRot
 }
 async function checkoutClient(pool: import("pg").Pool, observer?: PiiRotationTimingObserver): Promise<import("pg").PoolClient> {
   const sample: PiiRotationTimingSample = { poolWaitingCount: pool.waitingCount, poolTotalCount: pool.totalCount, poolIdleCount: pool.idleCount };
-  return observeLatency("pool_checkout", observer, () => pool.connect(), sample);
+  try {
+    return await observeLatency("pool_checkout", observer, () => pool.connect(), sample);
+  } catch (error) {
+    piiRotationDispatchTotal.inc({ outcome: checkoutFailureOutcome(error), component: "pii_rotation_worker" });
+    throw error;
+  }
 }
 async function beginScopedTenantTransaction(client: import("pg").PoolClient, tenantId: number, observer?: PiiRotationTimingObserver): Promise<void> {
   await observeLatency("tenant_context_setup", observer, () => beginTenantTransaction(client, tenantId));

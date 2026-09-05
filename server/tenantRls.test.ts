@@ -40,9 +40,9 @@ describe("beginTenantTransaction", () => {
     await commitTenantTransaction(client);
 
     expect(client.query.mock.calls.map(([text]) => text)).toEqual([
+      "BEGIN",
       "RESET bis.tenant_id",
       "SELECT current_setting('bis.tenant_id', true) AS tenant_id",
-      "BEGIN",
       "SELECT set_config('bis.tenant_id', $1, true)",
       "SELECT current_setting('bis.tenant_id', true) AS tenant_id",
       "COMMIT",

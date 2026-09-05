@@ -31,9 +31,9 @@ export async function setTenantRlsContext(client: TenantScopedClient, tenantId: 
 }
 
 /**
- * Starts an RLS-scoped transaction. Callers must use the returned client for all
- * protected-table queries and must finish with commitTenantTransaction or
- * rollbackTenantTransaction before releasing the client.
+ * Clears and validates the server session assigned to the active transaction.
+ * In PgBouncer transaction-pooling mode, it must be called only after BEGIN so
+ * the reset and transaction-local RLS binding apply to the same backend session.
  */
 async function clearSessionTenantRlsContext(client: TenantScopedClient): Promise<void> {
   try {
@@ -53,14 +53,18 @@ async function clearSessionTenantRlsContext(client: TenantScopedClient): Promise
 export async function beginTenantTransaction(client: TenantScopedClient, tenantId: number): Promise<void> {
   // Reject malformed runtime values before issuing any query on a pooled client.
   assertTenantId(tenantId);
-  // Clear an accidental session-level SET before BEGIN. This protects the next
-  // transaction even if a legacy query path contaminated a pooled connection.
-  await clearSessionTenantRlsContext(client);
+  // PgBouncer transaction pooling may assign the backend only after BEGIN. Keep
+  // reset, verification, and SET LOCAL in the same transaction/backend session.
   await client.query("BEGIN");
   try {
+    await clearSessionTenantRlsContext(client);
     await setTenantRlsContext(client, tenantId);
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
+    // RESET inside a failed transaction is rolled back with it. Best-effort
+    // cleanup after rollback protects direct node-postgres pooled clients while
+    // preserving the original fail-closed setup error for the caller.
+    await clearSessionTenantRlsContext(client).catch(() => undefined);
     throw error;
   }
 }
