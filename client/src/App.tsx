@@ -67,6 +67,7 @@ const CaseDetailPage               = lazy(() => import("@/pages/bis/CaseDetailPa
 const StakeholderPortalPage        = lazy(() => import("@/pages/bis/StakeholderPortalPage"));
 const StakeholderPortalLandingPage = lazy(() => import("@/pages/StakeholderPortalLandingPage"));
 const OllamaManagementPage         = lazy(() => import("@/pages/bis/OllamaManagementPage"));
+const PiiForensicAuditPage         = lazy(() => import("@/pages/bis/PiiForensicAuditPage"));
 
 // LEX — Law Enforcement Extension
 const LexAdminPage      = lazy(() => import("@/pages/lex/LexAdminPage"));
@@ -224,6 +225,7 @@ function Router() {
         <Route path="/infra/redis" component={RedisPage} />
         <Route path="/infra/gateway" component={GatewayHealthPage} />
         <Route path="/infra/health" component={SystemHealthDashboard} />
+        <Route path="/infra/pii-forensics" component={PiiForensicAuditPage} />
         {/* NG Background Screening */}
         <Route path="/ng-screening" component={NgScreeningDashboard} />
         <Route path="/ng-screening/packages" component={NgPackagesPage} />

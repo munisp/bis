@@ -2,16 +2,33 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { appendPiiForensicAuditEvent, piiForensicIntegrityHash, readVerifiedPiiForensicEvents, verifyPiiForensicAuditEvent } from "./piiForensicAudit";
 
 const originalAuditSecret = process.env.AUDIT_HMAC_SECRET;
+const originalCursorKeyring = process.env.BIS_PII_FORENSIC_CURSOR_KEYRING;
+const originalCursorActiveKeyVersion = process.env.BIS_PII_FORENSIC_CURSOR_ACTIVE_KEY_VERSION;
+const originalCursorKeyExpiries = process.env.BIS_PII_FORENSIC_CURSOR_KEY_EXPIRIES_JSON;
+const cursorKeyV1 = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+const cursorKeyV2 = "__________________________________________8=";
+
+function configureCursorKeys(active = "cursor-v1", keyring = `cursor-v1:${cursorKeyV1}`) {
+  process.env.BIS_PII_FORENSIC_CURSOR_KEYRING = keyring;
+  process.env.BIS_PII_FORENSIC_CURSOR_ACTIVE_KEY_VERSION = active;
+}
 
 afterEach(() => {
   vi.useRealTimers();
   if (originalAuditSecret === undefined) delete process.env.AUDIT_HMAC_SECRET;
   else process.env.AUDIT_HMAC_SECRET = originalAuditSecret;
+  if (originalCursorKeyring === undefined) delete process.env.BIS_PII_FORENSIC_CURSOR_KEYRING;
+  else process.env.BIS_PII_FORENSIC_CURSOR_KEYRING = originalCursorKeyring;
+  if (originalCursorActiveKeyVersion === undefined) delete process.env.BIS_PII_FORENSIC_CURSOR_ACTIVE_KEY_VERSION;
+  else process.env.BIS_PII_FORENSIC_CURSOR_ACTIVE_KEY_VERSION = originalCursorActiveKeyVersion;
+  if (originalCursorKeyExpiries === undefined) delete process.env.BIS_PII_FORENSIC_CURSOR_KEY_EXPIRIES_JSON;
+  else process.env.BIS_PII_FORENSIC_CURSOR_KEY_EXPIRIES_JSON = originalCursorKeyExpiries;
   delete process.env.BIS_PII_FORENSIC_CURSOR_TTL_SECONDS;
 });
 
 function event(overrides: Partial<{ id: number; tenantId: number; createdAt: string; detail: Record<string, string | number | boolean | null>; integrityHash: string; integrityScheme: string; incidentRef: string | null }> = {}) {
   process.env.AUDIT_HMAC_SECRET = "synthetic-forensic-hmac-secret";
+  configureCursorKeys();
   const base = {
     id: 1,
     incidentId: "11111111-1111-1111-1111-111111111111",
@@ -124,6 +141,22 @@ describe("PII forensic audit read-back integrity", () => {
     expect(verified).toBe(1000);
     expect(pages).toBe(10);
     expect(Math.max(...query.mock.calls.map((call) => call[1][4] as number))).toBe(101);
+  });
+
+  it("accepts an in-flight cursor through a bounded old-key overlap and rejects it after retirement", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-05T12:00:00.000Z"));
+    process.env.BIS_PII_FORENSIC_CURSOR_TTL_SECONDS = "60";
+    const first = event({ id: 2, createdAt: "2026-09-05T11:59:59.000Z" });
+    const second = event({ id: 1, createdAt: "2026-09-05T11:59:58.000Z" });
+    const query = vi.fn().mockResolvedValueOnce({ rows: [row(first), row(second)] }).mockResolvedValueOnce({ rows: [row(second)] });
+    configureCursorKeys("cursor-v1", `cursor-v1:${cursorKeyV1}`);
+    const firstPage = await readVerifiedPiiForensicEvents({ query } as never, { tenantId: 7, limit: 1 });
+    configureCursorKeys("cursor-v2", `cursor-v1:${cursorKeyV1},cursor-v2:${cursorKeyV2}`);
+    process.env.BIS_PII_FORENSIC_CURSOR_KEY_EXPIRIES_JSON = JSON.stringify({ "cursor-v1": "2026-09-05T12:01:00.000Z" });
+    await expect(readVerifiedPiiForensicEvents({ query } as never, { tenantId: 7, limit: 1, cursor: firstPage.nextCursor! })).resolves.toMatchObject({ events: expect.any(Array) });
+    process.env.BIS_PII_FORENSIC_CURSOR_KEYRING = `cursor-v2:${cursorKeyV2}`;
+    await expect(readVerifiedPiiForensicEvents({ query } as never, { tenantId: 7, limit: 1, cursor: firstPage.nextCursor! })).rejects.toThrow("invalid or expired");
   });
 
   it("continues without duplicates across equal timestamps and out-of-order timestamp groups", async () => {

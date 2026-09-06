@@ -5,8 +5,12 @@ import pg from "pg";
 const { Client } = pg;
 const connectionString = process.env.DATABASE_URL ?? process.env.BIS_DATABASE_URL;
 if (!connectionString) throw new Error("DATABASE_URL or BIS_DATABASE_URL is required");
-const ROW_COUNT = 10_000;
-const PAGE_SIZE = 100;
+const ROW_COUNT = Number(process.env.BIS_FORENSIC_EXPLAIN_ROWS ?? "10000");
+const PAGE_SIZE = Number(process.env.BIS_FORENSIC_EXPLAIN_PAGE_SIZE ?? "100");
+const CURSOR_OFFSET = Number(process.env.BIS_FORENSIC_EXPLAIN_CURSOR_OFFSET ?? String(Math.floor(ROW_COUNT / 2)));
+if (!Number.isSafeInteger(ROW_COUNT) || ROW_COUNT < 10_000 || ROW_COUNT > 2_000_000) throw new Error("BIS_FORENSIC_EXPLAIN_ROWS must be an integer from 10000 through 2000000");
+if (!Number.isSafeInteger(PAGE_SIZE) || PAGE_SIZE < 1 || PAGE_SIZE > 200) throw new Error("BIS_FORENSIC_EXPLAIN_PAGE_SIZE must be an integer from 1 through 200");
+if (!Number.isSafeInteger(CURSOR_OFFSET) || CURSOR_OFFSET < 0 || CURSOR_OFFSET >= ROW_COUNT) throw new Error("BIS_FORENSIC_EXPLAIN_CURSOR_OFFSET must be within the synthetic history");
 const INDEX_NAME = "pii_forensic_audit_events_tenant_created_id_desc_idx";
 
 async function setTenant(client, tenantId) {
@@ -75,8 +79,8 @@ async function main() {
     await client.query("BEGIN");
     await setTenant(client, tenant);
     const cursor = (await client.query(
-      `SELECT id,created_at FROM pii_forensic_audit_events WHERE tenant_id=$1 ORDER BY created_at DESC,id DESC OFFSET 5000 LIMIT 1`,
-      [tenant],
+      `SELECT id,created_at FROM pii_forensic_audit_events WHERE tenant_id=$1 ORDER BY created_at DESC,id DESC OFFSET $2 LIMIT 1`,
+      [tenant, CURSOR_OFFSET],
     )).rows[0];
     assert.ok(cursor, "synthetic cursor row must exist");
     const initialPage = await explain(client, [tenant, null, null, PAGE_SIZE + 1]);
@@ -87,7 +91,7 @@ async function main() {
       status: "pass",
       rowCount: ROW_COUNT,
       pageSize: PAGE_SIZE,
-      cursorOffset: 5000,
+      cursorOffset: CURSOR_OFFSET,
       indexName: INDEX_NAME,
       initialPage,
       deepPage,

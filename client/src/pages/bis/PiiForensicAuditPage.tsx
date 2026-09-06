@@ -1,0 +1,79 @@
+import { useEffect, useMemo, useState } from "react";
+import { trpc } from "@/lib/trpc";
+import { AlertTriangle, ChevronLeft, ChevronRight, Download, Loader2, RefreshCw, ShieldCheck } from "lucide-react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+
+type ForensicEvent = {
+  id: number;
+  createdAt: Date | string;
+  eventType: string;
+  detail: Record<string, string | number | boolean | null>;
+  integrityHash: string;
+  integrityScheme: string;
+  incidentRef: string | null;
+  incidentStatus: string | null;
+};
+
+function isExpiredCursorError(error: { data?: { code?: string } | null; message?: string } | null): boolean {
+  return error?.data?.code === "BAD_REQUEST" && error.message === "PII forensic pagination cursor is invalid or expired.";
+}
+
+function downloadVerifiedEvents(events: ForensicEvent[]): void {
+  const payload = JSON.stringify({ generatedAt: new Date().toISOString(), eventCount: events.length, events }, null, 2);
+  const objectUrl = URL.createObjectURL(new Blob([payload], { type: "application/json" }));
+  const anchor = document.createElement("a");
+  anchor.href = objectUrl;
+  anchor.download = `bis-pii-forensic-audit-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+  anchor.click();
+  URL.revokeObjectURL(objectUrl);
+}
+
+export default function PiiForensicAuditPage() {
+  const [cursor, setCursor] = useState<string | undefined>();
+  const [history, setHistory] = useState<ForensicEvent[]>([]);
+  const [pageStack, setPageStack] = useState<Array<string | undefined>>([]);
+  const [cursorExpired, setCursorExpired] = useState(false);
+  const query = trpc.piiKeyCustody.listForensics.useQuery({ limit: 100, cursor }, { retry: false });
+
+  useEffect(() => {
+    if (!query.data) return;
+    setCursorExpired(false);
+    setHistory((current) => {
+      const seen = new Set(current.map((event) => event.id));
+      return [...current, ...query.data.events.filter((event) => !seen.has(event.id))] as ForensicEvent[];
+    });
+  }, [query.data]);
+
+  const events = query.data?.events ?? [];
+  const nextCursor = query.data?.nextCursor ?? null;
+  const expired = isExpiredCursorError(query.error);
+  const canDownload = history.length > 0;
+  const formattedEvents = useMemo(() => events.map((event) => ({ ...event, createdAt: new Date(event.createdAt).toLocaleString("en-NG") })), [events]);
+
+  function restartAfterExpiry(): void {
+    setCursor(undefined);
+    setPageStack([]);
+    setHistory([]);
+    setCursorExpired(true);
+    void query.refetch();
+  }
+
+  return <div className="space-y-6 p-6">
+    <section className="flex flex-wrap items-start justify-between gap-4">
+      <div>
+        <div className="mb-2 flex items-center gap-2 text-primary"><ShieldCheck size={22}/><span className="font-mono text-xs uppercase tracking-[0.18em]">PII custody</span></div>
+        <h1 className="text-2xl font-semibold text-foreground">Verified forensic audit</h1>
+        <p className="mt-1 max-w-3xl text-sm text-muted-foreground">Each page is tenant-isolated, HMAC-verified, and bounded to 100 immutable forensic events. Event detail is constrained to an approved non-PII schema.</p>
+      </div>
+      <Button variant="outline" disabled={!canDownload} onClick={() => downloadVerifiedEvents(history)}><Download className="mr-2" size={15}/>Download retrieved verified events</Button>
+    </section>
+
+    {expired ? <Card className="border-amber-300 bg-amber-50"><CardContent className="flex flex-wrap items-center justify-between gap-3 pt-5"><div className="flex gap-3"><AlertTriangle className="mt-0.5 text-amber-700" size={18}/><p className="max-w-2xl text-sm text-amber-950">The signed continuation cursor expired or is no longer valid. No page was returned. Restarting begins a new verified scan and discards locally accumulated export rows to avoid presenting a mixed export.</p></div><Button onClick={restartAfterExpiry}><RefreshCw className="mr-2" size={15}/>Restart verified scan</Button></CardContent></Card> : null}
+    {cursorExpired ? <p className="text-xs text-muted-foreground">A new cursor chain is active after expiration recovery.</p> : null}
+    {query.isLoading ? <div className="flex justify-center py-24"><Loader2 className="animate-spin text-muted-foreground"/></div> : null}
+    {!query.isLoading && !query.error ? <Card><CardContent className="space-y-3 pt-5">{formattedEvents.length ? formattedEvents.map((event) => <div key={event.id} className="rounded border border-border/60 p-3"><div className="flex flex-wrap items-center justify-between gap-2"><code className="text-xs text-muted-foreground">event #{event.id}</code><span className="text-xs text-muted-foreground">{event.createdAt}</span></div><p className="mt-1 text-sm font-medium text-foreground">{event.eventType}</p><p className="mt-1 break-words font-mono text-xs text-muted-foreground">{JSON.stringify(event.detail)}</p></div>) : <p className="py-12 text-center text-sm text-muted-foreground">No verified forensic events are available for this tenant.</p>}<div className="flex items-center justify-between border-t pt-4"><Button variant="outline" disabled={!pageStack.length || query.isFetching} onClick={() => { const previous = pageStack.at(-1); setPageStack((current) => current.slice(0, -1)); setCursor(previous); }}><ChevronLeft className="mr-1" size={15}/>Previous page</Button><span className="text-xs text-muted-foreground">Retrieved {history.length} verified events</span><Button disabled={!nextCursor || query.isFetching} onClick={() => { setPageStack((current) => [...current, cursor]); setCursor(nextCursor ?? undefined); }} >Next page<ChevronRight className="ml-1" size={15}/></Button></div></CardContent></Card> : null}
+    {query.error && !expired ? <Card className="border-destructive/40"><CardContent className="pt-5 text-sm text-destructive">The verified forensic audit page could not be loaded. No partial result is shown. {query.error.message}</CardContent></Card> : null}
+  </div>;
+}

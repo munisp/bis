@@ -354,6 +354,24 @@ const ENV_SPECS: EnvSpec[] = [
     description: "Forensic audit cursor lifetime in seconds; must be an integer from 60 through 3600",
   },
   {
+    key: "BIS_PII_FORENSIC_CURSOR_KEYRING",
+    required: false,
+    secret: true,
+    description: "Versioned 256-bit Base64URL cursor-signing keyring; retain retiring keys only through the maximum cursor lifetime",
+  },
+  {
+    key: "BIS_PII_FORENSIC_CURSOR_ACTIVE_KEY_VERSION",
+    required: false,
+    secret: false,
+    description: "Version identifier of the active forensic cursor-signing key",
+  },
+  {
+    key: "BIS_PII_FORENSIC_CURSOR_KEY_EXPIRIES_JSON",
+    required: false,
+    secret: false,
+    description: "Optional JSON object mapping retired cursor-signing key versions to bounded ISO-8601 expiry timestamps",
+  },
+  {
     key: "BIS_PII_LEGACY_CUTOVER_KEYRING",
     required: false,
     secret: true,
@@ -467,6 +485,8 @@ export function validateEnv(): void {
       "BIS_VAULT_TRANSIT_TOKEN",
       "BIS_VAULT_TRANSIT_MOUNT",
       "AUDIT_HMAC_SECRET",
+      "BIS_PII_FORENSIC_CURSOR_KEYRING",
+      "BIS_PII_FORENSIC_CURSOR_ACTIVE_KEY_VERSION",
       "PERMIFY_URL",
       "PERMIFY_TENANT_ID",
       "PERMIFY_API_KEY",
@@ -486,6 +506,30 @@ export function validateEnv(): void {
     const cursorTtl = process.env.BIS_PII_FORENSIC_CURSOR_TTL_SECONDS ?? "";
     if (!/^[0-9]+$/.test(cursorTtl) || Number(cursorTtl) < 60 || Number(cursorTtl) > 3600) {
       errors.push("INSECURE PII ACTIVATION: BIS_PII_FORENSIC_CURSOR_TTL_SECONDS must be a whole number from 60 through 3600");
+    }
+    const cursorKeyVersions = (process.env.BIS_PII_FORENSIC_CURSOR_KEYRING ?? "").split(",").map((entry) => entry.slice(0, entry.indexOf(":")).trim()).filter(Boolean);
+    const cursorActiveKeyVersion = (process.env.BIS_PII_FORENSIC_CURSOR_ACTIVE_KEY_VERSION ?? "").trim();
+    let cursorKeyExpiries: Record<string, unknown> = {};
+    try {
+      const parsed: unknown = JSON.parse(process.env.BIS_PII_FORENSIC_CURSOR_KEY_EXPIRIES_JSON ?? "{}");
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("not an object");
+      cursorKeyExpiries = parsed as Record<string, unknown>;
+    } catch {
+      errors.push("INSECURE PII ACTIVATION: BIS_PII_FORENSIC_CURSOR_KEY_EXPIRIES_JSON must be a JSON object");
+    }
+    if (!cursorKeyVersions.includes(cursorActiveKeyVersion)) {
+      errors.push("INSECURE PII ACTIVATION: active forensic cursor signing key must be present in the configured keyring");
+    }
+    for (const version of cursorKeyVersions) {
+      const expiry = cursorKeyExpiries[version];
+      if (version === cursorActiveKeyVersion) {
+        if (expiry !== undefined) errors.push("INSECURE PII ACTIVATION: active forensic cursor signing key must not have a retirement expiry");
+        continue;
+      }
+      const expiryTime = typeof expiry === "string" ? new Date(expiry).getTime() : Number.NaN;
+      if (!Number.isFinite(expiryTime) || expiryTime <= Date.now() || expiryTime > Date.now() + 3600 * 1000) {
+        errors.push("INSECURE PII ACTIVATION: each retiring forensic cursor signing key requires a future expiry no later than one hour");
+      }
     }
   }
 
