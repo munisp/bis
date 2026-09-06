@@ -5,7 +5,7 @@ import { getPgPool } from "./db";
 import { ENV } from "./_core/env";
 import { router, writeProcedure, protectedProcedure } from "./_core/trpc";
 import { permifyCheck } from "./permify";
-import { appendPiiForensicAuditEvent } from "./piiForensicAudit";
+import { appendPiiForensicAuditEvent, readVerifiedPiiForensicEvents } from "./piiForensicAudit";
 import { assertTransitKeyReference } from "./piiEnvelopeCrypto";
 import { loadVaultTransitClient, parseVaultTransitRef } from "./vaultTransit";
 import { beginTenantTransaction } from "./tenantRls";
@@ -154,6 +154,17 @@ export const piiKeyCustodyRouter = router({
     if (!ctx.user || !["admin", "supervisor", "auditor"].includes(ctx.user.role)) throw new TRPCError({ code: "FORBIDDEN", message: "A designated PII forensic-read role is required." });
     if (ENV.isProduction && !(await permifyCheck("platform", String(tenantId), "view_pii_forensics", String(ctx.user.id)))) throw new TRPCError({ code: "FORBIDDEN", message: "PII forensic-read permission denied." });
     const db = await pool();
-    return (await db.query(`SELECT e.created_at,e.event_type,e.detail,e.integrity_hash,i.incident_ref,i.status AS incident_status FROM pii_forensic_audit_events e LEFT JOIN pii_key_compromise_incidents i ON i.id=e.incident_id WHERE e.tenant_id=$1 AND ($2::text IS NULL OR i.incident_ref=$2) ORDER BY e.created_at DESC LIMIT $3`, [tenantId, input.incidentRef ?? null, input.limit])).rows;
+    const client = await db.connect();
+    try {
+      await beginTenantTransaction(client, tenantId);
+      const events = await readVerifiedPiiForensicEvents(client, tenantId, input.incidentRef, input.limit);
+      await client.query("COMMIT");
+      return events;
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "PII forensic audit verification failed.", cause: error });
+    } finally {
+      client.release();
+    }
   }),
 });

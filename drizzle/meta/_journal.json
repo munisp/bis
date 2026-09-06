@@ -134,6 +134,13 @@
       "when": 1788616800000,
       "tag": "0018_pii_rotation_dispatch_dead_letter",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1788620400000,
+      "tag": "0019_pii_forensic_integrity_verification",
+      "breakpoints": true
     }
   ]
 }
