@@ -8,7 +8,7 @@ afterEach(() => {
   else process.env.AUDIT_HMAC_SECRET = originalAuditSecret;
 });
 
-function event(overrides: Partial<{ detail: Record<string, string | number | boolean | null>; integrityHash: string; integrityScheme: string }> = {}) {
+function event(overrides: Partial<{ id: number; tenantId: number; createdAt: string; detail: Record<string, string | number | boolean | null>; integrityHash: string; integrityScheme: string; incidentRef: string | null }> = {}) {
   process.env.AUDIT_HMAC_SECRET = "synthetic-forensic-hmac-secret";
   const base = {
     id: 1,
@@ -20,10 +20,28 @@ function event(overrides: Partial<{ detail: Record<string, string | number | boo
     detail: { worker_version: "pii-rotation-v1", error_code: "PII_ROTATION_ATTEMPTS_EXHAUSTED" },
     integrityScheme: "hmac_sha256_canonical_json_v2",
     createdAt: "2026-09-05T12:00:00.000Z",
+    incidentRef: "BIS-KC-ABCDEFGHIJKLMNOPQR",
   };
-  const detail = overrides.detail ?? base.detail;
-  const integrityHash = overrides.integrityHash ?? piiForensicIntegrityHash({ ...base, detail });
-  return { ...base, detail, integrityHash, integrityScheme: overrides.integrityScheme ?? base.integrityScheme };
+  const merged = { ...base, ...overrides, detail: overrides.detail ?? base.detail };
+  const integrityHash = overrides.integrityHash ?? piiForensicIntegrityHash(merged);
+  return { ...merged, integrityHash };
+}
+
+function row(value: ReturnType<typeof event>) {
+  return {
+    id: value.id,
+    incident_id: value.incidentId,
+    tenant_id: value.tenantId,
+    rotation_job_id: value.rotationJobId,
+    actor_user_id: value.actorUserId,
+    event_type: value.eventType,
+    detail: value.detail,
+    integrity_hash: value.integrityHash,
+    integrity_scheme: value.integrityScheme,
+    created_at: value.createdAt,
+    incident_ref: value.incidentRef,
+    incident_status: "contained",
+  };
 }
 
 describe("PII forensic audit read-back integrity", () => {
@@ -49,50 +67,73 @@ describe("PII forensic audit read-back integrity", () => {
   it("rejects unapproved detail fields and non-primitive values before insert", async () => {
     process.env.AUDIT_HMAC_SECRET = "synthetic-forensic-hmac-secret";
     const query = vi.fn();
-    await expect(appendPiiForensicAuditEvent({ query } as never, {
-      tenantId: 7,
-      eventType: "rotation_failed",
-      detail: { candidate_name: "must-not-write" } as never,
-    })).rejects.toThrow("approved non-PII schema");
-    await expect(appendPiiForensicAuditEvent({ query } as never, {
-      tenantId: 7,
-      eventType: "rotation_failed",
-      detail: { error_code: { nested: "must-not-write" } } as never,
-    })).rejects.toThrow("approved non-PII schema");
+    await expect(appendPiiForensicAuditEvent({ query } as never, { tenantId: 7, eventType: "rotation_failed", detail: { candidate_name: "must-not-write" } as never })).rejects.toThrow("approved non-PII schema");
+    await expect(appendPiiForensicAuditEvent({ query } as never, { tenantId: 7, eventType: "rotation_failed", detail: { error_code: { nested: "must-not-write" } } as never })).rejects.toThrow("approved non-PII schema");
     expect(query).not.toHaveBeenCalled();
   });
 
-  it("returns verified rows and rejects a tampered row before returning any events", async () => {
+  it("returns a bounded verified page and continues with a signed keyset cursor", async () => {
+    const first = event({ id: 3, createdAt: "2026-09-05T12:00:03.000Z" });
+    const second = event({ id: 2, createdAt: "2026-09-05T12:00:02.000Z" });
+    const third = event({ id: 1, createdAt: "2026-09-05T12:00:01.000Z" });
+    const query = vi.fn()
+      .mockResolvedValueOnce({ rows: [row(first), row(second)] })
+      .mockResolvedValueOnce({ rows: [row(third)] });
+    const firstPage = await readVerifiedPiiForensicEvents({ query } as never, { tenantId: 7, limit: 1 });
+    expect(firstPage.events).toHaveLength(1);
+    expect(firstPage.nextCursor).toEqual(expect.any(String));
+    expect(query.mock.calls[0]![1][4]).toBe(2);
+    const secondPage = await readVerifiedPiiForensicEvents({ query } as never, { tenantId: 7, limit: 1, cursor: firstPage.nextCursor! });
+    expect(secondPage.events).toHaveLength(1);
+    expect(secondPage.nextCursor).toBeNull();
+    expect(query.mock.calls[1]![1][2]).toBe("2026-09-05T12:00:03.000Z");
+    expect(query.mock.calls[1]![1][3]).toBe(3);
+  });
+
+  it("rejects cursor tampering and cross-tenant cursor reuse before any SQL query", async () => {
+    const first = event({ id: 3, createdAt: "2026-09-05T12:00:03.000Z" });
+    const second = event({ id: 2, createdAt: "2026-09-05T12:00:02.000Z" });
+    const query = vi.fn().mockResolvedValueOnce({ rows: [row(first), row(second)] });
+    const page = await readVerifiedPiiForensicEvents({ query } as never, { tenantId: 7, limit: 1 });
+    await expect(readVerifiedPiiForensicEvents({ query } as never, { tenantId: 7, limit: 1, cursor: `${page.nextCursor}x` })).rejects.toThrow("cursor is invalid");
+    await expect(readVerifiedPiiForensicEvents({ query } as never, { tenantId: 8, limit: 1, cursor: page.nextCursor! })).rejects.toThrow("cursor is invalid");
+    expect(query).toHaveBeenCalledTimes(1);
+  });
+
+  it("verifies a 1,000-event synthetic history in bounded 100-row cursor pages", async () => {
+    const history = Array.from({ length: 1000 }, (_, index) => event({
+      id: 1000 - index,
+      createdAt: new Date(Date.UTC(2026, 8, 5, 12, 0, 0, 1000 - index)).toISOString(),
+    }));
+    const query = vi.fn().mockImplementation(async (_sql: string, values: unknown[]) => {
+      const cursorId = values[3] as number | null;
+      const start = cursorId === null ? 0 : history.findIndex((candidate) => candidate.id === cursorId) + 1;
+      return { rows: history.slice(start, start + (values[4] as number)).map(row) };
+    });
+    let cursor: string | null = null;
+    let verified = 0;
+    let pages = 0;
+    do {
+      const page = await readVerifiedPiiForensicEvents({ query } as never, { tenantId: 7, limit: 100, cursor: cursor ?? undefined });
+      verified += page.events.length;
+      cursor = page.nextCursor;
+      pages += 1;
+    } while (cursor);
+    expect(verified).toBe(1000);
+    expect(pages).toBe(10);
+    expect(Math.max(...query.mock.calls.map((call) => call[1][4] as number))).toBe(101);
+  });
+
+  it("rejects a mixed legacy/v2 page before returning any events", async () => {
+    const valid = event({ id: 2 });
+    const legacy = event({ id: 1, integrityScheme: "legacy_json_v1" });
+    const query = vi.fn().mockResolvedValue({ rows: [row(valid), row(legacy)] });
+    await expect(readVerifiedPiiForensicEvents({ query } as never, { tenantId: 7, limit: 10 })).rejects.toThrow("integrity verification failed");
+  });
+
+  it("rejects a tampered row before returning any events", async () => {
     const valid = event();
-    const query = vi.fn().mockResolvedValueOnce({ rows: [{
-      id: valid.id,
-      incident_id: valid.incidentId,
-      tenant_id: valid.tenantId,
-      rotation_job_id: valid.rotationJobId,
-      actor_user_id: valid.actorUserId,
-      event_type: valid.eventType,
-      detail: valid.detail,
-      integrity_hash: valid.integrityHash,
-      integrity_scheme: valid.integrityScheme,
-      created_at: valid.createdAt,
-      incident_ref: "BIS-KC-ABCDEFGHIJKLMNOPQR",
-      incident_status: "contained",
-    }] });
-    await expect(readVerifiedPiiForensicEvents({ query } as never, 7, undefined, 10)).resolves.toHaveLength(1);
-    query.mockResolvedValueOnce({ rows: [{
-      id: valid.id,
-      incident_id: valid.incidentId,
-      tenant_id: valid.tenantId,
-      rotation_job_id: valid.rotationJobId,
-      actor_user_id: valid.actorUserId,
-      event_type: valid.eventType,
-      detail: { ...valid.detail, error_code: "TAMPERED" },
-      integrity_hash: valid.integrityHash,
-      integrity_scheme: valid.integrityScheme,
-      created_at: valid.createdAt,
-      incident_ref: "BIS-KC-ABCDEFGHIJKLMNOPQR",
-      incident_status: "contained",
-    }] });
-    await expect(readVerifiedPiiForensicEvents({ query } as never, 7, undefined, 10)).rejects.toThrow("integrity verification failed");
+    const query = vi.fn().mockResolvedValue({ rows: [row({ ...valid, detail: { ...valid.detail, error_code: "TAMPERED" } })] });
+    await expect(readVerifiedPiiForensicEvents({ query } as never, { tenantId: 7, limit: 10 })).rejects.toThrow("integrity verification failed");
   });
 });

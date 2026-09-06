@@ -149,7 +149,7 @@ export const piiKeyCustodyRouter = router({
     } catch (error) { await client.query("ROLLBACK").catch(() => undefined); throw error; } finally { client.release(); }
   }),
 
-  listForensics: protectedProcedure.input(z.object({ incidentRef: incidentRefSchema.optional(), limit: z.number().int().min(1).max(200).default(100) })).query(async ({ ctx, input }) => {
+  listForensics: protectedProcedure.input(z.object({ incidentRef: incidentRefSchema.optional(), limit: z.number().int().min(1).max(200).default(100), cursor: z.string().trim().min(32).max(2048).optional() })).query(async ({ ctx, input }) => {
     const tenantId = tenant(ctx); assertEnabled();
     if (!ctx.user || !["admin", "supervisor", "auditor"].includes(ctx.user.role)) throw new TRPCError({ code: "FORBIDDEN", message: "A designated PII forensic-read role is required." });
     if (ENV.isProduction && !(await permifyCheck("platform", String(tenantId), "view_pii_forensics", String(ctx.user.id)))) throw new TRPCError({ code: "FORBIDDEN", message: "PII forensic-read permission denied." });
@@ -157,9 +157,9 @@ export const piiKeyCustodyRouter = router({
     const client = await db.connect();
     try {
       await beginTenantTransaction(client, tenantId);
-      const events = await readVerifiedPiiForensicEvents(client, tenantId, input.incidentRef, input.limit);
+      const page = await readVerifiedPiiForensicEvents(client, { tenantId, incidentRef: input.incidentRef, limit: input.limit, cursor: input.cursor });
       await client.query("COMMIT");
-      return events;
+      return page;
     } catch (error) {
       await client.query("ROLLBACK").catch(() => undefined);
       throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "PII forensic audit verification failed.", cause: error });
