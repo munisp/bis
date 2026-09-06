@@ -4,8 +4,10 @@ import { appendPiiForensicAuditEvent, piiForensicIntegrityHash, readVerifiedPiiF
 const originalAuditSecret = process.env.AUDIT_HMAC_SECRET;
 
 afterEach(() => {
+  vi.useRealTimers();
   if (originalAuditSecret === undefined) delete process.env.AUDIT_HMAC_SECRET;
   else process.env.AUDIT_HMAC_SECRET = originalAuditSecret;
+  delete process.env.BIS_PII_FORENSIC_CURSOR_TTL_SECONDS;
 });
 
 function event(overrides: Partial<{ id: number; tenantId: number; createdAt: string; detail: Record<string, string | number | boolean | null>; integrityHash: string; integrityScheme: string; incidentRef: string | null }> = {}) {
@@ -122,6 +124,43 @@ describe("PII forensic audit read-back integrity", () => {
     expect(verified).toBe(1000);
     expect(pages).toBe(10);
     expect(Math.max(...query.mock.calls.map((call) => call[1][4] as number))).toBe(101);
+  });
+
+  it("continues without duplicates across equal timestamps and out-of-order timestamp groups", async () => {
+    const sameTimestamp = "2026-09-05T12:00:00.000Z";
+    const history = [
+      event({ id: 9, createdAt: sameTimestamp, detail: { worker_version: "event-9" } }),
+      event({ id: 8, createdAt: sameTimestamp, detail: { worker_version: "event-8" } }),
+      event({ id: 7, createdAt: sameTimestamp, detail: { worker_version: "event-7" } }),
+      event({ id: 6, createdAt: "2026-09-05T11:59:59.000Z", detail: { worker_version: "late-older-event-6" } }),
+    ];
+    const query = vi.fn().mockImplementation(async (_sql: string, values: unknown[]) => {
+      const cursorId = values[3] as number | null;
+      const start = cursorId === null ? 0 : history.findIndex((candidate) => candidate.id === cursorId) + 1;
+      return { rows: history.slice(start, start + (values[4] as number)).map(row) };
+    });
+    let cursor: string | null = null;
+    const received: string[] = [];
+    do {
+      const page = await readVerifiedPiiForensicEvents({ query } as never, { tenantId: 7, limit: 1, cursor: cursor ?? undefined });
+      received.push(...page.events.map((entry) => String(entry.detail.worker_version)));
+      cursor = page.nextCursor;
+    } while (cursor);
+    expect(received).toEqual(["event-9", "event-8", "event-7", "late-older-event-6"]);
+    expect(new Set(received).size).toBe(4);
+  });
+
+  it("rejects expired signed cursors before issuing a continuation query", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-05T12:00:00.000Z"));
+    process.env.BIS_PII_FORENSIC_CURSOR_TTL_SECONDS = "60";
+    const first = event({ id: 2, createdAt: "2026-09-05T11:59:59.000Z" });
+    const second = event({ id: 1, createdAt: "2026-09-05T11:59:58.000Z" });
+    const query = vi.fn().mockResolvedValueOnce({ rows: [row(first), row(second)] });
+    const page = await readVerifiedPiiForensicEvents({ query } as never, { tenantId: 7, limit: 1 });
+    vi.setSystemTime(new Date("2026-09-05T12:01:00.001Z"));
+    await expect(readVerifiedPiiForensicEvents({ query } as never, { tenantId: 7, limit: 1, cursor: page.nextCursor! })).rejects.toThrow("invalid or expired");
+    expect(query).toHaveBeenCalledTimes(1);
   });
 
   it("rejects a mixed legacy/v2 page before returning any events", async () => {

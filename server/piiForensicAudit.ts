@@ -7,7 +7,10 @@ export type PiiForensicIntegrityScheme = "hmac_sha256_canonical_json_v2";
 type PiiForensicPrimitive = string | number | boolean | null;
 
 const INTEGRITY_SCHEME: PiiForensicIntegrityScheme = "hmac_sha256_canonical_json_v2";
-const FORENSIC_CURSOR_VERSION = 1;
+const FORENSIC_CURSOR_VERSION = 2;
+const DEFAULT_FORENSIC_CURSOR_TTL_SECONDS = 900;
+const MIN_FORENSIC_CURSOR_TTL_SECONDS = 60;
+const MAX_FORENSIC_CURSOR_TTL_SECONDS = 3600;
 const allowedDetailKeys = new Set(["record_count", "registry_id", "source_registry_id", "target_registry_id", "rotation_job_id", "reason_code", "error_code", "actor_role", "source_key_version", "target_key_version", "provider_key_version", "evidence_ref", "channel", "dry_run", "checkpoint", "state", "worker_version", "incident_ref"]);
 
 type PiiForensicWriteInput = {
@@ -19,7 +22,10 @@ type PiiForensicWriteInput = {
   detail: Record<string, PiiForensicPrimitive>;
 };
 type PiiForensicStoredEvent = PiiForensicWriteInput & { id: number; integrityHash: string; integrityScheme: string; createdAt: Date | string };
-type ForensicCursorPayload = { version: number; tenantId: number; incidentRef: string | null; createdAt: string; id: number };
+type ForensicCursorPayload = { version: number; tenantId: number; incidentRef: string | null; createdAt: string; id: number; expiresAt: string };
+export class PiiForensicCursorError extends Error {
+  constructor() { super("PII forensic pagination cursor is invalid or expired."); }
+}
 type VerifiedForensicEvent = { createdAt: Date | string; eventType: PiiForensicEventType; detail: Record<string, PiiForensicPrimitive>; integrityHash: string; integrityScheme: PiiForensicIntegrityScheme; incidentRef: string | null; incidentStatus: string | null };
 
 function auditSecret(): string {
@@ -48,6 +54,17 @@ function canonicalDetail(detail: Record<string, PiiForensicPrimitive>): Record<s
 
 function hmacHex(value: string): string {
   return createHmac("sha256", auditSecret()).update(value).digest("hex");
+}
+
+function cursorTtlSeconds(): number {
+  const configured = process.env.BIS_PII_FORENSIC_CURSOR_TTL_SECONDS;
+  if (configured === undefined || configured.trim() === "") return DEFAULT_FORENSIC_CURSOR_TTL_SECONDS;
+  if (!/^[0-9]+$/.test(configured)) throw new Error("BIS_PII_FORENSIC_CURSOR_TTL_SECONDS must be a whole number.");
+  const seconds = Number(configured);
+  if (!Number.isSafeInteger(seconds) || seconds < MIN_FORENSIC_CURSOR_TTL_SECONDS || seconds > MAX_FORENSIC_CURSOR_TTL_SECONDS) {
+    throw new Error(`BIS_PII_FORENSIC_CURSOR_TTL_SECONDS must be between ${MIN_FORENSIC_CURSOR_TTL_SECONDS} and ${MAX_FORENSIC_CURSOR_TTL_SECONDS}.`);
+  }
+  return seconds;
 }
 
 function fixedTimeHexEqual(actual: string, expected: string): boolean {
@@ -88,24 +105,29 @@ export function verifyPiiForensicAuditEvent(event: PiiForensicStoredEvent): bool
   }));
 }
 
-function encodeForensicCursor(payload: ForensicCursorPayload): string {
-  const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url");
-  return `${encoded}.${hmacHex(encoded)}`;
+function cursorHmacHex(encoded: string): string {
+  return hmacHex(`bis:forensic-cursor:v${FORENSIC_CURSOR_VERSION}:${encoded}`);
+}
+
+function encodeForensicCursor(payload: Omit<ForensicCursorPayload, "version" | "expiresAt">): string {
+  const expiresAt = new Date(Date.now() + cursorTtlSeconds() * 1000).toISOString();
+  const encoded = Buffer.from(JSON.stringify({ ...payload, version: FORENSIC_CURSOR_VERSION, expiresAt })).toString("base64url");
+  return `${encoded}.${cursorHmacHex(encoded)}`;
 }
 
 function decodeForensicCursor(cursor: string, tenantId: number, incidentRef: string | undefined): ForensicCursorPayload {
   const parts = cursor.split(".");
-  if (parts.length !== 2 || !parts[0] || !parts[1] || !fixedTimeHexEqual(parts[1], hmacHex(parts[0]))) throw new Error("PII forensic pagination cursor is invalid.");
+  if (parts.length !== 2 || !parts[0] || !parts[1] || !fixedTimeHexEqual(parts[1], cursorHmacHex(parts[0]))) throw new PiiForensicCursorError();
   let payload: unknown;
   try { payload = JSON.parse(Buffer.from(parts[0], "base64url").toString("utf8")); }
-  catch { throw new Error("PII forensic pagination cursor is invalid."); }
-  if (!payload || typeof payload !== "object") throw new Error("PII forensic pagination cursor is invalid.");
+  catch { throw new PiiForensicCursorError(); }
+  if (!payload || typeof payload !== "object") throw new PiiForensicCursorError();
   const candidate = payload as Partial<ForensicCursorPayload>;
   const cursorId = candidate.id;
-  if (candidate.version !== FORENSIC_CURSOR_VERSION || candidate.tenantId !== tenantId || candidate.incidentRef !== (incidentRef ?? null) || typeof candidate.createdAt !== "string" || Number.isNaN(new Date(candidate.createdAt).getTime()) || typeof cursorId !== "number" || !Number.isSafeInteger(cursorId) || cursorId <= 0) {
-    throw new Error("PII forensic pagination cursor is invalid.");
+  if (candidate.version !== FORENSIC_CURSOR_VERSION || candidate.tenantId !== tenantId || candidate.incidentRef !== (incidentRef ?? null) || typeof candidate.createdAt !== "string" || typeof candidate.expiresAt !== "string" || Number.isNaN(new Date(candidate.createdAt).getTime()) || Number.isNaN(new Date(candidate.expiresAt).getTime()) || typeof cursorId !== "number" || !Number.isSafeInteger(cursorId) || cursorId <= 0 || new Date(candidate.expiresAt).getTime() <= Date.now()) {
+    throw new PiiForensicCursorError();
   }
-  return { version: FORENSIC_CURSOR_VERSION, tenantId, incidentRef: incidentRef ?? null, createdAt: canonicalCreatedAt(candidate.createdAt), id: cursorId };
+  return { version: FORENSIC_CURSOR_VERSION, tenantId, incidentRef: incidentRef ?? null, createdAt: canonicalCreatedAt(candidate.createdAt), id: cursorId, expiresAt: canonicalCreatedAt(candidate.expiresAt) };
 }
 
 export async function appendPiiForensicAuditEvent(client: PoolClient, input: PiiForensicWriteInput): Promise<void> {
@@ -159,6 +181,6 @@ export async function readVerifiedPiiForensicEvents(client: PoolClient, input: {
   const last = verified.at(-1);
   return {
     events: verified.map(({ createdAt, eventType, detail, integrityHash, integrityScheme, incidentRef, incidentStatus }) => ({ createdAt, eventType, detail, integrityHash, integrityScheme: integrityScheme as PiiForensicIntegrityScheme, incidentRef, incidentStatus })),
-    nextCursor: hasMore && last ? encodeForensicCursor({ version: FORENSIC_CURSOR_VERSION, tenantId: input.tenantId, incidentRef: input.incidentRef ?? null, createdAt: canonicalCreatedAt(last.createdAt), id: last.id }) : null,
+    nextCursor: hasMore && last ? encodeForensicCursor({ tenantId: input.tenantId, incidentRef: input.incidentRef ?? null, createdAt: canonicalCreatedAt(last.createdAt), id: last.id }) : null,
   };
 }

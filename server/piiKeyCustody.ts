@@ -5,7 +5,7 @@ import { getPgPool } from "./db";
 import { ENV } from "./_core/env";
 import { router, writeProcedure, protectedProcedure } from "./_core/trpc";
 import { permifyCheck } from "./permify";
-import { appendPiiForensicAuditEvent, readVerifiedPiiForensicEvents } from "./piiForensicAudit";
+import { appendPiiForensicAuditEvent, PiiForensicCursorError, readVerifiedPiiForensicEvents } from "./piiForensicAudit";
 import { assertTransitKeyReference } from "./piiEnvelopeCrypto";
 import { loadVaultTransitClient, parseVaultTransitRef } from "./vaultTransit";
 import { beginTenantTransaction } from "./tenantRls";
@@ -162,6 +162,7 @@ export const piiKeyCustodyRouter = router({
       return page;
     } catch (error) {
       await client.query("ROLLBACK").catch(() => undefined);
+      if (error instanceof PiiForensicCursorError) throw new TRPCError({ code: "BAD_REQUEST", message: "PII forensic pagination cursor is invalid or expired." });
       throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "PII forensic audit verification failed.", cause: error });
     } finally {
       client.release();

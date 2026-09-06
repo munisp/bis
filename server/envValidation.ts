@@ -347,6 +347,13 @@ const ENV_SPECS: EnvSpec[] = [
     description: "Fail-closed Vault Transit request timeout in milliseconds",
   },
   {
+    key: "BIS_PII_FORENSIC_CURSOR_TTL_SECONDS",
+    required: false,
+    secret: false,
+    defaultValue: "900",
+    description: "Forensic audit cursor lifetime in seconds; must be an integer from 60 through 3600",
+  },
+  {
     key: "BIS_PII_LEGACY_CUTOVER_KEYRING",
     required: false,
     secret: true,
@@ -475,6 +482,10 @@ export function validateEnv(): void {
     }
     if (process.env.BIS_VAULT_TRANSIT_ADDR && !process.env.BIS_VAULT_TRANSIT_ADDR.startsWith("https://")) {
       errors.push("INSECURE PII ACTIVATION: Vault Transit must use HTTPS");
+    }
+    const cursorTtl = process.env.BIS_PII_FORENSIC_CURSOR_TTL_SECONDS ?? "";
+    if (!/^[0-9]+$/.test(cursorTtl) || Number(cursorTtl) < 60 || Number(cursorTtl) > 3600) {
+      errors.push("INSECURE PII ACTIVATION: BIS_PII_FORENSIC_CURSOR_TTL_SECONDS must be a whole number from 60 through 3600");
     }
   }
 
