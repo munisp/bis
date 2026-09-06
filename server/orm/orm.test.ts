@@ -936,6 +936,7 @@ describe("Canonical PostgreSQL Baseline", () => {
       "0017_pii_tenant_rls_and_dispatch",
       "0018_pii_rotation_dispatch_dead_letter",
       "0019_pii_forensic_integrity_verification",
+      "0020_pii_forensic_keyset_pagination_index",
     ]);
   });
 

@@ -141,6 +141,13 @@
       "when": 1788620400000,
       "tag": "0019_pii_forensic_integrity_verification",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1788624000000,
+      "tag": "0020_pii_forensic_keyset_pagination_index",
+      "breakpoints": true
     }
   ]
 }
