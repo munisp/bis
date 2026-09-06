@@ -46,8 +46,18 @@ async function main() {
   const terminal = await client.query(`SELECT state,attempt_count,dead_letter_reason,dead_lettered_at IS NOT NULL AS dead_lettered FROM pii_rotation_dispatch_queue WHERE rotation_job_id=$1`, [job]);
   assert.deepEqual(terminal.rows[0], { state: "dead_letter", attempt_count: 12, dead_letter_reason: DEAD, dead_lettered: true });
   await expectReject("terminal dispatch requeue", () => client.query(`UPDATE pii_rotation_dispatch_queue SET state='queued',dead_lettered_at=NULL,dead_letter_reason=NULL WHERE rotation_job_id=$1`, [job]));
+  const otherRef = `BIS-PR-${randomUUID().replaceAll("-", "").slice(0, 18).toUpperCase()}`;
+  const selectedForNamedRef = await client.query(
+    `SELECT rotation_job_id FROM pii_rotation_dispatch_queue
+     WHERE ((state='terminalizing' AND leased_at < NOW()-make_interval(secs=>$2) AND ($1::text IS NULL OR rotation_ref=$1))
+        OR (state='queued' AND ($1::text IS NULL OR rotation_ref=$1)))
+     ORDER BY (state='terminalizing') DESC,created_at ASC
+     LIMIT 1`,
+    [otherRef, 300],
+  );
+  assert.equal(selectedForNamedRef.rowCount, 0, "named worker selection must not claim a different terminalizing dispatch");
   await client.end();
-  process.stdout.write(JSON.stringify({ status: "pass", checks: ["attempt_exhaustion_terminalizes", "failed_job_preserves_terminal_evidence", "dead_letter_immutable"] }) + "\n");
+  process.stdout.write(JSON.stringify({ status: "pass", checks: ["attempt_exhaustion_terminalizes", "failed_job_preserves_terminal_evidence", "dead_letter_immutable", "named_worker_terminalization_isolation"] }) + "\n");
 }
 
 main().catch((error) => { process.stderr.write(`PII dispatch dead-letter integration test failed: ${error instanceof Error ? error.message : "unknown error"}\n`); process.exitCode = 1; });
