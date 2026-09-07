@@ -5926,9 +5926,18 @@ const ollamaRouter = router({
     }),
 
   lakehouseQuery: protectedProcedure
-    .input(z.object({ question: z.string(), schema: z.string().optional(), model: z.string().optional() }))
-    .mutation(async ({ input }) => {
-      return ollamaFetch("/lakehouse/query", input);
+    .input(z.object({ question: z.string().trim().min(1).max(2_000), context: z.string().trim().max(2_000).optional(), model: z.string().trim().max(128).optional(), maxRows: z.number().int().min(1).max(1_000).optional() }))
+    .mutation(async ({ input, ctx }) => {
+      if (!ctx.tenantId || !ctx.user || !["admin", "supervisor", "analyst", "auditor"].includes(ctx.user.role)) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "A tenant-scoped analytics role is required." });
+      }
+      return ollamaFetch("/lakehouse/query", {
+        question: input.question,
+        context: input.context,
+        model: input.model,
+        max_rows: input.maxRows,
+        tenant_id: ctx.tenantId,
+      });
     }),
 
   explainRisk: protectedProcedure

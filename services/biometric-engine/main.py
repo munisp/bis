@@ -1132,8 +1132,9 @@ async def batch_enroll(req: BatchEnrollRequest):
             results.append({"subject_ref": item.subject_ref, "ok": True, **result})
         except HTTPException as e:
             results.append({"subject_ref": item.subject_ref, "ok": False, "error": e.detail})
-        except Exception as e:
-            results.append({"subject_ref": item.subject_ref, "ok": False, "error": str(e)})
+        except Exception:
+            log.exception("Batch enrollment item failed", extra={"subject_ref": item.subject_ref})
+            results.append({"subject_ref": item.subject_ref, "ok": False, "error": "Enrollment could not be completed"})
     ok_count = sum(1 for r in results if r["ok"])
     return {"total": len(results), "enrolled": ok_count, "failed": len(results) - ok_count, "results": results}
 

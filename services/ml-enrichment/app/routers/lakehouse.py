@@ -1,38 +1,35 @@
 """
-app/routers/lakehouse.py — Natural-language AI query over the BIS data lakehouse.
+Natural-language analytics over a tenant-scoped BIS PostgreSQL data store.
 
-The Lakehouse AI query pipeline:
-  1. Accept a natural-language question from the analyst
-  2. Use Ollama (or cloud LLM) to convert the question to a SQL query
-  3. Execute the SQL against the BIS PostgreSQL database
-  4. Use Ollama to summarise the result set in plain English
-  5. Return both the SQL and the natural-language answer
-
-This enables analysts to query investigation data, alert trends, and case
-statistics without writing SQL — directly from the BIS dashboard.
+The language model is restricted to selecting a bounded analytics plan. It never
+produces executable SQL, identifiers, or SQL parameters. Each plan is a static,
+parameterized aggregate query with an explicit tenant predicate.
 """
 from __future__ import annotations
 
-import re
-from typing import Any, Dict, List, Optional
+import json
+import os
+import secrets
+from typing import Any, Dict, List, Literal, Optional
 
 import structlog
-from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, Field
-from sqlalchemy.ext.asyncio import create_async_engine
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy import text as sa_text
+from sqlalchemy.ext.asyncio import create_async_engine
 
 log = structlog.get_logger(__name__)
 router = APIRouter()
 
 
-# ── Models ────────────────────────────────────────────────────────────────────
-
 class LakehouseQueryRequest(BaseModel):
-    question: str = Field(..., description="Natural-language question about BIS data")
-    context: Optional[str] = None  # Optional: additional context for the LLM
-    model: Optional[str] = None
-    max_rows: int = Field(100, ge=1, le=1000)
+    model_config = ConfigDict(extra="forbid")
+
+    question: str = Field(..., min_length=1, max_length=2_000, description="Natural-language analytics question")
+    context: Optional[str] = Field(default=None, max_length=2_000, description="Optional non-sensitive analytics context")
+    model: Optional[str] = Field(default=None, max_length=128)
+    tenant_id: int = Field(..., gt=0, description="Trusted tenant identity injected by the BFF")
+    max_rows: int = Field(default=100, ge=1, le=1_000)
 
 
 class LakehouseQueryResponse(BaseModel):
@@ -45,58 +42,103 @@ class LakehouseQueryResponse(BaseModel):
     model_used: str
 
 
-# ── Schema context for SQL generation ────────────────────────────────────────
+class LakehouseQueryPlan(BaseModel):
+    """A model-selected identifier, not executable model-generated SQL."""
 
-SCHEMA_CONTEXT = """
-BIS Platform PostgreSQL Database Schema (key tables, snake_case column names):
+    model_config = ConfigDict(extra="forbid")
 
-investigations(id, ref, title, status, priority, riskScore, subjectName, createdAt, dueAt)
-  status values: open | in_progress | closed | archived
-  priority values: low | medium | high | critical
+    query_id: Literal[
+        "investigation_status_summary",
+        "alert_severity_summary",
+        "kyc_status_summary",
+    ]
+    lookback_days: int = Field(default=30, ge=1, le=365)
 
-alerts(id, ref, type, severity, status, message, sourceService, createdAt)
-  severity values: low | medium | high | critical
-  status values: open | acknowledged | resolved | false_positive
 
-cases(id, ref, title, type, status, priority, riskScore, createdAt, closedAt)
-  type values: fraud | aml | kyc | sanctions | general
-  status values: open | in_progress | closed | archived
+SAFE_QUERY_TEMPLATES: Dict[str, tuple[Any, str]] = {
+    "investigation_status_summary": (
+        sa_text(
+            """
+            SELECT "status" AS status, COUNT(*)::bigint AS record_count
+              FROM investigations
+             WHERE "tenantId" = :tenant_id
+               AND "deletedAt" IS NULL
+               AND "createdAt" >= NOW() - (:lookback_days * INTERVAL '1 day')
+             GROUP BY "status"
+             ORDER BY record_count DESC, status ASC
+             LIMIT :max_rows
+            """
+        ),
+        "SELECT status, COUNT(*) FROM investigations WHERE tenant_id = :tenant_id AND created_at >= :lookback_window GROUP BY status",
+    ),
+    "alert_severity_summary": (
+        sa_text(
+            """
+            SELECT severity, COUNT(*)::bigint AS record_count
+              FROM alerts
+             WHERE "tenantId" = :tenant_id
+               AND "deletedAt" IS NULL
+               AND "createdAt" >= NOW() - (:lookback_days * INTERVAL '1 day')
+             GROUP BY severity
+             ORDER BY record_count DESC, severity ASC
+             LIMIT :max_rows
+            """
+        ),
+        "SELECT severity, COUNT(*) FROM alerts WHERE tenant_id = :tenant_id AND created_at >= :lookback_window GROUP BY severity",
+    ),
+    "kyc_status_summary": (
+        sa_text(
+            """
+            SELECT status, COUNT(*)::bigint AS record_count
+              FROM kyc_records
+             WHERE "tenantId" = :tenant_id
+               AND "deletedAt" IS NULL
+               AND "createdAt" >= NOW() - (:lookback_days * INTERVAL '1 day')
+             GROUP BY status
+             ORDER BY record_count DESC, status ASC
+             LIMIT :max_rows
+            """
+        ),
+        "SELECT status, COUNT(*) FROM kyc_records WHERE tenant_id = :tenant_id AND created_at >= :lookback_window GROUP BY status",
+    ),
+}
 
-fieldTasks(id, ref, title, status, priority, agentId, investigationId, createdAt)
-  status values: pending | in_progress | completed | cancelled
 
-users(id, name, email, role, createdAt)
-  role values: admin | analyst | agent | viewer
+PLAN_CONTEXT = """
+Choose exactly one approved analytics plan for the requested tenant-scoped aggregate.
+Do not generate SQL, identifiers, filters, or any fields outside this JSON object.
 
-tenants(id, name, plan, status, createdAt)
+Approved query_id values:
+- investigation_status_summary: counts of investigations grouped by status
+- alert_severity_summary: counts of alerts grouped by severity
+- kyc_status_summary: counts of KYC records grouped by status
 
-screeningRequests(id, ref, subjectName, status, riskScore, createdAt)
-
-kycRecords(id, ref, subjectName, status, provider, createdAt)
-  status values: pending | passed | failed | expired
-
-auditLog(id, action, entityType, entityId, actorId, createdAt)
-
-Rules:
-- Always use SELECT only (no INSERT/UPDATE/DELETE/DROP/ALTER)
-- Use LIMIT to cap results (max 1000 rows)
-- Column names are snake_case, for example risk_score and created_at
-- Use DATE_TRUNC() for date grouping
-- Use COUNT(*), AVG(), SUM() for aggregations
-- Always include createdAt in time-based queries
-- For date filtering use: WHERE created_at >= NOW() - INTERVAL '30 days'
+Return only JSON in this form:
+{"query_id":"one approved value","lookback_days":30}
 """
 
 
-def sanitize_sql(sql: str) -> str:
-    """Strip dangerous SQL keywords to prevent injection."""
-    dangerous = re.compile(
-        r'\b(INSERT|UPDATE|DELETE|DROP|TRUNCATE|ALTER|CREATE|GRANT|REVOKE|EXEC|EXECUTE)\b',
-        re.IGNORECASE,
-    )
-    if dangerous.search(sql):
-        raise ValueError("Generated SQL contains disallowed operations")
-    return sql.strip().rstrip(";")
+def _gateway_key() -> str:
+    key = os.getenv("BIS_GATEWAY_KEY", "").strip()
+    if not key:
+        log.error("lakehouse.gateway_key.unconfigured")
+        raise HTTPException(status_code=503, detail="Lakehouse analytics is unavailable")
+    return key
+
+
+def require_gateway_key(request: Request) -> None:
+    presented = request.headers.get("X-BIS-Key", "")
+    if not presented or not secrets.compare_digest(presented, _gateway_key()):
+        raise HTTPException(status_code=401, detail="Lakehouse analytics authorization failed")
+
+
+def parse_query_plan(raw_plan: str) -> LakehouseQueryPlan:
+    """Parse a closed plan schema; raw model output never becomes executable SQL."""
+    try:
+        candidate = json.loads(raw_plan.strip())
+        return LakehouseQueryPlan.model_validate(candidate)
+    except (json.JSONDecodeError, ValidationError, TypeError, ValueError) as error:
+        raise ValueError("The analytics question could not be mapped to an approved query plan") from error
 
 
 def _make_async_url(db_url: str) -> str:
@@ -110,103 +152,80 @@ def _make_async_url(db_url: str) -> str:
     raise ValueError("DATABASE_URL must be a PostgreSQL URL")
 
 
-# ── Endpoint ──────────────────────────────────────────────────────────────────
-
-@router.post("/query", response_model=LakehouseQueryResponse)
+@router.post("/query", response_model=LakehouseQueryResponse, dependencies=[Depends(require_gateway_key)])
 async def lakehouse_query(req: LakehouseQueryRequest, request: Request) -> LakehouseQueryResponse:
-    """Convert a natural-language question to SQL, execute it, and summarise the result."""
+    """Answer an aggregate analytics question through a bounded tenant-specific plan."""
     ollama = request.app.state.ollama
     settings = request.app.state.settings
     model = req.model or settings.ollama_default_model
-
-    # Step 1: Generate SQL via Ollama
-    sql_prompt = f"""
-{SCHEMA_CONTEXT}
-
+    plan_prompt = f"""
+{PLAN_CONTEXT}
 Question: {req.question}
-{f'Additional context: {req.context}' if req.context else ''}
-
-Generate a single valid PostgreSQL SELECT query to answer this question.
-Return ONLY the SQL query, no explanation, no markdown fences.
+{f'Additional analytics context: {req.context}' if req.context else ''}
 """
-    try:
-        generated_sql = await ollama.generate(
-            model=model,
-            prompt=sql_prompt,
-            system="You are a PostgreSQL expert. Return only valid SQL SELECT statements.",
-        )
-        generated_sql = sanitize_sql(generated_sql.strip())
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        log.error("lakehouse.sql_generation.failed", error=str(e))
-        raise HTTPException(status_code=503, detail=f"SQL generation failed: {e}")
 
-    # Step 2: Execute SQL against the BIS database
-    rows: List[Dict[str, Any]] = []
-    columns: List[str] = []
     try:
-        db_url = _make_async_url(settings.database_url)
+        raw_plan = await ollama.generate(
+            model=model,
+            prompt=plan_prompt,
+            system="You select only approved analytics plans. Return JSON and no other text.",
+        )
+        plan = parse_query_plan(raw_plan)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail="Question is not supported by approved analytics plans") from error
+    except Exception:
+        log.error("lakehouse.plan_generation.failed")
+        raise HTTPException(status_code=503, detail="Lakehouse analytics is unavailable")
+
+    statement, display_sql = SAFE_QUERY_TEMPLATES[plan.query_id]
+    engine = None
+    try:
         engine = create_async_engine(
-            db_url,
+            _make_async_url(settings.database_url),
             pool_pre_ping=True,
             pool_size=1,
             max_overflow=0,
             connect_args={"command_timeout": 5},
         )
-        # Enforce row limit in generated SQL
-        limited_sql = generated_sql
-        if "limit" not in limited_sql.lower():
-            limited_sql = f"{limited_sql} LIMIT {req.max_rows}"
-
-        async with engine.connect() as conn:
-            await conn.execute(sa_text("SET TRANSACTION READ ONLY"))
-            await conn.execute(sa_text("SET LOCAL statement_timeout = '5000ms'"))
-            result = await conn.execute(sa_text(limited_sql))
+        parameters = {
+            "tenant_id": req.tenant_id,
+            "lookback_days": plan.lookback_days,
+            "max_rows": req.max_rows,
+        }
+        async with engine.connect() as connection:
+            await connection.execute(sa_text("SET TRANSACTION READ ONLY"))
+            await connection.execute(sa_text("SET LOCAL statement_timeout = '5000ms'"))
+            result = await connection.execute(statement, parameters)
+            rows = [dict(row) for row in result.mappings().all()]
             columns = list(result.keys())
-            raw_rows = result.fetchall()
-            rows = [dict(zip(columns, row)) for row in raw_rows]
+    except Exception:
+        log.error("lakehouse.query_execution.failed", query_id=plan.query_id, tenant_id=req.tenant_id)
+        raise HTTPException(status_code=503, detail="Lakehouse analytics is unavailable")
+    finally:
+        if engine is not None:
+            await engine.dispose()
 
-        await engine.dispose()
-        log.info(
-            "lakehouse.sql_execution.ok",
-            question=req.question[:80],
-            rows=len(rows),
-            sql=limited_sql[:200],
-        )
-    except ValueError:
-        raise
-    except Exception as db_err:
-        log.error("lakehouse.sql_execution.failed", error=str(db_err), sql=generated_sql[:300])
-        raise HTTPException(
-            status_code=422,
-            detail=f"SQL execution failed: {db_err}",
-        )
-
-    # Step 3: Summarise result via Ollama
     answer_prompt = f"""
 Question: {req.question}
-SQL executed: {generated_sql}
-Result: {len(rows)} rows returned.
-{f'Sample data (first 5 rows): {rows[:5]}' if rows else 'No data returned for this query.'}
+Approved analytics plan: {plan.query_id}
+Result: {len(rows)} aggregate row(s) returned.
+Rows: {rows[:5] if rows else 'No data returned.'}
 
-Provide a clear, concise answer to the question based on the query result.
-Be specific — mention counts, percentages, or key values where relevant.
+Provide a concise answer based only on these aggregate results.
 """
     try:
         answer = await ollama.generate(
             model=model,
             prompt=answer_prompt,
-            system="You are a data analyst. Summarise query results clearly for a compliance officer.",
+            system="You are a compliance analytics assistant. Summarize only the supplied aggregate result.",
         )
     except Exception:
-        answer = f"Query executed successfully. {len(rows)} row(s) returned."
+        answer = f"Approved analytics plan completed. {len(rows)} aggregate row(s) returned."
 
-    log.info("lakehouse.query.completed", question=req.question[:80], rows=len(rows))
-
+    log.info("lakehouse.query.completed", query_id=plan.query_id, tenant_id=req.tenant_id, rows=len(rows))
     return LakehouseQueryResponse(
         question=req.question,
-        generated_sql=generated_sql,
+        generated_sql=display_sql,
         answer=answer,
         row_count=len(rows),
         columns=columns,
