@@ -40,6 +40,7 @@ import { startBroadcastScheduler } from "../broadcastScheduler";
 import { validateEnv } from "../envValidation";
 import { ENV } from "./env";
 import { startWebhookRetryScheduler } from "../webhookRetry";
+import { FORENSIC_EXPORT_MAX_EVENTS, iterateVerifiedForensicExport } from "../piiForensicExport";
 
 // ── Structured logger ─────────────────────────────────────────────────────────
 function log(level: "info" | "warn" | "error", msg: string, meta?: Record<string, unknown>) {
@@ -645,6 +646,49 @@ async function startServer() {
       res.status(202).json(result);
     } catch (error) {
       respondConsumerAdapterError(req, res, error, "consumer_dispute_method_description");
+    }
+  });
+
+  // Verified PII forensic export delegates every page to the same tenant-scoped tRPC procedure.
+  // It streams NDJSON and has no separate forensic query or export-state persistence path.
+  app.get("/api/pii-forensics/export.ndjson", async (req: Request, res: Response) => {
+    const rawIncidentRef = typeof req.query.incidentRef === "string" ? req.query.incidentRef : undefined;
+    const rawMaxEvents = typeof req.query.maxEvents === "string" ? Number(req.query.maxEvents) : undefined;
+    if (rawIncidentRef !== undefined && !/^BIS-PII-[A-Z0-9]{18}$/.test(rawIncidentRef)) {
+      res.status(400).json({ error: "A valid PII incident reference is required", code: "BAD_REQUEST" });
+      return;
+    }
+    if (rawMaxEvents !== undefined && (!Number.isSafeInteger(rawMaxEvents) || rawMaxEvents < 1 || rawMaxEvents > FORENSIC_EXPORT_MAX_EVENTS)) {
+      res.status(400).json({ error: `maxEvents must be an integer from 1 through ${FORENSIC_EXPORT_MAX_EVENTS}`, code: "BAD_REQUEST" });
+      return;
+    }
+    let emitted = 0;
+    try {
+      const caller = appRouter.createCaller(await createContextFromRequest(req, res));
+      res.status(200);
+      res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
+      res.setHeader("Content-Disposition", 'attachment; filename="bis-pii-forensic-audit.ndjson"');
+      res.setHeader("Cache-Control", "no-store, private");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.write(`${JSON.stringify({ type: "manifest", format: "bis-pii-forensic-audit-ndjson-v1", generatedAt: new Date().toISOString(), maxEvents: rawMaxEvents ?? FORENSIC_EXPORT_MAX_EVENTS })}\n`);
+      for await (const event of iterateVerifiedForensicExport(
+        (input) => caller.piiKeyCustody.listForensics(input),
+        { incidentRef: rawIncidentRef, maxEvents: rawMaxEvents },
+      )) {
+        if (req.destroyed || res.writableEnded) throw new Error("forensic export client disconnected");
+        emitted += 1;
+        if (!res.write(`${JSON.stringify({ type: "event", event })}\n`)) {
+          await new Promise<void>((resolve, reject) => { res.once("drain", resolve); res.once("error", reject); });
+        }
+      }
+      res.end(`${JSON.stringify({ type: "complete", eventCount: emitted })}\n`);
+    } catch (error) {
+      log("warn", "verified forensic export terminated", { reqId: (req as Request & { id?: string }).id, emitted, code: error && typeof error === "object" && "code" in error ? String((error as { code: unknown }).code) : "INTERNAL_SERVER_ERROR" });
+      if (!res.headersSent) {
+        respondConsumerAdapterError(req, res, error, "pii_forensic_export");
+      } else if (!res.writableEnded) {
+        res.destroy();
+      }
     }
   });
 
