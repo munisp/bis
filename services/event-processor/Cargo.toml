@@ -22,6 +22,7 @@ tokio-stream = "0.1"
 dashmap = "5"
 # HTTP client — used for webhook fan-out and BFF forwarding
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+bis-transport-policy = { path = "../../crates/bis-transport-policy" }
 # Native Kafka consumer/producer — requires librdkafka-dev in the Docker build image.
 # Enable with: cargo build --features kafka-native
 # Docker: RUN apt-get install -y librdkafka-dev cmake

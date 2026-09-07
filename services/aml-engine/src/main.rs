@@ -1,3 +1,4 @@
+use bis_transport_policy::{https_client, required_allowed_hosts, TrustedEndpoint};
 use axum::{
     extract::{Json, State},
     http::{HeaderMap, StatusCode},
@@ -252,21 +253,22 @@ fn spawn_sdn_refresh(cache: SharedSdnCache) {
 async fn fetch_and_update_cache(cache: &SharedSdnCache) -> Result<usize, String> {
     // Use reqwest if available; otherwise return an error so the static seed remains.
     // This is a best-effort refresh — the engine works without it.
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
-        .user_agent("BIS-AML-Engine/2.0 (compliance@bis.ng)")
-        .build()
-        .map_err(|e| format!("HTTP client build failed: {e}"))?;
-
-    let url = aml_engine::sdn_sync::OFAC_SDN_URL;
+    let hosts = std::collections::HashSet::from(["www.treasury.gov".to_string()]);
+    let url = TrustedEndpoint::parse("OFAC_SDN_URL", aml_engine::sdn_sync::OFAC_SDN_URL, &hosts)
+        .map_err(|_| "sanctions-feed endpoint policy rejected".to_string())?;
+    let client = https_client(
+        std::time::Duration::from_secs(30),
+        std::time::Duration::from_secs(10),
+    )
+    .map_err(|_| "sanctions-feed transport initialization failed".to_string())?;
     let resp = client
-        .get(url)
+        .get(url.as_url().clone())
         .send()
         .await
-        .map_err(|e| format!("HTTP GET {url} failed: {e}"))?;
+        .map_err(|_| "sanctions-feed request failed".to_string())?;
 
     if !resp.status().is_success() {
-        return Err(format!("HTTP {}: {}", resp.status(), url));
+        return Err("sanctions-feed request was rejected".to_string());
     }
 
     let body = resp
@@ -376,13 +378,19 @@ async fn main() {
     // ── DLQ: initialise and start replay background task ──────────────────────
     let dlq = Arc::new(AmlDlq::new());
     {
-        let replay_url = format!(
-            "http://localhost:{}/screen",
-            std::env::var("PORT").unwrap_or_else(|_| "8085".to_string())
-        );
-        dlq.clone()
-            .start_replay_task(replay_url, service_key.clone());
-        info!("[AML-DLQ] Dead-letter queue initialised (capacity 1000, replay every 30s)");
+        let replay_url = std::env::var("BIS_AML_REPLAY_URL").ok().and_then(|raw| {
+            required_allowed_hosts("BIS_AML_REPLAY_ALLOWED_HOSTS")
+                .ok()
+                .and_then(|hosts| TrustedEndpoint::parse("BIS_AML_REPLAY_URL", &raw, &hosts).ok())
+                .and_then(|endpoint| endpoint.with_path_segments(&["screen"]).ok())
+                .map(|endpoint| endpoint.as_str().to_string())
+        });
+        if let Some(replay_url) = replay_url {
+            dlq.clone().start_replay_task(replay_url, service_key.clone());
+            info!("[AML-DLQ] Dead-letter queue replay initialised");
+        } else {
+            warn!("[AML-DLQ] Replay transport is disabled until an approved HTTPS endpoint is configured");
+        }
     }
 
     let state = AppState { sdn_cache, dlq };

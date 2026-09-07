@@ -1,0 +1,11 @@
+[package]
+name = "bis-transport-policy"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.78"
+description = "BIS fail-closed outbound HTTPS, host allow-list, and mTLS transport policy"
+publish = false
+
+[dependencies]
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+thiserror = "1"
