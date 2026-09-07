@@ -1,3 +1,12 @@
+import {
+  FORENSIC_EXPORT_MAX_EVENTS,
+  FORENSIC_EXPORT_PAGE_SIZE,
+  toForensicExportEvent,
+  type ForensicExportEvent,
+} from "./forensicExportProtocol";
+
+export { FORENSIC_EXPORT_MAX_EVENTS, FORENSIC_EXPORT_PAGE_SIZE } from "./forensicExportProtocol";
+
 export type VerifiedForensicExportEvent = {
   id: number;
   createdAt: Date | string;
@@ -8,16 +17,12 @@ export type VerifiedForensicExportEvent = {
   incidentRef: string | null;
   incidentStatus: string | null;
 };
-
 type VerifiedForensicPage = { events: VerifiedForensicExportEvent[]; nextCursor: string | null };
-
-export const FORENSIC_EXPORT_PAGE_SIZE = 200;
-export const FORENSIC_EXPORT_MAX_EVENTS = 10_000;
 
 export async function* iterateVerifiedForensicExport(
   fetchPage: (input: { limit: number; cursor?: string; incidentRef?: string }) => Promise<VerifiedForensicPage>,
   input: { incidentRef?: string; maxEvents?: number } = {},
-): AsyncGenerator<VerifiedForensicExportEvent, number, void> {
+): AsyncGenerator<ForensicExportEvent, number, void> {
   const maxEvents = input.maxEvents ?? FORENSIC_EXPORT_MAX_EVENTS;
   if (!Number.isSafeInteger(maxEvents) || maxEvents < 1 || maxEvents > FORENSIC_EXPORT_MAX_EVENTS) {
     throw new Error(`forensic export maximum must be an integer from 1 through ${FORENSIC_EXPORT_MAX_EVENTS}`);
@@ -32,11 +37,12 @@ export async function* iterateVerifiedForensicExport(
       throw new Error("verified forensic export received an invalid page shape");
     }
     for (const event of page.events) {
-      if (!Number.isSafeInteger(event.id) || event.id <= 0 || ids.has(event.id)) {
+      const verifiedEvent = toForensicExportEvent(event);
+      if (ids.has(verifiedEvent.id)) {
         throw new Error("verified forensic export received a duplicate or invalid immutable event ID");
       }
-      ids.add(event.id);
-      yield event;
+      ids.add(verifiedEvent.id);
+      yield verifiedEvent;
       emitted += 1;
       if (emitted === maxEvents) return emitted;
     }

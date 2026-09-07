@@ -18,6 +18,7 @@
     "pii:rls:test": "node scripts/test-0017-pii-rls.mjs",
     "pii:rls:stress": "tsx scripts/stress-0017-rls-dispatch.ts",
     "pii:rls:validate-monitoring": "node scripts/validate-0017-rls-monitoring-config.mjs",
+    "pii:forensics:verify-export": "tsx scripts/verify-forensic-export.ts",
     "db:push": "pnpm db:migrate",
     "db:seed": "tsx server/seed.ts",
     "e2e": "playwright test",

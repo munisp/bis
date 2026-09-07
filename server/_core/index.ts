@@ -41,6 +41,7 @@ import { validateEnv } from "../envValidation";
 import { ENV } from "./env";
 import { startWebhookRetryScheduler } from "../webhookRetry";
 import { FORENSIC_EXPORT_MAX_EVENTS, iterateVerifiedForensicExport } from "../piiForensicExport";
+import { forensicIncidentReferenceSchema, serializeForensicExportRecord } from "../forensicExportProtocol";
 
 // ── Structured logger ─────────────────────────────────────────────────────────
 function log(level: "info" | "warn" | "error", msg: string, meta?: Record<string, unknown>) {
@@ -654,7 +655,7 @@ async function startServer() {
   app.get("/api/pii-forensics/export.ndjson", async (req: Request, res: Response) => {
     const rawIncidentRef = typeof req.query.incidentRef === "string" ? req.query.incidentRef : undefined;
     const rawMaxEvents = typeof req.query.maxEvents === "string" ? Number(req.query.maxEvents) : undefined;
-    if (rawIncidentRef !== undefined && !/^BIS-PII-[A-Z0-9]{18}$/.test(rawIncidentRef)) {
+    if (rawIncidentRef !== undefined && !forensicIncidentReferenceSchema.safeParse(rawIncidentRef).success) {
       res.status(400).json({ error: "A valid PII incident reference is required", code: "BAD_REQUEST" });
       return;
     }
@@ -670,18 +671,18 @@ async function startServer() {
       res.setHeader("Content-Disposition", 'attachment; filename="bis-pii-forensic-audit.ndjson"');
       res.setHeader("Cache-Control", "no-store, private");
       res.setHeader("X-Content-Type-Options", "nosniff");
-      res.write(`${JSON.stringify({ type: "manifest", format: "bis-pii-forensic-audit-ndjson-v1", generatedAt: new Date().toISOString(), maxEvents: rawMaxEvents ?? FORENSIC_EXPORT_MAX_EVENTS })}\n`);
+      res.write(serializeForensicExportRecord({ type: "manifest", format: "bis-pii-forensic-audit-ndjson-v1", generatedAt: new Date().toISOString(), maxEvents: rawMaxEvents ?? FORENSIC_EXPORT_MAX_EVENTS, incidentRef: rawIncidentRef ?? null }));
       for await (const event of iterateVerifiedForensicExport(
         (input) => caller.piiKeyCustody.listForensics(input),
         { incidentRef: rawIncidentRef, maxEvents: rawMaxEvents },
       )) {
         if (req.destroyed || res.writableEnded) throw new Error("forensic export client disconnected");
         emitted += 1;
-        if (!res.write(`${JSON.stringify({ type: "event", event })}\n`)) {
+        if (!res.write(serializeForensicExportRecord({ type: "event", event }))) {
           await new Promise<void>((resolve, reject) => { res.once("drain", resolve); res.once("error", reject); });
         }
       }
-      res.end(`${JSON.stringify({ type: "complete", eventCount: emitted })}\n`);
+      res.end(serializeForensicExportRecord({ type: "complete", eventCount: emitted }));
     } catch (error) {
       log("warn", "verified forensic export terminated", { reqId: (req as Request & { id?: string }).id, emitted, code: error && typeof error === "object" && "code" in error ? String((error as { code: unknown }).code) : "INTERNAL_SERVER_ERROR" });
       if (!res.headersSent) {
