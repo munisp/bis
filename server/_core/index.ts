@@ -119,32 +119,44 @@ async function startServer() {
     });
   }
 
+  const contentSecurityPolicy = isDev
+    ? {
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://maps.googleapis.com"],
+          styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+          fontSrc: ["'self'", "https://fonts.gstatic.com"],
+          imgSrc: ["'self'", "data:", "https:", "blob:"],
+          connectSrc: ["'self'", "ws:", "wss:"],
+          frameSrc: ["'none'"],
+          objectSrc: ["'none'"],
+          upgradeInsecureRequests: null,
+        },
+      }
+    : {
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: [
+            "'self'",
+            "https://maps.googleapis.com",
+            (_req: import("http").IncomingMessage, res: import("http").ServerResponse) => {
+              const nonce = (res as import("http").ServerResponse & { locals?: { nonce?: string } }).locals?.nonce;
+              return nonce ? `'nonce-${nonce}'` : "'none'";
+            },
+          ],
+          styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+          fontSrc: ["'self'", "https://fonts.gstatic.com"],
+          imgSrc: ["'self'", "data:", "https:", "blob:"],
+          connectSrc: ["'self'", "wss:"],
+          frameSrc: ["'none'"],
+          objectSrc: ["'none'"],
+          upgradeInsecureRequests: [],
+        },
+      };
+
   app.use(
     helmet({
-      contentSecurityPolicy: isDev
-        ? false // Vite HMR requires inline scripts in dev
-        : {
-            directives: {
-              defaultSrc: ["'self'"],
-              // Use per-request nonce instead of 'unsafe-inline'
-              scriptSrc: [
-                "'self'",
-                "https://maps.googleapis.com",
-                // Helmet CSP directive functions receive IncomingMessage / ServerResponse
-                (_req: import("http").IncomingMessage, res: import("http").ServerResponse) => {
-                  const nonce = (res as import("http").ServerResponse & { locals?: { nonce?: string } }).locals?.nonce;
-                  return nonce ? `'nonce-${nonce}'` : "'unsafe-inline'";
-                },
-              ],
-              styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-              fontSrc: ["'self'", "https://fonts.gstatic.com"],
-              imgSrc: ["'self'", "data:", "https:", "blob:"],
-              connectSrc: ["'self'", "https://api.manus.im", "wss:"],
-              frameSrc: ["'none'"],
-              objectSrc: ["'none'"],
-              upgradeInsecureRequests: [],
-            },
-          },
+      contentSecurityPolicy,
       // HSTS: 1 year, include subdomains
       strictTransportSecurity: {
         maxAge: 31536000,

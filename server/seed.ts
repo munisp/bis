@@ -9,6 +9,7 @@
  */
 
 import "dotenv/config";
+import { randomBytes, randomInt, randomUUID } from "node:crypto";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { sql } from "drizzle-orm";
@@ -51,15 +52,21 @@ const db = drizzle(pool);
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function rnd<T>(arr: readonly T[]): T {
-  return arr[Math.floor(Math.random() * arr.length)];
+  if (arr.length === 0) throw new Error("Cannot choose a seed value from an empty collection.");
+  return arr[randomInt(arr.length)]!;
 }
 
 function rndFloat(min: number, max: number, dp = 1): number {
-  return parseFloat((Math.random() * (max - min) + min).toFixed(dp));
+  if (!Number.isFinite(min) || !Number.isFinite(max) || min > max || !Number.isInteger(dp) || dp < 0 || dp > 6) {
+    throw new Error("Invalid synthetic floating-point range.");
+  }
+  const scale = 10 ** dp;
+  return randomInt(Math.round(min * scale), Math.round(max * scale) + 1) / scale;
 }
 
 function rndInt(min: number, max: number): number {
-  return Math.floor(Math.random() * (max - min + 1)) + min;
+  if (!Number.isSafeInteger(min) || !Number.isSafeInteger(max) || min > max) throw new Error("Invalid synthetic integer range.");
+  return randomInt(min, max + 1);
 }
 
 function daysAgo(n: number): Date {
@@ -311,7 +318,7 @@ async function seedInvestigations(userIds: number[]) {
 
   for (let i = 1; i <= 50; i++) {
     const ref = `INV-2026-${pad(i, 4)}`;
-    const isCorpRate = Math.random() < 0.3;
+    const isCorpRate = rndInt(1, 10) <= 3;
     const subjectName = isCorpRate ? rnd(CORP_NAMES) : randomName();
     const subjectType = isCorpRate ? "corporate" : "individual";
     const riskScore = rndFloat(10, 95);
@@ -383,9 +390,9 @@ async function seedAlerts(invRows: { id: number; ref: string }[]) {
     const tpl = rnd(ALERT_TEMPLATES);
     const severity = rnd(SEVERITIES);
     const hoursBack = rndInt(1, 720);
-    const isRead = Math.random() > 0.4;
-    const isAck = Math.random() > 0.6;
-    const isResolved = Math.random() > 0.8;
+    const isRead = rndInt(1, 10) > 4;
+    const isAck = rndInt(1, 10) > 6;
+    const isResolved = rndInt(1, 10) > 8;
 
     await db.execute(
       sql.raw(`
@@ -423,7 +430,7 @@ async function seedKycRecords(invRows: { id: number; ref: string }[], userIds: n
     const phone = randomPhone();
     const ninResult = JSON.stringify({ verified: status === "passed", confidence: rndFloat(0.7, 0.99) }).replace(/'/g, "''");
     const bvnResult = JSON.stringify({ verified: status === "passed", confidence: rndFloat(0.7, 0.99) }).replace(/'/g, "''");
-    const sanctionsResult = JSON.stringify({ matched: Math.random() > 0.9, lists: [] }).replace(/'/g, "''");
+    const sanctionsResult = JSON.stringify({ matched: rndInt(1, 10) > 9, lists: [] }).replace(/'/g, "''");
     const createdBy = rnd(userIds);
     const daysBack = rndInt(1, 60);
 
@@ -715,7 +722,7 @@ async function seedRuleEvaluations(ruleIds: number[], invRows: { id: number; ref
     const value = rndFloat(10, 100);
     const threshold = rndFloat(40, 80);
     const triggered = value >= threshold;
-    const alertCreated = triggered && Math.random() > 0.3;
+    const alertCreated = triggered && rndInt(1, 10) > 3;
     const hoursBack = rndInt(1, 168);
 
     await db.execute(
@@ -872,10 +879,10 @@ async function seedBiometricSessionLogs(kycIds: number[]) {
     const spoofType = rnd(SPOOF_TYPES);
     const genuine = spoofType === "genuine";
     const verType = rnd(VER_TYPES);
-    const passed = genuine ? Math.random() > 0.05 : Math.random() < 0.08;
+    const passed = genuine ? rndInt(1, 100) > 5 : rndInt(1, 100) <= 8;
     const kycId = kycIds.length > 0 ? rnd(kycIds) : null;
     const daysBack = rndInt(0, 90);
-    const sessionId = `bio-seed-${i.toString().padStart(4, "0")}-${Math.random().toString(36).slice(2, 8)}`;
+    const sessionId = `bio-seed-${i.toString().padStart(4, "0")}-${randomUUID()}`;
     const subjectRef = `SUBJ-${rndInt(1000, 9999)}`;
 
     const isActiveLiveness = verType === "active_liveness" || verType === "full_verify";
@@ -931,10 +938,10 @@ async function seedBiometricSessionLogs(kycIds: number[]) {
       overallVerified: verType === "full_verify" ? passed : null,
       failureReasons: !passed ? (genuine ? "liveness_check_failed" : `spoof_detected:${spoofType}`) : null,
       // Metadata
-      requestId: `req-${Math.random().toString(36).slice(2, 12)}`,
+      requestId: `req-${randomUUID()}`,
       latencyMs: rndFloat(80, 1200, 0),
       engineVersion: "biometric-engine-v2.1.0",
-      kafkaPublished: Math.random() > 0.1,
+      kafkaPublished: rndInt(1, 10) > 1,
       createdAt: daysAgo(daysBack),
     });
     count++;
@@ -992,7 +999,7 @@ async function seedWebhooks(tenantIds: number[]) {
       tenantId: tenantIds[i % tenantIds.length],
       url: sampleUrls[i],
       events: events[i],
-      secret: `whsec_${Math.random().toString(36).slice(2, 34)}`,
+      secret: `whsec_${randomBytes(24).toString("base64url")}`,
       status: "active" as const,
       createdAt: new Date(Date.now() - i * 86400000),
     });

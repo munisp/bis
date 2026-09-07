@@ -13,6 +13,7 @@
  *   5. After max attempts (7), item is marked as `dead_letter` for manual review
  *   6. Successful retries update billing_topups and clear the queue entry
  */
+import { randomInt } from "node:crypto";
 import { getDb } from "./db";
 import { creditTenantAccount } from "./billing";
 
@@ -38,9 +39,9 @@ interface RetryItem {
 // ── Backoff Calculator ────────────────────────────────────────────────────────
 export function calculateBackoff(attempt: number): number {
   const delay = Math.min(BASE_DELAY_MS * Math.pow(2, attempt), MAX_DELAY_MS);
-  // Add 10% jitter to prevent thundering herd
-  const jitter = delay * 0.1 * Math.random();
-  return Math.round(delay + jitter);
+  // Add bounded cryptographic jitter to prevent a synchronized retry herd.
+  const jitter = randomInt(Math.floor(delay * 0.1) + 1);
+  return delay + jitter;
 }
 
 // ── Enqueue a Failed Webhook ──────────────────────────────────────────────────
