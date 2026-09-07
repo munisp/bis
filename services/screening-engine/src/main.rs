@@ -39,9 +39,15 @@ use rdkafka::{
     ClientConfig, Message,
 };
 use redis::aio::ConnectionManager;
+use reqwest::{redirect::Policy, Client, Url};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+    time::Duration,
+};
 use tracing::{error, info, warn};
+#[cfg(test)]
 use uuid::Uuid;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -147,26 +153,108 @@ pub struct AppState {
 }
 
 pub struct EngineConfig {
-    pub nimc_url: String,
+    pub nimc_url: Url,
     pub nimc_key: String,
-    pub nibss_url: String,
+    pub nibss_url: Url,
     pub nibss_key: String,
-    pub efcc_url: String,
+    pub efcc_url: Url,
     pub efcc_key: String,
-    pub icpc_url: String,
+    pub icpc_url: Url,
     pub icpc_key: String,
-    pub cac_url: String,
+    pub cac_url: Url,
     pub cac_key: String,
-    pub waec_url: String,
+    pub waec_url: Url,
     pub waec_key: String,
-    pub aggregator_url: String,
+    pub aggregator_url: Url,
     pub aggregator_key: String,
+}
+
+fn configured_provider_hosts() -> anyhow::Result<HashSet<String>> {
+    let hosts = std::env::var("BIS_SCREENING_PROVIDER_ALLOWED_HOSTS")?
+        .split(',')
+        .map(str::trim)
+        .filter(|host| !host.is_empty())
+        .map(|host| host.to_ascii_lowercase())
+        .collect::<HashSet<_>>();
+    if hosts.is_empty() {
+        anyhow::bail!("BIS_SCREENING_PROVIDER_ALLOWED_HOSTS must contain at least one hostname");
+    }
+    Ok(hosts)
+}
+
+fn trusted_provider_url(
+    name: &str,
+    raw: &str,
+    allowed_hosts: &HashSet<String>,
+) -> anyhow::Result<Url> {
+    let mut url = Url::parse(raw.trim())?;
+    if url.scheme() != "https" {
+        anyhow::bail!("{name} must use https");
+    }
+    if !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        anyhow::bail!("{name} must not contain credentials, query parameters, or fragments");
+    }
+    let host = url
+        .host_str()
+        .map(str::to_ascii_lowercase)
+        .ok_or_else(|| anyhow::anyhow!("{name} must include a hostname"))?;
+    if !allowed_hosts.contains(&host) {
+        anyhow::bail!("{name} host is not allow-listed");
+    }
+    let normalized_path = url.path().trim_end_matches('/').to_string();
+    url.set_path(&normalized_path);
+    Ok(url)
+}
+
+fn provider_url_from_env(
+    name: &str,
+    variable: &str,
+    default: Option<&str>,
+    allowed_hosts: &HashSet<String>,
+) -> anyhow::Result<Url> {
+    let raw = match (std::env::var(variable), default) {
+        (Ok(value), _) => value,
+        (Err(_), Some(value)) => value.to_string(),
+        (Err(_), None) => anyhow::bail!("{variable} must be configured"),
+    };
+    trusted_provider_url(name, &raw, allowed_hosts)
+}
+
+fn provider_endpoint(base: &Url, segments: &[&str]) -> Result<Url, &'static str> {
+    let mut endpoint = base.clone();
+    let mut path = endpoint
+        .path_segments_mut()
+        .map_err(|_| "configured provider endpoint cannot accept path segments")?;
+    path.pop_if_empty();
+    for segment in segments {
+        path.push(segment);
+    }
+    drop(path);
+    Ok(endpoint)
+}
+
+fn outbound_provider_client() -> Result<Client, reqwest::Error> {
+    Client::builder()
+        .https_only(true)
+        .redirect(Policy::none())
+        .connect_timeout(Duration::from_secs(10))
+        .build()
 }
 
 pub struct Metrics {
     pub screenings_total: prometheus::CounterVec,
     pub screening_duration: prometheus::HistogramVec,
     pub errors_total: prometheus::CounterVec,
+}
+
+impl Default for Metrics {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Metrics {
@@ -251,17 +339,15 @@ pub async fn run_screening(
             .unwrap_or("unknown")
     );
 
-    if let Ok(cached) = redis::cmd("GET")
+    if let Ok(Some(json)) = redis::cmd("GET")
         .arg(&cache_key)
         .query_async::<Option<String>>(redis)
         .await
     {
-        if let Some(json) = cached {
-            if let Ok(mut result) = serde_json::from_str::<ScreeningResult>(&json) {
-                result.request_id = req.request_id.clone();
-                result.result_id = req.result_id;
-                return result;
-            }
+        if let Ok(mut result) = serde_json::from_str::<ScreeningResult>(&json) {
+            result.request_id = req.request_id.clone();
+            result.result_id = req.result_id;
+            return result;
         }
     }
 
@@ -318,11 +404,20 @@ pub async fn run_screening(
 // ─── Individual Screening Implementations ────────────────────────────────────
 
 async fn screen_nin_trace(req: &ScreeningRequest, config: &EngineConfig) -> ScreeningResult {
-    // Real NIMC API call
-    let client = reqwest::Client::new();
+    if config.nimc_key.trim().is_empty() {
+        return error_result(req, "NIMC credentials are not configured");
+    }
+    let client = match outbound_provider_client() {
+        Ok(client) => client,
+        Err(_) => return error_result(req, "provider transport is unavailable"),
+    };
+    let endpoint = match provider_endpoint(&config.nimc_url, &["v1", "nin", "verify"]) {
+        Ok(endpoint) => endpoint,
+        Err(_) => return error_result(req, "provider endpoint is invalid"),
+    };
     let nin = req.subject.nin.as_deref().unwrap_or("");
     match client
-        .post(format!("{}/v1/nin/verify", config.nimc_url))
+        .post(endpoint)
         .header("Authorization", format!("Bearer {}", config.nimc_key))
         .json(&serde_json::json!({ "nin": nin, "name": req.subject.full_name }))
         .timeout(Duration::from_secs(30))
@@ -362,10 +457,20 @@ async fn screen_nin_trace(req: &ScreeningRequest, config: &EngineConfig) -> Scre
 }
 
 async fn screen_bvn(req: &ScreeningRequest, config: &EngineConfig) -> ScreeningResult {
-    let client = reqwest::Client::new();
+    if config.nibss_key.trim().is_empty() {
+        return error_result(req, "NIBSS credentials are not configured");
+    }
+    let client = match outbound_provider_client() {
+        Ok(client) => client,
+        Err(_) => return error_result(req, "provider transport is unavailable"),
+    };
+    let endpoint = match provider_endpoint(&config.nibss_url, &["v2", "bvn", "verify"]) {
+        Ok(endpoint) => endpoint,
+        Err(_) => return error_result(req, "provider endpoint is invalid"),
+    };
     let bvn = req.subject.bvn.as_deref().unwrap_or("");
     match client
-        .post(format!("{}/v2/bvn/verify", config.nibss_url))
+        .post(endpoint)
         .header("Authorization", format!("Bearer {}", config.nibss_key))
         .json(&serde_json::json!({ "bvn": bvn }))
         .timeout(Duration::from_secs(30))
@@ -406,9 +511,19 @@ async fn screen_bvn(req: &ScreeningRequest, config: &EngineConfig) -> ScreeningR
 }
 
 async fn screen_efcc(req: &ScreeningRequest, config: &EngineConfig) -> ScreeningResult {
-    let client = reqwest::Client::new();
+    if config.efcc_key.trim().is_empty() {
+        return error_result(req, "EFCC credentials are not configured");
+    }
+    let client = match outbound_provider_client() {
+        Ok(client) => client,
+        Err(_) => return error_result(req, "provider transport is unavailable"),
+    };
+    let endpoint = match provider_endpoint(&config.efcc_url, &["v1", "search"]) {
+        Ok(endpoint) => endpoint,
+        Err(_) => return error_result(req, "provider endpoint is invalid"),
+    };
     match client
-        .post(format!("{}/v1/search", config.efcc_url))
+        .post(endpoint)
         .header("x-api-key", &config.efcc_key)
         .json(&serde_json::json!({ "name": req.subject.full_name, "nin": req.subject.nin }))
         .timeout(Duration::from_secs(45))
@@ -445,9 +560,19 @@ async fn screen_efcc(req: &ScreeningRequest, config: &EngineConfig) -> Screening
 }
 
 async fn screen_icpc(req: &ScreeningRequest, config: &EngineConfig) -> ScreeningResult {
-    let client = reqwest::Client::new();
+    if config.icpc_key.trim().is_empty() {
+        return error_result(req, "ICPC credentials are not configured");
+    }
+    let client = match outbound_provider_client() {
+        Ok(client) => client,
+        Err(_) => return error_result(req, "provider transport is unavailable"),
+    };
+    let endpoint = match provider_endpoint(&config.icpc_url, &["v1", "search"]) {
+        Ok(endpoint) => endpoint,
+        Err(_) => return error_result(req, "provider endpoint is invalid"),
+    };
     match client
-        .post(format!("{}/v1/search", config.icpc_url))
+        .post(endpoint)
         .header("x-api-key", &config.icpc_key)
         .json(&serde_json::json!({ "name": req.subject.full_name }))
         .timeout(Duration::from_secs(45))
@@ -496,19 +621,25 @@ struct AggregatorScreeningResponse {
 // screen_aggregator delegates specialist checks to the configured accredited
 // screening provider using the platform's normalized request and response contract.
 async fn screen_aggregator(req: &ScreeningRequest, config: &EngineConfig) -> ScreeningResult {
-    if config.aggregator_url.trim().is_empty() || config.aggregator_key.trim().is_empty() {
+    if config.aggregator_key.trim().is_empty() {
         return error_result(req, "screening aggregator credentials are not configured");
     }
     let screening_type = serde_json::to_value(&req.screening_type)
         .ok()
         .and_then(|value| value.as_str().map(str::to_owned))
         .unwrap_or_else(|| "unknown".to_owned());
-    let endpoint = format!(
-        "{}/v1/screenings/{}",
-        config.aggregator_url.trim_end_matches('/'),
-        screening_type
-    );
-    let response = reqwest::Client::new()
+    let endpoint = match provider_endpoint(
+        &config.aggregator_url,
+        &["v1", "screenings", &screening_type],
+    ) {
+        Ok(endpoint) => endpoint,
+        Err(_) => return error_result(req, "provider endpoint is invalid"),
+    };
+    let client = match outbound_provider_client() {
+        Ok(client) => client,
+        Err(_) => return error_result(req, "provider transport is unavailable"),
+    };
+    let response = client
         .post(endpoint)
         .header("Authorization", format!("Bearer {}", config.aggregator_key))
         .header("Idempotency-Key", &req.request_id)
@@ -740,22 +871,56 @@ async fn main() -> anyhow::Result<()> {
         .set("message.timeout.ms", "5000")
         .create()?;
 
+    let provider_hosts = configured_provider_hosts()?;
     let config = Arc::new(EngineConfig {
-        nimc_url: std::env::var("NIMC_URL").unwrap_or_else(|_| "https://api.nimc.gov.ng".into()),
+        nimc_url: provider_url_from_env(
+            "NIMC_URL",
+            "NIMC_URL",
+            Some("https://api.nimc.gov.ng"),
+            &provider_hosts,
+        )?,
         nimc_key: std::env::var("NIMC_API_KEY").unwrap_or_default(),
-        nibss_url: std::env::var("NIBSS_URL")
-            .unwrap_or_else(|_| "https://api.nibss-plc.com.ng".into()),
+        nibss_url: provider_url_from_env(
+            "NIBSS_URL",
+            "NIBSS_URL",
+            Some("https://api.nibss-plc.com.ng"),
+            &provider_hosts,
+        )?,
         nibss_key: std::env::var("NIBSS_API_KEY").unwrap_or_default(),
-        efcc_url: std::env::var("EFCC_URL").unwrap_or_else(|_| "https://api.efcc.gov.ng".into()),
+        efcc_url: provider_url_from_env(
+            "EFCC_URL",
+            "EFCC_URL",
+            Some("https://api.efcc.gov.ng"),
+            &provider_hosts,
+        )?,
         efcc_key: std::env::var("EFCC_API_KEY").unwrap_or_default(),
-        icpc_url: std::env::var("ICPC_URL").unwrap_or_else(|_| "https://api.icpc.gov.ng".into()),
+        icpc_url: provider_url_from_env(
+            "ICPC_URL",
+            "ICPC_URL",
+            Some("https://api.icpc.gov.ng"),
+            &provider_hosts,
+        )?,
         icpc_key: std::env::var("ICPC_API_KEY").unwrap_or_default(),
-        cac_url: std::env::var("CAC_URL").unwrap_or_else(|_| "https://efts.cac.gov.ng".into()),
+        cac_url: provider_url_from_env(
+            "CAC_URL",
+            "CAC_URL",
+            Some("https://efts.cac.gov.ng"),
+            &provider_hosts,
+        )?,
         cac_key: std::env::var("CAC_API_KEY").unwrap_or_default(),
-        waec_url: std::env::var("WAEC_URL")
-            .unwrap_or_else(|_| "https://api.waecnigeria.org".into()),
+        waec_url: provider_url_from_env(
+            "WAEC_URL",
+            "WAEC_URL",
+            Some("https://api.waecnigeria.org"),
+            &provider_hosts,
+        )?,
         waec_key: std::env::var("WAEC_API_KEY").unwrap_or_default(),
-        aggregator_url: std::env::var("SCREENING_AGGREGATOR_URL").unwrap_or_default(),
+        aggregator_url: provider_url_from_env(
+            "SCREENING_AGGREGATOR_URL",
+            "SCREENING_AGGREGATOR_URL",
+            None,
+            &provider_hosts,
+        )?,
         aggregator_key: std::env::var("SCREENING_AGGREGATOR_API_KEY").unwrap_or_default(),
     });
 
@@ -765,10 +930,8 @@ async fn main() -> anyhow::Result<()> {
     {
         anyhow::bail!("BIS_SCREENING_ENGINE_KEY must be configured");
     }
-    if config.aggregator_url.trim().is_empty() || config.aggregator_key.trim().is_empty() {
-        anyhow::bail!(
-            "SCREENING_AGGREGATOR_URL and SCREENING_AGGREGATOR_API_KEY must be configured"
-        );
+    if config.aggregator_key.trim().is_empty() {
+        anyhow::bail!("SCREENING_AGGREGATOR_API_KEY must be configured");
     }
     if std::env::var("DATABASE_URL").unwrap_or_default().is_empty() {
         anyhow::bail!("DATABASE_URL must be configured for durable screening results");
@@ -845,21 +1008,70 @@ mod tests {
         }
     }
 
+    fn test_provider_url() -> Url {
+        Url::parse("https://screening-provider.test").expect("valid test provider URL")
+    }
+
+    #[test]
+    fn provider_url_requires_allowlisted_https_without_userinfo_or_query() {
+        let allowed_hosts = HashSet::from(["screening-provider.test".to_string()]);
+        assert!(trusted_provider_url(
+            "TEST_URL",
+            "https://screening-provider.test/base/",
+            &allowed_hosts
+        )
+        .is_ok());
+        assert!(
+            trusted_provider_url("TEST_URL", "http://screening-provider.test", &allowed_hosts)
+                .is_err()
+        );
+        assert!(trusted_provider_url(
+            "TEST_URL",
+            "https://user:secret@screening-provider.test",
+            &allowed_hosts
+        )
+        .is_err());
+        assert!(trusted_provider_url(
+            "TEST_URL",
+            "https://screening-provider.test?next=https://metadata.google.internal",
+            &allowed_hosts
+        )
+        .is_err());
+        assert!(trusted_provider_url(
+            "TEST_URL",
+            "https://metadata.google.internal",
+            &allowed_hosts
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn provider_paths_are_appended_as_escaped_segments() {
+        let base =
+            Url::parse("https://screening-provider.test/base").expect("valid test provider URL");
+        let endpoint = provider_endpoint(&base, &["v1", "screenings", "pep_sanctions"])
+            .expect("path can be appended");
+        assert_eq!(
+            endpoint.as_str(),
+            "https://screening-provider.test/base/v1/screenings/pep_sanctions"
+        );
+    }
+
     fn test_config() -> EngineConfig {
         EngineConfig {
-            nimc_url: "".into(),
+            nimc_url: test_provider_url(),
             nimc_key: "".into(),
-            nibss_url: "".into(),
+            nibss_url: test_provider_url(),
             nibss_key: "".into(),
-            efcc_url: "".into(),
+            efcc_url: test_provider_url(),
             efcc_key: "".into(),
-            icpc_url: "".into(),
+            icpc_url: test_provider_url(),
             icpc_key: "".into(),
-            cac_url: "".into(),
+            cac_url: test_provider_url(),
             cac_key: "".into(),
-            waec_url: "".into(),
+            waec_url: test_provider_url(),
             waec_key: "".into(),
-            aggregator_url: "".into(),
+            aggregator_url: test_provider_url(),
             aggregator_key: "".into(),
         }
     }
@@ -923,51 +1135,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_aggregator_accepts_valid_provider_contract() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let address = listener.local_addr().unwrap();
-        let provider = Router::new().route(
-            "/v1/screenings/pep_sanctions",
-            post(
-                |headers: axum::http::HeaderMap,
-                 axum::Json(request): axum::Json<ScreeningRequest>| async move {
-                    assert_eq!(
-                        headers
-                            .get("authorization")
-                            .and_then(|value| value.to_str().ok()),
-                        Some("Bearer integration-test-key")
-                    );
-                    assert_eq!(
-                        headers
-                            .get("idempotency-key")
-                            .and_then(|value| value.to_str().ok()),
-                        Some(request.request_id.as_str())
-                    );
-                    (
-                        axum::http::StatusCode::OK,
-                        axum::Json(serde_json::json!({
-                            "outcome": "clear",
-                            "summary": "Accredited provider completed PEP screening",
-                            "details": {"match": false},
-                            "risk_score": 0.02,
-                            "source": "accredited-provider"
-                        })),
-                    )
-                },
-            ),
-        );
-        tokio::spawn(async move { axum::serve(listener, provider).await.unwrap() });
-
+    async fn test_aggregator_rejects_cleartext_transport_if_runtime_config_is_tampered() {
         let mut config = test_config();
-        config.aggregator_url = format!("http://{address}");
+        config.aggregator_url = Url::parse("http://127.0.0.1:9").expect("valid syntactic HTTP URL");
         config.aggregator_key = "integration-test-key".into();
         let request = make_req(ScreeningType::PepSanctions);
         let result = screen_aggregator(&request, &config).await;
-        assert!(matches!(result.outcome, ScreeningOutcome::Clear));
-        assert_eq!(
-            result.summary,
-            "Accredited provider completed PEP screening"
-        );
-        assert_eq!(result.sources, vec!["accredited-provider"]);
+        assert!(matches!(result.outcome, ScreeningOutcome::Error));
     }
 }

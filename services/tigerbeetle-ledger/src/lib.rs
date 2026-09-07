@@ -6,7 +6,9 @@
 ///   - PostgreSQL reconciliation writer
 ///   - Idempotency key management via Redis
 ///   - Prometheus metrics
+use reqwest::{redirect::Policy, Certificate, Identity, Url};
 use serde::{Deserialize, Serialize};
+use std::{collections::HashSet, fs};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -77,6 +79,10 @@ pub enum LedgerError {
     InvalidLedger(u32),
     #[error("HTTP client error: {0}")]
     HttpError(#[from] reqwest::Error),
+    #[error("Invalid TigerBeetle proxy endpoint: {0}")]
+    InvalidProxyEndpoint(String),
+    #[error("TigerBeetle TLS configuration error: {0}")]
+    TlsConfiguration(String),
     #[error("Serialization error: {0}")]
     SerdeError(#[from] serde_json::Error),
 }
@@ -233,23 +239,169 @@ pub struct StablecoinTransferRequest {
 
 #[derive(Clone)]
 pub struct TbClient {
-    base_url: String,
+    base_url: Url,
     http: reqwest::Client,
 }
 
+fn configured_allowed_proxy_hosts() -> Result<HashSet<String>, LedgerError> {
+    let hosts = std::env::var("TIGERBEETLE_PROXY_ALLOWED_HOSTS")
+        .map_err(|_| {
+            LedgerError::InvalidProxyEndpoint(
+                "TIGERBEETLE_PROXY_ALLOWED_HOSTS must be configured".to_string(),
+            )
+        })?
+        .split(',')
+        .map(str::trim)
+        .filter(|host| !host.is_empty())
+        .map(|host| host.to_ascii_lowercase())
+        .collect::<HashSet<_>>();
+    if hosts.is_empty() {
+        return Err(LedgerError::InvalidProxyEndpoint(
+            "TIGERBEETLE_PROXY_ALLOWED_HOSTS must contain at least one hostname".to_string(),
+        ));
+    }
+    Ok(hosts)
+}
+
+fn parse_trusted_https_endpoint(
+    raw: &str,
+    allowed_hosts: &HashSet<String>,
+) -> Result<Url, LedgerError> {
+    if raw.trim().is_empty() || raw.trim() == "disabled" {
+        return Err(LedgerError::InvalidProxyEndpoint(
+            "TIGERBEETLE_HTTP_URL must be configured".to_string(),
+        ));
+    }
+    let mut endpoint = Url::parse(raw.trim()).map_err(|_| {
+        LedgerError::InvalidProxyEndpoint(
+            "TIGERBEETLE_HTTP_URL must be an absolute HTTPS URL".to_string(),
+        )
+    })?;
+    if endpoint.scheme() != "https" {
+        return Err(LedgerError::InvalidProxyEndpoint(
+            "TIGERBEETLE_HTTP_URL must use https".to_string(),
+        ));
+    }
+    if !endpoint.username().is_empty()
+        || endpoint.password().is_some()
+        || endpoint.query().is_some()
+        || endpoint.fragment().is_some()
+    {
+        return Err(LedgerError::InvalidProxyEndpoint(
+            "TIGERBEETLE_HTTP_URL must not include credentials, query parameters, or fragments"
+                .to_string(),
+        ));
+    }
+    let host = endpoint
+        .host_str()
+        .map(str::to_ascii_lowercase)
+        .ok_or_else(|| {
+            LedgerError::InvalidProxyEndpoint(
+                "TIGERBEETLE_HTTP_URL must include a hostname".to_string(),
+            )
+        })?;
+    if !allowed_hosts.contains(&host) {
+        return Err(LedgerError::InvalidProxyEndpoint(
+            "TIGERBEETLE_HTTP_URL host is not allow-listed".to_string(),
+        ));
+    }
+    let normalized_path = endpoint.path().trim_end_matches('/').to_string();
+    endpoint.set_path(&normalized_path);
+    Ok(endpoint)
+}
+
+fn required_pem_file(variable: &str) -> Result<Vec<u8>, LedgerError> {
+    let path = std::env::var(variable)
+        .map_err(|_| LedgerError::TlsConfiguration(format!("{variable} must be configured")))?;
+    if path.trim().is_empty() {
+        return Err(LedgerError::TlsConfiguration(format!(
+            "{variable} must be configured"
+        )));
+    }
+    fs::read(path.trim())
+        .map_err(|_| LedgerError::TlsConfiguration(format!("{variable} could not be read")))
+}
+
+fn validate_account_id(account_id: &str) -> Result<(), LedgerError> {
+    if account_id.is_empty()
+        || account_id.len() > 39
+        || !account_id.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return Err(LedgerError::InvalidProxyEndpoint(
+            "ledger account ID must be a decimal TigerBeetle identifier".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 impl TbClient {
+    /// Creates a TLS-only client for one configured, allow-listed ledger proxy.
+    ///
+    /// The proxy URL and certificate paths are deployment configuration, never a
+    /// request field. Both the CA bundle and client identity are mandatory so the
+    /// financial transport is mutually authenticated and fails closed.
     pub fn new(base_url: &str) -> Result<Self, LedgerError> {
-        if base_url.trim().is_empty() || base_url == "disabled" {
-            return Err(LedgerError::ProxyError(
-                "TIGERBEETLE_HTTP_URL must be configured".to_string(),
-            ));
-        }
-        Ok(Self {
-            base_url: base_url.trim_end_matches('/').to_string(),
-            http: reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(10))
-                .build()?,
-        })
+        let allowed_hosts = configured_allowed_proxy_hosts()?;
+        let base_url = parse_trusted_https_endpoint(base_url, &allowed_hosts)?;
+        let ca_pem = required_pem_file("TIGERBEETLE_TLS_CA_PEM_FILE")?;
+        let identity_pem = required_pem_file("TIGERBEETLE_TLS_CLIENT_IDENTITY_PEM_FILE")?;
+        let ca = Certificate::from_pem(&ca_pem).map_err(|_| {
+            LedgerError::TlsConfiguration(
+                "TIGERBEETLE_TLS_CA_PEM_FILE is not a valid PEM certificate".to_string(),
+            )
+        })?;
+        let identity = Identity::from_pem(&identity_pem)
+            .map_err(|_| LedgerError::TlsConfiguration("TIGERBEETLE_TLS_CLIENT_IDENTITY_PEM_FILE must contain a PEM certificate and private key".to_string()))?;
+        let http = reqwest::Client::builder()
+            .https_only(true)
+            .redirect(Policy::none())
+            .timeout(std::time::Duration::from_secs(10))
+            .connect_timeout(std::time::Duration::from_secs(5))
+            .add_root_certificate(ca)
+            .identity(identity)
+            .build()?;
+        Ok(Self { base_url, http })
+    }
+
+    fn account_url(&self, account_id: &str) -> Result<Url, LedgerError> {
+        validate_account_id(account_id)?;
+        let mut endpoint = self.base_url.clone();
+        let mut segments = endpoint.path_segments_mut().map_err(|_| {
+            LedgerError::InvalidProxyEndpoint(
+                "configured endpoint cannot accept path segments".to_string(),
+            )
+        })?;
+        segments.pop_if_empty();
+        segments.push("accounts");
+        segments.push(account_id);
+        drop(segments);
+        Ok(endpoint)
+    }
+
+    fn accounts_url(&self) -> Result<Url, LedgerError> {
+        let mut endpoint = self.base_url.clone();
+        let mut segments = endpoint.path_segments_mut().map_err(|_| {
+            LedgerError::InvalidProxyEndpoint(
+                "configured endpoint cannot accept path segments".to_string(),
+            )
+        })?;
+        segments.pop_if_empty();
+        segments.push("accounts");
+        drop(segments);
+        Ok(endpoint)
+    }
+
+    fn transfers_url(&self) -> Result<Url, LedgerError> {
+        let mut endpoint = self.base_url.clone();
+        let mut segments = endpoint.path_segments_mut().map_err(|_| {
+            LedgerError::InvalidProxyEndpoint(
+                "configured endpoint cannot accept path segments".to_string(),
+            )
+        })?;
+        segments.pop_if_empty();
+        segments.push("transfers");
+        drop(segments);
+        Ok(endpoint)
     }
 
     pub fn tenant_account_id(tenant_id: i32) -> String {
@@ -282,11 +434,7 @@ impl TbClient {
         tenant_id: i32,
     ) -> Result<TbAccount, LedgerError> {
         // Try to fetch existing account first
-        let resp = self
-            .http
-            .get(format!("{}/accounts/{}", self.base_url, account_id))
-            .send()
-            .await?;
+        let resp = self.http.get(self.account_url(account_id)?).send().await?;
         if resp.status().is_success() {
             let account: TbAccount = resp.json().await?;
             return Ok(account);
@@ -303,16 +451,14 @@ impl TbClient {
         };
         let resp = self
             .http
-            .post(format!("{}/accounts", self.base_url))
+            .post(self.accounts_url()?)
             .json(&[&req])
             .send()
             .await?;
         if !resp.status().is_success() {
-            let body = resp.text().await.unwrap_or_default();
-            return Err(LedgerError::ProxyError(format!(
-                "create account failed: {}",
-                body
-            )));
+            return Err(LedgerError::ProxyError(
+                "TigerBeetle proxy rejected account creation".to_string(),
+            ));
         }
         self.get_account(account_id).await
     }
@@ -324,33 +470,28 @@ impl TbClient {
     ) -> Result<String, LedgerError> {
         let resp = self
             .http
-            .post(format!("{}/transfers", self.base_url))
+            .post(self.transfers_url()?)
             .json(&[req])
             .send()
             .await?;
         if !resp.status().is_success() {
-            let body = resp.text().await.unwrap_or_default();
-            return Err(LedgerError::ProxyError(format!(
-                "create transfer failed: {}",
-                body
-            )));
+            return Err(LedgerError::ProxyError(
+                "TigerBeetle proxy rejected transfer creation".to_string(),
+            ));
         }
         Ok(req.id.clone())
     }
 
     /// Fetch account balance
     pub async fn get_account(&self, account_id: &str) -> Result<TbAccount, LedgerError> {
-        let resp = self
-            .http
-            .get(format!("{}/accounts/{}", self.base_url, account_id))
-            .send()
-            .await?;
+        let resp = self.http.get(self.account_url(account_id)?).send().await?;
         if resp.status() == 404 {
             return Err(LedgerError::AccountNotFound(account_id.to_string()));
         }
         if !resp.status().is_success() {
-            let body = resp.text().await.unwrap_or_default();
-            return Err(LedgerError::ProxyError(body));
+            return Err(LedgerError::ProxyError(
+                "TigerBeetle proxy rejected account lookup".to_string(),
+            ));
         }
         Ok(resp.json().await?)
     }
@@ -455,6 +596,40 @@ mod tests {
         assert_eq!(TbClient::ledger_for_currency("USD"), ledger::USD);
         assert_eq!(TbClient::ledger_for_currency("USDC"), ledger::USDC);
         assert_eq!(TbClient::ledger_for_currency("UNKNOWN"), ledger::NGN);
+    }
+
+    #[test]
+    fn test_trusted_proxy_endpoint_requires_allowlisted_https_without_userinfo() {
+        let allowed_hosts = HashSet::from(["ledger-proxy.internal".to_string()]);
+        assert!(
+            parse_trusted_https_endpoint("https://ledger-proxy.internal/api/", &allowed_hosts)
+                .is_ok()
+        );
+        assert!(
+            parse_trusted_https_endpoint("http://ledger-proxy.internal", &allowed_hosts).is_err()
+        );
+        assert!(parse_trusted_https_endpoint(
+            "https://user:secret@ledger-proxy.internal",
+            &allowed_hosts
+        )
+        .is_err());
+        assert!(
+            parse_trusted_https_endpoint("https://metadata.google.internal", &allowed_hosts)
+                .is_err()
+        );
+        assert!(parse_trusted_https_endpoint(
+            "https://ledger-proxy.internal?redirect=https://metadata.google.internal",
+            &allowed_hosts
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn test_account_ids_must_be_decimal_tigerbeetle_identifiers() {
+        assert!(validate_account_id("1000042").is_ok());
+        assert!(validate_account_id("../../metadata").is_err());
+        assert!(validate_account_id("1000042?admin=true").is_err());
+        assert!(validate_account_id("").is_err());
     }
 
     #[test]
