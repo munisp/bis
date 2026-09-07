@@ -159,6 +159,30 @@ describe("PII forensic audit read-back integrity", () => {
     await expect(readVerifiedPiiForensicEvents({ query } as never, { tenantId: 7, limit: 1, cursor: firstPage.nextCursor! })).rejects.toThrow("invalid or expired");
   });
 
+  it("verifies concurrently issued old- and new-key cursors during an overlap", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-05T12:00:00.000Z"));
+    process.env.BIS_PII_FORENSIC_CURSOR_TTL_SECONDS = "60";
+    const first = event({ id: 2, createdAt: "2026-09-05T11:59:59.000Z" });
+    const second = event({ id: 1, createdAt: "2026-09-05T11:59:58.000Z" });
+    configureCursorKeys("cursor-v1", `cursor-v1:${cursorKeyV1},cursor-v2:${cursorKeyV2}`);
+    const issueQuery = vi.fn().mockResolvedValue({ rows: [row(first), row(second)] });
+    const oldCursors = await Promise.all(Array.from({ length: 32 }, async () => (await readVerifiedPiiForensicEvents({ query: issueQuery } as never, { tenantId: 7, limit: 1 })).nextCursor!));
+    configureCursorKeys("cursor-v2", `cursor-v1:${cursorKeyV1},cursor-v2:${cursorKeyV2}`);
+    process.env.BIS_PII_FORENSIC_CURSOR_KEY_EXPIRIES_JSON = JSON.stringify({ "cursor-v1": "2026-09-05T12:01:00.000Z" });
+    const newCursors = await Promise.all(Array.from({ length: 32 }, async () => (await readVerifiedPiiForensicEvents({ query: issueQuery } as never, { tenantId: 7, limit: 1 })).nextCursor!));
+    const continuationQuery = vi.fn().mockResolvedValue({ rows: [row(second)] });
+    await expect(Promise.all([...oldCursors, ...newCursors].map((cursor) => readVerifiedPiiForensicEvents({ query: continuationQuery } as never, { tenantId: 7, limit: 1, cursor })))).resolves.toHaveLength(64);
+  });
+
+  it("rejects an ambiguous active-key selection rather than selecting a fallback signer", async () => {
+    const first = event({ id: 2 });
+    const second = event({ id: 1 });
+    configureCursorKeys("cursor-v1,cursor-v2", `cursor-v1:${cursorKeyV1},cursor-v2:${cursorKeyV2}`);
+    const query = vi.fn().mockResolvedValue({ rows: [row(first), row(second)] });
+    await expect(readVerifiedPiiForensicEvents({ query } as never, { tenantId: 7, limit: 1 })).rejects.toThrow("ACTIVE_KEY_VERSION");
+  });
+
   it("continues without duplicates across equal timestamps and out-of-order timestamp groups", async () => {
     const sameTimestamp = "2026-09-05T12:00:00.000Z";
     const history = [
