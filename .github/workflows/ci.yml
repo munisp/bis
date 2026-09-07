@@ -93,7 +93,7 @@ jobs:
           cache-dependency-path: mobile/pnpm-lock.yaml
       - name: Install mobile dependencies
         working-directory: mobile
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --ignore-workspace
       - name: Validate mobile security client
         working-directory: mobile
         run: |
