@@ -10,7 +10,6 @@ pub mod otel;
 mod tests;
 pub mod traceparent;
 
-use bis_transport_policy::{required_allowed_hosts, TrustedEndpoint};
 use axum::{
     extract::{Path, State},
     http::{HeaderMap, StatusCode},
@@ -19,6 +18,7 @@ use axum::{
     routing::{get, post},
     Router,
 };
+use bis_transport_policy::{required_allowed_hosts, TrustedEndpoint};
 use chrono::{DateTime, Utc};
 use dashmap::DashMap;
 use insider_threat::InsiderThreatDetector;
@@ -379,18 +379,28 @@ async fn subscribe(
     State(state): State<AppState>,
     Json(req): Json<SubscribeRequest>,
 ) -> Result<Json<Subscription>, (StatusCode, Json<ErrorResponse>)> {
-    let allowed_hosts = required_allowed_hosts("BIS_EVENT_SUBSCRIBER_ALLOWED_HOSTS").map_err(|_| {
-        (StatusCode::SERVICE_UNAVAILABLE, Json(ErrorResponse {
-            code: "SUBSCRIPTION_TRANSPORT_UNAVAILABLE".to_string(),
-            message: "Subscription delivery is not configured".to_string(),
-        }))
-    })?;
-    let subscriber_url = TrustedEndpoint::parse("subscriber_url", &req.subscriber_url, &allowed_hosts).map_err(|_| {
-        (StatusCode::BAD_REQUEST, Json(ErrorResponse {
-            code: "INVALID_SUBSCRIBER_URL".to_string(),
-            message: "Subscriber URL must be an approved HTTPS endpoint".to_string(),
-        }))
-    })?;
+    let allowed_hosts =
+        required_allowed_hosts("BIS_EVENT_SUBSCRIBER_ALLOWED_HOSTS").map_err(|_| {
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(ErrorResponse {
+                    code: "SUBSCRIPTION_TRANSPORT_UNAVAILABLE".to_string(),
+                    message: "Subscription delivery is not configured".to_string(),
+                }),
+            )
+        })?;
+    let subscriber_url =
+        TrustedEndpoint::parse("subscriber_url", &req.subscriber_url, &allowed_hosts).map_err(
+            |_| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(ErrorResponse {
+                        code: "INVALID_SUBSCRIBER_URL".to_string(),
+                        message: "Subscriber URL must be an approved HTTPS endpoint".to_string(),
+                    }),
+                )
+            },
+        )?;
     let sub = Subscription {
         id: Uuid::new_v4().to_string(),
         subscriber_url: subscriber_url.as_url().as_str().to_string(),

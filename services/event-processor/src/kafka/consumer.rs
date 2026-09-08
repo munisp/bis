@@ -222,18 +222,25 @@ pub async fn process_event(event: BisEvent, audit_log: AuditLog) {
 // ─── BFF webhook fan-out ───────────────────────────────────────────────────────────────────────────────
 
 async fn forward_to_bff(entry: serde_json::Value) {
-    let allowed_hosts = match bis_transport_policy::required_allowed_hosts("BIS_EVENT_BFF_ALLOWED_HOSTS") {
-        Ok(hosts) => hosts,
-        Err(_) => {
-            warn!("[BFF] Outbound transport policy is not configured");
-            return;
-        }
-    };
+    let allowed_hosts =
+        match bis_transport_policy::required_allowed_hosts("BIS_EVENT_BFF_ALLOWED_HOSTS") {
+            Ok(hosts) => hosts,
+            Err(_) => {
+                warn!("[BFF] Outbound transport policy is not configured");
+                return;
+            }
+        };
     let bff_url = match std::env::var("BFF_WEBHOOK_URL")
         .ok()
-        .and_then(|raw| bis_transport_policy::TrustedEndpoint::parse("BFF_WEBHOOK_URL", &raw, &allowed_hosts).ok())
-        .and_then(|endpoint| endpoint.with_path_segments(&["api", "internal", "events"]).ok())
-    {
+        .and_then(|raw| {
+            bis_transport_policy::TrustedEndpoint::parse("BFF_WEBHOOK_URL", &raw, &allowed_hosts)
+                .ok()
+        })
+        .and_then(|endpoint| {
+            endpoint
+                .with_path_segments(&["api", "internal", "events"])
+                .ok()
+        }) {
         Some(endpoint) => endpoint,
         None => {
             warn!("[BFF] Outbound webhook endpoint is not configured");
