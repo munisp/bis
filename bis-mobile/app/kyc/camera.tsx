@@ -49,6 +49,7 @@ export default function DocumentCameraScreen() {
   const [permission, requestPermission] = useCameraPermissions();
   const [docType, setDocType] = useState<DocType>("nin");
   const [capturedUri, setCapturedUri] = useState<string | null>(null);
+  const [capturedBase64, setCapturedBase64] = useState<string | null>(null);
   const [subjectRef, setSubjectRef] = useState("");
   const [capturing, setCapturing] = useState(false);
   const [ocrResult, setOcrResult] = useState<Record<string, string> | null>(null);
@@ -81,9 +82,10 @@ export default function DocumentCameraScreen() {
     setCapturing(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
-      const photo = await cameraRef.current.takePictureAsync({ quality: 0.9 });
-      if (photo?.uri) {
+      const photo = await cameraRef.current.takePictureAsync({ quality: 0.9, base64: true });
+      if (photo?.uri && photo.base64) {
         setCapturedUri(photo.uri);
+        setCapturedBase64(photo.base64);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       }
     } catch {
@@ -97,19 +99,21 @@ export default function DocumentCameraScreen() {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       quality: 0.9,
+      base64: true,
     });
-    if (!result.canceled && result.assets[0]) {
+    if (!result.canceled && result.assets[0]?.base64) {
       setCapturedUri(result.assets[0].uri);
+      setCapturedBase64(result.assets[0].base64);
     }
   };
 
   const handleRunOCR = () => {
-    if (!capturedUri || !subjectRef.trim()) {
+    if (!capturedUri || !capturedBase64 || !subjectRef.trim()) {
       Alert.alert("Subject reference required", "Enter the authorised subject reference before OCR.");
       return;
     }
     ocrMutation.mutate({
-      imageBase64: capturedUri,
+      imageBase64: capturedBase64,
       subjectRef: subjectRef.trim(),
       documentType: docType === "nin" ? "NIN_SLIP" : docType === "passport" ? "PASSPORT" : "DRIVERS_LICENSE",
     });
@@ -117,6 +121,7 @@ export default function DocumentCameraScreen() {
 
   const handleRetake = () => {
     setCapturedUri(null);
+    setCapturedBase64(null);
     setOcrResult(null);
   };
 

@@ -153,7 +153,7 @@ function LivenessStep({
 }
 
 // ── Selfie capture step ───────────────────────────────────────────────────────
-function SelfieStep({ onCapture }: { onCapture: (uri: string) => void }) {
+function SelfieStep({ onCapture }: { onCapture: (capture: { uri: string; base64: string }) => void }) {
   const cameraRef = useRef<CameraView>(null);
   const [capturing, setCapturing] = useState(false);
 
@@ -162,10 +162,10 @@ function SelfieStep({ onCapture }: { onCapture: (uri: string) => void }) {
     setCapturing(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
-      const photo = await cameraRef.current.takePictureAsync({ quality: 0.8, base64: false });
-      if (photo?.uri) {
+      const photo = await cameraRef.current.takePictureAsync({ quality: 0.8, base64: true });
+      if (photo?.uri && photo.base64) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        onCapture(photo.uri);
+        onCapture({ uri: photo.uri, base64: photo.base64 });
       }
     } catch (err) {
       Alert.alert("Capture Failed", "Could not capture photo. Please try again.");
@@ -199,7 +199,7 @@ function SelfieStep({ onCapture }: { onCapture: (uri: string) => void }) {
 }
 
 // ── Document capture step ─────────────────────────────────────────────────────
-function DocumentStep({ onCapture }: { onCapture: (uri: string) => void }) {
+function DocumentStep({ onCapture }: { onCapture: (capture: { uri: string; base64: string }) => void }) {
   const cameraRef = useRef<CameraView>(null);
   const [capturing, setCapturing] = useState(false);
 
@@ -208,10 +208,10 @@ function DocumentStep({ onCapture }: { onCapture: (uri: string) => void }) {
     setCapturing(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
-      const photo = await cameraRef.current.takePictureAsync({ quality: 0.9, base64: false });
-      if (photo?.uri) {
+      const photo = await cameraRef.current.takePictureAsync({ quality: 0.9, base64: true });
+      if (photo?.uri && photo.base64) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        onCapture(photo.uri);
+        onCapture({ uri: photo.uri, base64: photo.base64 });
       }
     } catch {
       Alert.alert("Capture Failed", "Could not capture document. Please try again.");
@@ -224,9 +224,10 @@ function DocumentStep({ onCapture }: { onCapture: (uri: string) => void }) {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       quality: 0.9,
+      base64: true,
     });
-    if (!result.canceled && result.assets[0]) {
-      onCapture(result.assets[0].uri);
+    if (!result.canceled && result.assets[0]?.base64) {
+      onCapture({ uri: result.assets[0].uri, base64: result.assets[0].base64 });
     }
   };
 
@@ -335,7 +336,9 @@ export default function BiometricEnrollmentScreen() {
   const router = useRouter();
   const [step, setStep] = useState<Step>("permissions");
   const [selfieUri, setSelfieUri] = useState<string | null>(null);
+  const [selfieBase64, setSelfieBase64] = useState<string | null>(null);
   const [documentUri, setDocumentUri] = useState<string | null>(null);
+  const [documentBase64, setDocumentBase64] = useState<string | null>(null);
   const [subjectRef, setSubjectRef] = useState("");
 
   const { data: challengesData } = trpc.biometric.getChallenges.useQuery();
@@ -356,19 +359,19 @@ export default function BiometricEnrollmentScreen() {
   });
 
   const handleEnroll = useCallback(() => {
-    if (!selfieUri || !documentUri || !subjectRef.trim()) {
+    if (!selfieUri || !selfieBase64 || !documentUri || !documentBase64 || !subjectRef.trim()) {
       Alert.alert("Subject reference required", "Enter the authorised subject reference before enrollment.");
       return;
     }
     enrollMutation.mutate({
-      enrollImageBase64: selfieUri,
-      livenessImageBase64: selfieUri,
+      enrollImageBase64: selfieBase64,
+      livenessImageBase64: selfieBase64,
       subjectRef: subjectRef.trim(),
-      documentImageBase64: documentUri,
+      documentImageBase64: documentBase64,
       documentType: "NIN_SLIP",
       challenge: "blink",
     });
-  }, [selfieUri, documentUri, subjectRef, enrollMutation]);
+  }, [selfieUri, selfieBase64, documentUri, documentBase64, subjectRef, enrollMutation]);
 
   const STEPS: Step[] = ["permissions", "liveness", "selfie", "document", "confirm", "done"];
   const stepIndex = STEPS.indexOf(step);
@@ -398,16 +401,18 @@ export default function BiometricEnrollmentScreen() {
       )}
       {step === "selfie" && (
         <SelfieStep
-          onCapture={(uri) => {
-            setSelfieUri(uri);
+          onCapture={(capture) => {
+            setSelfieUri(capture.uri);
+            setSelfieBase64(capture.base64);
             setStep("document");
           }}
         />
       )}
       {step === "document" && (
         <DocumentStep
-          onCapture={(uri) => {
-            setDocumentUri(uri);
+          onCapture={(capture) => {
+            setDocumentUri(capture.uri);
+            setDocumentBase64(capture.base64);
             setStep("confirm");
           }}
         />
