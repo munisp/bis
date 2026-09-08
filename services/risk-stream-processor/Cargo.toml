@@ -38,8 +38,7 @@ chrono  = { version = "0.4", features = ["serde"] }
 thiserror = "1"
 anyhow    = "1"
 # Metrics
-prometheus      = { version = "0.13", features = ["process"] }
-axum-prometheus = "0.7"
+prometheus      = { version = "0.14", features = ["process"] }
 
 [dev-dependencies]
 tokio-test = "0.4"

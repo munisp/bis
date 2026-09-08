@@ -14,7 +14,6 @@
 /// Histograms (hand-rolled buckets):
 ///   aml_latency_seconds_bucket    — /screen endpoint latency
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
 use std::time::Instant;
 
 // ─── Atomic counters ──────────────────────────────────────────────────────────

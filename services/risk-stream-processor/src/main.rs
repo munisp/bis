@@ -286,7 +286,7 @@ async fn run_consumer(state: AppState, brokers: String, group_id: String) {
         .create()
         .expect("Failed to create Kafka consumer");
 
-    let topic_refs: Vec<&str> = topics.iter().map(|s| *s).collect();
+    let topic_refs: Vec<&str> = topics.to_vec();
     consumer
         .subscribe(&topic_refs)
         .expect("Failed to subscribe to topics");

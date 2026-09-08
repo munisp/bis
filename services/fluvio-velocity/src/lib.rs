@@ -244,8 +244,8 @@ impl VelocityEngine {
             let count = window.count(rule.cross_border_only);
             let total = window.total_amount(rule.cross_border_only);
 
-            let count_breach = rule.count_limit.map_or(false, |limit| count > limit);
-            let amount_breach = rule.amount_limit_kobo.map_or(false, |limit| total > limit);
+            let count_breach = rule.count_limit.is_some_and(|limit| count > limit);
+            let amount_breach = rule.amount_limit_kobo.is_some_and(|limit| total > limit);
 
             if count_breach || amount_breach {
                 breaches.push(VelocityBreach {

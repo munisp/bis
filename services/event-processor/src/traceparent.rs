@@ -22,7 +22,7 @@
 //   // Propagate downstream (e.g. in HTTP fan-out)
 //   let header_value = ctx.to_traceparent_header();
 
-use crate::otel::{OtlpAnyValue, SpanBuilder};
+use crate::otel::SpanBuilder;
 
 /// Parsed W3C trace context extracted from Kafka message headers or HTTP headers.
 #[derive(Debug, Clone)]

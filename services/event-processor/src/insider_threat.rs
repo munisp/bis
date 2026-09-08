@@ -13,7 +13,7 @@ use axum::{extract::State, http::StatusCode, response::Json};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use tracing::{info, warn};
+use tracing::info;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 

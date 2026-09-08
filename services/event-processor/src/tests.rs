@@ -1,6 +1,6 @@
 // tests.rs — unit tests for bis-event-processor types and logic
 #[cfg(test)]
-mod tests {
+mod regression {
     use crate::{AppState, BisEvent, EventType, PublishRequest, Severity, Subscription};
     use chrono::Utc;
     use uuid::Uuid;
@@ -16,7 +16,7 @@ mod tests {
 
     #[test]
     fn test_event_type_deserialization() {
-        let et: EventType = serde_json::from_str("\"INVESTIGATION_UPDATED\"")
+        let _et: EventType = serde_json::from_str("\"INVESTIGATION_UPDATED\"")
             .unwrap_or(EventType::InvestigationFlagged);
         // InvestigationUpdated doesn't exist; InvestigationFlagged is the closest
         // Just verify deserialization works for a known type
@@ -192,7 +192,7 @@ mod tests {
         // Critical >= High → should match
         assert!(Severity::Critical >= min_sev);
         // Medium < High → should not match
-        assert!(!(Severity::Medium >= min_sev));
+        assert!(Severity::Medium < min_sev);
         // High == High → should match
         assert!(Severity::High >= min_sev);
     }

@@ -24,7 +24,7 @@
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 /// BIS event envelope matching the Go producer schema.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -42,6 +42,7 @@ pub type AuditLog = Arc<RwLock<Vec<serde_json::Value>>>;
 
 // ─── Kafka topics ─────────────────────────────────────────────────────────────────────────────────
 
+#[cfg(feature = "kafka-native")]
 const TOPICS: &[&str] = &[
     "bis.events",
     "bis.payment.events",
@@ -50,6 +51,7 @@ const TOPICS: &[&str] = &[
     "bis.velocity.breaches",
 ];
 
+#[cfg(feature = "kafka-native")]
 const CONSUMER_GROUP: &str = "bis-event-processor";
 
 // ─── Native rdkafka consumer (feature-gated) ──────────────────────────────────────────────────

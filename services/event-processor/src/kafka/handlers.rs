@@ -19,7 +19,7 @@
  */
 
 use serde::{Deserialize, Serialize};
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 use super::consumer::{AuditLog, BisEvent};
 

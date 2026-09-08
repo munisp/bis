@@ -99,6 +99,7 @@ async fn screen_transaction(
     State(state): State<AppState>,
     Json(req): Json<TransactionScreenRequest>,
 ) -> impl IntoResponse {
+    let started = std::time::Instant::now();
     // Wrap screening in a catch — any panic or internal error sends to DLQ.
     let req_clone = req.clone();
     let mut result = score_transaction(&req);
@@ -149,23 +150,21 @@ async fn screen_transaction(
     }
 
     // Check country against live sanctioned countries
-    if cache
+    if (cache
         .sanctioned_countries
         .contains(req.originator_country.as_str())
         || cache
             .sanctioned_countries
-            .contains(req.beneficiary_country.as_str())
-    {
-        if !result
+            .contains(req.beneficiary_country.as_str()))
+        && !result
             .flags
             .contains(&"high_risk_originator_country".to_string())
-            && !result
-                .flags
-                .contains(&"high_risk_beneficiary_country".to_string())
-        {
-            result.risk_score = (result.risk_score + 35).min(100);
-            result.flags.push("sanctioned_country_live".to_string());
-        }
+        && !result
+            .flags
+            .contains(&"high_risk_beneficiary_country".to_string())
+    {
+        result.risk_score = (result.risk_score + 35).min(100);
+        result.flags.push("sanctioned_country_live".to_string());
     }
 
     drop(cache);
@@ -178,6 +177,7 @@ async fn screen_transaction(
         );
     }
 
+    metrics::record_latency(started);
     (StatusCode::OK, Json(result))
 }
 

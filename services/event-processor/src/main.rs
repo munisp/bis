@@ -22,8 +22,7 @@ use bis_transport_policy::{required_allowed_hosts, TrustedEndpoint};
 use chrono::{DateTime, Utc};
 use dashmap::DashMap;
 use insider_threat::InsiderThreatDetector;
-#[allow(unused_imports)]
-use otel::{init_otel, OtlpAnyValue, SpanBuilder, SpanSender};
+use otel::{init_otel, SpanSender};
 use serde::{Deserialize, Serialize};
 use std::sync::OnceLock;
 use std::{
@@ -180,6 +179,12 @@ pub struct AppState {
     pub insider_detector: Arc<InsiderThreatDetector>,
     /// Optional PostgreSQL connection pool — None in dev/test mode
     pub db_pool: Option<Arc<deadpool_postgres::Pool>>,
+}
+
+impl Default for AppState {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl AppState {
@@ -477,8 +482,8 @@ async fn main() {
         .init();
 
     // ── OpenTelemetry OTLP span exporter ─────────────────────────────────────────
-    // Set OTEL_EXPORTER_OTLP_ENDPOINT to enable (e.g. http://jaeger:4318 or
-    // http://grafana-tempo:4318).  When unset, spans are silently discarded.
+    // Export requires an allow-listed HTTPS collector plus custom CA and mTLS identity.
+    // When incomplete, spans are discarded locally rather than sent over a weaker path.
     let (otel_sender, _otel_handle) = init_otel();
     OTEL_TX.set(otel_sender).ok();
 

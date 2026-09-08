@@ -159,7 +159,7 @@ async fn redis_get(url: &str, key: &str) -> Option<String> {
     let n = s.read(&mut buf).await.ok()?;
     let resp = std::str::from_utf8(&buf[..n]).ok()?;
     if resp.starts_with('$') {
-        resp.splitn(3, "\r\n").nth(1).map(|s| s.to_string())
+        resp.split("\r\n").nth(1).map(|s| s.to_string())
     } else {
         None
     }
@@ -294,7 +294,6 @@ struct PaymentEventReq {
     rail: Option<String>,
     is_cross_border: Option<bool>,
     tenant_id: Option<String>,
-    peer_cn: Option<String>,
 }
 
 async fn handle_health() -> impl IntoResponse {
@@ -328,7 +327,7 @@ async fn handle_event(
     // mTLS peer certificate inspection.
     // Production: reads X-Peer-Cert-DER (base64 DER) injected by TLS terminator,
     // parses the real certificate CN/SANs, and validates against the allow-list.
-    // Dev/test fallback: trusts X-Peer-CN header when X-Peer-Cert-DER is absent.
+    // Missing or malformed certificate data is rejected when mTLS is enabled.
     if state.config.mtls_enabled {
         let allowed =
             if let Some(der_b64) = headers.get("X-Peer-Cert-DER").and_then(|v| v.to_str().ok()) {
