@@ -1,0 +1,10 @@
+extensions:
+  - addsTo:
+      pack: codeql/rust-all
+      extensible: barrierModel
+    data:
+      # TrustedEndpoint::parse rejects non-HTTPS schemes, non-allow-listed hosts,
+      # userinfo, query strings, and fragments before it returns Ok(endpoint).
+      # This barrier deliberately does not model with_path_segments so future
+      # user-controlled path segments remain visible to request-forgery analysis.
+      - ["<bis_transport_policy::TrustedEndpoint>::parse", "ReturnValue.Field[core::result::Result::Ok(0)]", "request-forgery", "manual"]

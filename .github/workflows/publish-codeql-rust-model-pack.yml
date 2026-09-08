@@ -1,0 +1,32 @@
+name: Publish BIS CodeQL Rust Model Pack
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    name: Validate and publish trusted-endpoint model pack
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+
+      - name: Install CodeQL CLI
+        uses: github/codeql-action/init@v4
+        with:
+          languages: rust
+
+      - name: Validate model-pack manifest and extensions
+        working-directory: .github/codeql/bis-rust-models
+        run: |
+          codeql pack install
+          test -f qlpack.yml
+          test -f models/trusted-endpoint.yml
+
+      - name: Publish immutable model-pack version
+        working-directory: .github/codeql/bis-rust-models
+        run: codeql pack publish
