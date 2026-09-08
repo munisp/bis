@@ -1,12 +1,10 @@
 # Local dependencies and generated outputs
-node_modules
-mobile/node_modules
-client/node_modules
+**/node_modules
 dist
-client/dist
-mobile/android/.gradle
-mobile/android/app/build
-mobile/ios/build
+**/dist
+**/android/.gradle
+**/android/app/build
+**/ios/build
 
 # Repository metadata and local development files
 .git

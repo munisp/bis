@@ -10,7 +10,7 @@ The staging environment must be isolated from production DNS, object storage, KM
 |---|---|---|
 | Physical device | Managed Android or iOS device exposing hardware-backed Keychain/Keystore security | Emulator and JavaScript-native mocks cannot prove `SECURE_HARDWARE` persistence behavior. |
 | Isolated app profile | Staging bundle identifier/profile with no real user session | The probe writes and clears a synthetic session credential. |
-| Device probe | Execute `runSecureSessionDeviceProbe()` from `mobile/src/testing/secureSessionDeviceProbe.ts` and save its returned JSON immediately | The attestation proves hardware security, device-only policy, persistence after process-cache reset, legacy-service isolation, and logout cleanup. |
+| Device probe | Run the approved physical-device session-persistence probe from the authoritative `bis-mobile/` release candidate and save its sanitized attestation JSON immediately. Do not reuse an artifact from the retained legacy client. | The attestation proves hardware security, device-only policy, persistence after process-cache reset, prior-session isolation, and logout cleanup. |
 | Staging BFF | HTTPS root endpoint in `STAGING_BFF_URL`; it must expose `/api/kyc/documents/*` | The mobile client uses the BFF, not the internal gateway, for KYC upload authorization and custody completion. |
 | Staging identity | A short-lived staging mobile token and a KYC record owned by the token’s tenant | The server enforces tenant and actor ownership before issuing a direct upload authorization. |
 | Object store and KMS | Staging-only S3-compatible bucket, key, grant, TLS endpoint, and versioning | Completion verifies `aws:kms`, expected key identity, content type, byte count, and SHA-256 metadata. |
@@ -19,7 +19,7 @@ The staging environment must be isolated from production DNS, object storage, KM
 
 ## 2. Device-lab attestation contract
 
-The device runner must emit the exact JSON shape returned by `runSecureSessionDeviceProbe()`. It must not contain a token, password, credential value, device serial, user identifier, or document data. The acceptance runner rejects attestations older than 30 minutes.
+The device runner must emit the exact JSON shape required by the acceptance runner from the authoritative `bis-mobile/` release candidate. It must not contain a token, password, credential value, device serial, user identifier, or document data. The acceptance runner rejects attestations older than 30 minutes.
 
 ```json
 {
@@ -36,9 +36,9 @@ The device runner must emit the exact JSON shape returned by `runSecureSessionDe
 }
 ```
 
-> The device runner must call the exported probe in an actual Android or iOS application process. A Vitest mock, an emulator assertion, or a hand-authored JSON document is not evidence of a physical-device result.
+> The device runner must execute the approved probe in the authoritative application’s actual Android or iOS process. A test double, an emulator assertion, or a hand-authored JSON document is not evidence of a physical-device result.
 
-## 3. Staging mobile/KMS acceptance invocation
+## 3. Staging native-client/KMS acceptance invocation
 
 The protected staging job provides these values through the protected `staging` environment. Do not place the access token, device attestation, SSH key, object-store credentials, or KMS identifiers in the repository.
 

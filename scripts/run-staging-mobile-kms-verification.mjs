@@ -131,7 +131,7 @@ async function main() {
     fail(error.message);
   }
   if (values.BIS_ENV !== 'staging') fail('BIS_ENV must be staging');
-  if (values.BIS_STAGING_CONFIRMATION !== confirmation) fail('explicit non-production mobile/KMS confirmation is required');
+  if (values.BIS_STAGING_CONFIRMATION !== confirmation) fail('explicit non-production native-client/KMS confirmation is required');
   if (values.STAGING_DATA_RETENTION_CONFIRMED !== 'synthetic-only-approved') {
     fail('STAGING_DATA_RETENTION_CONFIRMED must be synthetic-only-approved');
   }
@@ -226,7 +226,7 @@ async function main() {
     report.serverCustodyVerification = true;
     report.completedAt = new Date().toISOString();
     await writeReport(reportPath, report);
-    process.stdout.write(`PASS staging mobile Keychain/Keystore and SSE-KMS verification; report=${reportPath}\n`);
+    process.stdout.write(`PASS staging native-client Keychain/Keystore and SSE-KMS verification; report=${reportPath}\n`);
   } catch (error) {
     report.completedAt = new Date().toISOString();
     report.failure = error instanceof Error ? error.message : 'unknown failure';
@@ -238,6 +238,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  process.stderr.write(`FAIL staging mobile/KMS verification: ${error instanceof Error ? error.message : 'unknown error'}\n`);
+  process.stderr.write(`FAIL staging native-client/KMS verification: ${error instanceof Error ? error.message : 'unknown error'}\n`);
   process.exitCode = process.exitCode || 1;
 });

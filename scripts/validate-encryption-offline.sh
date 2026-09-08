@@ -46,7 +46,9 @@ run typescript pnpm check
 run pwa_build pnpm build
 run gateway_race bash -lc 'cd services/gateway && go test -race ./...'
 run archive_worker bash -lc 'cd services/cold-archive-writer && go vet ./... && go test -race ./...'
-run mobile_typecheck bash -lc 'cd mobile && pnpm type-check'
+run deprecated_mobile_references "$ROOT/scripts/check-deprecated-mobile-references.sh"
+run mobile_typecheck bash -lc 'cd bis-mobile && pnpm exec tsc --noEmit'
+run mobile_lint bash -lc 'cd bis-mobile && pnpm lint'
 
 printf '\nSummary:\n'
 cat "$OUT/summary.tsv"

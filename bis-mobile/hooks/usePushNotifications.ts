@@ -143,7 +143,6 @@ async function registerForPushNotificationsAsync(): Promise<string | null> {
   }
 
   if (finalStatus !== "granted") {
-    console.warn("[BIS] Push notification permission not granted");
     return null;
   }
 
@@ -152,15 +151,13 @@ async function registerForPushNotificationsAsync(): Promise<string | null> {
     Constants.easConfig?.projectId;
 
   if (!projectId) {
-    console.warn("[BIS] No EAS project ID found — skipping push token registration");
     return null;
   }
 
   try {
     const tokenData = await Notifications.getExpoPushTokenAsync({ projectId });
     return tokenData.data;
-  } catch (err) {
-    console.warn("[BIS] Failed to get push token:", err);
+  } catch {
     return null;
   }
 }

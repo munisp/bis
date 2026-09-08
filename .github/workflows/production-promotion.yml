@@ -103,13 +103,14 @@ jobs:
         run: |
           go vet ./...
           go test -race ./...
-      - name: Validate mobile security client
-        working-directory: mobile
+      - name: Reject deprecated mobile client references
+        run: ./scripts/check-deprecated-mobile-references.sh
+      - name: Validate authoritative native client
+        working-directory: bis-mobile
         run: |
-          pnpm install --frozen-lockfile
-          pnpm type-check
+          pnpm install --frozen-lockfile --ignore-workspace
+          pnpm typecheck
           pnpm lint
-          pnpm test
 
   publish-images:
     name: publish-immutable-images

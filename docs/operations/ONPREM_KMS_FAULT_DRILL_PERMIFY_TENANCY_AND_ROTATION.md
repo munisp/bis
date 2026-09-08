@@ -10,7 +10,7 @@
 |---|---|---|
 | Vault unseal custodians | Supply quorum shares for the approved ceremony. | Possess or use the full runtime configuration/MinIO root credential. |
 | Vault security administrator | Initialize Vault, approve/generate a temporary root token, issue/revoke AppRole credentials, enable audit devices. | Run the BFF or acceptance runner with a root token. |
-| KES administrator | Issue KES identities, restrict policies, add external keys, approve key cutover. | Give KES/Vault credentials to BFF/mobile/runner. |
+| KES administrator | Issue KES identities, restrict policies, add external keys, approve key cutover. | Give KES/Vault credentials to the BFF, a native client, or a test runner. |
 | MinIO operator | Configure bucket versioning, SSE-KMS default, lifecycle, and service account. | Change Vault/KES policy or use an unscoped root key for tests. |
 | Permify policy administrator | Apply schemas and tuples using a distinct policy-admin credential. | Use the BFF check-only credential for writes. |
 | BIS release operator | Runs the synthetic BFF acceptance and validates redacted reports. | Seal Vault, stop KES, or administer storage identities. |

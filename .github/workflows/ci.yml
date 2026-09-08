@@ -90,13 +90,14 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-          cache-dependency-path: mobile/pnpm-lock.yaml
-      - name: Install mobile dependencies
-        working-directory: mobile
+          cache-dependency-path: bis-mobile/pnpm-lock.yaml
+      - name: Reject deprecated mobile client references
+        run: ./scripts/check-deprecated-mobile-references.sh
+      - name: Install authoritative native client dependencies
+        working-directory: bis-mobile
         run: pnpm install --frozen-lockfile --ignore-workspace
-      - name: Validate mobile security client
-        working-directory: mobile
+      - name: Validate authoritative native client
+        working-directory: bis-mobile
         run: |
-          pnpm type-check
+          pnpm typecheck
           pnpm lint
-          pnpm test

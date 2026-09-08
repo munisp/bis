@@ -102,7 +102,7 @@ NINAuth is NIMC’s official consent gateway. Its public developer material desc
 ### 3.2 NVS SOAP flow (only where separately authorized)
 
 1. Complete formal request to NIMC DG/CEO, execute NDA/MOU, submit NVS forms, and provision authorized administrators/users. Obtain sandbox credentials and provider-issued WSDL/XSD. [3] [4]
-2. Establish the required secure VPN/private connectivity. Pin the provider TLS chain as specified. Do not expose SOAP service through public mobile/PWA traffic.
+2. Establish the required secure VPN/private connectivity. Pin the provider TLS chain as specified. Do not expose SOAP service through public native-client or PWA traffic.
 3. Configure the provider-approved NVS access level. NIMC documents Level 1 through Level 5 access; BIS must use the lowest level needed for the approved purpose. [4]
 4. Build SOAP envelopes from generated types produced from the provider WSDL; validate XML against XSD, disable external entity resolution, bound message sizes, and reject DTD/XXE. Use a provider correlation ID and contract-defined nonce/idempotency control.
 5. Sign/authenticate requests only as specified by the NVS contract. Persist no raw SOAP request/response in application logs. Encrypt permitted result fields, store a redacted schema-valid response fingerprint and NIMC transaction reference.
