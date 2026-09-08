@@ -15,6 +15,7 @@ import { useState, useRef, useCallback } from "react";
 import {
   View,
   Text,
+  TextInput,
   StyleSheet,
   TouchableOpacity,
   Alert,
@@ -265,11 +266,15 @@ function ConfirmStep({
   documentUri,
   onEnroll,
   isEnrolling,
+  subjectRef,
+  onSubjectRefChange,
 }: {
   selfieUri: string;
   documentUri: string;
   onEnroll: () => void;
   isEnrolling: boolean;
+  subjectRef: string;
+  onSubjectRefChange: (value: string) => void;
 }) {
   return (
     <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.confirmContent}>
@@ -299,6 +304,16 @@ function ConfirmStep({
           </View>
         ))}
       </View>
+
+      <TextInput
+        style={styles.subjectRefInput}
+        value={subjectRef}
+        onChangeText={onSubjectRefChange}
+        placeholder="Authorised subject reference"
+        placeholderTextColor={COLORS.muted}
+        autoCapitalize="characters"
+        accessibilityLabel="Authorised subject reference"
+      />
 
       <TouchableOpacity
         style={[styles.primaryButton, isEnrolling && styles.primaryButtonDisabled]}
@@ -403,6 +418,8 @@ export default function BiometricEnrollmentScreen() {
           documentUri={documentUri}
           onEnroll={handleEnroll}
           isEnrolling={enrollMutation.isPending}
+          subjectRef={subjectRef}
+          onSubjectRefChange={setSubjectRef}
         />
       )}
       {step === "done" && (
@@ -464,6 +481,16 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 20,
+  },
+  subjectRefInput: {
+    backgroundColor: COLORS.card,
+    borderColor: COLORS.border,
+    borderWidth: 1,
+    borderRadius: 10,
+    color: COLORS.text,
+    marginBottom: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
   },
   primaryButton: {
     backgroundColor: COLORS.primary,

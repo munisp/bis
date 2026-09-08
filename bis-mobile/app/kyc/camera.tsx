@@ -9,6 +9,7 @@ import { useState, useRef } from "react";
 import {
   View,
   Text,
+  TextInput,
   StyleSheet,
   TouchableOpacity,
   Alert,
@@ -192,6 +193,16 @@ export default function DocumentCameraScreen() {
             </View>
           )}
 
+          <TextInput
+            style={styles.subjectRefInput}
+            value={subjectRef}
+            onChangeText={setSubjectRef}
+            placeholder="Authorised subject reference"
+            placeholderTextColor={COLORS.muted}
+            autoCapitalize="characters"
+            accessibilityLabel="Authorised subject reference"
+          />
+
           {/* Actions */}
           <View style={styles.actionRow}>
             <TouchableOpacity style={styles.secondaryButton} onPress={handleRetake}>
@@ -337,5 +348,15 @@ const styles = StyleSheet.create({
   ocrRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: COLORS.border },
   ocrKey: { fontSize: 11, color: COLORS.muted, fontWeight: "600" },
   ocrValue: { fontSize: 12, color: COLORS.text, fontWeight: "500", maxWidth: "60%", textAlign: "right" },
+  subjectRefInput: {
+    backgroundColor: COLORS.card,
+    borderColor: COLORS.border,
+    borderWidth: 1,
+    borderRadius: 10,
+    color: COLORS.text,
+    marginBottom: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
   actionRow: { flexDirection: "row", gap: 12, justifyContent: "center" },
 });
