@@ -288,3 +288,39 @@ mod tests {
         assert_eq!(crate::BROADCAST_CAPACITY, 256);
     }
 }
+
+#[test]
+fn subscriber_webhook_allowlist_rejects_ssrf_url_forms() {
+    use bis_transport_policy::TrustedEndpoint;
+    use std::collections::HashSet;
+
+    let hosts = HashSet::from(["hooks.example.test".to_string()]);
+    assert!(TrustedEndpoint::parse(
+        "subscriber_url",
+        "https://hooks.example.test/events",
+        &hosts,
+    )
+    .is_ok());
+    assert!(
+        TrustedEndpoint::parse("subscriber_url", "http://hooks.example.test/events", &hosts,)
+            .is_err()
+    );
+    assert!(TrustedEndpoint::parse(
+        "subscriber_url",
+        "https://169.254.169.254/latest/meta-data",
+        &hosts,
+    )
+    .is_err());
+    assert!(TrustedEndpoint::parse(
+        "subscriber_url",
+        "https://user:secret@hooks.example.test/events",
+        &hosts,
+    )
+    .is_err());
+    assert!(TrustedEndpoint::parse(
+        "subscriber_url",
+        "https://hooks.example.test/events?target=internal",
+        &hosts,
+    )
+    .is_err());
+}

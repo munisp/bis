@@ -25,6 +25,7 @@ serde_json   = "1"
 rdkafka      = { version = "0.36", features = ["cmake-build"] }
 # HTTP client (for ML enrichment service + Dapr + AML engine)
 reqwest      = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+bis-transport-policy = { path = "../../crates/bis-transport-policy" }
 # Redis (deduplication + state)
 redis        = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
 # Observability

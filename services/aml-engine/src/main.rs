@@ -1,4 +1,3 @@
-use bis_transport_policy::{https_client, required_allowed_hosts, TrustedEndpoint};
 use axum::{
     extract::{Json, State},
     http::{HeaderMap, StatusCode},
@@ -7,6 +6,7 @@ use axum::{
     routing::{get, post},
     Router,
 };
+use bis_transport_policy::{https_client, required_allowed_hosts, TrustedEndpoint};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -386,7 +386,8 @@ async fn main() {
                 .map(|endpoint| endpoint.as_str().to_string())
         });
         if let Some(replay_url) = replay_url {
-            dlq.clone().start_replay_task(replay_url, service_key.clone());
+            dlq.clone()
+                .start_replay_task(replay_url, service_key.clone());
             info!("[AML-DLQ] Dead-letter queue replay initialised");
         } else {
             warn!("[AML-DLQ] Replay transport is disabled until an approved HTTPS endpoint is configured");
@@ -413,4 +414,31 @@ async fn main() {
     info!("BIS AML Engine v2.0 listening on {}", addr);
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
+}
+
+#[cfg(test)]
+mod transport_policy_tests {
+    use bis_transport_policy::TrustedEndpoint;
+    use std::collections::HashSet;
+
+    #[test]
+    fn aml_sanctions_feed_rejects_cleartext_and_untrusted_hosts() {
+        let hosts = HashSet::from(["www.treasury.gov".to_string()]);
+        assert!(TrustedEndpoint::parse(
+            "OFAC_SDN_URL",
+            "https://www.treasury.gov/ofac/downloads/sdn.xml",
+            &hosts,
+        )
+        .is_ok());
+        assert!(
+            TrustedEndpoint::parse("OFAC_SDN_URL", "http://www.treasury.gov/sdn.xml", &hosts)
+                .is_err()
+        );
+        assert!(TrustedEndpoint::parse(
+            "OFAC_SDN_URL",
+            "https://metadata.google.internal/sdn.xml",
+            &hosts
+        )
+        .is_err());
+    }
 }

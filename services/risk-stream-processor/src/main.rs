@@ -10,6 +10,7 @@ use axum::{
     routing::get,
     Json, Router,
 };
+use bis_transport_policy::{https_client, required_allowed_hosts, TrustedEndpoint};
 use rdkafka::{
     consumer::{Consumer, StreamConsumer},
     ClientConfig, Message,
@@ -60,8 +61,8 @@ fn metrics_text() -> String {
 // ─── App State ────────────────────────────────────────────────────────────────
 #[derive(Clone)]
 struct AppState {
-    ml_url: Arc<String>,
-    dapr_url: Arc<String>,
+    ml_url: Arc<TrustedEndpoint>,
+    dapr_url: Arc<TrustedEndpoint>,
     dapr_pubsub: Arc<String>,
     http: HttpClient,
 }
@@ -82,7 +83,14 @@ async fn enrich_event(
     };
     let resp = state
         .http
-        .post(format!("{}/risk/score", state.ml_url))
+        .post(
+            state
+                .ml_url
+                .with_path_segments(&["risk", "score"])
+                .map_err(|_| {
+                    ProcessorError::EnrichmentError("ML endpoint is invalid".to_string())
+                })?,
+        )
         .json(&req)
         .timeout(std::time::Duration::from_secs(5))
         .send()
@@ -107,13 +115,13 @@ async fn publish_to_dapr(
     topic: &str,
     data: serde_json::Value,
 ) -> Result<(), ProcessorError> {
-    let url = format!(
-        "{}/v1.0/publish/{}/{}",
-        state.dapr_url, state.dapr_pubsub, topic
-    );
+    let url = state
+        .dapr_url
+        .with_path_segments(&["v1.0", "publish", state.dapr_pubsub.as_str(), topic])
+        .map_err(|_| ProcessorError::DaprError("Dapr endpoint is invalid".to_string()))?;
     let resp = state
         .http
-        .post(&url)
+        .post(url)
         .json(&data)
         .timeout(std::time::Duration::from_secs(5))
         .send()
@@ -378,15 +386,39 @@ async fn main() {
     };
     let group_id =
         std::env::var("KAFKA_GROUP_ID").unwrap_or_else(|_| "bis-risk-stream-processor".to_string());
-    let ml_url = match std::env::var("ML_ENRICHMENT_URL") {
-        Ok(value) if !value.trim().is_empty() => value,
+    let ml_url = match (
+        std::env::var("ML_ENRICHMENT_URL"),
+        required_allowed_hosts("BIS_RISK_ML_ALLOWED_HOSTS"),
+    ) {
+        (Ok(value), Ok(hosts)) => match TrustedEndpoint::parse("ML_ENRICHMENT_URL", &value, &hosts)
+        {
+            Ok(endpoint) => endpoint,
+            Err(_) => {
+                error!("ML_ENRICHMENT_URL must be an approved HTTPS endpoint");
+                return;
+            }
+        },
         _ => {
-            error!("ML_ENRICHMENT_URL must be configured");
+            error!("ML_ENRICHMENT_URL and BIS_RISK_ML_ALLOWED_HOSTS must be configured");
             return;
         }
     };
-    let dapr_port = std::env::var("DAPR_HTTP_PORT").unwrap_or_else(|_| "3500".to_string());
-    let dapr_url = format!("http://localhost:{}", dapr_port);
+    let dapr_url = match (
+        std::env::var("DAPR_URL"),
+        required_allowed_hosts("BIS_RISK_DAPR_ALLOWED_HOSTS"),
+    ) {
+        (Ok(value), Ok(hosts)) => match TrustedEndpoint::parse("DAPR_URL", &value, &hosts) {
+            Ok(endpoint) => endpoint,
+            Err(_) => {
+                error!("DAPR_URL must be an approved HTTPS endpoint");
+                return;
+            }
+        },
+        _ => {
+            error!("DAPR_URL and BIS_RISK_DAPR_ALLOWED_HOSTS must be configured");
+            return;
+        }
+    };
     let dapr_pubsub = match std::env::var("DAPR_PUBSUB_NAME") {
         Ok(value) if !value.trim().is_empty() => value,
         _ => {
@@ -410,13 +442,19 @@ async fn main() {
         ml_url: Arc::new(ml_url.clone()),
         dapr_url: Arc::new(dapr_url),
         dapr_pubsub: Arc::new(dapr_pubsub),
-        http: HttpClient::builder()
-            .timeout(std::time::Duration::from_secs(10))
-            .build()
-            .expect("Failed to build HTTP client"),
+        http: match https_client(
+            std::time::Duration::from_secs(10),
+            std::time::Duration::from_secs(5),
+        ) {
+            Ok(client) => client,
+            Err(_) => {
+                error!("TLS HTTP client could not be initialized");
+                return;
+            }
+        },
     };
 
-    info!("[RiskStream] ML Enrichment URL: {}", ml_url);
+    info!("[RiskStream] ML Enrichment endpoint configured");
     info!("[RiskStream] Kafka brokers: {}", kafka_brokers);
 
     // Spawn Kafka consumer

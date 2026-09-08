@@ -9,6 +9,7 @@ use axum::{
     routing::{get, post},
     Router,
 };
+use bis_transport_policy::{https_client, required_allowed_hosts, TrustedEndpoint};
 use serde::Deserialize;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -57,7 +58,7 @@ fn render_metrics() -> String {
 
 #[derive(Clone)]
 struct Config {
-    gateway_url: String,
+    gateway_url: TrustedEndpoint,
     gateway_key: String,
     service_key: String,
     webhook_port: u16,
@@ -68,14 +69,20 @@ struct Config {
 }
 
 impl Config {
-    fn from_env() -> Self {
+    fn from_env() -> Result<Self, String> {
         let mtls_cns = std::env::var("MTLS_ALLOWED_CNS")
             .unwrap_or_else(|_| "bis-gateway,bis-event-processor".to_string())
             .split(',')
             .map(|s| s.trim().to_string())
             .collect();
-        Self {
-            gateway_url: std::env::var("GATEWAY_URL").unwrap_or_default(),
+        let gateway_url = std::env::var("GATEWAY_URL")
+            .map_err(|_| "GATEWAY_URL must be configured".to_string())?;
+        let allowed_hosts = required_allowed_hosts("BIS_VELOCITY_GATEWAY_ALLOWED_HOSTS")
+            .map_err(|_| "BIS_VELOCITY_GATEWAY_ALLOWED_HOSTS must be configured".to_string())?;
+        let gateway_url = TrustedEndpoint::parse("GATEWAY_URL", &gateway_url, &allowed_hosts)
+            .map_err(|_| "GATEWAY_URL must be an approved HTTPS endpoint".to_string())?;
+        Ok(Self {
+            gateway_url,
             gateway_key: std::env::var("BIS_GATEWAY_KEY").unwrap_or_default(),
             service_key: std::env::var("BIS_FLUVIO_VELOCITY_KEY").unwrap_or_default(),
             webhook_port: std::env::var("WEBHOOK_PORT")
@@ -91,7 +98,7 @@ impl Config {
                 .map(|v| v.eq_ignore_ascii_case("true"))
                 .unwrap_or(false),
             mtls_allowed_cns: mtls_cns,
-        }
+        })
     }
 }
 
@@ -182,9 +189,18 @@ async fn dispatch_breach(client: &reqwest::Client, config: &Config, breach: &Vel
         DISPATCH_ERRORS_TOTAL.fetch_add(1, Ordering::Relaxed);
         return;
     }
-    let url = format!("{}/v1/velocity/alert", config.gateway_url);
+    let url = match config
+        .gateway_url
+        .with_path_segments(&["v1", "velocity", "alert"])
+    {
+        Ok(url) => url,
+        Err(_) => {
+            error!("Gateway endpoint path cannot be constructed");
+            return;
+        }
+    };
     match client
-        .post(&url)
+        .post(url)
         .header("X-BIS-Key", &config.gateway_key)
         .json(breach)
         .timeout(Duration::from_secs(10))
@@ -390,11 +406,14 @@ async fn main() {
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(&log_level)),
         )
         .init();
-    let config = Arc::new(Config::from_env());
-    if config.gateway_url.is_empty()
-        || config.gateway_key.is_empty()
-        || config.service_key.is_empty()
-        || config.redis_url.is_empty()
+    let config = match Config::from_env() {
+        Ok(config) => Arc::new(config),
+        Err(message) => {
+            error!("{}", message);
+            return;
+        }
+    };
+    if config.gateway_key.is_empty() || config.service_key.is_empty() || config.redis_url.is_empty()
     {
         error!("GATEWAY_URL, BIS_GATEWAY_KEY, BIS_FLUVIO_VELOCITY_KEY, and REDIS_URL must be configured");
         return;
@@ -408,9 +427,15 @@ async fn main() {
         return;
     }
     let engine = Arc::new(Mutex::new(VelocityEngine::new(default_rules())));
-    let client = Arc::new(reqwest::Client::new());
+    let client = match https_client(Duration::from_secs(10), Duration::from_secs(5)) {
+        Ok(client) => Arc::new(client),
+        Err(_) => {
+            error!("TLS HTTP client could not be initialized");
+            return;
+        }
+    };
     info!("BIS Fluvio Velocity Processor starting...");
-    info!("Gateway URL: {}", config.gateway_url);
+    info!("Gateway endpoint configured");
     info!("mTLS enabled: {}", config.mtls_enabled);
     info!("Redis circuit breaker: {}", config.redis_url);
     let gc_engine = engine.clone();
