@@ -490,8 +490,10 @@ async fn main() {
     if gateway_key().is_empty() {
         panic!("BIS_EVENT_PROCESSOR_KEY must be configured");
     }
-    // ── PostgreSQL pool (optional) ───────────────────────────────────────────────────────────────────
-    let db_pool = db::build_pool().await;
+    // ── PostgreSQL pool (TLS-only when configured) ───────────────────────────────────────────────────
+    let db_pool = db::build_pool()
+        .await
+        .unwrap_or_else(|_| panic!("Event Processor PostgreSQL TLS configuration is invalid"));
     if let Some(pool) = &db_pool {
         db::migrate(pool).await;
     }
