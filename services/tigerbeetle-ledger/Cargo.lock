@@ -146,6 +146,7 @@ version = "1.0.0"
 dependencies = [
  "anyhow",
  "axum",
+ "bis-transport-policy",
  "chrono",
  "deadpool-postgres",
  "hex",
@@ -165,6 +166,14 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+]
+
+[[package]]
+name = "bis-transport-policy"
+version = "1.0.0"
+dependencies = [
+ "reqwest",
+ "thiserror 1.0.69",
 ]
 
 [[package]]

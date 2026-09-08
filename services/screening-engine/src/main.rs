@@ -31,6 +31,7 @@ use axum::{
     routing::{get, post},
     Router,
 };
+use bis_transport_policy::{https_client, required_allowed_hosts, TrustedEndpoint};
 use chrono::Utc;
 use deadpool_postgres::Pool;
 use rdkafka::{
@@ -39,7 +40,7 @@ use rdkafka::{
     ClientConfig, Message,
 };
 use redis::aio::ConnectionManager;
-use reqwest::{redirect::Policy, Client, Url};
+use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
@@ -153,61 +154,20 @@ pub struct AppState {
 }
 
 pub struct EngineConfig {
-    pub nimc_url: Url,
+    pub nimc_url: TrustedEndpoint,
     pub nimc_key: String,
-    pub nibss_url: Url,
+    pub nibss_url: TrustedEndpoint,
     pub nibss_key: String,
-    pub efcc_url: Url,
+    pub efcc_url: TrustedEndpoint,
     pub efcc_key: String,
-    pub icpc_url: Url,
+    pub icpc_url: TrustedEndpoint,
     pub icpc_key: String,
-    pub cac_url: Url,
+    pub cac_url: TrustedEndpoint,
     pub cac_key: String,
-    pub waec_url: Url,
+    pub waec_url: TrustedEndpoint,
     pub waec_key: String,
-    pub aggregator_url: Url,
+    pub aggregator_url: TrustedEndpoint,
     pub aggregator_key: String,
-}
-
-fn configured_provider_hosts() -> anyhow::Result<HashSet<String>> {
-    let hosts = std::env::var("BIS_SCREENING_PROVIDER_ALLOWED_HOSTS")?
-        .split(',')
-        .map(str::trim)
-        .filter(|host| !host.is_empty())
-        .map(|host| host.to_ascii_lowercase())
-        .collect::<HashSet<_>>();
-    if hosts.is_empty() {
-        anyhow::bail!("BIS_SCREENING_PROVIDER_ALLOWED_HOSTS must contain at least one hostname");
-    }
-    Ok(hosts)
-}
-
-fn trusted_provider_url(
-    name: &str,
-    raw: &str,
-    allowed_hosts: &HashSet<String>,
-) -> anyhow::Result<Url> {
-    let mut url = Url::parse(raw.trim())?;
-    if url.scheme() != "https" {
-        anyhow::bail!("{name} must use https");
-    }
-    if !url.username().is_empty()
-        || url.password().is_some()
-        || url.query().is_some()
-        || url.fragment().is_some()
-    {
-        anyhow::bail!("{name} must not contain credentials, query parameters, or fragments");
-    }
-    let host = url
-        .host_str()
-        .map(str::to_ascii_lowercase)
-        .ok_or_else(|| anyhow::anyhow!("{name} must include a hostname"))?;
-    if !allowed_hosts.contains(&host) {
-        anyhow::bail!("{name} host is not allow-listed");
-    }
-    let normalized_path = url.path().trim_end_matches('/').to_string();
-    url.set_path(&normalized_path);
-    Ok(url)
 }
 
 fn provider_url_from_env(
@@ -215,34 +175,23 @@ fn provider_url_from_env(
     variable: &str,
     default: Option<&str>,
     allowed_hosts: &HashSet<String>,
-) -> anyhow::Result<Url> {
+) -> anyhow::Result<TrustedEndpoint> {
     let raw = match (std::env::var(variable), default) {
         (Ok(value), _) => value,
         (Err(_), Some(value)) => value.to_string(),
         (Err(_), None) => anyhow::bail!("{variable} must be configured"),
     };
-    trusted_provider_url(name, &raw, allowed_hosts)
+    TrustedEndpoint::parse(name, &raw, allowed_hosts).map_err(Into::into)
 }
 
-fn provider_endpoint(base: &Url, segments: &[&str]) -> Result<Url, &'static str> {
-    let mut endpoint = base.clone();
-    let mut path = endpoint
-        .path_segments_mut()
-        .map_err(|_| "configured provider endpoint cannot accept path segments")?;
-    path.pop_if_empty();
-    for segment in segments {
-        path.push(segment);
-    }
-    drop(path);
-    Ok(endpoint)
+fn provider_endpoint(base: &TrustedEndpoint, segments: &[&str]) -> Result<Url, &'static str> {
+    base.with_path_segments(segments)
+        .map_err(|_| "configured provider endpoint cannot accept path segments")
 }
 
-fn outbound_provider_client() -> Result<Client, reqwest::Error> {
-    Client::builder()
-        .https_only(true)
-        .redirect(Policy::none())
-        .connect_timeout(Duration::from_secs(10))
-        .build()
+fn outbound_provider_client() -> Result<reqwest::Client, bis_transport_policy::TransportPolicyError>
+{
+    https_client(Duration::from_secs(30), Duration::from_secs(10))
 }
 
 pub struct Metrics {
@@ -871,7 +820,7 @@ async fn main() -> anyhow::Result<()> {
         .set("message.timeout.ms", "5000")
         .create()?;
 
-    let provider_hosts = configured_provider_hosts()?;
+    let provider_hosts = required_allowed_hosts("BIS_SCREENING_PROVIDER_ALLOWED_HOSTS")?;
     let config = Arc::new(EngineConfig {
         nimc_url: provider_url_from_env(
             "NIMC_URL",
@@ -1008,36 +957,44 @@ mod tests {
         }
     }
 
-    fn test_provider_url() -> Url {
-        Url::parse("https://screening-provider.test").expect("valid test provider URL")
+    fn test_provider_url() -> TrustedEndpoint {
+        let allowed_hosts = HashSet::from(["screening-provider.test".to_string()]);
+        TrustedEndpoint::parse(
+            "TEST_URL",
+            "https://screening-provider.test",
+            &allowed_hosts,
+        )
+        .expect("valid allow-listed test provider URL")
     }
 
     #[test]
     fn provider_url_requires_allowlisted_https_without_userinfo_or_query() {
         let allowed_hosts = HashSet::from(["screening-provider.test".to_string()]);
-        assert!(trusted_provider_url(
+        assert!(TrustedEndpoint::parse(
             "TEST_URL",
             "https://screening-provider.test/base/",
             &allowed_hosts
         )
         .is_ok());
-        assert!(
-            trusted_provider_url("TEST_URL", "http://screening-provider.test", &allowed_hosts)
-                .is_err()
-        );
-        assert!(trusted_provider_url(
+        assert!(TrustedEndpoint::parse(
+            "TEST_URL",
+            "http://screening-provider.test",
+            &allowed_hosts
+        )
+        .is_err());
+        assert!(TrustedEndpoint::parse(
             "TEST_URL",
             "https://user:secret@screening-provider.test",
             &allowed_hosts
         )
         .is_err());
-        assert!(trusted_provider_url(
+        assert!(TrustedEndpoint::parse(
             "TEST_URL",
             "https://screening-provider.test?next=https://metadata.google.internal",
             &allowed_hosts
         )
         .is_err());
-        assert!(trusted_provider_url(
+        assert!(TrustedEndpoint::parse(
             "TEST_URL",
             "https://metadata.google.internal",
             &allowed_hosts
@@ -1047,8 +1004,13 @@ mod tests {
 
     #[test]
     fn provider_paths_are_appended_as_escaped_segments() {
-        let base =
-            Url::parse("https://screening-provider.test/base").expect("valid test provider URL");
+        let allowed_hosts = HashSet::from(["screening-provider.test".to_string()]);
+        let base = TrustedEndpoint::parse(
+            "TEST_URL",
+            "https://screening-provider.test/base",
+            &allowed_hosts,
+        )
+        .expect("valid test provider URL");
         let endpoint = provider_endpoint(&base, &["v1", "screenings", "pep_sanctions"])
             .expect("path can be appended");
         assert_eq!(
@@ -1134,13 +1096,14 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_aggregator_rejects_cleartext_transport_if_runtime_config_is_tampered() {
-        let mut config = test_config();
-        config.aggregator_url = Url::parse("http://127.0.0.1:9").expect("valid syntactic HTTP URL");
-        config.aggregator_key = "integration-test-key".into();
-        let request = make_req(ScreeningType::PepSanctions);
-        let result = screen_aggregator(&request, &config).await;
-        assert!(matches!(result.outcome, ScreeningOutcome::Error));
+    #[test]
+    fn test_aggregator_cleartext_transport_cannot_construct_trusted_endpoint() {
+        let allowed_hosts = HashSet::from(["screening-provider.test".to_string()]);
+        assert!(TrustedEndpoint::parse(
+            "AGGREGATOR_URL",
+            "http://screening-provider.test",
+            &allowed_hosts,
+        )
+        .is_err());
     }
 }

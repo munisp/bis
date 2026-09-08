@@ -43,6 +43,7 @@ tokio-postgres    = { version = "0.7", features = ["with-chrono-0_4", "with-serd
 deadpool-postgres  = "0.14"
 # Redis (idempotency keys)
 redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
+bis-transport-policy = { path = "../../crates/bis-transport-policy" }
 
 [dev-dependencies]
 tokio-test = "0.4"
