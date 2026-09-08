@@ -183,12 +183,51 @@ async fn close_circuit(redis_url: &str) {
 
 // ─── Gateway dispatch ─────────────────────────────────────────────────────────
 
+const MAX_GATEWAY_BREACH_FIELD_BYTES: usize = 256;
+const MAX_GATEWAY_BREACH_PAYLOAD_BYTES: usize = 16 * 1024;
+
+/// Enforce the gateway's bounded alert contract before JSON serialization.
+/// All breach identifiers originate from a payment event and must never cause
+/// an unbounded allocation in the asynchronous dispatch path.
+fn bounded_gateway_breach(breach: &VelocityBreach) -> Option<VelocityBreach> {
+    let fields = [
+        breach.alert_id.as_str(),
+        breach.account_id.as_str(),
+        breach.tenant_id.as_str(),
+        breach.rule_name.as_str(),
+        breach.risk_level.as_str(),
+        breach.triggering_tx_ref.as_str(),
+    ];
+    if fields
+        .iter()
+        .any(|field| field.len() > MAX_GATEWAY_BREACH_FIELD_BYTES)
+    {
+        return None;
+    }
+
+    let encoded = serde_json::to_vec(breach).ok()?;
+    if encoded.len() > MAX_GATEWAY_BREACH_PAYLOAD_BYTES {
+        return None;
+    }
+
+    Some(breach.clone())
+}
+
 async fn dispatch_breach(client: &TrustedHttpsClient, config: &Config, breach: &VelocityBreach) {
     if is_circuit_open(&config.redis_url).await {
         warn!(alert_id = %breach.alert_id, "Circuit breaker OPEN — skipping dispatch");
         DISPATCH_ERRORS_TOTAL.fetch_add(1, Ordering::Relaxed);
         return;
     }
+    let bounded_breach = match bounded_gateway_breach(breach) {
+        Some(payload) => payload,
+        None => {
+            error!(alert_id = %breach.alert_id, "Refusing oversized gateway breach payload");
+            DISPATCH_ERRORS_TOTAL.fetch_add(1, Ordering::Relaxed);
+            return;
+        }
+    };
+
     let request = match client.post(&["v1", "velocity", "alert"]) {
         Ok(request) => request,
         Err(_) => {
@@ -198,7 +237,7 @@ async fn dispatch_breach(client: &TrustedHttpsClient, config: &Config, breach: &
     };
     match request
         .header("X-BIS-Key", &config.gateway_key)
-        .json(breach)
+        .json(&bounded_breach)
         .timeout(Duration::from_secs(10))
         .send()
         .await
@@ -459,4 +498,36 @@ async fn main() {
     info!("Listening on {}", addr);
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
+}
+
+#[cfg(test)]
+mod gateway_payload_tests {
+    use super::*;
+
+    fn breach() -> VelocityBreach {
+        VelocityBreach {
+            alert_id: "alert-1".to_string(),
+            account_id: "account-1".to_string(),
+            tenant_id: "tenant-1".to_string(),
+            rule_name: "COUNT_1MIN".to_string(),
+            risk_level: "high".to_string(),
+            window_secs: 60,
+            tx_count: 6,
+            total_amount_kobo: 60_000,
+            triggering_tx_ref: "tx-1".to_string(),
+            detected_at: chrono::Utc::now(),
+        }
+    }
+
+    #[test]
+    fn gateway_payload_accepts_protocol_sized_breach() {
+        assert!(bounded_gateway_breach(&breach()).is_some());
+    }
+
+    #[test]
+    fn gateway_payload_rejects_oversized_request_derived_field() {
+        let mut oversized = breach();
+        oversized.account_id = "a".repeat(MAX_GATEWAY_BREACH_FIELD_BYTES + 1);
+        assert!(bounded_gateway_breach(&oversized).is_none());
+    }
 }
