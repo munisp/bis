@@ -9,8 +9,8 @@ cd "$ROOT"
 
 matches="$(
   {
-    git grep -n -I -E '(^|[^[:alnum:]_-])mobile/' -- . ':(exclude)mobile/**' || true
-    git grep -n -I -E '(/home/ubuntu/bis/mobile|working-directory:[[:space:]]*mobile([[:space:]]|$)|cache-dependency-path:[[:space:]]*mobile/|(^|[[:space:];])cd[[:space:]]+mobile([[:space:];]|$))' -- . ':(exclude)mobile/**' || true
+    git grep -n -I -E '(^|[^[:alnum:]_-])mobile/' -- . ':(exclude)mobile/**' ':(exclude)scripts/check-deprecated-mobile-references.sh' || true
+    git grep -n -I -E '(/home/ubuntu/bis/mobile|working-directory:[[:space:]]*mobile([[:space:]]|$)|cache-dependency-path:[[:space:]]*mobile/|(^|[[:space:];])cd[[:space:]]+mobile([[:space:];]|$))' -- . ':(exclude)mobile/**' ':(exclude)scripts/check-deprecated-mobile-references.sh' || true
   } | LC_ALL=C sort -u
 )"
 

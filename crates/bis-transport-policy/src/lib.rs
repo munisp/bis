@@ -19,6 +19,8 @@ pub enum TransportPolicyError {
     HostNotAllowed { name: String },
     #[error("endpoint cannot accept path segments")]
     CannotJoinPath,
+    #[error("request path contains an unsafe segment")]
+    UnsafePathSegment,
     #[error("required TLS material could not be read")]
     TlsMaterialUnreadable,
     #[error("TLS material is invalid")]
@@ -73,6 +75,7 @@ impl TrustedEndpoint {
             .map_err(|_| TransportPolicyError::CannotJoinPath)?;
         path.pop_if_empty();
         for segment in segments {
+            validate_path_segment(segment)?;
             path.push(segment);
         }
         drop(path);
@@ -82,6 +85,22 @@ impl TrustedEndpoint {
     pub fn as_url(&self) -> &Url {
         &self.0
     }
+}
+
+/// Permit only one opaque path component at a time. URL path delimiters,
+/// traversal components, and control bytes are rejected before construction.
+/// This prevents callers from changing the trusted endpoint's authority, query,
+/// fragment, or path semantics through a later request segment.
+fn validate_path_segment(segment: &str) -> Result<(), TransportPolicyError> {
+    if segment.is_empty()
+        || matches!(segment, "." | "..")
+        || segment.bytes().any(|byte| {
+            byte.is_ascii_control() || matches!(byte, b'/' | b'\\' | b'?' | b'#' | b'@')
+        })
+    {
+        return Err(TransportPolicyError::UnsafePathSegment);
+    }
+    Ok(())
 }
 
 pub fn required_allowed_hosts(variable: &str) -> Result<HashSet<String>, TransportPolicyError> {
@@ -251,5 +270,26 @@ mod tests {
                 .as_str(),
             "https://ledger.internal/base/v1/webhooks/created"
         );
+    }
+
+    #[test]
+    fn endpoint_rejects_delimiter_and_traversal_path_segments() {
+        let endpoint = TrustedEndpoint::parse("TEST", "https://ledger.internal/base", &hosts())
+            .expect("endpoint accepted");
+
+        for unsafe_segment in [
+            "",
+            ".",
+            "..",
+            "//metadata.google.internal",
+            "https://metadata.google.internal",
+            "a/b",
+            "next?target=https://metadata.google.internal",
+            "fragment#internal",
+            "user@internal",
+            "line\nbreak",
+        ] {
+            assert!(endpoint.with_path_segments(&[unsafe_segment]).is_err());
+        }
     }
 }

@@ -10,7 +10,8 @@ use axum::{
     Router,
 };
 use bis_transport_policy::{required_allowed_hosts, TrustedEndpoint, TrustedHttpsClient};
-use serde::Deserialize;
+use reqwest::header::CONTENT_TYPE;
+use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -186,10 +187,27 @@ async fn close_circuit(redis_url: &str) {
 const MAX_GATEWAY_BREACH_FIELD_BYTES: usize = 256;
 const MAX_GATEWAY_BREACH_PAYLOAD_BYTES: usize = 16 * 1024;
 
-/// Enforce the gateway's bounded alert contract before JSON serialization.
-/// All breach identifiers originate from a payment event and must never cause
-/// an unbounded allocation in the asynchronous dispatch path.
-fn bounded_gateway_breach(breach: &VelocityBreach) -> Option<VelocityBreach> {
+/// The only gateway payload shape emitted by this process. Borrowed fields
+/// avoid cloning request-derived strings before the single bounded encoding.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GatewayVelocityAlert<'a> {
+    alert_id: &'a str,
+    account_id: &'a str,
+    tenant_id: &'a str,
+    rule_name: &'a str,
+    risk_level: &'a str,
+    window_secs: u64,
+    tx_count: u64,
+    total_amount_kobo: i64,
+    triggering_tx_ref: &'a str,
+    detected_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// Encode one gateway alert after bounding every variable-width input. The
+/// checked byte buffer is passed directly to Reqwest, preventing a second
+/// request-derived serialization and failing closed on encoding/bound errors.
+fn encode_gateway_breach(breach: &VelocityBreach) -> Option<Vec<u8>> {
     let fields = [
         breach.alert_id.as_str(),
         breach.account_id.as_str(),
@@ -205,12 +223,20 @@ fn bounded_gateway_breach(breach: &VelocityBreach) -> Option<VelocityBreach> {
         return None;
     }
 
-    let encoded = serde_json::to_vec(breach).ok()?;
-    if encoded.len() > MAX_GATEWAY_BREACH_PAYLOAD_BYTES {
-        return None;
-    }
-
-    Some(breach.clone())
+    let payload = GatewayVelocityAlert {
+        alert_id: &breach.alert_id,
+        account_id: &breach.account_id,
+        tenant_id: &breach.tenant_id,
+        rule_name: &breach.rule_name,
+        risk_level: &breach.risk_level,
+        window_secs: breach.window_secs,
+        tx_count: breach.tx_count,
+        total_amount_kobo: breach.total_amount_kobo,
+        triggering_tx_ref: &breach.triggering_tx_ref,
+        detected_at: breach.detected_at,
+    };
+    let encoded = serde_json::to_vec(&payload).ok()?;
+    (encoded.len() <= MAX_GATEWAY_BREACH_PAYLOAD_BYTES).then_some(encoded)
 }
 
 async fn dispatch_breach(client: &TrustedHttpsClient, config: &Config, breach: &VelocityBreach) {
@@ -219,7 +245,7 @@ async fn dispatch_breach(client: &TrustedHttpsClient, config: &Config, breach: &
         DISPATCH_ERRORS_TOTAL.fetch_add(1, Ordering::Relaxed);
         return;
     }
-    let bounded_breach = match bounded_gateway_breach(breach) {
+    let encoded_breach = match encode_gateway_breach(breach) {
         Some(payload) => payload,
         None => {
             error!(alert_id = %breach.alert_id, "Refusing oversized gateway breach payload");
@@ -237,7 +263,8 @@ async fn dispatch_breach(client: &TrustedHttpsClient, config: &Config, breach: &
     };
     match request
         .header("X-BIS-Key", &config.gateway_key)
-        .json(&bounded_breach)
+        .header(CONTENT_TYPE, "application/json")
+        .body(encoded_breach)
         .timeout(Duration::from_secs(10))
         .send()
         .await
@@ -520,14 +547,18 @@ mod gateway_payload_tests {
     }
 
     #[test]
-    fn gateway_payload_accepts_protocol_sized_breach() {
-        assert!(bounded_gateway_breach(&breach()).is_some());
+    fn gateway_payload_encodes_protocol_sized_breach_once_within_bound() {
+        let encoded = encode_gateway_breach(&breach()).expect("protocol-sized breach accepted");
+        assert!(encoded.len() <= MAX_GATEWAY_BREACH_PAYLOAD_BYTES);
+        assert!(std::str::from_utf8(&encoded)
+            .expect("JSON is UTF-8")
+            .contains("\"alertId\""));
     }
 
     #[test]
     fn gateway_payload_rejects_oversized_request_derived_field() {
         let mut oversized = breach();
         oversized.account_id = "a".repeat(MAX_GATEWAY_BREACH_FIELD_BYTES + 1);
-        assert!(bounded_gateway_breach(&oversized).is_none());
+        assert!(encode_gateway_breach(&oversized).is_none());
     }
 }
