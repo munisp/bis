@@ -61,11 +61,11 @@ export default function InvestigationsScreen() {
   const [page, setPage] = useState(1);
 
   const { data, isLoading, refetch, isRefetching } = trpc.investigations.list.useQuery(
-    { page, limit: 20, search: search || undefined },
+    { offset: (page - 1) * 20, limit: 20, search: search || undefined },
     { staleTime: 30_000 }
   );
 
-  const investigations = (data as any)?.investigations ?? [];
+  const investigations = data?.items ?? [] ?? [];
   const total = (data as any)?.total ?? 0;
 
   return (

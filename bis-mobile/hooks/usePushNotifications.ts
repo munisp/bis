@@ -29,7 +29,8 @@ import { trpc } from "@/lib/trpc";
 // Configure how foreground notifications are presented
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-    shouldShowAlert: true,
+    shouldShowBanner: true,
+      shouldShowList: true,
     shouldPlaySound: true,
     shouldSetBadge: true,
   }),

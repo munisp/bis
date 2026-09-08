@@ -10,17 +10,17 @@ const COLORS = {
 };
 
 const STATUS_COLOR: Record<string, string> = {
-  verified: COLORS.success, pending: COLORS.warning, failed: COLORS.error, in_progress: COLORS.primary,
+  passed: COLORS.success, pending: COLORS.warning, failed: COLORS.error, processing: COLORS.primary,
 };
 
 export default function KYCScreen() {
   const router = useRouter();
   const { data, isLoading, refetch, isRefetching } = trpc.kyc.list.useQuery(
-    { page: 1, limit: 20 },
+    { limit: 20 },
     { staleTime: 30_000 }
   );
 
-  const records = (data as any)?.records ?? [];
+  const records = data?.items ?? [] ?? [];
 
   return (
     <View style={styles.container}>

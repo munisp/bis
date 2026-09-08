@@ -321,6 +321,7 @@ export default function BiometricEnrollmentScreen() {
   const [step, setStep] = useState<Step>("permissions");
   const [selfieUri, setSelfieUri] = useState<string | null>(null);
   const [documentUri, setDocumentUri] = useState<string | null>(null);
+  const [subjectRef, setSubjectRef] = useState("");
 
   const { data: challengesData } = trpc.biometric.getChallenges.useQuery();
   const challenges: LivenessChallenge[] = (challengesData as any)?.challenges ?? [
@@ -340,14 +341,19 @@ export default function BiometricEnrollmentScreen() {
   });
 
   const handleEnroll = useCallback(() => {
-    if (!selfieUri || !documentUri) return;
+    if (!selfieUri || !documentUri || !subjectRef.trim()) {
+      Alert.alert("Subject reference required", "Enter the authorised subject reference before enrollment.");
+      return;
+    }
     enrollMutation.mutate({
-      selfieBase64: selfieUri, // In production: convert to base64
-      documentBase64: documentUri,
-      documentType: "nin",
-      challengeResults: challenges.map(c => ({ challengeId: c.id, passed: true })),
+      enrollImageBase64: selfieUri,
+      livenessImageBase64: selfieUri,
+      subjectRef: subjectRef.trim(),
+      documentImageBase64: documentUri,
+      documentType: "NIN_SLIP",
+      challenge: "blink",
     });
-  }, [selfieUri, documentUri, challenges, enrollMutation]);
+  }, [selfieUri, documentUri, subjectRef, enrollMutation]);
 
   const STEPS: Step[] = ["permissions", "liveness", "selfie", "document", "confirm", "done"];
   const stepIndex = STEPS.indexOf(step);

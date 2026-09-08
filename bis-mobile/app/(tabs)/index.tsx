@@ -72,12 +72,12 @@ export default function DashboardScreen() {
   const router = useRouter();
   const { user } = useAuth();
 
-  const { data: summary, isLoading, refetch, isRefetching } = trpc.dashboard.summary.useQuery(undefined, {
+  const { data: summary, isLoading, refetch, isRefetching } = trpc.dashboard.stats.useQuery(undefined, {
     staleTime: 30_000,
   });
 
   const { data: recentAlerts } = trpc.alerts.list.useQuery(
-    { page: 1, limit: 5, resolved: false },
+    { unreadOnly: true, limit: 5 },
     { staleTime: 30_000 }
   );
 
@@ -120,14 +120,14 @@ export default function DashboardScreen() {
           />
           <StatCard
             label="Open Alerts"
-            value={summary?.openAlerts ?? 0}
+            value={summary?.alertsToday ?? 0}
             icon="notifications-outline"
             color={COLORS.critical}
             onPress={() => router.push("/(tabs)/alerts")}
           />
           <StatCard
             label="KYC Pending"
-            value={summary?.pendingKyc ?? 0}
+            value={summary?.biometricEnrollments ?? 0}
             icon="shield-checkmark-outline"
             color={COLORS.medium}
             onPress={() => router.push("/(tabs)/kyc")}
@@ -149,10 +149,10 @@ export default function DashboardScreen() {
             <Text style={styles.sectionLink}>View all</Text>
           </TouchableOpacity>
         </View>
-        {recentAlerts?.alerts?.length === 0 && (
+        {recentAlerts?.length === 0 && (
           <Text style={styles.emptyText}>No open alerts</Text>
         )}
-        {(recentAlerts?.alerts ?? []).map((alert: any) => (
+        {(recentAlerts ?? []).map((alert: any) => (
           <AlertItem key={alert.id} alert={alert} />
         ))}
       </View>

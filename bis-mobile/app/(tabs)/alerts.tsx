@@ -15,7 +15,7 @@ const SEV_COLOR: Record<string, string> = {
 export default function AlertsScreen() {
   const utils = trpc.useUtils();
   const { data, isLoading, refetch, isRefetching } = trpc.alerts.list.useQuery(
-    { page: 1, limit: 30, resolved: false },
+    { unreadOnly: true, limit: 30 },
     { staleTime: 30_000 }
   );
 
@@ -23,7 +23,7 @@ export default function AlertsScreen() {
     onSuccess: () => utils.alerts.list.invalidate(),
   });
 
-  const alerts = (data as any)?.alerts ?? [];
+  const alerts = data ?? [] ?? [];
 
   return (
     <View style={styles.container}>
@@ -45,7 +45,7 @@ export default function AlertsScreen() {
                   </View>
                   {!item.acknowledged && (
                     <TouchableOpacity
-                      onPress={() => acknowledgeMutation.mutate({ alertId: item.id })}
+                      onPress={() => acknowledgeMutation.mutate({ id: item.id })}
                       style={styles.ackButton}
                     >
                       <Ionicons name="checkmark-outline" size={14} color={COLORS.primary} />

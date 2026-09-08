@@ -48,6 +48,7 @@ export default function DocumentCameraScreen() {
   const [permission, requestPermission] = useCameraPermissions();
   const [docType, setDocType] = useState<DocType>("nin");
   const [capturedUri, setCapturedUri] = useState<string | null>(null);
+  const [subjectRef, setSubjectRef] = useState("");
   const [capturing, setCapturing] = useState(false);
   const [ocrResult, setOcrResult] = useState<Record<string, string> | null>(null);
 
@@ -102,10 +103,14 @@ export default function DocumentCameraScreen() {
   };
 
   const handleRunOCR = () => {
-    if (!capturedUri) return;
+    if (!capturedUri || !subjectRef.trim()) {
+      Alert.alert("Subject reference required", "Enter the authorised subject reference before OCR.");
+      return;
+    }
     ocrMutation.mutate({
       imageBase64: capturedUri,
-      documentType: docType,
+      subjectRef: subjectRef.trim(),
+      documentType: docType === "nin" ? "NIN_SLIP" : docType === "passport" ? "PASSPORT" : "DRIVERS_LICENSE",
     });
   };
 
