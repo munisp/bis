@@ -1,4 +1,7 @@
-use reqwest::{redirect::Policy, Certificate, Client, ClientBuilder, Identity, Url};
+use reqwest::{
+    redirect::Policy, Certificate, Client, ClientBuilder, Identity, RequestBuilder, Response, Url,
+};
+use serde::Serialize;
 use std::{collections::HashSet, fs, time::Duration};
 use thiserror::Error;
 
@@ -22,6 +25,8 @@ pub enum TransportPolicyError {
     TlsMaterialInvalid,
     #[error("HTTP client setup failed")]
     ClientBuild,
+    #[error("trusted HTTPS request failed")]
+    RequestFailed,
 }
 
 #[derive(Clone, Debug)]
@@ -95,6 +100,77 @@ pub fn required_allowed_hosts(variable: &str) -> Result<HashSet<String>, Transpo
         });
     }
     Ok(hosts)
+}
+
+#[derive(Clone)]
+pub struct TrustedHttpsClient {
+    endpoint: TrustedEndpoint,
+    client: Client,
+}
+
+impl TrustedHttpsClient {
+    pub fn new(
+        endpoint: TrustedEndpoint,
+        timeout: Duration,
+        connect_timeout: Duration,
+    ) -> Result<Self, TransportPolicyError> {
+        Ok(Self {
+            endpoint,
+            client: https_client(timeout, connect_timeout)?,
+        })
+    }
+
+    pub fn get(&self, segments: &[&str]) -> Result<RequestBuilder, TransportPolicyError> {
+        Ok(self.client.get(self.endpoint.with_path_segments(segments)?))
+    }
+
+    pub fn post(&self, segments: &[&str]) -> Result<RequestBuilder, TransportPolicyError> {
+        Ok(self
+            .client
+            .post(self.endpoint.with_path_segments(segments)?))
+    }
+}
+
+#[derive(Clone)]
+pub struct MtlsTrustedHttpsClient {
+    endpoint: TrustedEndpoint,
+    client: Client,
+}
+
+impl MtlsTrustedHttpsClient {
+    pub fn new(
+        endpoint: TrustedEndpoint,
+        timeout: Duration,
+        connect_timeout: Duration,
+        ca_pem_path: &str,
+        identity_pem_path: &str,
+    ) -> Result<Self, TransportPolicyError> {
+        Ok(Self {
+            endpoint,
+            client: mtls_https_client(timeout, connect_timeout, ca_pem_path, identity_pem_path)?,
+        })
+    }
+
+    pub async fn get(&self, segments: &[&str]) -> Result<Response, TransportPolicyError> {
+        self.client
+            .get(self.endpoint.with_path_segments(segments)?)
+            .send()
+            .await
+            .map_err(|_| TransportPolicyError::RequestFailed)
+    }
+
+    pub async fn post_json<T: Serialize + ?Sized>(
+        &self,
+        segments: &[&str],
+        body: &T,
+    ) -> Result<Response, TransportPolicyError> {
+        self.client
+            .post(self.endpoint.with_path_segments(segments)?)
+            .json(body)
+            .send()
+            .await
+            .map_err(|_| TransportPolicyError::RequestFailed)
+    }
 }
 
 pub fn https_client(

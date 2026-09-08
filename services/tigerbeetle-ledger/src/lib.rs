@@ -6,8 +6,7 @@
 ///   - PostgreSQL reconciliation writer
 ///   - Idempotency key management via Redis
 ///   - Prometheus metrics
-use bis_transport_policy::{mtls_https_client, required_allowed_hosts, TrustedEndpoint};
-use reqwest::Url;
+use bis_transport_policy::{required_allowed_hosts, MtlsTrustedHttpsClient, TrustedEndpoint};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
@@ -241,8 +240,7 @@ pub struct StablecoinTransferRequest {
 
 #[derive(Clone)]
 pub struct TbClient {
-    base_url: TrustedEndpoint,
-    http: reqwest::Client,
+    proxy: MtlsTrustedHttpsClient,
 }
 
 fn required_tls_path(variable: &str) -> Result<String, LedgerError> {
@@ -283,7 +281,8 @@ impl TbClient {
             .map_err(|_| LedgerError::InvalidProxyEndpoint("TIGERBEETLE_HTTP_URL must be an allow-listed HTTPS endpoint without credentials, query parameters, or fragments".to_string()))?;
         let ca_path = required_tls_path("TIGERBEETLE_TLS_CA_PEM_FILE")?;
         let identity_path = required_tls_path("TIGERBEETLE_TLS_CLIENT_IDENTITY_PEM_FILE")?;
-        let http = mtls_https_client(
+        let proxy = MtlsTrustedHttpsClient::new(
+            base_url,
             std::time::Duration::from_secs(10),
             std::time::Duration::from_secs(5),
             &ca_path,
@@ -294,37 +293,42 @@ impl TbClient {
                 "TLS trust material or client identity is invalid".to_string(),
             )
         })?;
-        Ok(Self { base_url, http })
+        Ok(Self { proxy })
     }
 
-    fn account_url(&self, account_id: &str) -> Result<Url, LedgerError> {
+    async fn account_get(&self, account_id: &str) -> Result<reqwest::Response, LedgerError> {
         validate_account_id(account_id)?;
-        self.base_url
-            .with_path_segments(&["accounts", account_id])
+        self.proxy
+            .get(&["accounts", account_id])
+            .await
             .map_err(|_| {
-                LedgerError::InvalidProxyEndpoint(
-                    "configured endpoint cannot accept path segments".to_string(),
+                LedgerError::ProxyError("TigerBeetle mTLS account lookup failed".to_string())
+            })
+    }
+
+    async fn accounts_post(
+        &self,
+        request: &CreateAccountRequest,
+    ) -> Result<reqwest::Response, LedgerError> {
+        self.proxy
+            .post_json(&["accounts"], &[request])
+            .await
+            .map_err(|_| {
+                LedgerError::ProxyError(
+                    "TigerBeetle mTLS account creation request failed".to_string(),
                 )
             })
     }
 
-    fn accounts_url(&self) -> Result<Url, LedgerError> {
-        self.base_url
-            .with_path_segments(&["accounts"])
+    async fn transfers_post(
+        &self,
+        request: &CreateTransferRequest,
+    ) -> Result<reqwest::Response, LedgerError> {
+        self.proxy
+            .post_json(&["transfers"], &[request])
+            .await
             .map_err(|_| {
-                LedgerError::InvalidProxyEndpoint(
-                    "configured endpoint cannot accept path segments".to_string(),
-                )
-            })
-    }
-
-    fn transfers_url(&self) -> Result<Url, LedgerError> {
-        self.base_url
-            .with_path_segments(&["transfers"])
-            .map_err(|_| {
-                LedgerError::InvalidProxyEndpoint(
-                    "configured endpoint cannot accept path segments".to_string(),
-                )
+                LedgerError::ProxyError("TigerBeetle mTLS transfer request failed".to_string())
             })
     }
 
@@ -358,7 +362,7 @@ impl TbClient {
         tenant_id: i32,
     ) -> Result<TbAccount, LedgerError> {
         // Try to fetch existing account first
-        let resp = self.http.get(self.account_url(account_id)?).send().await?;
+        let resp = self.account_get(account_id).await?;
         if resp.status().is_success() {
             let account: TbAccount = resp.json().await?;
             return Ok(account);
@@ -373,12 +377,7 @@ impl TbClient {
             code: 1000, // Tenant debit account code
             flags: 0,
         };
-        let resp = self
-            .http
-            .post(self.accounts_url()?)
-            .json(&[&req])
-            .send()
-            .await?;
+        let resp = self.accounts_post(&req).await?;
         if !resp.status().is_success() {
             return Err(LedgerError::ProxyError(
                 "TigerBeetle proxy rejected account creation".to_string(),
@@ -392,12 +391,7 @@ impl TbClient {
         &self,
         req: &CreateTransferRequest,
     ) -> Result<String, LedgerError> {
-        let resp = self
-            .http
-            .post(self.transfers_url()?)
-            .json(&[req])
-            .send()
-            .await?;
+        let resp = self.transfers_post(req).await?;
         if !resp.status().is_success() {
             return Err(LedgerError::ProxyError(
                 "TigerBeetle proxy rejected transfer creation".to_string(),
@@ -408,7 +402,7 @@ impl TbClient {
 
     /// Fetch account balance
     pub async fn get_account(&self, account_id: &str) -> Result<TbAccount, LedgerError> {
-        let resp = self.http.get(self.account_url(account_id)?).send().await?;
+        let resp = self.account_get(account_id).await?;
         if resp.status() == 404 {
             return Err(LedgerError::AccountNotFound(account_id.to_string()));
         }

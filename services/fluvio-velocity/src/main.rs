@@ -9,7 +9,7 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use bis_transport_policy::{https_client, required_allowed_hosts, TrustedEndpoint};
+use bis_transport_policy::{required_allowed_hosts, TrustedEndpoint, TrustedHttpsClient};
 use serde::Deserialize;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -183,24 +183,20 @@ async fn close_circuit(redis_url: &str) {
 
 // ─── Gateway dispatch ─────────────────────────────────────────────────────────
 
-async fn dispatch_breach(client: &reqwest::Client, config: &Config, breach: &VelocityBreach) {
+async fn dispatch_breach(client: &TrustedHttpsClient, config: &Config, breach: &VelocityBreach) {
     if is_circuit_open(&config.redis_url).await {
         warn!(alert_id = %breach.alert_id, "Circuit breaker OPEN — skipping dispatch");
         DISPATCH_ERRORS_TOTAL.fetch_add(1, Ordering::Relaxed);
         return;
     }
-    let url = match config
-        .gateway_url
-        .with_path_segments(&["v1", "velocity", "alert"])
-    {
-        Ok(url) => url,
+    let request = match client.post(&["v1", "velocity", "alert"]) {
+        Ok(request) => request,
         Err(_) => {
             error!("Gateway endpoint path cannot be constructed");
             return;
         }
     };
-    match client
-        .post(url)
+    match request
         .header("X-BIS-Key", &config.gateway_key)
         .json(breach)
         .timeout(Duration::from_secs(10))
@@ -279,7 +275,7 @@ async fn service_auth(headers: HeaderMap, request: axum::extract::Request, next:
 #[derive(Clone)]
 struct AppState {
     engine: Arc<Mutex<VelocityEngine>>,
-    client: Arc<reqwest::Client>,
+    client: Arc<TrustedHttpsClient>,
     config: Arc<Config>,
 }
 
@@ -426,10 +422,14 @@ async fn main() {
         return;
     }
     let engine = Arc::new(Mutex::new(VelocityEngine::new(default_rules())));
-    let client = match https_client(Duration::from_secs(10), Duration::from_secs(5)) {
+    let client = match TrustedHttpsClient::new(
+        config.gateway_url.clone(),
+        Duration::from_secs(10),
+        Duration::from_secs(5),
+    ) {
         Ok(client) => Arc::new(client),
         Err(_) => {
-            error!("TLS HTTP client could not be initialized");
+            error!("Trusted HTTPS gateway client could not be initialized");
             return;
         }
     };
