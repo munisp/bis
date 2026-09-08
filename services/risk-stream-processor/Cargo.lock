@@ -156,6 +156,7 @@ name = "bis-transport-policy"
 version = "1.0.0"
 dependencies = [
  "reqwest",
+ "serde",
  "thiserror 1.0.69",
 ]
 
