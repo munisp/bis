@@ -211,13 +211,9 @@ impl AmlDlq {
         self: Arc<Self>,
         replay_url: String,
         api_key: String,
+        client: reqwest::Client,
     ) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
-            let client = reqwest::Client::builder()
-                .timeout(Duration::from_secs(10))
-                .build()
-                .unwrap_or_default();
-
             let mut interval = tokio::time::interval(Duration::from_secs(30));
             interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 

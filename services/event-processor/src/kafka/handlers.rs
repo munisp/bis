@@ -587,24 +587,51 @@ pub async fn dispatch_domain_event(event: &BisEvent, audit_log: AuditLog) {
 // ─── BFF webhook forward (shared with consumer.rs) ───────────────────────────
 
 async fn forward_to_bff(entry: serde_json::Value) {
-    let bff_url = std::env::var("BFF_WEBHOOK_URL")
-        .unwrap_or_else(|_| "http://localhost:8080/api/internal/events".to_string());
-    let gateway_key = std::env::var("BIS_GATEWAY_KEY")
-        .unwrap_or_else(|_| "dev-gateway-key-change-in-prod".to_string());
-
-    let client = match reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
-    {
-        Ok(c) => c,
-        Err(e) => {
-            warn!("[BFF] Failed to build HTTP client: {}", e);
+    let allowed_hosts =
+        match bis_transport_policy::required_allowed_hosts("BIS_EVENT_BFF_ALLOWED_HOSTS") {
+            Ok(hosts) => hosts,
+            Err(_) => {
+                warn!("[BFF] Outbound transport policy is not configured");
+                return;
+            }
+        };
+    let bff_url = match std::env::var("BFF_WEBHOOK_URL")
+        .ok()
+        .and_then(|raw| {
+            bis_transport_policy::TrustedEndpoint::parse("BFF_WEBHOOK_URL", &raw, &allowed_hosts)
+                .ok()
+        })
+        .and_then(|endpoint| {
+            endpoint
+                .with_path_segments(&["api", "internal", "events"])
+                .ok()
+        }) {
+        Some(endpoint) => endpoint,
+        None => {
+            warn!("[BFF] Outbound webhook endpoint is not configured");
+            return;
+        }
+    };
+    let gateway_key = match std::env::var("BIS_GATEWAY_KEY") {
+        Ok(key) if !key.trim().is_empty() => key,
+        _ => {
+            warn!("[BFF] Gateway credential is not configured");
+            return;
+        }
+    };
+    let client = match bis_transport_policy::https_client(
+        std::time::Duration::from_secs(10),
+        std::time::Duration::from_secs(5),
+    ) {
+        Ok(client) => client,
+        Err(_) => {
+            warn!("[BFF] TLS client cannot be initialized");
             return;
         }
     };
 
     match client
-        .post(&bff_url)
+        .post(bff_url)
         .header("X-BIS-Key", &gateway_key)
         .header("Content-Type", "application/json")
         .json(&entry)

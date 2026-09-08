@@ -386,9 +386,19 @@ async fn main() {
                 .map(|endpoint| endpoint.as_str().to_string())
         });
         if let Some(replay_url) = replay_url {
-            dlq.clone()
-                .start_replay_task(replay_url, service_key.clone());
-            info!("[AML-DLQ] Dead-letter queue replay initialised");
+            match https_client(
+                std::time::Duration::from_secs(10),
+                std::time::Duration::from_secs(5),
+            ) {
+                Ok(client) => {
+                    dlq.clone()
+                        .start_replay_task(replay_url, service_key.clone(), client);
+                    info!("[AML-DLQ] Dead-letter queue replay initialised");
+                }
+                Err(_) => {
+                    warn!("[AML-DLQ] Replay transport is disabled because TLS client setup failed")
+                }
+            }
         } else {
             warn!("[AML-DLQ] Replay transport is disabled until an approved HTTPS endpoint is configured");
         }
