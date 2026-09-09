@@ -152,7 +152,7 @@ export default function DashboardScreen() {
         {recentAlerts?.length === 0 && (
           <Text style={styles.emptyText}>No open alerts</Text>
         )}
-        {(recentAlerts ?? []).map((alert: any) => (
+        {(recentAlerts ?? []).map((alert) => (
           <AlertItem key={alert.id} alert={alert} />
         ))}
       </View>

@@ -37,6 +37,11 @@ const COLORS = {
 
 type DocType = "nin" | "passport" | "drivers_licence";
 
+type OcrResult = {
+  confidence: number | null;
+  reviewStatus: "pending_human_review";
+};
+
 const DOC_TYPES: { value: DocType; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
   { value: "nin", label: "NIN Slip", icon: "card-outline" },
   { value: "passport", label: "Passport", icon: "book-outline" },
@@ -52,12 +57,12 @@ export default function DocumentCameraScreen() {
   const [capturedBase64, setCapturedBase64] = useState<string | null>(null);
   const [subjectRef, setSubjectRef] = useState("");
   const [capturing, setCapturing] = useState(false);
-  const [ocrResult, setOcrResult] = useState<Record<string, string> | null>(null);
+  const [ocrResult, setOcrResult] = useState<OcrResult | null>(null);
 
   const ocrMutation = trpc.biometric.ocrDocument.useMutation({
-    onSuccess: (data: any) => {
+    onSuccess: (data) => {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      setOcrResult(data?.fields ?? {});
+      setOcrResult({ confidence: data.confidence, reviewStatus: data.reviewStatus });
     },
     onError: (err) => {
       Alert.alert("OCR Failed", err.message);
@@ -188,13 +193,17 @@ export default function DocumentCameraScreen() {
           {/* OCR result */}
           {ocrResult && (
             <View style={styles.ocrCard}>
-              <Text style={styles.ocrTitle}>Extracted Fields</Text>
-              {Object.entries(ocrResult).map(([key, value]) => (
-                <View key={key} style={styles.ocrRow}>
-                  <Text style={styles.ocrKey}>{key.replace(/_/g, " ").toUpperCase()}</Text>
-                  <Text style={styles.ocrValue}>{String(value)}</Text>
-                </View>
-              ))}
+              <Text style={styles.ocrTitle}>OCR Review Submitted</Text>
+              <View style={styles.ocrRow}>
+                <Text style={styles.ocrKey}>CONFIDENCE</Text>
+                <Text style={styles.ocrValue}>
+                  {ocrResult.confidence === null ? "Unavailable" : `${Math.round(ocrResult.confidence * 100)}%`}
+                </Text>
+              </View>
+              <View style={styles.ocrRow}>
+                <Text style={styles.ocrKey}>STATUS</Text>
+                <Text style={styles.ocrValue}>{ocrResult.reviewStatus.replace(/_/g, " ")}</Text>
+              </View>
             </View>
           )}
 

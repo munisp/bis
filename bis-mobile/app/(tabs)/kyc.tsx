@@ -20,7 +20,7 @@ export default function KYCScreen() {
     { staleTime: 30_000 }
   );
 
-  const records = data?.items ?? [] ?? [];
+  const records = data?.items ?? [];
 
   return (
     <View style={styles.container}>
@@ -41,10 +41,10 @@ export default function KYCScreen() {
       ) : (
         <FlatList
           data={records}
-          keyExtractor={(item: any) => String(item.id)}
+          keyExtractor={(item) => String(item.id)}
           refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={COLORS.primary} />}
           contentContainerStyle={styles.list}
-          renderItem={({ item }: { item: any }) => {
+          renderItem={({ item }) => {
             const sc = STATUS_COLOR[item.status] ?? COLORS.muted;
             return (
               <View style={styles.card}>

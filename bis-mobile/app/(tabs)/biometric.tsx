@@ -59,19 +59,6 @@ export default function BiometricScreen() {
     onError: (err) => Alert.alert("Error", err.message),
   });
 
-  const verifyMutation = trpc.biometric.verify.useMutation({
-    onSuccess: (result) => {
-      const r = result as Record<string, unknown>;
-      Alert.alert(
-        r.match ? "Match Found" : "No Match",
-        r.match
-          ? `Identity verified with ${Number(r.confidence ?? 0).toFixed(1)}% confidence`
-          : "Biometric verification failed — no match found"
-      );
-    },
-    onError: (err) => Alert.alert("Error", err.message),
-  });
-
   const deleteMutation = trpc.biometric.delete.useMutation({
     onSuccess: () => utils.biometric.list.invalidate(),
     onError: (err) => Alert.alert("Error", err.message),

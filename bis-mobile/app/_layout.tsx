@@ -1,5 +1,4 @@
 import { DarkTheme, ThemeProvider } from "@react-navigation/native";
-import { useFonts } from "expo-font";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
@@ -8,7 +7,7 @@ import "react-native-reanimated";
 import { usePushNotifications } from "@/hooks/usePushNotifications";
 import { TRPCProvider } from "@/lib/trpc";
 
-// Prevent the splash screen from auto-hiding before asset loading is complete.
+// Prevent the splash screen from auto-hiding until the root navigator is ready.
 void SplashScreen.preventAutoHideAsync();
 
 function RootNavigator() {
@@ -31,19 +30,9 @@ function RootNavigator() {
 }
 
 export default function RootLayout() {
-  const [loaded] = useFonts({
-    SpaceMono: require("../assets/fonts/SpaceMono-Regular.ttf"),
-  });
-
   useEffect(() => {
-    if (loaded) {
-      void SplashScreen.hideAsync();
-    }
-  }, [loaded]);
-
-  if (!loaded) {
-    return null;
-  }
+    void SplashScreen.hideAsync();
+  }, []);
 
   return (
     <TRPCProvider>

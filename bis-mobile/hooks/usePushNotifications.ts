@@ -23,14 +23,13 @@ import { Platform } from "react-native";
 import * as Notifications from "expo-notifications";
 import * as Device from "expo-device";
 import Constants from "expo-constants";
-import { useRouter } from "expo-router";
+import { useRouter, type Href } from "expo-router";
 import { trpc } from "@/lib/trpc";
 
 // Configure how foreground notifications are presented
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-    shouldShowBanner: true,
-      shouldShowList: true,
+    shouldShowAlert: true,
     shouldPlaySound: true,
     shouldSetBadge: true,
   }),
@@ -46,18 +45,20 @@ type NotificationData = {
 
 // ─── Deep-link resolver ───────────────────────────────────────────────────────
 
-function resolveRoute(data: NotificationData): string {
+function resolveRoute(data: NotificationData): Href {
   const { type, id, ref } = data;
   const target = id ?? ref;
 
   switch (type) {
     case "alert":
-      return target ? `/alerts/${target}` : "/(tabs)/alerts";
+      return target
+        ? { pathname: "/alerts/[id]", params: { id: String(target) } }
+        : "/(tabs)/alerts";
     case "investigation":
-      return target ? `/investigation/${target}` : "/(tabs)/investigations";
     case "field_task":
-      // Field tasks link to the parent investigation if ref is provided
-      return target ? `/investigation/${target}` : "/(tabs)/investigations";
+      return target
+        ? { pathname: "/investigation/[id]", params: { id: String(target) } }
+        : "/(tabs)/investigations";
     case "kyc":
       return "/(tabs)/kyc";
     default:
@@ -69,14 +70,14 @@ function resolveRoute(data: NotificationData): string {
 
 export function usePushNotifications() {
   const router = useRouter();
-  const notificationListener = useRef<Notifications.EventSubscription | null>(null);
-  const responseListener = useRef<Notifications.EventSubscription | null>(null);
-  const registerToken = trpc.users.registerPushToken.useMutation();
+  const notificationListener = useRef<Notifications.Subscription | null>(null);
+  const responseListener = useRef<Notifications.Subscription | null>(null);
+  const { mutate: registerPushToken } = trpc.users.registerPushToken.useMutation();
 
   useEffect(() => {
     registerForPushNotificationsAsync().then((token) => {
       if (token) {
-        registerToken.mutate({ token });
+        registerPushToken({ token });
       }
     });
 
@@ -94,7 +95,7 @@ export function usePushNotifications() {
         const route = resolveRoute(data);
         // Small delay to ensure the navigator is mounted
         setTimeout(() => {
-          router.push(route as any);
+          router.push(route);
         }, 300);
       }
     );
@@ -105,7 +106,7 @@ export function usePushNotifications() {
       const data = response.notification.request.content.data as NotificationData;
       const route = resolveRoute(data);
       setTimeout(() => {
-        router.push(route as any);
+        router.push(route);
       }, 500);
     });
 
@@ -113,7 +114,7 @@ export function usePushNotifications() {
       notificationListener.current?.remove();
       responseListener.current?.remove();
     };
-  }, [router]);
+  }, [router, registerPushToken]);
 }
 
 // ─── Permission + token registration ─────────────────────────────────────────

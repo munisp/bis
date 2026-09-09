@@ -23,19 +23,20 @@ export default function AlertsScreen() {
     onSuccess: () => utils.alerts.list.invalidate(),
   });
 
-  const alerts = data ?? [] ?? [];
+  const alerts = data ?? [];
+  type AlertRow = (typeof alerts)[number];
 
   return (
     <View style={styles.container}>
       {isLoading ? (
         <ActivityIndicator color={COLORS.primary} style={{ marginTop: 40 }} />
       ) : (
-        <FlatList
+        <FlatList<AlertRow>
           data={alerts}
-          keyExtractor={(item: any) => String(item.id)}
+          keyExtractor={(item) => String(item.id)}
           refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={COLORS.primary} />}
           contentContainerStyle={styles.list}
-          renderItem={({ item }: { item: any }) => {
+          renderItem={({ item }) => {
             const sc = SEV_COLOR[item.severity] ?? COLORS.muted;
             return (
               <View style={[styles.card, { borderLeftColor: sc, borderLeftWidth: 3 }]}>

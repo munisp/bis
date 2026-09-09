@@ -23,7 +23,7 @@ import {
   ActivityIndicator,
   Image,
 } from "react-native";
-import { CameraView, CameraType, useCameraPermissions } from "expo-camera";
+import { CameraView, useCameraPermissions } from "expo-camera";
 import * as ImagePicker from "expo-image-picker";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
@@ -44,11 +44,21 @@ const COLORS = {
 
 type Step = "permissions" | "liveness" | "selfie" | "document" | "confirm" | "done";
 
+type LivenessChallengeType = "blink" | "head_turn_left" | "head_turn_right" | "smile" | "nod";
+
 interface LivenessChallenge {
   id: string;
-  type: string;
+  type: LivenessChallengeType;
   instruction: string;
 }
+
+const CHALLENGE_DISPLAY_TYPES: Record<string, LivenessChallengeType> = {
+  blink: "blink",
+  turn_left: "head_turn_left",
+  turn_right: "head_turn_right",
+  smile: "smile",
+  nod: "nod",
+};
 
 // ── Step indicator ────────────────────────────────────────────────────────────
 function StepIndicator({ current, total }: { current: number; total: number }) {
@@ -167,7 +177,7 @@ function SelfieStep({ onCapture }: { onCapture: (capture: { uri: string; base64:
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         onCapture({ uri: photo.uri, base64: photo.base64 });
       }
-    } catch (err) {
+    } catch {
       Alert.alert("Capture Failed", "Could not capture photo. Please try again.");
     } finally {
       setCapturing(false);
@@ -341,12 +351,16 @@ export default function BiometricEnrollmentScreen() {
   const [documentBase64, setDocumentBase64] = useState<string | null>(null);
   const [subjectRef, setSubjectRef] = useState("");
 
-  const { data: challengesData } = trpc.biometric.getChallenges.useQuery();
-  const challenges: LivenessChallenge[] = (challengesData as any)?.challenges ?? [
-    { id: "blink", type: "blink", instruction: "Blink both eyes slowly twice" },
-    { id: "turn_left", type: "head_turn_left", instruction: "Turn your head slowly to the left" },
-    { id: "turn_right", type: "head_turn_right", instruction: "Turn your head slowly to the right" },
-  ];
+  const {
+    data: challengesData,
+    isLoading: challengesLoading,
+    error: challengesError,
+    refetch: refetchChallenges,
+  } = trpc.biometric.getChallenges.useQuery();
+  const challenges: LivenessChallenge[] = (challengesData?.challenges ?? []).flatMap((challenge) => {
+    const type = CHALLENGE_DISPLAY_TYPES[challenge.id];
+    return type ? [{ id: challenge.id, type, instruction: challenge.label }] : [];
+  });
 
   const enrollMutation = trpc.biometric.fullEnrollment.useMutation({
     onSuccess: () => {
@@ -394,10 +408,26 @@ export default function BiometricEnrollmentScreen() {
         <PermissionsStep onGranted={() => setStep("liveness")} />
       )}
       {step === "liveness" && (
-        <LivenessStep
-          challenges={challenges}
-          onComplete={() => setStep("selfie")}
-        />
+        challengesLoading ? (
+          <View style={styles.centeredContent}>
+            <ActivityIndicator color={COLORS.primary} />
+            <Text style={styles.stepDesc}>Loading authorised liveness challenges…</Text>
+          </View>
+        ) : challengesError || challenges.length === 0 ? (
+          <View style={styles.centeredContent}>
+            <Ionicons name="alert-circle-outline" size={48} color={COLORS.warning} />
+            <Text style={styles.stepTitle}>Liveness Check Unavailable</Text>
+            <Text style={styles.stepDesc}>Authorised liveness challenges could not be loaded. Please retry before capturing biometric data.</Text>
+            <TouchableOpacity style={styles.primaryButton} onPress={() => refetchChallenges()}>
+              <Text style={styles.primaryButtonText}>Retry</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <LivenessStep
+            challenges={challenges}
+            onComplete={() => setStep("selfie")}
+          />
+        )
       )}
       {step === "selfie" && (
         <SelfieStep
