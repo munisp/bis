@@ -298,6 +298,7 @@ dependencies = [
  "axum",
  "base64",
  "bis-transport-policy",
+ "bytes",
  "chrono",
  "dotenvy",
  "reqwest",

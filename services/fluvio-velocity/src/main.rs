@@ -10,6 +10,7 @@ use axum::{
     Router,
 };
 use bis_transport_policy::{required_allowed_hosts, TrustedEndpoint, TrustedHttpsClient};
+use bytes::Bytes;
 use reqwest::header::CONTENT_TYPE;
 use serde::Deserialize;
 use std::fmt::Write as _;
@@ -200,6 +201,30 @@ const MAX_BOUND_GATEWAY_JSON_BYTES: usize = MAX_GATEWAY_FIXED_JSON_BYTES
 
 /// Write a JSON string without invoking a serializer that could allocate from
 /// request-derived content. The caller has already bounded all dynamic fields.
+struct FixedGatewayBuffer(Box<[u8; MAX_GATEWAY_BREACH_PAYLOAD_BYTES]>);
+
+impl AsRef<[u8]> for FixedGatewayBuffer {
+    fn as_ref(&self) -> &[u8] {
+        &self.0[..]
+    }
+}
+
+struct BoundedGatewayPayload {
+    bytes: Box<[u8; MAX_GATEWAY_BREACH_PAYLOAD_BYTES]>,
+    len: usize,
+}
+
+impl BoundedGatewayPayload {
+    #[cfg(test)]
+    fn as_bytes(&self) -> &[u8] {
+        &self.bytes[..self.len]
+    }
+
+    fn into_bytes(self) -> Bytes {
+        Bytes::from_owner(FixedGatewayBuffer(self.bytes)).slice(0..self.len)
+    }
+}
+
 fn push_json_string(output: &mut String, value: &str) {
     output.push('"');
     for character in value.chars() {
@@ -232,7 +257,7 @@ fn push_json_field(output: &mut String, name: &str, value: &str) {
 /// Encode one gateway alert after bounding every variable-width input. The
 /// resulting byte buffer has a constant, checked allocation ceiling and is
 /// passed directly to Reqwest so the HTTP sink never serializes request data.
-fn encode_gateway_breach(breach: &VelocityBreach) -> Option<Vec<u8>> {
+fn encode_gateway_breach(breach: &VelocityBreach) -> Option<BoundedGatewayPayload> {
     let fields = [
         breach.alert_id.as_str(),
         breach.account_id.as_str(),
@@ -276,7 +301,14 @@ fn encode_gateway_breach(breach: &VelocityBreach) -> Option<Vec<u8>> {
     push_json_field(&mut encoded, "detectedAt", &detected_at);
     encoded.push('}');
 
-    (encoded.len() <= MAX_GATEWAY_BREACH_PAYLOAD_BYTES).then_some(encoded.into_bytes())
+    if encoded.len() > MAX_GATEWAY_BREACH_PAYLOAD_BYTES {
+        return None;
+    }
+
+    let len = encoded.len();
+    let mut bytes = Box::new([0_u8; MAX_GATEWAY_BREACH_PAYLOAD_BYTES]);
+    bytes[..len].copy_from_slice(encoded.as_bytes());
+    Some(BoundedGatewayPayload { bytes, len })
 }
 
 async fn dispatch_breach(client: &TrustedHttpsClient, config: &Config, breach: &VelocityBreach) {
@@ -304,7 +336,7 @@ async fn dispatch_breach(client: &TrustedHttpsClient, config: &Config, breach: &
     match request
         .header("X-BIS-Key", &config.gateway_key)
         .header(CONTENT_TYPE, "application/json")
-        .body(encoded_breach)
+        .body(encoded_breach.into_bytes())
         .timeout(Duration::from_secs(10))
         .send()
         .await
@@ -589,8 +621,8 @@ mod gateway_payload_tests {
     #[test]
     fn gateway_payload_encodes_protocol_sized_breach_once_within_bound() {
         let encoded = encode_gateway_breach(&breach()).expect("protocol-sized breach accepted");
-        assert!(encoded.len() <= MAX_GATEWAY_BREACH_PAYLOAD_BYTES);
-        assert!(std::str::from_utf8(&encoded)
+        assert!(encoded.as_bytes().len() <= MAX_GATEWAY_BREACH_PAYLOAD_BYTES);
+        assert!(std::str::from_utf8(encoded.as_bytes())
             .expect("JSON is UTF-8")
             .contains("\"alertId\""));
     }
@@ -601,7 +633,8 @@ mod gateway_payload_tests {
         encoded_breach.account_id = "account-\\\"quoted\\\"\nline".to_owned();
 
         let encoded = encode_gateway_breach(&encoded_breach).expect("bounded breach accepted");
-        let decoded: serde_json::Value = serde_json::from_slice(&encoded).expect("valid JSON");
+        let decoded: serde_json::Value =
+            serde_json::from_slice(encoded.as_bytes()).expect("valid JSON");
         assert_eq!(decoded["accountId"], encoded_breach.account_id);
         assert_eq!(decoded["alertId"], encoded_breach.alert_id);
     }
