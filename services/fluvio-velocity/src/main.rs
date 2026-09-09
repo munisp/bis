@@ -11,7 +11,8 @@ use axum::{
 };
 use bis_transport_policy::{required_allowed_hosts, TrustedEndpoint, TrustedHttpsClient};
 use reqwest::header::CONTENT_TYPE;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use std::fmt::Write as _;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -187,26 +188,50 @@ async fn close_circuit(redis_url: &str) {
 const MAX_GATEWAY_BREACH_FIELD_BYTES: usize = 256;
 const MAX_GATEWAY_BREACH_PAYLOAD_BYTES: usize = 16 * 1024;
 
-/// The only gateway payload shape emitted by this process. Borrowed fields
-/// avoid cloning request-derived strings before the single bounded encoding.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct GatewayVelocityAlert<'a> {
-    alert_id: &'a str,
-    account_id: &'a str,
-    tenant_id: &'a str,
-    rule_name: &'a str,
-    risk_level: &'a str,
-    window_secs: u64,
-    tx_count: u64,
-    total_amount_kobo: i64,
-    triggering_tx_ref: &'a str,
-    detected_at: chrono::DateTime<chrono::Utc>,
+/// The fixed JSON punctuation, numeric values, and timestamp are substantially
+/// smaller than this reserve. Each of the six request-derived fields is capped
+/// at 256 UTF-8 bytes and any byte can expand to at most a six-byte `\\u00XX`
+/// escape. Keeping this upper bound below the fixed reserve prevents `String`
+/// from growing beyond its constant allocation during serialization.
+const GATEWAY_VARIABLE_FIELD_COUNT: usize = 6;
+const MAX_GATEWAY_FIXED_JSON_BYTES: usize = 512;
+const MAX_BOUND_GATEWAY_JSON_BYTES: usize = MAX_GATEWAY_FIXED_JSON_BYTES
+    + (GATEWAY_VARIABLE_FIELD_COUNT * MAX_GATEWAY_BREACH_FIELD_BYTES * 6);
+
+/// Write a JSON string without invoking a serializer that could allocate from
+/// request-derived content. The caller has already bounded all dynamic fields.
+fn push_json_string(output: &mut String, value: &str) {
+    output.push('"');
+    for character in value.chars() {
+        match character {
+            '"' => output.push_str("\\\""),
+            '\\' => output.push_str("\\\\"),
+            '\u{08}' => output.push_str("\\b"),
+            '\u{0C}' => output.push_str("\\f"),
+            '\n' => output.push_str("\\n"),
+            '\r' => output.push_str("\\r"),
+            '\t' => output.push_str("\\t"),
+            control if control.is_control() => {
+                // Writing into String cannot fail. The format is always four
+                // hexadecimal digits because JSON control code points are <= 0x1F.
+                write!(output, "\\u{:04x}", control as u32).expect("write to String");
+            }
+            safe => output.push(safe),
+        }
+    }
+    output.push('"');
+}
+
+fn push_json_field(output: &mut String, name: &str, value: &str) {
+    output.push('"');
+    output.push_str(name);
+    output.push_str("\":");
+    push_json_string(output, value);
 }
 
 /// Encode one gateway alert after bounding every variable-width input. The
-/// checked byte buffer is passed directly to Reqwest, preventing a second
-/// request-derived serialization and failing closed on encoding/bound errors.
+/// resulting byte buffer has a constant, checked allocation ceiling and is
+/// passed directly to Reqwest so the HTTP sink never serializes request data.
 fn encode_gateway_breach(breach: &VelocityBreach) -> Option<Vec<u8>> {
     let fields = [
         breach.alert_id.as_str(),
@@ -219,24 +244,39 @@ fn encode_gateway_breach(breach: &VelocityBreach) -> Option<Vec<u8>> {
     if fields
         .iter()
         .any(|field| field.len() > MAX_GATEWAY_BREACH_FIELD_BYTES)
+        || MAX_BOUND_GATEWAY_JSON_BYTES > MAX_GATEWAY_BREACH_PAYLOAD_BYTES
     {
         return None;
     }
 
-    let payload = GatewayVelocityAlert {
-        alert_id: &breach.alert_id,
-        account_id: &breach.account_id,
-        tenant_id: &breach.tenant_id,
-        rule_name: &breach.rule_name,
-        risk_level: &breach.risk_level,
-        window_secs: breach.window_secs,
-        tx_count: breach.tx_count,
-        total_amount_kobo: breach.total_amount_kobo,
-        triggering_tx_ref: &breach.triggering_tx_ref,
-        detected_at: breach.detected_at,
-    };
-    let encoded = serde_json::to_vec(&payload).ok()?;
-    (encoded.len() <= MAX_GATEWAY_BREACH_PAYLOAD_BYTES).then_some(encoded)
+    let detected_at = breach
+        .detected_at
+        .to_rfc3339_opts(chrono::SecondsFormat::Micros, true);
+    let mut encoded = String::with_capacity(MAX_GATEWAY_BREACH_PAYLOAD_BYTES);
+    encoded.push('{');
+    push_json_field(&mut encoded, "alertId", &breach.alert_id);
+    encoded.push(',');
+    push_json_field(&mut encoded, "accountId", &breach.account_id);
+    encoded.push(',');
+    push_json_field(&mut encoded, "tenantId", &breach.tenant_id);
+    encoded.push(',');
+    push_json_field(&mut encoded, "ruleName", &breach.rule_name);
+    encoded.push(',');
+    push_json_field(&mut encoded, "riskLevel", &breach.risk_level);
+    encoded.push(',');
+    write!(
+        encoded,
+        "\"windowSecs\":{},\"txCount\":{},\"totalAmountKobo\":{}",
+        breach.window_secs, breach.tx_count, breach.total_amount_kobo
+    )
+    .expect("write to String");
+    encoded.push(',');
+    push_json_field(&mut encoded, "triggeringTxRef", &breach.triggering_tx_ref);
+    encoded.push(',');
+    push_json_field(&mut encoded, "detectedAt", &detected_at);
+    encoded.push('}');
+
+    (encoded.len() <= MAX_GATEWAY_BREACH_PAYLOAD_BYTES).then_some(encoded.into_bytes())
 }
 
 async fn dispatch_breach(client: &TrustedHttpsClient, config: &Config, breach: &VelocityBreach) {
@@ -553,6 +593,17 @@ mod gateway_payload_tests {
         assert!(std::str::from_utf8(&encoded)
             .expect("JSON is UTF-8")
             .contains("\"alertId\""));
+    }
+
+    #[test]
+    fn gateway_payload_escapes_request_derived_strings_as_valid_json() {
+        let mut encoded_breach = breach();
+        encoded_breach.account_id = "account-\\\"quoted\\\"\nline".to_owned();
+
+        let encoded = encode_gateway_breach(&encoded_breach).expect("bounded breach accepted");
+        let decoded: serde_json::Value = serde_json::from_slice(&encoded).expect("valid JSON");
+        assert_eq!(decoded["accountId"], encoded_breach.account_id);
+        assert_eq!(decoded["alertId"], encoded_breach.alert_id);
     }
 
     #[test]

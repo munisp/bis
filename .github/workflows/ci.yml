@@ -90,9 +90,13 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-          cache-dependency-path: bis-mobile/pnpm-lock.yaml
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            bis-mobile/pnpm-lock.yaml
       - name: Reject deprecated mobile client references
         run: ./scripts/check-deprecated-mobile-references.sh
+      - name: Install typed AppRouter dependencies
+        run: pnpm install --frozen-lockfile
       - name: Install authoritative native client dependencies
         working-directory: bis-mobile
         run: pnpm install --frozen-lockfile --ignore-workspace
