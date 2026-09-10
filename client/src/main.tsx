@@ -9,6 +9,7 @@ import App from "./App";
 import { OfflineBanner } from "./components/OfflineBanner";
 import { getLoginUrl } from "./const";
 import { isUnauthenticatedFailure, reportClientFailure } from "./lib/safeClientLogger";
+import { registerBISServiceWorker } from "./lib/serviceWorker";
 import { toast } from "sonner";
 import "./index.css";
 
@@ -76,6 +77,7 @@ async function fetchCsrfToken(): Promise<string | null> {
 }
 
 void fetchCsrfToken();
+registerBISServiceWorker();
 
 const trpcClient = trpc.createClient({
   links: [

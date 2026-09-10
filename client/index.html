@@ -10,7 +10,7 @@
     <meta name="apple-mobile-web-app-title" content="BIS" />
     <title>BIS — Background Intelligence System</title>
     <!-- Cache-busting: prevent browser from caching the HTML entry point -->
-    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate, max-age=0" />
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
     <link rel="manifest" href="/manifest.json" />
@@ -24,28 +24,5 @@
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
-    <script>
-      // Register Service Worker for offline PWA capability
-      if ('serviceWorker' in navigator) {
-        window.addEventListener('load', function () {
-          navigator.serviceWorker.register('/sw.js', { scope: '/' })
-            .then(function (reg) {
-              // Check for updates
-              reg.addEventListener('updatefound', function () {
-                const newWorker = reg.installing;
-                newWorker.addEventListener('statechange', function () {
-                  if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                    // New version available — notify app
-                    window.dispatchEvent(new CustomEvent('sw-update-available'));
-                  }
-                });
-              });
-            })
-            .catch(function () {
-              // Service worker support is optional; the app remains online-capable.
-            });
-        });
-      }
-    </script>
   </body>
 </html>

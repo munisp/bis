@@ -17,10 +17,24 @@ async function startServer() {
       ? path.resolve(__dirname, "public")
       : path.resolve(__dirname, "..", "dist", "public");
 
-  app.use(express.static(staticPath));
+  const setNoStoreHeaders = (res: express.Response) => {
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate, max-age=0");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+  };
 
-  // Handle client-side routing - serve index.html for all routes
+  app.use(express.static(staticPath, {
+    maxAge: "1y",
+    setHeaders: (res, filePath) => {
+      if (filePath.endsWith("index.html") || filePath.endsWith(`${path.sep}sw.js`)) {
+        setNoStoreHeaders(res);
+      }
+    },
+  }));
+
+  // Handle client-side routing - serve a non-cacheable HTML entry for all routes
   app.get("{*path}", (_req, res) => {
+    setNoStoreHeaders(res);
     res.sendFile(path.join(staticPath, "index.html"));
   });
 

@@ -3,6 +3,7 @@ import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import fs from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { defineConfig, type Plugin, type ViteDevServer } from "vite";
 import { vitePluginManusRuntime } from "vite-plugin-manus-runtime";
 import { VitePWA } from "vite-plugin-pwa";
@@ -14,6 +15,25 @@ import { VitePWA } from "vite-plugin-pwa";
 
 const PROJECT_ROOT = import.meta.dirname;
 const LOG_DIR = path.join(PROJECT_ROOT, ".manus-logs");
+
+function resolveBuildVersion(): string {
+  const configured = process.env.BIS_BUILD_VERSION?.trim() || process.env.GITHUB_SHA?.trim();
+  if (configured) return configured;
+
+  try {
+    return execFileSync("git", ["rev-parse", "--verify", "HEAD"], {
+      cwd: PROJECT_ROOT,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch {
+    // Local source archives can lack Git metadata. The resulting development
+    // version is safe but deployment automation must set BIS_BUILD_VERSION.
+    return "development";
+  }
+}
+
+const BUILD_VERSION = resolveBuildVersion();
 const MAX_LOG_SIZE_BYTES = 1 * 1024 * 1024; // 1MB per log file
 const TRIM_TARGET_BYTES = Math.floor(MAX_LOG_SIZE_BYTES * 0.6); // Trim to 60% to avoid constant re-trimming
 
@@ -200,6 +220,9 @@ const lexPWA = VitePWA({
 const plugins = [react(), tailwindcss(), jsxLocPlugin(), vitePluginManusRuntime(), vitePluginManusDebugCollector(), lexPWA];
 
 export default defineConfig({
+  define: {
+    __BIS_BUILD_VERSION__: JSON.stringify(BUILD_VERSION),
+  },
   plugins,
   resolve: {
     alias: {
