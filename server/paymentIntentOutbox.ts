@@ -1,6 +1,7 @@
 import { randomInt } from "node:crypto";
 import { sql } from "drizzle-orm";
-import { getDb } from "./db";
+import { getDb, getPgPool } from "./db";
+import { withTenantTransaction } from "./tenantRls";
 import { startPaymentTransferWorkflow } from "./temporal";
 
 const POLL_INTERVAL_MS = 5_000;
@@ -97,16 +98,7 @@ export async function processPaymentIntentOutbox(limit = MAX_BATCH_SIZE): Promis
   for (const item of claimed) {
     const attempt = item.attempts + 1;
     if (!isDispatchable(item)) {
-      await db.execute(sql`
-        UPDATE payment_intent_outbox
-        SET status = 'dead_letter', attempts = ${attempt}, leased_at = NULL,
-            last_error_code = 'INVALID_DURABLE_PAYMENT_INTENT'
-        WHERE id = ${item.id} AND status = 'leased'
-      `);
-      await db.execute(sql`
-        UPDATE transactions SET status = 'under_review', "updatedAt" = NOW()
-        WHERE id = ${item.transaction_id} AND status = 'pending'
-      `);
+      await escalateForReconciliation(item, attempt, "INVALID_DURABLE_PAYMENT_INTENT");
       deadLettered++;
       continue;
     }
@@ -134,16 +126,7 @@ export async function processPaymentIntentOutbox(limit = MAX_BATCH_SIZE): Promis
       dispatched++;
     } catch {
       if (attempt >= MAX_ATTEMPTS) {
-        await db.execute(sql`
-          UPDATE payment_intent_outbox
-          SET status = 'dead_letter', attempts = ${attempt}, leased_at = NULL,
-              last_error_code = 'TEMPORAL_WORKFLOW_START_FAILED'
-          WHERE id = ${item.id} AND status = 'leased'
-        `);
-        await db.execute(sql`
-          UPDATE transactions SET status = 'under_review', "updatedAt" = NOW()
-          WHERE id = ${item.transaction_id} AND status = 'pending'
-        `);
+        await escalateForReconciliation(item, attempt, "TEMPORAL_WORKFLOW_START_FAILED");
         deadLettered++;
       } else {
         await db.execute(sql`
@@ -157,6 +140,40 @@ export async function processPaymentIntentOutbox(limit = MAX_BATCH_SIZE): Promis
     }
   }
   return { claimed: claimed.length, dispatched, deferred, deadLettered };
+}
+
+async function escalateForReconciliation(
+  item: PaymentOutboxRow,
+  attempt: number,
+  errorCode: "INVALID_DURABLE_PAYMENT_INTENT" | "TEMPORAL_WORKFLOW_START_FAILED"
+): Promise<void> {
+  const pool = await getPgPool();
+  if (!pool) throw new Error("payment reconciliation database unavailable");
+  const client = await pool.connect();
+  try {
+    await withTenantTransaction(client, item.tenant_id, async tenantClient => {
+      const closed = await tenantClient.query(
+        `UPDATE payment_intent_outbox
+         SET status = 'dead_letter', attempts = $2, leased_at = NULL,
+             lease_owner = NULL, last_error_code = $3
+         WHERE id = $1 AND status = 'leased'
+         RETURNING id`,
+        [item.id, attempt, errorCode]
+      );
+      if (closed.rowCount !== 1) throw new Error("payment outbox lease was lost before terminal escalation");
+      const reviewed = await tenantClient.query(
+        `UPDATE transactions SET status = 'under_review', "updatedAt" = NOW()
+         WHERE id = $1 AND "tenantId" = $2 AND status = 'pending'
+         RETURNING id`,
+        [item.transaction_id, item.tenant_id]
+      );
+      if (reviewed.rowCount !== 1) throw new Error("payment transaction was not pending for terminal escalation");
+      // The database trigger opens the tenant-bound reconciliation case and immutable
+      // case_opened event in this same transaction. Do not duplicate it in application code.
+    });
+  } finally {
+    client.release();
+  }
 }
 
 function isDispatchable(item: PaymentOutboxRow): boolean {

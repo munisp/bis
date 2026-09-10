@@ -36,6 +36,7 @@ import { lexRouter } from "./lex";
 import { sessionsRouter, totpRouter, notificationsRouter, investigationLinksRouter, exportSchedulesRouter, decryptTotpSecret, validateTotp } from "./platform";
 import { archivalRouter } from "./archival";
 import { paymentRailsRouter } from "./paymentRails";
+import { paymentReconciliationRouter } from "./paymentReconciliation";
 import { documentVaultRouter } from "./documentVault";
 import { riskDashboardRouter } from "./riskDashboard";
 import { insiderThreatRouter } from "./insiderThreat";
@@ -7625,6 +7626,7 @@ export const appRouter = router({
   redis: redisRouter,
   archival: archivalRouter,
   paymentRails: paymentRailsRouter,
+  paymentReconciliation: paymentReconciliationRouter,
   documentVault: documentVaultRouter,
   riskDashboard: riskDashboardRouter,
   search: searchRouter,

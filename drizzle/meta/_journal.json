@@ -148,6 +148,20 @@
       "when": 1788624000000,
       "tag": "0020_pii_forensic_keyset_pagination_index",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1788627600000,
+      "tag": "0021_payment_intent_outbox",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1788631200000,
+      "tag": "0022_payment_reconciliation_cases",
+      "breakpoints": true
     }
   ]
 }

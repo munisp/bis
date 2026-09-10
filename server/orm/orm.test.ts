@@ -937,6 +937,8 @@ describe("Canonical PostgreSQL Baseline", () => {
       "0018_pii_rotation_dispatch_dead_letter",
       "0019_pii_forensic_integrity_verification",
       "0020_pii_forensic_keyset_pagination_index",
+      "0021_payment_intent_outbox",
+      "0022_payment_reconciliation_cases",
     ]);
   });
 
