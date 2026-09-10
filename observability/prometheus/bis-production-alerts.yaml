@@ -294,6 +294,69 @@ groups:
           description: "A billing event must be migrated into a four-eyes reconciliation case before any replay. Automated replay is prohibited."
           runbook: "docs/operations/INTELLIGENCE_BILLING_RECONCILIATION_AND_SPLIT_BRAIN_RUNBOOK.md#reconciliation-workflow"
 
+  - name: bis-payment-reconciliation
+    rules:
+      - alert: BISPaymentReconciliationMetricsCollectionFailed
+        expr: bis_payment_reconciliation_metrics_collection_healthy == 0
+        for: 5m
+        labels:
+          severity: critical
+          service: payments
+        annotations:
+          summary: "Payment reconciliation metrics cannot query PostgreSQL"
+          description: "Queue, stale-lease, and four-eyes reconciliation state cannot be observed. Freeze payment outbox scale-out and restore PostgreSQL metrics collection before resuming normal operations."
+          runbook: "docs/operations/PAYMENT_RECONCILIATION_UNDER_REVIEW_RUNBOOK.md#metrics-collection-failure"
+      - alert: BISPaymentIntentOutboxStaleLease
+        expr: bis_payment_intent_outbox_stale_leases > 0
+        for: 10m
+        labels:
+          severity: warning
+          service: payments
+        annotations:
+          summary: "Payment intent outbox lease is stale"
+          description: "At least one payment workflow handoff lease exceeded the five-minute recovery interval for ten minutes. Inspect PostgreSQL health, worker fencing, and deterministic workflow identifiers before intervention."
+          runbook: "docs/operations/PAYMENT_RECONCILIATION_UNDER_REVIEW_RUNBOOK.md#stale-lease-recovery"
+      - alert: BISPaymentReconciliationBacklogHigh
+        expr: sum(bis_payment_reconciliation_open_cases) > 25
+        for: 15m
+        labels:
+          severity: warning
+          service: payments
+        annotations:
+          summary: "Payment reconciliation backlog exceeds 25 cases"
+          description: "High-volume human review demand is building. Add independent authorized reviewers and investigate common provider or orchestration failures; do not bulk requeue cases."
+          runbook: "docs/operations/PAYMENT_RECONCILIATION_UNDER_REVIEW_RUNBOOK.md#high-volume-backlog"
+      - alert: BISPaymentReconciliationCaseUnclaimed
+        expr: bis_payment_reconciliation_open_cases{state="open"} > 0
+        for: 30m
+        labels:
+          severity: critical
+          service: payments
+        annotations:
+          summary: "Payment reconciliation case remains unclaimed"
+          description: "A dead-lettered payment intent has not received human ownership for 30 minutes. Freeze automatic replay for the affected rail and assign an independent tenant-scoped reconciler."
+          runbook: "docs/operations/PAYMENT_RECONCILIATION_UNDER_REVIEW_RUNBOOK.md#case-triage"
+      - alert: BISPaymentReconciliationSLOExceeded
+        expr: bis_payment_reconciliation_oldest_open_age_seconds > 14400
+        for: 15m
+        labels:
+          severity: critical
+          service: payments
+        annotations:
+          summary: "Oldest payment reconciliation exceeds four hours"
+          description: "An uncertain payment outcome breached the four-hour reconciliation objective. Fence competing workers, preserve evidence, and use the four-eyes procedure; do not infer settlement from a timeout."
+          runbook: "docs/operations/PAYMENT_RECONCILIATION_UNDER_REVIEW_RUNBOOK.md#four-eyes-resolution"
+      - alert: BISPaymentIntentOutboxDeadLetter
+        expr: bis_payment_intent_outbox_events{state="dead_letter"} > 0
+        for: 5m
+        labels:
+          severity: critical
+          service: payments
+        annotations:
+          summary: "Payment intent outbox reached terminal dead-letter"
+          description: "Every dead-lettered payment intent must have exactly one tenant-bound reconciliation case. Verify the case trigger and do not create a new payment intent or transfer identifier."
+          runbook: "docs/operations/PAYMENT_RECONCILIATION_UNDER_REVIEW_RUNBOOK.md#case-triage"
+
   - name: bis-distributed-tracing
     rules:
       - alert: BISGatewayTraceLatencyP95High

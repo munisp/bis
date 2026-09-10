@@ -21,6 +21,7 @@ import { serveStatic, setupVite } from "./vite";
 import { notifyOwner } from "./notification";
 import { recordPaystackWebhook } from "../billingSettlement";
 import { registerIntelligenceBillingMetrics } from "../intelligenceBillingMetrics";
+import { registerPaymentReconciliationMetrics } from "../paymentReconciliationMetrics";
 import { traceCorrelationMiddleware, traceLogFields } from "../traceContext";
 import crypto from "crypto";
 import { createOpenClawRouter } from "../openclawEndpoints";
@@ -292,6 +293,7 @@ async function startServer() {
   // Collect default Node.js metrics (heap, GC, event loop lag, etc.)
   collectDefaultMetrics({ prefix: 'bis_' });
   registerIntelligenceBillingMetrics();
+  registerPaymentReconciliationMetrics();
   const httpRequestDuration = new Histogram({
     name: 'bis_http_request_duration_seconds',
     help: 'Duration of HTTP requests in seconds',
