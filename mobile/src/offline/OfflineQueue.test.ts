@@ -238,13 +238,12 @@ describe('OfflineQueue.drain', () => {
   });
 
   it('dead-letters operations that exceed maxAttempts', async () => {
-    const { queue } = makeQueue(failing);
+    const { queue, storage } = makeQueue(failing);
     await queue.enqueue({ type: 'kyc.submit', payload: {}, maxAttempts: 2, tenantId: 'tenant-001' });
 
     // First drain: attempt 1
     await queue.drain();
     // Manually reset lastAttemptAt to bypass backoff
-    const storage = (queue as any).storage as MemoryStorage;
     const raw = await storage.getItem('@bis:offline_queue');
     const ops = JSON.parse(raw!) as QueuedOperation[];
     ops[0].lastAttemptAt = new Date(Date.now() - 60_000).toISOString();
@@ -289,10 +288,8 @@ describe('OfflineQueue.drain', () => {
   });
 
   it('returns immediately if already draining', async () => {
-    let drainCount = 0;
     const slowExecutor: OperationExecutor = async () => {
-      drainCount++;
-      await new Promise((r) => setTimeout(r, 50));
+      await new Promise<void>((resolve) => setTimeout(resolve, 50));
     };
     const { queue } = makeQueue(slowExecutor);
     await queue.enqueue({ type: 'kyc.submit', payload: {}, tenantId: 'tenant-001' });
@@ -334,13 +331,12 @@ describe('OfflineQueue.clear', () => {
 
 describe('OfflineQueue.retryDeadLettered', () => {
   it('moves a dead-lettered operation back to the main queue', async () => {
-    const { queue } = makeQueue(failing);
+    const { queue, storage } = makeQueue(failing);
     await queue.enqueue({ type: 'kyc.submit', payload: {}, maxAttempts: 1, tenantId: 'tenant-001' });
 
     // Drain to dead-letter it (attempt 1 fails, maxAttempts=1 so dead-letter on next drain)
     await queue.drain();
     // Reset backoff
-    const storage = (queue as any).storage as MemoryStorage;
     const raw = await storage.getItem('@bis:offline_queue');
     if (raw) {
       const ops = JSON.parse(raw) as QueuedOperation[];
@@ -381,7 +377,7 @@ describe('OfflineQueue network integration', () => {
 
     network.setConnected(true);
     // Give async drain a tick to complete
-    await new Promise((r) => setTimeout(r, 10));
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
     expect(executed.length).toBe(1);
 
     queue.stop();

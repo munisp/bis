@@ -67,27 +67,25 @@ pub enum SchemaError {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]
+#[derive(Default)]
 pub enum CompatibilityMode {
+    #[default]
     Backward,
     Forward,
     Full,
     None,
 }
 
-impl Default for CompatibilityMode {
-    fn default() -> Self {
-        CompatibilityMode::Backward
-    }
-}
+impl std::str::FromStr for CompatibilityMode {
+    type Err = SchemaError;
 
-impl CompatibilityMode {
-    pub fn from_str(s: &str) -> Result<Self, SchemaError> {
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_uppercase().as_str() {
             "BACKWARD" => Ok(CompatibilityMode::Backward),
-            "FORWARD"  => Ok(CompatibilityMode::Forward),
-            "FULL"     => Ok(CompatibilityMode::Full),
-            "NONE"     => Ok(CompatibilityMode::None),
-            other      => Err(SchemaError::InvalidCompatibilityMode(other.to_string())),
+            "FORWARD" => Ok(CompatibilityMode::Forward),
+            "FULL" => Ok(CompatibilityMode::Full),
+            "NONE" => Ok(CompatibilityMode::None),
+            other => Err(SchemaError::InvalidCompatibilityMode(other.to_string())),
         }
     }
 }
@@ -162,11 +160,7 @@ impl SchemaRegistry {
     }
 
     /// Set the compatibility mode for a subject.
-    pub fn set_compatibility(
-        &mut self,
-        subject: &str,
-        mode: CompatibilityMode,
-    ) {
+    pub fn set_compatibility(&mut self, subject: &str, mode: CompatibilityMode) {
         self.compatibility.insert(subject.to_string(), mode);
     }
 
@@ -181,11 +175,7 @@ impl SchemaRegistry {
     ///
     /// Returns the schema ID.  If the schema is identical to the latest
     /// version (same fingerprint), returns the existing ID.
-    pub fn register(
-        &mut self,
-        subject: &str,
-        schema_json: &str,
-    ) -> Result<u32, SchemaError> {
+    pub fn register(&mut self, subject: &str, schema_json: &str) -> Result<u32, SchemaError> {
         // Parse and validate the schema
         let parsed = parse_avro_schema(schema_json)?;
         let fingerprint = fingerprint(schema_json);
@@ -229,11 +219,7 @@ impl SchemaRegistry {
     }
 
     /// Get a specific schema version for a subject.
-    pub fn get_version(
-        &self,
-        subject: &str,
-        version: u32,
-    ) -> Result<&SchemaVersion, SchemaError> {
+    pub fn get_version(&self, subject: &str, version: u32) -> Result<&SchemaVersion, SchemaError> {
         self.subjects
             .get(subject)
             .ok_or_else(|| SchemaError::SubjectNotFound(subject.to_string()))?
@@ -277,7 +263,6 @@ impl SchemaRegistry {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
 
 /// Returns true if an Avro field has a default value.
 ///
@@ -650,23 +635,33 @@ mod tests {
     #[test]
     fn test_register_same_schema_returns_existing_id() {
         let mut registry = SchemaRegistry::new();
-        let id1 = registry.register("bis.payment.events", payment_event_schema()).unwrap();
-        let id2 = registry.register("bis.payment.events", payment_event_schema()).unwrap();
+        let id1 = registry
+            .register("bis.payment.events", payment_event_schema())
+            .unwrap();
+        let id2 = registry
+            .register("bis.payment.events", payment_event_schema())
+            .unwrap();
         assert_eq!(id1, id2);
     }
 
     #[test]
     fn test_register_multiple_subjects() {
         let mut registry = SchemaRegistry::new();
-        let id1 = registry.register("bis.payment.events", payment_event_schema()).unwrap();
-        let id2 = registry.register("bis.aml.alerts", aml_alert_schema()).unwrap();
+        let id1 = registry
+            .register("bis.payment.events", payment_event_schema())
+            .unwrap();
+        let id2 = registry
+            .register("bis.aml.alerts", aml_alert_schema())
+            .unwrap();
         assert_ne!(id1, id2);
     }
 
     #[test]
     fn test_get_latest() {
         let mut registry = SchemaRegistry::new();
-        registry.register("bis.payment.events", payment_event_schema()).unwrap();
+        registry
+            .register("bis.payment.events", payment_event_schema())
+            .unwrap();
         let latest = registry.get_latest("bis.payment.events");
         assert!(latest.is_ok());
         assert_eq!(latest.unwrap().version, 1);
@@ -682,7 +677,9 @@ mod tests {
     #[test]
     fn test_get_by_id() {
         let mut registry = SchemaRegistry::new();
-        let id = registry.register("bis.payment.events", payment_event_schema()).unwrap();
+        let id = registry
+            .register("bis.payment.events", payment_event_schema())
+            .unwrap();
         let schema = registry.get_by_id(id);
         assert!(schema.is_some());
         assert_eq!(schema.unwrap().id, id);
@@ -691,8 +688,12 @@ mod tests {
     #[test]
     fn test_list_subjects() {
         let mut registry = SchemaRegistry::new();
-        registry.register("bis.payment.events", payment_event_schema()).unwrap();
-        registry.register("bis.aml.alerts", aml_alert_schema()).unwrap();
+        registry
+            .register("bis.payment.events", payment_event_schema())
+            .unwrap();
+        registry
+            .register("bis.aml.alerts", aml_alert_schema())
+            .unwrap();
         let subjects = registry.list_subjects();
         assert_eq!(subjects.len(), 2);
     }
@@ -702,7 +703,9 @@ mod tests {
         let mut registry = SchemaRegistry::new();
         registry.set_compatibility("bis.test", CompatibilityMode::None);
         registry.register("bis.test", base_schema()).unwrap();
-        registry.register("bis.test", schema_with_optional_field()).unwrap();
+        registry
+            .register("bis.test", schema_with_optional_field())
+            .unwrap();
         let versions = registry.list_versions("bis.test").unwrap();
         assert_eq!(versions, vec![1, 2]);
     }
@@ -710,7 +713,9 @@ mod tests {
     #[test]
     fn test_delete_subject() {
         let mut registry = SchemaRegistry::new();
-        registry.register("bis.payment.events", payment_event_schema()).unwrap();
+        registry
+            .register("bis.payment.events", payment_event_schema())
+            .unwrap();
         let deleted = registry.delete_subject("bis.payment.events");
         assert!(deleted.is_ok());
         assert!(registry.get_latest("bis.payment.events").is_err());
@@ -718,11 +723,23 @@ mod tests {
 
     #[test]
     fn test_compatibility_mode_from_str() {
-        assert_eq!(CompatibilityMode::from_str("BACKWARD").unwrap(), CompatibilityMode::Backward);
-        assert_eq!(CompatibilityMode::from_str("FORWARD").unwrap(), CompatibilityMode::Forward);
-        assert_eq!(CompatibilityMode::from_str("FULL").unwrap(), CompatibilityMode::Full);
-        assert_eq!(CompatibilityMode::from_str("NONE").unwrap(), CompatibilityMode::None);
-        assert!(CompatibilityMode::from_str("INVALID").is_err());
+        assert_eq!(
+            "BACKWARD".parse::<CompatibilityMode>().unwrap(),
+            CompatibilityMode::Backward
+        );
+        assert_eq!(
+            "FORWARD".parse::<CompatibilityMode>().unwrap(),
+            CompatibilityMode::Forward
+        );
+        assert_eq!(
+            "FULL".parse::<CompatibilityMode>().unwrap(),
+            CompatibilityMode::Full
+        );
+        assert_eq!(
+            "NONE".parse::<CompatibilityMode>().unwrap(),
+            CompatibilityMode::None
+        );
+        assert!("INVALID".parse::<CompatibilityMode>().is_err());
     }
 
     #[test]

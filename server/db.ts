@@ -24,28 +24,30 @@ import { ENV } from './_core/env';
 let _pool: Pool | null = null;
 let _db: ReturnType<typeof drizzle> | null = null;
 
-// Lazily create the drizzle instance so local tooling can run without a DB.
+// Lazily initialize the shared PostgreSQL pool. A missing or unavailable database
+// is a service failure; production handlers must not substitute empty responses.
 export async function getDb() {
-  if (!_db && ENV.databaseUrl) {
-    try {
-      const dbUrl = ENV.databaseUrl;
-      const isLocal = dbUrl.includes("localhost") || dbUrl.includes("127.0.0.1");
-      // Enforce SSL for all non-local connections; allow self-signed certs for managed DBs
-      const sslConfig = isLocal ? undefined : { ssl: { rejectUnauthorized: ENV.dbSslStrict } };
-      _pool = new Pool({
-        connectionString: dbUrl,
-        max: 20,            // max pool size
-        idleTimeoutMillis: 30_000,
-        connectionTimeoutMillis: 5_000,
-        ...sslConfig,
-      });
-      _pool.on("error", (err) => console.error("[DB Pool] Unexpected error:", err));
-      _db = drizzle(_pool);
-    } catch (error) {
-      console.warn("[Database] Failed to connect:", error);
-      _db = null;
-    }
+  if (_db) return _db;
+  const dbUrl = ENV.databaseUrl;
+  if (!dbUrl) throw new Error("BIS_DATABASE_URL or DATABASE_URL must be configured");
+  const isLocal = dbUrl.includes("localhost") || dbUrl.includes("127.0.0.1");
+  const sslConfig = isLocal ? undefined : { ssl: { rejectUnauthorized: ENV.dbSslStrict } };
+  const pool = new Pool({
+    connectionString: dbUrl,
+    max: 20,
+    idleTimeoutMillis: 30_000,
+    connectionTimeoutMillis: 5_000,
+    ...sslConfig,
+  });
+  pool.on("error", (err) => process.stderr.write(`[DB Pool] Unexpected error: ${err.message}\n`));
+  try {
+    await pool.query("SELECT 1");
+  } catch (error) {
+    await pool.end();
+    throw new Error(`PostgreSQL connection failed: ${error instanceof Error ? error.message : String(error)}`);
   }
+  _pool = pool;
+  _db = drizzle(pool);
   return _db;
 }
 

@@ -27,11 +27,16 @@ import { redisRouter } from "./redisRouter";
 import { messagingRouter } from "./messaging";
 import { socialMonitoringRouter } from "./socialMonitoring";
 import { biometricRouter } from "./biometric";
+import { institutionalAccessRouter } from "./institutionalAccess";
+import { informalVerificationRouter } from "./informalVerification";
+import { investigationIntelligenceRouter } from "./investigationIntelligence";
+import { intelligenceBillingReconciliationRouter } from "./intelligenceBillingReconciliation";
 import { lakehouseRouter } from "./lakehouse";
 import { lexRouter } from "./lex";
 import { sessionsRouter, totpRouter, notificationsRouter, investigationLinksRouter, exportSchedulesRouter, decryptTotpSecret, validateTotp } from "./platform";
 import { archivalRouter } from "./archival";
 import { paymentRailsRouter } from "./paymentRails";
+import { paymentReconciliationRouter } from "./paymentReconciliation";
 import { documentVaultRouter } from "./documentVault";
 import { riskDashboardRouter } from "./riskDashboard";
 import { insiderThreatRouter } from "./insiderThreat";
@@ -128,6 +133,13 @@ import { z } from "zod";
 import { ENV } from "./_core/env";
 import { analyticsRouter } from "./orm/analyticsRouter"; // analytics.getDashboardStats is separate from db.getDashboardStats
 import { caddyRouter } from "./caddy";
+import { consumerIntelligenceRouter } from "./consumerIntelligence";
+import { consumerGovernanceRouter } from "./consumerGovernance";
+import { consumerDisputesRouter } from "./consumerDisputes";
+import { fieldEvidenceRouter } from "./fieldEvidence";
+import { kycDocumentEvidenceRouter } from "./kycDocumentEvidence";
+import { complianceWorkflowRouter } from "./complianceWorkflow";
+import { piiKeyCustodyRouter } from "./piiKeyCustody";
 
 // ─── Service URLs ─────────────────────────────────────────────────────────────
 
@@ -2855,11 +2867,14 @@ const fieldTasksRouter = router({
       deadline: z.string().optional(),
       instructions: z.string().optional(),
       investigationId: z.number().optional(),
+      idempotencyKey: z.string().uuid().optional(),
     }))
     .mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new Error("Database unavailable");
-      const taskRef = generateRef("FT");
+      const taskRef = input.idempotencyKey ? `FT-${input.idempotencyKey.replaceAll('-', '').slice(0, 20).toUpperCase()}` : generateRef("FT");
+      const [existing] = await db.select().from(fieldTasks).where(eq(fieldTasks.taskRef, taskRef)).limit(1);
+      if (existing) return { taskRef: existing.taskRef, idempotentReplay: true };
       await db.insert(fieldTasks).values({
         taskRef,
         agentId: input.agentId,
@@ -2880,7 +2895,7 @@ const fieldTasksRouter = router({
       });
       await writeAuditLog(db, { userId: ctx.user!.id, category: "investigation", action: `Field task dispatched to ${input.agentName}`, targetRef: taskRef });
       await publishEvent("FIELD_TASK_DISPATCHED", taskRef, "info", { agentName: input.agentName, taskType: input.taskType });
-      return { taskRef };
+      return { taskRef, idempotentReplay: false };
     }),
 
   checkIn: writeProcedure
@@ -5912,9 +5927,18 @@ const ollamaRouter = router({
     }),
 
   lakehouseQuery: protectedProcedure
-    .input(z.object({ question: z.string(), schema: z.string().optional(), model: z.string().optional() }))
-    .mutation(async ({ input }) => {
-      return ollamaFetch("/lakehouse/query", input);
+    .input(z.object({ question: z.string().trim().min(1).max(2_000), context: z.string().trim().max(2_000).optional(), model: z.string().trim().max(128).optional(), maxRows: z.number().int().min(1).max(1_000).optional() }))
+    .mutation(async ({ input, ctx }) => {
+      if (!ctx.tenantId || !ctx.user || !["admin", "supervisor", "analyst", "auditor"].includes(ctx.user.role)) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "A tenant-scoped analytics role is required." });
+      }
+      return ollamaFetch("/lakehouse/query", {
+        question: input.question,
+        context: input.context,
+        model: input.model,
+        max_rows: input.maxRows,
+        tenant_id: ctx.tenantId,
+      });
     }),
 
   explainRisk: protectedProcedure
@@ -6397,6 +6421,14 @@ const criminalRecordsRouter = router({
       notes:             z.string().optional(),
     }))
     .mutation(async ({ input, ctx }) => {
+      // This endpoint predates institutional authority controls and therefore
+      // must never dispatch or create a restricted request. Callers must use
+      // institutionalAccess.createRestrictedRequest followed by an independent
+      // institutionalAccess.approveRestrictedRequest instead.
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: "Legacy restricted-record requests are disabled; submit an authorised institutional request",
+      });
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
       const requestRef = generateRef("CRR");
@@ -7566,6 +7598,10 @@ export const appRouter = router({
    messaging: messagingRouter,
   socialMonitoring: socialMonitoringRouter,
   biometric: biometricRouter,
+  institutionalAccess: institutionalAccessRouter,
+  informalVerification: informalVerificationRouter,
+  investigationIntelligence: investigationIntelligenceRouter,
+  intelligenceBillingReconciliation: intelligenceBillingReconciliationRouter,
   lakehouse: lakehouseRouter,
   playbooks: playbooksRouter,
   duplicateCheck: duplicateCheckRouter,
@@ -7590,6 +7626,7 @@ export const appRouter = router({
   redis: redisRouter,
   archival: archivalRouter,
   paymentRails: paymentRailsRouter,
+  paymentReconciliation: paymentReconciliationRouter,
   documentVault: documentVaultRouter,
   riskDashboard: riskDashboardRouter,
   search: searchRouter,
@@ -7602,5 +7639,12 @@ export const appRouter = router({
   collectionSites: collectionSitesRouter,
   analytics: analyticsRouter,
   caddy: caddyRouter,
+  consumerIntelligence: consumerIntelligenceRouter,
+  consumerGovernance: consumerGovernanceRouter,
+  consumerDisputes: consumerDisputesRouter,
+  complianceWorkflow: complianceWorkflowRouter,
+  piiKeyCustody: piiKeyCustodyRouter,
+  fieldEvidence: fieldEvidenceRouter,
+  kycDocumentEvidence: kycDocumentEvidenceRouter,
 });
 export type AppRouter = typeof appRouter;

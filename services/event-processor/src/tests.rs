@@ -1,6 +1,6 @@
 // tests.rs — unit tests for bis-event-processor types and logic
 #[cfg(test)]
-mod tests {
+mod regression {
     use crate::{AppState, BisEvent, EventType, PublishRequest, Severity, Subscription};
     use chrono::Utc;
     use uuid::Uuid;
@@ -16,7 +16,8 @@ mod tests {
 
     #[test]
     fn test_event_type_deserialization() {
-        let et: EventType = serde_json::from_str("\"INVESTIGATION_UPDATED\"").unwrap_or(EventType::InvestigationFlagged);
+        let _et: EventType = serde_json::from_str("\"INVESTIGATION_UPDATED\"")
+            .unwrap_or(EventType::InvestigationFlagged);
         // InvestigationUpdated doesn't exist; InvestigationFlagged is the closest
         // Just verify deserialization works for a known type
         let et2: EventType = serde_json::from_str("\"KYC_COMPLETED\"").unwrap();
@@ -124,7 +125,10 @@ mod tests {
     #[test]
     fn test_app_state_new() {
         let state = AppState::new();
-        assert_eq!(state.event_count.load(std::sync::atomic::Ordering::Relaxed), 0);
+        assert_eq!(
+            state.event_count.load(std::sync::atomic::Ordering::Relaxed),
+            0
+        );
         assert_eq!(state.subscriptions.len(), 0);
         let log = state.audit_log.lock().unwrap();
         assert_eq!(log.len(), 0);
@@ -133,9 +137,16 @@ mod tests {
     #[test]
     fn test_app_state_event_count_increment() {
         let state = AppState::new();
-        state.event_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        state.event_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        assert_eq!(state.event_count.load(std::sync::atomic::Ordering::Relaxed), 2);
+        state
+            .event_count
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        state
+            .event_count
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        assert_eq!(
+            state.event_count.load(std::sync::atomic::Ordering::Relaxed),
+            2
+        );
     }
 
     // ─── Subscription construction ────────────────────────────────────────────
@@ -181,7 +192,7 @@ mod tests {
         // Critical >= High → should match
         assert!(Severity::Critical >= min_sev);
         // Medium < High → should not match
-        assert!(!(Severity::Medium >= min_sev));
+        assert!(Severity::Medium < min_sev);
         // High == High → should match
         assert!(Severity::High >= min_sev);
     }
@@ -189,9 +200,9 @@ mod tests {
     // ─── gateway_key / port defaults ─────────────────────────────────────────
 
     #[test]
-    fn test_gateway_key_default() {
+    fn test_gateway_key_has_no_embedded_default() {
         let key = crate::gateway_key();
-        assert!(!key.is_empty());
+        assert_ne!(key, "dev-gateway-key-change-in-prod");
     }
 
     #[test]
@@ -276,4 +287,40 @@ mod tests {
     fn test_broadcast_capacity_constant() {
         assert_eq!(crate::BROADCAST_CAPACITY, 256);
     }
+}
+
+#[test]
+fn subscriber_webhook_allowlist_rejects_ssrf_url_forms() {
+    use bis_transport_policy::TrustedEndpoint;
+    use std::collections::HashSet;
+
+    let hosts = HashSet::from(["hooks.example.test".to_string()]);
+    assert!(TrustedEndpoint::parse(
+        "subscriber_url",
+        "https://hooks.example.test/events",
+        &hosts,
+    )
+    .is_ok());
+    assert!(
+        TrustedEndpoint::parse("subscriber_url", "http://hooks.example.test/events", &hosts,)
+            .is_err()
+    );
+    assert!(TrustedEndpoint::parse(
+        "subscriber_url",
+        "https://169.254.169.254/latest/meta-data",
+        &hosts,
+    )
+    .is_err());
+    assert!(TrustedEndpoint::parse(
+        "subscriber_url",
+        "https://user:secret@hooks.example.test/events",
+        &hosts,
+    )
+    .is_err());
+    assert!(TrustedEndpoint::parse(
+        "subscriber_url",
+        "https://hooks.example.test/events?target=internal",
+        &hosts,
+    )
+    .is_err());
 }

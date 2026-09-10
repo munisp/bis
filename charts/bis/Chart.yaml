@@ -1,0 +1,6 @@
+apiVersion: v2
+name: bis
+description: Hardened BIS control-plane workloads
+version: 0.1.0
+appVersion: "2.0"
+type: application

@@ -10,7 +10,7 @@ import { ENV } from "./_core/env";
 
 // Read at call-time so tests can delete process.env.PERMIFY_URL
 function getPermifyUrl() { return process.env.PERMIFY_URL ?? ""; }
-function getPermifyTenant() { return process.env.PERMIFY_TENANT_ID ?? "t1"; }
+function getPermifyTenant() { return process.env.PERMIFY_TENANT_ID ?? ""; }
 function getPermifyApiKey() { return process.env.PERMIFY_API_KEY ?? ""; }
 
 interface CheckRequest {
@@ -44,11 +44,14 @@ export async function permifyCheck(
   const PERMIFY_TENANT = getPermifyTenant();
   const PERMIFY_API_KEY = getPermifyApiKey();
 
-  if (!PERMIFY_URL) {
+  if (!PERMIFY_URL || !PERMIFY_TENANT || !PERMIFY_API_KEY) {
     throw new TRPCError({
       code: "FORBIDDEN",
       message: "Authorization service is not configured — access denied",
     });
+  }
+  if (ENV.isProduction && !PERMIFY_URL.startsWith("https://")) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Authorization service must use HTTPS in production — access denied" });
   }
 
   const body: CheckRequest = {
@@ -60,7 +63,7 @@ export async function permifyCheck(
 
   try {
     const res = await fetch(
-      `${PERMIFY_URL}/v1/tenants/${PERMIFY_TENANT}/permissions/check`,
+      `${PERMIFY_URL}/v1/tenants/${encodeURIComponent(PERMIFY_TENANT)}/permissions/check`,
       {
         method: "POST",
         headers: {
@@ -103,11 +106,15 @@ export async function permifyWriteRelationship(
   const PERMIFY_URL = getPermifyUrl();
   const PERMIFY_TENANT = getPermifyTenant();
   const PERMIFY_API_KEY = getPermifyApiKey();
-  if (!PERMIFY_URL) return;
+  if (!PERMIFY_URL || !PERMIFY_TENANT || !PERMIFY_API_KEY) {
+    if (ENV.isProduction) throw new Error("production relationship provisioning requires PERMIFY_URL, PERMIFY_TENANT_ID, and PERMIFY_API_KEY");
+    return;
+  }
+  if (ENV.isProduction && !PERMIFY_URL.startsWith("https://")) throw new Error("production relationship provisioning requires an HTTPS PERMIFY_URL");
 
   try {
     const res = await fetch(
-      `${PERMIFY_URL}/v1/tenants/${PERMIFY_TENANT}/relationships/write`,
+      `${PERMIFY_URL}/v1/tenants/${encodeURIComponent(PERMIFY_TENANT)}/relationships/write`,
       {
         method: "POST",
         headers: {
@@ -120,9 +127,11 @@ export async function permifyWriteRelationship(
     );
 
     if (!res.ok) {
+      if (ENV.isProduction) throw new Error(`production relationship provisioning failed with HTTP ${res.status}`);
       console.warn(`[Permify] write relationship returned ${res.status}`);
     }
   } catch (err) {
+    if (ENV.isProduction) throw err;
     console.warn("[Permify] write relationship error:", err);
   }
 }

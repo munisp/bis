@@ -19,7 +19,7 @@
  */
 
 use serde::{Deserialize, Serialize};
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 use super::consumer::{AuditLog, BisEvent};
 
@@ -44,11 +44,9 @@ pub struct CriminalRecordIngestedPayload {
 /// - Computes a severity level based on offence category and verdict
 /// - Triggers a BFF alert for terrorism, violent, or warrant records
 /// - Publishes an enriched event for the OpenSearch indexer
-pub async fn handle_criminal_record_ingested(
-    event: &BisEvent,
-    audit_log: AuditLog,
-) {
-    let payload: CriminalRecordIngestedPayload = match serde_json::from_value(event.payload.clone()) {
+pub async fn handle_criminal_record_ingested(event: &BisEvent, audit_log: AuditLog) {
+    let payload: CriminalRecordIngestedPayload = match serde_json::from_value(event.payload.clone())
+    {
         Ok(p) => p,
         Err(e) => {
             warn!("[CriminalRecord] Failed to deserialise payload: {}", e);
@@ -159,17 +157,15 @@ pub struct CorporateCheckCompletedPayload {
 /// Handles bis.corporate.check_completed events.
 /// - Triggers BFF alert for adverse outcomes
 /// - Publishes enriched event for OpenSearch indexer
-pub async fn handle_corporate_check_completed(
-    event: &BisEvent,
-    audit_log: AuditLog,
-) {
-    let payload: CorporateCheckCompletedPayload = match serde_json::from_value(event.payload.clone()) {
-        Ok(p) => p,
-        Err(e) => {
-            warn!("[CorporateCheck] Failed to deserialise payload: {}", e);
-            return;
-        }
-    };
+pub async fn handle_corporate_check_completed(event: &BisEvent, audit_log: AuditLog) {
+    let payload: CorporateCheckCompletedPayload =
+        match serde_json::from_value(event.payload.clone()) {
+            Ok(p) => p,
+            Err(e) => {
+                warn!("[CorporateCheck] Failed to deserialise payload: {}", e);
+                return;
+            }
+        };
 
     info!(
         "[CorporateCheck] Completed: ref={} outcome={} risk={:.1} flags={:?}",
@@ -237,10 +233,7 @@ pub struct FieldVisitCheckInPayload {
 }
 
 /// Handles bis.field_visit.checked_in events.
-pub async fn handle_field_visit_checked_in(
-    event: &BisEvent,
-    audit_log: AuditLog,
-) {
+pub async fn handle_field_visit_checked_in(event: &BisEvent, audit_log: AuditLog) {
     let payload: FieldVisitCheckInPayload = match serde_json::from_value(event.payload.clone()) {
         Ok(p) => p,
         Err(e) => {
@@ -285,14 +278,14 @@ pub struct FieldVisitCheckOutPayload {
 
 /// Handles bis.field_visit.checked_out events.
 /// Flags suspiciously short visits (< 5 minutes) for review.
-pub async fn handle_field_visit_checked_out(
-    event: &BisEvent,
-    audit_log: AuditLog,
-) {
+pub async fn handle_field_visit_checked_out(event: &BisEvent, audit_log: AuditLog) {
     let payload: FieldVisitCheckOutPayload = match serde_json::from_value(event.payload.clone()) {
         Ok(p) => p,
         Err(e) => {
-            warn!("[FieldVisit] Failed to deserialise check-out payload: {}", e);
+            warn!(
+                "[FieldVisit] Failed to deserialise check-out payload: {}",
+                e
+            );
             return;
         }
     };
@@ -356,14 +349,14 @@ pub struct ThinFileFlaggedPayload {
 
 /// Handles bis.investigation.thin_file_flagged events.
 /// Notifies the BFF so the investigation dashboard updates in real-time.
-pub async fn handle_thin_file_flagged(
-    event: &BisEvent,
-    audit_log: AuditLog,
-) {
+pub async fn handle_thin_file_flagged(event: &BisEvent, audit_log: AuditLog) {
     let payload: ThinFileFlaggedPayload = match serde_json::from_value(event.payload.clone()) {
         Ok(p) => p,
         Err(e) => {
-            warn!("[ThinFile] Failed to deserialise thin_file_flagged payload: {}", e);
+            warn!(
+                "[ThinFile] Failed to deserialise thin_file_flagged payload: {}",
+                e
+            );
             return;
         }
     };
@@ -415,14 +408,14 @@ pub struct ThinFileRevertedPayload {
 }
 
 /// Handles bis.investigation.thin_file_reverted events.
-pub async fn handle_thin_file_reverted(
-    event: &BisEvent,
-    audit_log: AuditLog,
-) {
+pub async fn handle_thin_file_reverted(event: &BisEvent, audit_log: AuditLog) {
     let payload: ThinFileRevertedPayload = match serde_json::from_value(event.payload.clone()) {
         Ok(p) => p,
         Err(e) => {
-            warn!("[ThinFile] Failed to deserialise thin_file_reverted payload: {}", e);
+            warn!(
+                "[ThinFile] Failed to deserialise thin_file_reverted payload: {}",
+                e
+            );
             return;
         }
     };
@@ -460,10 +453,7 @@ pub struct MojaloopCompliancePayload {
 
 /// Handles bis.mojaloop.compliance_checked events.
 /// Blocks and alerts on non-approved compliance checks.
-pub async fn handle_mojaloop_compliance(
-    event: &BisEvent,
-    audit_log: AuditLog,
-) {
+pub async fn handle_mojaloop_compliance(event: &BisEvent, audit_log: AuditLog) {
     let payload: MojaloopCompliancePayload = match serde_json::from_value(event.payload.clone()) {
         Ok(p) => p,
         Err(e) => {
@@ -525,14 +515,14 @@ pub struct FluvioCriminalRecordPayload {
 
 /// Handles bis.fluvio.criminal_record events from the Fluvio velocity stream.
 /// These are lightweight, high-throughput events for real-time analytics.
-pub async fn handle_fluvio_criminal_record(
-    event: &BisEvent,
-    audit_log: AuditLog,
-) {
+pub async fn handle_fluvio_criminal_record(event: &BisEvent, audit_log: AuditLog) {
     let payload: FluvioCriminalRecordPayload = match serde_json::from_value(event.payload.clone()) {
         Ok(p) => p,
         Err(e) => {
-            warn!("[Fluvio] Failed to deserialise criminal record payload: {}", e);
+            warn!(
+                "[Fluvio] Failed to deserialise criminal record payload: {}",
+                e
+            );
             return;
         }
     };
@@ -597,24 +587,51 @@ pub async fn dispatch_domain_event(event: &BisEvent, audit_log: AuditLog) {
 // ─── BFF webhook forward (shared with consumer.rs) ───────────────────────────
 
 async fn forward_to_bff(entry: serde_json::Value) {
-    let bff_url = std::env::var("BFF_WEBHOOK_URL")
-        .unwrap_or_else(|_| "http://localhost:8080/api/internal/events".to_string());
-    let gateway_key = std::env::var("BIS_GATEWAY_KEY")
-        .unwrap_or_else(|_| "dev-gateway-key-change-in-prod".to_string());
-
-    let client = match reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
-    {
-        Ok(c) => c,
-        Err(e) => {
-            warn!("[BFF] Failed to build HTTP client: {}", e);
+    let allowed_hosts =
+        match bis_transport_policy::required_allowed_hosts("BIS_EVENT_BFF_ALLOWED_HOSTS") {
+            Ok(hosts) => hosts,
+            Err(_) => {
+                warn!("[BFF] Outbound transport policy is not configured");
+                return;
+            }
+        };
+    let bff_url = match std::env::var("BFF_WEBHOOK_URL")
+        .ok()
+        .and_then(|raw| {
+            bis_transport_policy::TrustedEndpoint::parse("BFF_WEBHOOK_URL", &raw, &allowed_hosts)
+                .ok()
+        })
+        .and_then(|endpoint| {
+            endpoint
+                .with_path_segments(&["api", "internal", "events"])
+                .ok()
+        }) {
+        Some(endpoint) => endpoint,
+        None => {
+            warn!("[BFF] Outbound webhook endpoint is not configured");
+            return;
+        }
+    };
+    let gateway_key = match std::env::var("BIS_GATEWAY_KEY") {
+        Ok(key) if !key.trim().is_empty() => key,
+        _ => {
+            warn!("[BFF] Gateway credential is not configured");
+            return;
+        }
+    };
+    let client = match bis_transport_policy::https_client(
+        std::time::Duration::from_secs(10),
+        std::time::Duration::from_secs(5),
+    ) {
+        Ok(client) => client,
+        Err(_) => {
+            warn!("[BFF] TLS client cannot be initialized");
             return;
         }
     };
 
     match client
-        .post(&bff_url)
+        .post(bff_url)
         .header("X-BIS-Key", &gateway_key)
         .header("Content-Type", "application/json")
         .json(&entry)

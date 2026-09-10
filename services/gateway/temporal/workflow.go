@@ -164,20 +164,20 @@ func ScoreRiskActivity(ctx context.Context, scoreInput map[string]interface{}, r
 
 var temporalClient client.Client
 
-// InitClient connects to the Temporal server. Call once at startup.
-func InitClient() {
+// InitClient connects to the explicitly configured Temporal server.
+func InitClient() error {
 	temporalHost := os.Getenv("TEMPORAL_HOST")
-	if temporalHost == "" {
-		temporalHost = "localhost:7233"
+	namespace := os.Getenv("TEMPORAL_NAMESPACE")
+	if temporalHost == "" || namespace == "" {
+		return fmt.Errorf("TEMPORAL_HOST and TEMPORAL_NAMESPACE must be configured")
 	}
-	var err error
-	temporalClient, err = client.Dial(client.Options{HostPort: temporalHost})
+	configuredClient, err := client.Dial(client.Options{HostPort: temporalHost, Namespace: namespace})
 	if err != nil {
-		log.Printf("[Temporal] Warning: cannot connect to %s: %v (workflow engine disabled)", temporalHost, err)
-		temporalClient = nil
-		return
+		return fmt.Errorf("connect to Temporal at %s: %w", temporalHost, err)
 	}
+	temporalClient = configuredClient
 	log.Printf("[Temporal] Client connected → %s", temporalHost)
+	return nil
 }
 
 // StartWorker registers and starts the workflow/activity worker.
@@ -228,22 +228,23 @@ func Close() {
 // Client is a thin wrapper around the package-level Temporal functions.
 type Client struct{}
 
-// NewClient initialises the Temporal connection and returns a Client.
+// NewClient establishes a Temporal client using explicit service configuration.
 func NewClient(host, namespace string) (*Client, error) {
-	if host != "" {
-		os.Setenv("TEMPORAL_HOST", host)
+	if host == "" || namespace == "" {
+		return nil, fmt.Errorf("Temporal host and namespace are required")
 	}
-	if namespace != "" {
-		os.Setenv("TEMPORAL_NAMESPACE", namespace)
+	configuredClient, err := client.Dial(client.Options{HostPort: host, Namespace: namespace})
+	if err != nil {
+		return nil, fmt.Errorf("connect to Temporal at %s: %w", host, err)
 	}
-	InitClient()
+	temporalClient = configuredClient
 	return &Client{}, nil
 }
 
 // StartWorkflow starts a named workflow and returns its run ID.
 func (c *Client) StartWorkflow(ctx context.Context, workflowType string, input interface{}) (string, error) {
 	if temporalClient == nil {
-		return "mock-run-id", nil // graceful degradation in dev
+		return "", fmt.Errorf("Temporal client is unavailable")
 	}
 	opts := client.StartWorkflowOptions{
 		ID:        fmt.Sprintf("%s-%d", workflowType, time.Now().UnixNano()),

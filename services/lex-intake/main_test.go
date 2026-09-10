@@ -128,7 +128,14 @@ func newTestServer(t *testing.T) (*Server, *Store) {
 	t.Helper()
 	store := newTestStore(t)
 	bis := NewBISClient("http://localhost:19999", "") // unreachable
-	return &Server{store: store, bis: bis, config: loadConfig()}, store
+	return &Server{store: store, bis: bis, config: Config{PINPepper: "test-pepper"}}, store
+}
+
+func issueTestPIN(t *testing.T, srv *Server, submitterID, agencyCode, pin string) {
+	t.Helper()
+	if err := srv.store.IssuePIN(submitterID, srv.pinHash(submitterID, pin), agencyCode); err != nil {
+		t.Fatalf("issue test PIN: %v", err)
+	}
 }
 
 func TestHandleSubmit_MissingFields(t *testing.T) {
@@ -145,6 +152,7 @@ func TestHandleSubmit_MissingFields(t *testing.T) {
 
 func TestHandleSubmit_Queued(t *testing.T) {
 	srv, store := newTestServer(t)
+	issueTestPIN(t, srv, "off-1", "NPF-LA", "123456")
 	body := `{"submitterId":"off-1","agencyCode":"NPF-LA","pin":"123456","incidentType":"arrest","incidentState":"LA","narrative":"Suspect apprehended near market"}`
 	req := httptest.NewRequest(http.MethodPost, "/submit", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -171,6 +179,7 @@ func TestHandleSubmit_RateLimitEnforced(t *testing.T) {
 	body := `{"submitterId":"off-rl","agencyCode":"NPF-LA","pin":"123456","incidentType":"arrest","incidentState":"LA","narrative":"test"}`
 
 	for i := 0; i < 5; i++ {
+		issueTestPIN(t, srv, "off-rl", "NPF-LA", "123456")
 		req := httptest.NewRequest(http.MethodPost, "/submit", bytes.NewBufferString(body))
 		req.Header.Set("Content-Type", "application/json")
 		rr := httptest.NewRecorder()
@@ -181,6 +190,7 @@ func TestHandleSubmit_RateLimitEnforced(t *testing.T) {
 	}
 
 	// 6th should be 429
+	issueTestPIN(t, srv, "off-rl", "NPF-LA", "123456")
 	req := httptest.NewRequest(http.MethodPost, "/submit", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
@@ -192,6 +202,7 @@ func TestHandleSubmit_RateLimitEnforced(t *testing.T) {
 
 func TestHandleSMS(t *testing.T) {
 	srv, store := newTestServer(t)
+	issueTestPIN(t, srv, "off-sms", "NPF-RI", "654321")
 	req := httptest.NewRequest(http.MethodPost, "/sms", bytes.NewBufferString(
 		"submitterId=off-sms&agencyCode=NPF-RI&pin=654321&type=theft&state=RI&narrative=Stolen+vehicle+reported",
 	))

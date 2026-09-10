@@ -22,6 +22,7 @@ tokio-stream = "0.1"
 dashmap = "5"
 # HTTP client — used for webhook fan-out and BFF forwarding
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+bis-transport-policy = { path = "../../crates/bis-transport-policy" }
 # Native Kafka consumer/producer — requires librdkafka-dev in the Docker build image.
 # Enable with: cargo build --features kafka-native
 # Docker: RUN apt-get install -y librdkafka-dev cmake
@@ -32,6 +33,9 @@ redis = { version = "0.25", features = ["tokio-comp", "connection-manager"], opt
 # PostgreSQL async client — for persisting audit log and subscriptions
 tokio-postgres = { version = "0.7", features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 deadpool-postgres = { version = "0.14" }
+tokio-postgres-rustls = { version = "0.14", features = ["ring"] }
+rustls = "0.23"
+pem = "4"
 
 [features]
 default = []

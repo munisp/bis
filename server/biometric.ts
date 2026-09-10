@@ -22,6 +22,7 @@ import { notifyOwner } from "./_core/notification";
 import { auditLog } from "../drizzle/schema";
 import * as crypto from "crypto";
 import { fluvioPublishBiometricEvent } from "./fluvio";
+import { createBiometricReviewCase, grantBiometricConsent, requireBiometricConsent, resolveBiometricReview, withdrawBiometricConsent } from "./biometricGovernance";
 
 const EVENT_PROCESSOR_URL = ENV.eventProcessorUrl;
 
@@ -92,6 +93,31 @@ async function biometricFetch(path: string, body: unknown, contentType = "applic
 // ─── Router ───────────────────────────────────────────────────────────────────
 
 export const biometricRouter = router({
+  grantConsent: writeProcedure.input(z.object({
+    subjectRef: z.string().min(1).max(128),
+    purpose: z.enum(["identity_verification", "document_face_match", "liveness_assurance"]),
+    policyVersion: z.string().min(1).max(64),
+    proofSha256: z.string().regex(/^[a-f0-9]{64}$/),
+    expiresAt: z.coerce.date(),
+    candidateId: z.number().int().positive().optional(),
+    kycRecordId: z.number().int().positive().optional(),
+  })).mutation(async ({ input, ctx }) => grantBiometricConsent(ctx, input)),
+
+  withdrawConsent: writeProcedure.input(z.object({
+    subjectRef: z.string().min(1).max(128),
+    purpose: z.enum(["identity_verification", "document_face_match", "liveness_assurance"]).optional(),
+    reason: z.string().min(10).max(512),
+  })).mutation(async ({ input, ctx }) => withdrawBiometricConsent(ctx, input)),
+
+  resolveReview: writeProcedure.input(z.object({
+    reviewCaseId: z.string().uuid(),
+    decision: z.enum(["approve", "reject"]),
+    rationale: z.string().min(10).max(2048),
+  })).mutation(async ({ input, ctx }) => {
+    if (ctx.user?.role !== "admin") throw new TRPCError({ code: "FORBIDDEN", message: "Only designated biometric reviewers may resolve a case" });
+    return resolveBiometricReview(ctx, input);
+  }),
+
   /**
    * GET /biometric/challenges — returns available liveness challenges
    */
@@ -117,17 +143,14 @@ export const biometricRouter = router({
         // SECURITY: max 4MB base64 image (~3MB binary) to prevent DoS
         imageBase64: z.string().max(5_500_000).describe("Base64-encoded JPEG/PNG frame from webcam"),
         challenge: z.enum(["blink", "turn_left", "turn_right", "smile", "nod"]).default("blink"),
-        subjectRef: z.string().max(128).optional(),
+        subjectRef: z.string().min(1).max(128),
       })
     )
-    .mutation(async ({ input }) => {
-      // Maps to Go gateway /v1/biometric/liveness → Python engine /verify/liveness
-      const result = await biometricFetch("/liveness", {
-        image: input.imageBase64,
-        challenge: input.challenge,
-        subject_ref: input.subjectRef,
-      });
-      return result;
+    .mutation(async ({ input, ctx }) => {
+      await requireBiometricConsent(ctx, input.subjectRef, ["liveness_assurance"]);
+      const result = await biometricFetch("/liveness", { image: input.imageBase64, challenge: input.challenge, subject_ref: input.subjectRef }) as Record<string, unknown>;
+      const review = await createBiometricReviewCase(ctx, { subjectRef: input.subjectRef, operation: "liveness", engineResult: result });
+      return { passed: result.live === true || result.passed === true, score: typeof result.score === "number" ? result.score : null, sandbox: result.sandbox === true, review };
     }),
 
   /**
@@ -180,44 +203,22 @@ export const biometricRouter = router({
       }
 
       // Maps to Go gateway /v1/biometric/enroll → Python engine /verify/match (enroll stores embedding)
-      const result = await biometricFetch("/enroll", {
-        image: input.imageBase64,
-        subject_ref: input.subjectRef,
-      });
+      await requireBiometricConsent(ctx, input.subjectRef, ["identity_verification"]);
+      const result = await biometricFetch("/enroll", { image: input.imageBase64, subject_ref: input.subjectRef }) as Record<string, unknown>;
       const enrollResult = result;
+      const review = await createBiometricReviewCase(ctx, { subjectRef: input.subjectRef, kycRecordId: input.kycRecordId, operation: "enrollment", engineResult: enrollResult });
 
-      // If a KYC record ID is provided, update the biometric status
-      if (input.kycRecordId && enrollResult.enrolled) {
-        try {
-          const db = await getDb();
-          if (db) {
-            await db
-              .update(kycRecords)
-              .set({
-                biometricStatus: "enrolled",
-                biometricFaceId: enrollResult.faceId,
-              })
-              .where(eq(kycRecords.id, input.kycRecordId));
-          }
-        } catch (e) {
-          console.warn("[Biometric] Failed to update KYC record:", e);
-        }
+      // Enrollment output is non-consequential until a separate authorised
+      // reviewer resolves the immutable review case. This prevents model output
+      // from changing a KYC decision or emitting a completion notification.
 
-        // Send owner notification for re-enrollment events (non-blocking)
-        notifyOwner({
-          title: "Biometric Re-enrollment Completed",
-          content: [
-            `Subject: ${input.subjectRef}`,
-            `KYC Record ID: #${input.kycRecordId}`,
-            `Face ID: ${enrollResult.faceId ?? "assigned"}`,
-            `Sandbox mode: ${enrollResult.sandbox ? "yes" : "no"}`,
-            `Enrolled at: ${new Date().toISOString()}`,
-            `Enrolled by: ${ctx.user?.name ?? ctx.user?.email ?? `User #${ctx.user?.id}`}`,
-          ].join("\n"),
-        }).catch(() => {});
-      }
-
-      return enrollResult;
+      return {
+        enrolled: enrollResult.enrolled === true,
+        faceId: typeof enrollResult.faceId === "string" ? enrollResult.faceId : (typeof enrollResult.face_id === "string" ? enrollResult.face_id : null),
+        sandbox: enrollResult.sandbox === true,
+        review,
+        reviewStatus: "pending_human_review" as const,
+      };
     }),
 
   /**
@@ -229,17 +230,14 @@ export const biometricRouter = router({
         // SECURITY: max 4MB base64 image (~3MB binary) to prevent DoS
         imageBase64: z.string().max(5_500_000),
         faceId: z.string().max(256),
-        subjectRef: z.string().max(128).optional(),
+        subjectRef: z.string().min(1).max(128),
       })
     )
-    .mutation(async ({ input }) => {
-      // Maps to Go gateway /v1/biometric/verify → Python engine /verify/match
-      const result = await biometricFetch("/verify", {
-        image: input.imageBase64,
-        face_id: input.faceId,
-        subject_ref: input.subjectRef,
-      });
-      return result;
+    .mutation(async ({ input, ctx }) => {
+      await requireBiometricConsent(ctx, input.subjectRef, ["identity_verification"]);
+      const result = await biometricFetch("/verify", { image: input.imageBase64, face_id: input.faceId, subject_ref: input.subjectRef }) as Record<string, unknown>;
+      const review = await createBiometricReviewCase(ctx, { subjectRef: input.subjectRef, operation: "face_match", engineResult: result });
+      return { match: result.match === true, score: typeof result.score === "number" ? result.score : null, threshold: typeof result.threshold === "number" ? result.threshold : null, review };
     }),
 
   /**
@@ -251,17 +249,18 @@ export const biometricRouter = router({
         // SECURITY: max 4MB base64 image (~3MB binary) to prevent DoS
         imageBase64: z.string().max(5_500_000),
         documentType: z.enum(["NIN_SLIP", "PASSPORT", "DRIVERS_LICENSE", "VOTERS_CARD", "NIN_CARD"]).default("NIN_SLIP"),
-        subjectRef: z.string().max(128).optional(),
+        subjectRef: z.string().min(1).max(128),
       })
     )
-    .mutation(async ({ input }) => {
-      // Maps to Go gateway /v1/biometric/ocr → Python engine /ocr/document
-      const result = await biometricFetch("/ocr", {
-        image: input.imageBase64,
-        document_type: input.documentType,
-        subject_ref: input.subjectRef,
-      });
-      return result;
+    .mutation(async ({ input, ctx }) => {
+      await requireBiometricConsent(ctx, input.subjectRef, ["document_face_match"]);
+      const result = await biometricFetch("/ocr", { image: input.imageBase64, document_type: input.documentType, subject_ref: input.subjectRef }) as Record<string, unknown>;
+      const review = await createBiometricReviewCase(ctx, { subjectRef: input.subjectRef, operation: "document_match", engineResult: result });
+      return {
+        confidence: typeof result.confidence === "number" ? result.confidence : null,
+        review,
+        reviewStatus: "pending_human_review" as const,
+      };
     }),
 
   /**
@@ -285,69 +284,69 @@ export const biometricRouter = router({
       })
     )
     .mutation(async ({ input, ctx }) => {
-      // Step 1: Liveness check
+      const needsDocumentConsent = Boolean(input.documentImageBase64 || input.documentType);
+      if (Boolean(input.documentImageBase64) !== Boolean(input.documentType)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Document image and document type must be supplied together" });
+      }
+      await requireBiometricConsent(ctx, input.subjectRef, needsDocumentConsent
+        ? ["identity_verification", "liveness_assurance", "document_face_match"]
+        : ["identity_verification", "liveness_assurance"]);
       const livenessResult = await biometricFetch("/liveness", {
+        image: input.livenessImageBase64, challenge: input.challenge, subject_ref: input.subjectRef,
+      }) as Record<string, unknown>;
+      if (livenessResult.live !== true && livenessResult.passed !== true) {
+        const review = await createBiometricReviewCase(ctx, { subjectRef: input.subjectRef, kycRecordId: input.kycRecordId, operation: "liveness", engineResult: livenessResult });
+        return { success: false, liveness: livenessResult, enrollment: null, ocr: null, review };
+      }
+      const antiSpoofingResult = await biometricFetch("/antispoofing", {
         image: input.livenessImageBase64,
-        challenge: input.challenge,
         subject_ref: input.subjectRef,
-      });
-
-      if (!livenessResult.passed) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "Liveness check failed. Please ensure you are a real person and follow the on-screen instructions.",
+      }) as Record<string, unknown>;
+      if (antiSpoofingResult.is_spoof === true || antiSpoofingResult.spoof === true) {
+        const review = await createBiometricReviewCase(ctx, {
+          subjectRef: input.subjectRef,
+          kycRecordId: input.kycRecordId,
+          operation: "anti_spoofing",
+          engineResult: antiSpoofingResult,
         });
+        return {
+          success: false,
+          liveness: { passed: true, score: typeof livenessResult.score === "number" ? livenessResult.score : null },
+          enrollment: null,
+          ocr: null,
+          review,
+          reviewStatus: "pending_human_review" as const,
+        };
       }
-
-      // Step 2: Face enrollment
-      const enrollResult = await biometricFetch("/enroll", {
-        image: input.enrollImageBase64,
-        subject_ref: input.subjectRef,
+      const enrollResult = await biometricFetch("/enroll", { image: input.enrollImageBase64, subject_ref: input.subjectRef }) as Record<string, unknown>;
+      const ocrResult = input.documentImageBase64 && input.documentType
+        ? await biometricFetch("/ocr", { image: input.documentImageBase64, document_type: input.documentType, subject_ref: input.subjectRef }) as Record<string, unknown>
+        : null;
+      const review = await createBiometricReviewCase(ctx, {
+        subjectRef: input.subjectRef,
+        kycRecordId: input.kycRecordId,
+        operation: "enrollment",
+        engineResult: { ...enrollResult, verified: enrollResult.enrolled === true, model_version: enrollResult.model_version ?? enrollResult.model },
       });
-
-      // Step 3: Document OCR (optional)
-      let ocrResult = null;
-      if (input.documentImageBase64 && input.documentType) {
-        ocrResult = await biometricFetch("/ocr", {
-          image: input.documentImageBase64,
-          document_type: input.documentType,
-          subject_ref: input.subjectRef,
-        });
-      }
-
-      // Step 4: Update KYC record
-      if (input.kycRecordId && enrollResult.enrolled) {
-        try {
-          const db = await getDb();
-          if (db) {
-            await db
-              .update(kycRecords)
-              .set({
-                biometricStatus: "enrolled",
-                biometricFaceId: enrollResult.faceId,
-                ...(ocrResult ? { documentOcrData: ocrResult } : {}),
-              })
-              .where(eq(kycRecords.id, input.kycRecordId));
-          }
-        } catch (e) {
-          console.warn("[Biometric] Failed to update KYC record:", e);
-        }
-      }
-
+      const faceId = typeof enrollResult.faceId === "string" ? enrollResult.faceId : (typeof enrollResult.face_id === "string" ? enrollResult.face_id : null);
+      const livenessPassed = livenessResult.live === true || livenessResult.passed === true;
       return {
-        success: true,
-        liveness: livenessResult,
-        enrollment: enrollResult,
-        ocr: ocrResult,
-        faceId: enrollResult.faceId,
-        sandbox: livenessResult.sandbox || enrollResult.sandbox,
+        success: enrollResult.enrolled === true,
+        faceId,
+        livenessPassed,
+        ocrConfidence: typeof ocrResult?.confidence === "number" ? ocrResult.confidence : null,
+        liveness: { passed: livenessPassed, score: typeof livenessResult.score === "number" ? livenessResult.score : null },
+        enrollment: { enrolled: enrollResult.enrolled === true, faceId },
+        ocr: ocrResult ? { confidence: typeof ocrResult.confidence === "number" ? ocrResult.confidence : null, documentType: input.documentType ?? null } : null,
+        review,
+        reviewStatus: "pending_human_review" as const,
       };
     }),
 
   /**
    * GET /biometric/list — paginated list of enrolled biometric records (from kyc_records)
    */
-  list: protectedProcedure
+  list: adminProcedure
     .input(z.object({ page: z.number().int().min(1).default(1), limit: z.number().int().min(1).max(100).default(20) }))
     .query(async ({ input }) => {
       try {
@@ -384,7 +383,7 @@ export const biometricRouter = router({
   /**
    * DELETE /biometric/:id — revoke a biometric enrollment
    */
-  delete: writeProcedure
+  delete: adminProcedure
     .input(z.object({ id: z.number().int() }))
     .mutation(async ({ input }) => {
       try {
@@ -400,7 +399,7 @@ export const biometricRouter = router({
       }
     }),
 
-  getStatus: protectedProcedure
+  getStatus: adminProcedure
     .input(z.object({ subjectRef: z.string() }))
     .query(async ({ input }) => {
       try {
@@ -678,20 +677,28 @@ export const biometricRouter = router({
     .input(
       z.object({
         selfieBase64: z.string().max(5_500_000),
-        referenceBase64: z.string().max(5_500_000).optional(),
-        subjectRef: z.string().max(128).optional(),
-        kycRecordId: z.number().int().optional(),
-        runAntispoofing: z.boolean().default(true),
-        runMatch: z.boolean().default(true),
+        referenceBase64: z.string().max(5_500_000),
+        subjectRef: z.string().min(1).max(128),
+        kycRecordId: z.number().int().positive().optional(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      await requireBiometricConsent(ctx, input.subjectRef, ["identity_verification", "liveness_assurance", "document_face_match"]);
       const result = await biometricFetch("/full", {
         selfie: input.selfieBase64,
         reference: input.referenceBase64,
         subject_ref: input.subjectRef,
-        run_antispoofing: input.runAntispoofing,
-        run_match: input.runMatch,
+        run_antispoofing: true,
+        run_match: true,
+      }) as Record<string, any>;
+      if (result.liveness?.live !== true || result.antispoofing?.genuine !== true || result.face_match?.match !== true) {
+        result.verified = false;
+      }
+      const review = await createBiometricReviewCase(ctx, {
+        subjectRef: input.subjectRef,
+        kycRecordId: input.kycRecordId,
+        operation: "full_verification",
+        engineResult: { ...result, model_version: result.model_version ?? result.face_match?.model ?? result.antispoofing?.model },
       });
 
       // Persist session log
@@ -711,19 +718,8 @@ export const biometricRouter = router({
         createdAt: new Date(),
       });
 
-      // Update KYC record if provided
-      if (input.kycRecordId && result.verified) {
-        try {
-          const db = await getDb();
-          if (db) {
-            await db.update(kycRecords)
-              .set({ biometricStatus: "enrolled" })
-              .where(eq(kycRecords.id, input.kycRecordId));
-          }
-        } catch (e) {
-          console.warn("[Biometric] Failed to update KYC record after fullVerify:", e);
-        }
-      }
+      // The engine result is evidentiary only. A designated human reviewer must
+      // resolve `review` before any KYC or adverse-action workflow may act on it.
 
       // Publish event and mark kafkaPublished
       const fullVerifyPublished = await publishBiometricEvent(
@@ -737,14 +733,14 @@ export const biometricRouter = router({
       );
       if (fullVerifyPublished && sessionId) { markBiometricSessionKafkaPublished(sessionId as any).catch(() => {}); }
 
-      return result;
+      return { ...result, review };
     }),
 
   // ─── Session Stats ─────────────────────────────────────────────────────────────
   /**
    * GET /biometric/sessionStats — daily pass/fail time-series + spoof-type breakdown
    */
-  sessionStats: protectedProcedure
+  sessionStats: adminProcedure
     .input(
       z.object({
         days: z.number().int().min(7).max(365).default(30),
@@ -758,7 +754,7 @@ export const biometricRouter = router({
   /**
    * GET /biometric/sessionLogs — paginated biometric session log history
    */
-  sessionLogs: protectedProcedure
+  sessionLogs: adminProcedure
     .input(
       z.object({
         subjectRef: z.string().max(128).optional(),
@@ -780,7 +776,7 @@ export const biometricRouter = router({
 
   // ── Spoof Alert Threshold Settings ──────────────────────────────────────────
 
-  getSpoofAlertThreshold: protectedProcedure.query(async () => {
+  getSpoofAlertThreshold: adminProcedure.query(async () => {
     const db = await getDb();
     if (!db) return { perTypeThreshold: 5, notificationsEnabled: true };
     const [row] = await db
@@ -795,7 +791,7 @@ export const biometricRouter = router({
     };
   }),
 
-  setSpoofAlertThreshold: writeProcedure
+  setSpoofAlertThreshold: adminProcedure
     .input(z.object({
       perTypeThreshold: z.number().int().min(1).max(100),
       notificationsEnabled: z.boolean(),
@@ -824,7 +820,7 @@ export const biometricRouter = router({
 
   // ── Session Log Export ───────────────────────────────────────────────────────
 
-  exportSessionLogs: protectedProcedure
+  exportSessionLogs: adminProcedure
     .input(z.object({
       subjectRef: z.string().optional(),
       kycRecordId: z.string().optional(),
@@ -992,7 +988,7 @@ export const biometricRouter = router({
 
   // ── Retention Policy Settings ────────────────────────────────────────────────
   // Read the configurable hot-storage retention window (default 90 days).
-  getRetentionDays: protectedProcedure.query(async () => {
+  getRetentionDays: adminProcedure.query(async () => {
     const db = await getDb();
     if (!db) return { retentionDays: 90 };
     const [row] = await db
@@ -1160,7 +1156,7 @@ export const biometricRouter = router({
   // ── Archival Status ─────────────────────────────────────────────────────────
   // Returns count of rows eligible for archival (older than 90 days),
   // last archival run timestamp, and next scheduled run.
-  archivalStatus: protectedProcedure.query(async () => {
+  archivalStatus: adminProcedure.query(async () => {
     const db = await getDb();
     if (!db) return {
       eligibleRows: 0,

@@ -87,6 +87,8 @@ describe("Permify — Policy-Based Access Control", () => {
 
   it("permifyCheck denies when Permify is unreachable", async () => {
     process.env.PERMIFY_URL = "http://permify:3476";
+    process.env.PERMIFY_TENANT_ID = "test-tenant";
+    process.env.PERMIFY_API_KEY = "test-key";
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("ECONNREFUSED")));
     const { permifyCheck } = await import("./permify");
     await expect(permifyCheck("case", "case-001", "close", "user-1")).rejects.toMatchObject({ code: "FORBIDDEN" });
@@ -95,6 +97,8 @@ describe("Permify — Policy-Based Access Control", () => {
 
   it("permifyCheck returns true for RESULT_ALLOWED", async () => {
     process.env.PERMIFY_URL = "http://permify:3476";
+    process.env.PERMIFY_TENANT_ID = "test-tenant";
+    process.env.PERMIFY_API_KEY = "test-key";
     vi.stubGlobal("fetch", mockFetchOk({ can: "RESULT_ALLOWED" }));
     const { permifyCheck } = await import("./permify");
     expect(await permifyCheck("investigation", "inv-001", "read", "user-1")).toBe(true);
@@ -103,6 +107,8 @@ describe("Permify — Policy-Based Access Control", () => {
 
   it("permifyCheck returns false for RESULT_DENIED", async () => {
     process.env.PERMIFY_URL = "http://permify:3476";
+    process.env.PERMIFY_TENANT_ID = "test-tenant";
+    process.env.PERMIFY_API_KEY = "test-key";
     vi.stubGlobal("fetch", mockFetchOk({ can: "RESULT_DENIED" }));
     const { permifyCheck } = await import("./permify");
     expect(await permifyCheck("investigation", "inv-001", "delete", "user-2")).toBe(false);
@@ -119,6 +125,8 @@ describe("Permify — Policy-Based Access Control", () => {
 
   it("permifyWriteRelationship calls Permify API when configured", async () => {
     process.env.PERMIFY_URL = "http://permify:3476";
+    process.env.PERMIFY_TENANT_ID = "test-tenant";
+    process.env.PERMIFY_API_KEY = "test-key";
     const fetchMock = mockFetchOk({ snap_token: "abc123" });
     vi.stubGlobal("fetch", fetchMock);
     const { permifyWriteRelationship } = await import("./permify");
@@ -390,12 +398,11 @@ describe("Redis — Caching Layer", () => {
 describe("TigerBeetle — Double-Entry Ledger", () => {
   beforeEach(() => { vi.resetModules(); });
 
-  it("creditTenantAccount returns recorded=false when TIGERBEETLE_URL is not set", async () => {
+  it("creditTenantAccount rejects an unbound legacy reference when TIGERBEETLE_URL is not set", async () => {
     delete process.env.TIGERBEETLE_URL;
     const { creditTenantAccount } = await import("./billing");
-    const result = await creditTenantAccount({ tenantId: "t1", amountKobo: 50000, reference: "PAY-001" });
-    expect(result.recorded).toBe(false);
-    expect(result.transferId).toBeTruthy();
+    await expect(creditTenantAccount({ tenantId: "t1", amountKobo: 50000, reference: "PAY-001" }))
+      .rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 
   it("TigerBeetle reconciliation tables are defined in schema", async () => {

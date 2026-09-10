@@ -21,6 +21,7 @@ const Settings               = lazy(() => import("@/pages/Settings"));
 const NotFound               = lazy(() => import("@/pages/NotFound"));
 const Forbidden              = lazy(() => import("@/pages/Forbidden"));
 const SearchResults          = lazy(() => import("@/pages/SearchResults"));
+const ConsumerDiscoveryPage  = lazy(() => import("@/pages/ConsumerDiscoveryPage"));
 const VerifyKYC              = lazy(() => import("@/pages/VerifyKYC"));
 
 const BiometricEnrollmentPage   = lazy(() => import("@/pages/bis/BiometricEnrollmentPage"));
@@ -66,6 +67,7 @@ const CaseDetailPage               = lazy(() => import("@/pages/bis/CaseDetailPa
 const StakeholderPortalPage        = lazy(() => import("@/pages/bis/StakeholderPortalPage"));
 const StakeholderPortalLandingPage = lazy(() => import("@/pages/StakeholderPortalLandingPage"));
 const OllamaManagementPage         = lazy(() => import("@/pages/bis/OllamaManagementPage"));
+const PiiForensicAuditPage         = lazy(() => import("@/pages/bis/PiiForensicAuditPage"));
 
 // LEX — Law Enforcement Extension
 const LexAdminPage      = lazy(() => import("@/pages/lex/LexAdminPage"));
@@ -223,6 +225,7 @@ function Router() {
         <Route path="/infra/redis" component={RedisPage} />
         <Route path="/infra/gateway" component={GatewayHealthPage} />
         <Route path="/infra/health" component={SystemHealthDashboard} />
+        <Route path="/infra/pii-forensics" component={PiiForensicAuditPage} />
         {/* NG Background Screening */}
         <Route path="/ng-screening" component={NgScreeningDashboard} />
         <Route path="/ng-screening/packages" component={NgPackagesPage} />
@@ -234,6 +237,7 @@ function Router() {
         {/* Fallback */}
         <Route path="/verify/:token" component={VerifyKYC} />
         <Route path="/search" component={SearchResults} />
+        <Route path="/consumer-discovery" component={ConsumerDiscoveryPage} />
         <Route path="/403" component={Forbidden} />
         <Route path="/404" component={NotFound} />
         <Route component={NotFound} />

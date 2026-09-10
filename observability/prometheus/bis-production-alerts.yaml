@@ -1,0 +1,411 @@
+groups:
+  - name: bis-observability-delivery
+    rules:
+      - alert: BISPrometheusRuleEvaluationFailed
+        expr: prometheus_rule_group_last_evaluation_success{rule_group=~".*bis-.*"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: prometheus
+        annotations:
+          summary: "BIS OBS-001 rule group is not evaluating successfully"
+          description: "Prometheus could not evaluate an OBS-001 rule group for two minutes. Alert-based release gates are unreliable until rule parsing, query dependencies, and storage health are restored."
+          runbook: "docs/operations/GATEWAY_AND_PARQUET_ARCHIVE_RUNBOOK.md#obs-001-alert-delivery"
+      - alert: BISGatewayMetricsScrapeFailed
+        expr: up{job="go-gateway-control-plane"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: gateway
+        annotations:
+          summary: "Protected gateway metrics endpoint is not being scraped"
+          description: "Prometheus cannot scrape the authenticated /internal/metrics endpoint. Verify the dedicated metrics key, service DNS, TLS/network path, and gateway availability."
+          runbook: "docs/operations/GATEWAY_AND_PARQUET_ARCHIVE_RUNBOOK.md#obs-001-alert-delivery"
+      - alert: BISArchivePushgatewayScrapeFailed
+        expr: up{job="cold-archive-pushgateway"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          service: cold-archive-writer
+        annotations:
+          summary: "Archive Pushgateway metrics are unavailable"
+          description: "Prometheus cannot ingest short-lived cold-archive worker metrics. Archive executions in production must fail if they cannot export metrics; restore HTTPS Pushgateway availability before the next scheduled run."
+          runbook: "docs/operations/GATEWAY_AND_PARQUET_ARCHIVE_RUNBOOK.md#obs-001-alert-delivery"
+
+  - name: bis-gateway-control-plane
+    rules:
+      - alert: BISGatewayDependencyUnavailable
+        expr: bis_gateway_control_plane_dependency_healthy == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: gateway
+        annotations:
+          summary: "BIS gateway control-plane dependency is unavailable"
+          description: "{{ $labels.dependency }} has been unavailable for at least two minutes. Gateway operations depending on it must remain fail closed. Check service DNS, credential rotation, TLS, and readiness before clearing."
+          runbook: "docs/operations/GATEWAY_AND_PARQUET_ARCHIVE_RUNBOOK.md#fail-closed-dependency-incident"
+      - alert: BISGatewayFailClosedDependencyEvents
+        expr: increase(bis_gateway_control_plane_dependency_fail_closed_total[10m]) > 5
+        for: 5m
+        labels:
+          severity: warning
+          service: gateway
+        annotations:
+          summary: "Gateway is repeatedly failing closed on a required dependency"
+          description: "{{ $labels.dependency }} caused more than five fail-closed decisions in ten minutes. Investigate the dependency before user-visible denials become sustained."
+          runbook: "docs/operations/GATEWAY_AND_PARQUET_ARCHIVE_RUNBOOK.md#fail-closed-dependency-incident"
+      - alert: BISPermifyAuthorizationErrors
+        expr: sum(rate(bis_gateway_permify_checks_total{outcome="error"}[5m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+          service: gateway
+        annotations:
+          summary: "BIS gateway is denying requests after Permify errors"
+          description: "Permission checks are failing closed because Permify responses or transport are invalid. Investigate before users experience sustained authorization denials."
+          runbook: "docs/operations/GATEWAY_AND_PARQUET_ARCHIVE_RUNBOOK.md#fail-closed-dependency-incident"
+      - alert: BISPermifyDenyRateSpike
+        expr: sum(rate(bis_gateway_permify_checks_total{outcome="denied"}[10m])) / clamp_min(sum(rate(bis_gateway_permify_checks_total[10m])), 1) > 0.25
+        for: 10m
+        labels:
+          severity: warning
+          service: gateway
+        annotations:
+          summary: "BIS gateway permission denial rate exceeds 25%"
+          description: "Review policy deployment, tenant bindings, and clients. This alert does not imply that the gateway has granted access."
+          runbook: "docs/operations/GATEWAY_AND_PARQUET_ARCHIVE_RUNBOOK.md#fail-closed-dependency-incident"
+
+  - name: bis-transactional-outbox
+    rules:
+      - alert: BISOutboxKeyRotationDue
+        expr: bis_gateway_transactional_outbox_key_rotation_due == 1
+        for: 5m
+        labels:
+          severity: critical
+          service: gateway
+        annotations:
+          summary: "BIS transactional-outbox encryption key rotation is due"
+          description: "The active outbox AES-256-GCM key is within its 30-day rotation lead window. Activate a new versioned key, retain the previous key only through the approved recovery window, and verify pending events are rewrapped before retirement."
+          runbook: "docs/operations/GATEWAY_AND_PARQUET_ARCHIVE_RUNBOOK.md#transactional-outbox-key-rotation"
+      - alert: BISOutboxKeyExpiryImminent
+        expr: bis_gateway_transactional_outbox_active_key_expiry_seconds > 0 and bis_gateway_transactional_outbox_active_key_expiry_seconds < 604800
+        for: 5m
+        labels:
+          severity: critical
+          service: gateway
+        annotations:
+          summary: "BIS transactional-outbox key expires within seven days"
+          description: "The active encrypted-outbox key is close to expiry. Rotate and verify rewrapping before the key policy blocks durable event processing."
+          runbook: "docs/operations/GATEWAY_AND_PARQUET_ARCHIVE_RUNBOOK.md#transactional-outbox-key-rotation"
+      - alert: BISOutboxBacklogGrowing
+        expr: bis_gateway_transactional_outbox_pending_events > 100
+        for: 10m
+        labels:
+          severity: critical
+          service: gateway
+        annotations:
+          summary: "BIS transactional outbox has more than 100 pending events"
+          description: "Kafka delivery is degraded or blocked. Events remain durable in PostgreSQL but must be drained before latency SLOs are breached."
+          runbook: "docs/operations/GATEWAY_AND_PARQUET_ARCHIVE_RUNBOOK.md#transactional-outbox-incident"
+      - alert: BISOutboxOldestPendingTooOld
+        expr: bis_gateway_transactional_outbox_oldest_pending_age_seconds > 900
+        for: 5m
+        labels:
+          severity: critical
+          service: gateway
+        annotations:
+          summary: "Oldest transactional-outbox event has been pending for more than 15 minutes"
+          description: "An encrypted durable event is not being delivered within the recovery objective. Check Kafka health, dispatcher errors, and PostgreSQL leases."
+          runbook: "docs/operations/GATEWAY_AND_PARQUET_ARCHIVE_RUNBOOK.md#transactional-outbox-incident"
+      - alert: BISOutboxDispatchLeaseStuck
+        expr: bis_gateway_transactional_outbox_oldest_dispatching_age_seconds > 300
+        for: 2m
+        labels:
+          severity: critical
+          service: gateway
+        annotations:
+          summary: "Transactional-outbox dispatch lease is stuck for more than five minutes"
+          description: "A dispatcher lease did not complete. Check gateway worker liveness, PostgreSQL locks, encrypted payload decryption, and Kafka publication."
+          runbook: "docs/operations/GATEWAY_AND_PARQUET_ARCHIVE_RUNBOOK.md#transactional-outbox-incident"
+      - alert: BISOutboxDeliveryStalled
+        expr: bis_gateway_transactional_outbox_pending_events > 0 and increase(bis_gateway_transactional_outbox_events_total{state="delivered"}[15m]) == 0
+        for: 10m
+        labels:
+          severity: critical
+          service: gateway
+        annotations:
+          summary: "Transactional outbox has pending events but no deliveries"
+          description: "The encrypted outbox is accepting durable events but none have been marked delivered in 15 minutes. Investigate Kafka, dispatcher, and authorization dependencies."
+          runbook: "docs/operations/GATEWAY_AND_PARQUET_ARCHIVE_RUNBOOK.md#transactional-outbox-incident"
+      - alert: BISOutboxDeadLettered
+        expr: increase(bis_gateway_transactional_outbox_events_total{state="dead_letter"}[15m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          service: gateway
+        annotations:
+          summary: "BIS gateway event reached transactional outbox dead-letter state"
+          description: "A durable business event exhausted delivery attempts. Reconcile the row and restore Kafka before manual replay."
+          runbook: "docs/operations/GATEWAY_AND_PARQUET_ARCHIVE_RUNBOOK.md#transactional-outbox-incident"
+      - alert: BISOutboxPersistenceError
+        expr: increase(bis_gateway_transactional_outbox_events_total{state="persistence_error"}[5m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          service: gateway
+        annotations:
+          summary: "BIS gateway could not durably persist an event"
+          description: "The gateway must reject dependent business operations. Restore PostgreSQL outbox health before retrying clients."
+          runbook: "docs/operations/GATEWAY_AND_PARQUET_ARCHIVE_RUNBOOK.md#transactional-outbox-incident"
+
+  - name: bis-cold-archive
+    rules:
+      - alert: BISColdArchiveDependencyUnavailable
+        expr: bis_cold_archive_dependency_healthy == 0
+        for: 5m
+        labels:
+          severity: critical
+          service: cold-archive-writer
+        annotations:
+          summary: "Cold archive PostgreSQL or object storage dependency is unavailable"
+          description: "{{ $labels.dependency }} was unavailable during an archive worker run. Do not bypass recovery or encryption verification; restore the dependency and rerun with the approved KMS key."
+          runbook: "docs/operations/GATEWAY_AND_PARQUET_ARCHIVE_RUNBOOK.md#cold-archive-incident"
+      - alert: BISColdArchiveFailure
+        expr: increase(bis_cold_archive_runs_total{outcome="failed"}[26h]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          service: cold-archive-writer
+        annotations:
+          summary: "BIS Parquet cold-archive job failed"
+          description: "The scheduled archive worker returned an error in the last 26 hours. Check batch state, object storage, PostgreSQL, KMS policy, and Pushgateway connectivity."
+          runbook: "docs/operations/GATEWAY_AND_PARQUET_ARCHIVE_RUNBOOK.md#cold-archive-incident"
+      - alert: BISColdArchiveStale
+        expr: time() - bis_cold_archive_last_success_timestamp_seconds > 93600
+        for: 30m
+        labels:
+          severity: warning
+          service: cold-archive-writer
+        annotations:
+          summary: "BIS cold archive has not completed successfully in more than 26 hours"
+          description: "The scheduled job may not be running or cannot reach PostgreSQL, object storage, or Pushgateway. Confirm CronJob scheduling and monitoring transport."
+          runbook: "docs/operations/GATEWAY_AND_PARQUET_ARCHIVE_RUNBOOK.md#cold-archive-incident"
+      - alert: BISColdArchiveQuarantinedBatch
+        expr: bis_cold_archive_batches{state="quarantined"} > 0
+        for: 5m
+        labels:
+          severity: critical
+          service: cold-archive-writer
+        annotations:
+          summary: "Cold archive contains a quarantined recovery batch"
+          description: "An interrupted upload or a retired/unavailable KMS key requires approved manual restore validation. Source data must remain preserved until custody is reconciled."
+          runbook: "docs/operations/GATEWAY_AND_PARQUET_ARCHIVE_RUNBOOK.md#cold-archive-recovery"
+      - alert: BISColdArchiveKMSUploadFailure
+        expr: increase(bis_cold_archive_kms_uploads_total{outcome="failed"}[26h]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          service: cold-archive-writer
+        annotations:
+          summary: "SSE-KMS archive object or manifest upload failed"
+          description: "An archive object did not complete its required SSE-KMS upload path. Verify object-store policy, active KMS grant, key identity, and manifest verification before retrying."
+          runbook: "docs/operations/GATEWAY_AND_PARQUET_ARCHIVE_RUNBOOK.md#cold-archive-incident"
+      - alert: BISColdArchiveKMSRotationDue
+        expr: bis_cold_archive_kms_key_rotation_due == 1
+        for: 5m
+        labels:
+          severity: critical
+          service: cold-archive-writer
+        annotations:
+          summary: "Cold archive KMS key rotation is due"
+          description: "The active archive KMS key is inside its mandatory rotation window. Add and approve a successor key before the configured expiry blocks archival operations."
+          runbook: "docs/operations/GATEWAY_AND_PARQUET_ARCHIVE_RUNBOOK.md#cold-archive-key-rotation"
+      - alert: BISColdArchiveKMSExpiryImminent
+        expr: bis_cold_archive_active_kms_key_expiry_seconds > 0 and bis_cold_archive_active_kms_key_expiry_seconds < 604800
+        for: 5m
+        labels:
+          severity: critical
+          service: cold-archive-writer
+        annotations:
+          summary: "Cold archive KMS key expires within seven days"
+          description: "The active archive KMS key must be rotated and recovery access verified before the policy prevents encrypted archive writes."
+          runbook: "docs/operations/GATEWAY_AND_PARQUET_ARCHIVE_RUNBOOK.md#cold-archive-key-rotation"
+      - alert: BISColdArchiveSlow
+        expr: histogram_quantile(0.95, sum(rate(bis_cold_archive_run_duration_seconds_bucket[7d])) by (le)) > 1200
+        for: 1h
+        labels:
+          severity: warning
+          service: cold-archive-writer
+        annotations:
+          summary: "BIS cold-archive p95 duration exceeds 20 minutes"
+          description: "Review PostgreSQL selection query, object storage throughput, batch size, and worker resource limits before the job overlaps its next schedule."
+          runbook: "docs/operations/GATEWAY_AND_PARQUET_ARCHIVE_RUNBOOK.md#cold-archive-incident"
+
+  - name: bis-intelligence-billing-reconciliation
+    rules:
+      - alert: BISIntelligenceBillingMetricsCollectionFailed
+        expr: bis_intelligence_billing_metrics_collection_healthy == 0
+        for: 5m
+        labels:
+          severity: critical
+          service: billing
+        annotations:
+          summary: "Intelligence billing reconciliation metrics cannot query PostgreSQL"
+          description: "The protected BFF metrics collector cannot read durable assessment billing state. Queue and reconciliation release gates are unreliable until PostgreSQL access is restored."
+          runbook: "docs/operations/INTELLIGENCE_BILLING_RECONCILIATION_AND_SPLIT_BRAIN_RUNBOOK.md#stale-lease-monitoring-and-recovery"
+      - alert: BISIntelligenceBillingStaleLease
+        expr: bis_intelligence_billing_stale_leases > 0
+        for: 10m
+        labels:
+          severity: warning
+          service: billing
+        annotations:
+          summary: "Intelligence assessment billing lease is stale"
+          description: "At least one worker lease has exceeded the five-minute recovery interval for ten minutes. Inspect worker fencing, PostgreSQL health, and deterministic transfer reconciliation before manual intervention."
+          runbook: "docs/operations/INTELLIGENCE_BILLING_RECONCILIATION_AND_SPLIT_BRAIN_RUNBOOK.md#stale-lease-monitoring-and-recovery"
+      - alert: BISIntelligenceBillingReconciliationBacklog
+        expr: bis_intelligence_billing_open_reconciliations > 0
+        for: 30m
+        labels:
+          severity: critical
+          service: billing
+        annotations:
+          summary: "Intelligence billing event requires human reconciliation"
+          description: "A retry-exhausted or uncertain deterministic TigerBeetle transfer has remained open for 30 minutes. A different tenant-scoped administrator must claim and reconcile it; do not create a new transfer ID."
+          runbook: "docs/operations/INTELLIGENCE_BILLING_RECONCILIATION_AND_SPLIT_BRAIN_RUNBOOK.md#reconciliation-workflow"
+      - alert: BISIntelligenceBillingReconciliationSLOExceeded
+        expr: bis_intelligence_billing_oldest_open_reconciliation_age_seconds > 14400
+        for: 15m
+        labels:
+          severity: critical
+          service: billing
+        annotations:
+          summary: "Oldest intelligence billing reconciliation exceeds four hours"
+          description: "An unresolved ledger uncertainty breached the four-hour reconciliation objective. Freeze automated replay for the event and apply the split-brain containment procedure if multiple workers or ledgers are involved."
+          runbook: "docs/operations/INTELLIGENCE_BILLING_RECONCILIATION_AND_SPLIT_BRAIN_RUNBOOK.md#split-brain-containment"
+      - alert: BISIntelligenceBillingLegacyDeadLetter
+        expr: bis_intelligence_billing_events{state="dead_letter"} > 0
+        for: 5m
+        labels:
+          severity: critical
+          service: billing
+        annotations:
+          summary: "Legacy intelligence billing event is in dead-letter state"
+          description: "A billing event must be migrated into a four-eyes reconciliation case before any replay. Automated replay is prohibited."
+          runbook: "docs/operations/INTELLIGENCE_BILLING_RECONCILIATION_AND_SPLIT_BRAIN_RUNBOOK.md#reconciliation-workflow"
+
+  - name: bis-payment-reconciliation
+    rules:
+      - alert: BISPaymentReconciliationMetricsCollectionFailed
+        expr: bis_payment_reconciliation_metrics_collection_healthy == 0
+        for: 5m
+        labels:
+          severity: critical
+          service: payments
+        annotations:
+          summary: "Payment reconciliation metrics cannot query PostgreSQL"
+          description: "Queue, stale-lease, and four-eyes reconciliation state cannot be observed. Freeze payment outbox scale-out and restore PostgreSQL metrics collection before resuming normal operations."
+          runbook: "docs/operations/PAYMENT_RECONCILIATION_UNDER_REVIEW_RUNBOOK.md#metrics-collection-failure"
+      - alert: BISPaymentIntentOutboxStaleLease
+        expr: bis_payment_intent_outbox_stale_leases > 0
+        for: 10m
+        labels:
+          severity: warning
+          service: payments
+        annotations:
+          summary: "Payment intent outbox lease is stale"
+          description: "At least one payment workflow handoff lease exceeded the five-minute recovery interval for ten minutes. Inspect PostgreSQL health, worker fencing, and deterministic workflow identifiers before intervention."
+          runbook: "docs/operations/PAYMENT_RECONCILIATION_UNDER_REVIEW_RUNBOOK.md#stale-lease-recovery"
+      - alert: BISPaymentReconciliationBacklogHigh
+        expr: sum(bis_payment_reconciliation_open_cases) > 25
+        for: 15m
+        labels:
+          severity: warning
+          service: payments
+        annotations:
+          summary: "Payment reconciliation backlog exceeds 25 cases"
+          description: "High-volume human review demand is building. Add independent authorized reviewers and investigate common provider or orchestration failures; do not bulk requeue cases."
+          runbook: "docs/operations/PAYMENT_RECONCILIATION_UNDER_REVIEW_RUNBOOK.md#high-volume-backlog"
+      - alert: BISPaymentReconciliationCaseUnclaimed
+        expr: bis_payment_reconciliation_open_cases{state="open"} > 0
+        for: 30m
+        labels:
+          severity: critical
+          service: payments
+        annotations:
+          summary: "Payment reconciliation case remains unclaimed"
+          description: "A dead-lettered payment intent has not received human ownership for 30 minutes. Freeze automatic replay for the affected rail and assign an independent tenant-scoped reconciler."
+          runbook: "docs/operations/PAYMENT_RECONCILIATION_UNDER_REVIEW_RUNBOOK.md#case-triage"
+      - alert: BISPaymentReconciliationSLOExceeded
+        expr: bis_payment_reconciliation_oldest_open_age_seconds > 14400
+        for: 15m
+        labels:
+          severity: critical
+          service: payments
+        annotations:
+          summary: "Oldest payment reconciliation exceeds four hours"
+          description: "An uncertain payment outcome breached the four-hour reconciliation objective. Fence competing workers, preserve evidence, and use the four-eyes procedure; do not infer settlement from a timeout."
+          runbook: "docs/operations/PAYMENT_RECONCILIATION_UNDER_REVIEW_RUNBOOK.md#four-eyes-resolution"
+      - alert: BISPaymentIntentOutboxDeadLetter
+        expr: bis_payment_intent_outbox_events{state="dead_letter"} > 0
+        for: 5m
+        labels:
+          severity: critical
+          service: payments
+        annotations:
+          summary: "Payment intent outbox reached terminal dead-letter"
+          description: "Every dead-lettered payment intent must have exactly one tenant-bound reconciliation case. Verify the case trigger and do not create a new payment intent or transfer identifier."
+          runbook: "docs/operations/PAYMENT_RECONCILIATION_UNDER_REVIEW_RUNBOOK.md#case-triage"
+
+  - name: bis-distributed-tracing
+    rules:
+      - alert: BISGatewayTraceLatencyP95High
+        expr: histogram_quantile(0.95, sum(rate(bis_gateway_trace_request_duration_seconds_bucket[10m])) by (le)) > 2
+        for: 10m
+        labels:
+          severity: warning
+          service: gateway
+        annotations:
+          summary: "Gateway trace-correlated request p95 exceeds two seconds"
+          description: "The W3C-trace-correlated gateway request p95 has exceeded two seconds for ten minutes. Review downstream latency using trace_id and request_id; do not sample payloads or credentials."
+          runbook: "docs/operations/PRODUCTION_SECURITY_HARDENING_AND_RBAC.md#supply-chain-resilience-and-operations"
+      - alert: BISGatewayTraceLatencyP99Critical
+        expr: histogram_quantile(0.99, sum(rate(bis_gateway_trace_request_duration_seconds_bucket[5m])) by (le)) > 10
+        for: 5m
+        labels:
+          severity: critical
+          service: gateway
+        annotations:
+          summary: "Gateway trace-correlated request p99 exceeds ten seconds"
+          description: "The gateway p99 latency is above the request timeout safety margin. Contain dependency failures, inspect only sanitized trace/request identifiers, and verify gateway readiness before rollback."
+          runbook: "docs/operations/PRODUCTION_SECURITY_HARDENING_AND_RBAC.md#network-and-runtime"
+      - alert: BISGatewayInvalidTraceContextRate
+        expr: sum(rate(bis_gateway_trace_correlation_total{outcome="invalid_replaced"}[10m])) / clamp_min(sum(rate(bis_gateway_trace_correlation_total[10m])), 1) > 0.01
+        for: 10m
+        labels:
+          severity: warning
+          service: gateway
+        annotations:
+          summary: "More than one percent of gateway requests have invalid W3C trace context"
+          description: "The gateway safely replaces malformed or zero trace contexts. Investigate ingress, BFF, and worker header propagation; malformed headers must not be accepted or logged verbatim."
+          runbook: "docs/operations/PRODUCTION_SECURITY_HARDENING_AND_RBAC.md#network-and-runtime"
+      - alert: BISGatewayNewTraceRootRateHigh
+        expr: sum(rate(bis_gateway_trace_correlation_total{outcome="new_root"}[10m])) / clamp_min(sum(rate(bis_gateway_trace_correlation_total[10m])), 1) > 0.5
+        for: 15m
+        labels:
+          severity: warning
+          service: gateway
+        annotations:
+          summary: "Gateway is receiving an unusually high rate of new trace roots"
+          description: "More than half of requests lack a valid upstream W3C trace context. This can be legitimate for direct callers but may indicate BFF, ingress, or worker correlation propagation loss."
+          runbook: "docs/operations/PRODUCTION_SECURITY_HARDENING_AND_RBAC.md#network-and-runtime"
+      - alert: BISGatewayTraceMetricsAbsent
+        expr: absent(bis_gateway_trace_correlation_total)
+        for: 5m
+        labels:
+          severity: critical
+          service: gateway
+        annotations:
+          summary: "Gateway distributed-tracing metrics are absent"
+          description: "The protected metrics scrape is present but no trace continuity series is exported. Verify the deployed gateway image digest and metric registry before relying on correlation-based incident analysis."
+          runbook: "docs/operations/PRODUCTION_SECURITY_HARDENING_AND_RBAC.md#release-evidence"

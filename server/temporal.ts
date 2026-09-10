@@ -108,6 +108,8 @@ export interface PaymentTransferWorkflowInput {
   beneficiaryAccountId: string;
   /** Beneficiary name */
   beneficiaryName: string;
+  /** Provider-authorized beneficiary bank code */
+  beneficiaryBankCode: string;
   /** Amount in kobo */
   amountKobo: number;
   /** ISO-4217 currency code */

@@ -225,33 +225,33 @@ func (r *CaseRepository) UpdateStatus(ctx context.Context, ref, status string, c
 	return err
 }
 
-// ── Stub repositories for parties, documents, timeline, stakeholders, comments ──
+// ── Database-backed entity repositories for parties, documents, timeline, stakeholders, comments ──
 
-// NewPartyRepository creates a stub party repository (full implementation follows same pattern).
+// NewPartyRepository creates the party repository adapter.
 func NewPartyRepository(db *sql.DB) *GenericRepo { return &GenericRepo{db: db, table: "case_parties"} }
 
-// NewDocumentRepository creates a stub document repository.
+// NewDocumentRepository creates the document repository adapter.
 func NewDocumentRepository(db *sql.DB) *GenericRepo {
 	return &GenericRepo{db: db, table: "case_documents"}
 }
 
-// NewTimelineRepository creates a stub timeline repository.
+// NewTimelineRepository creates the timeline repository adapter.
 func NewTimelineRepository(db *sql.DB) *GenericRepo {
 	return &GenericRepo{db: db, table: "case_timeline"}
 }
 
-// NewStakeholderRepository creates a stub stakeholder repository.
+// NewStakeholderRepository creates the stakeholder repository adapter.
 func NewStakeholderRepository(db *sql.DB) *GenericRepo {
 	return &GenericRepo{db: db, table: "case_stakeholders"}
 }
 
-// NewCommentRepository creates a stub comment repository.
+// NewCommentRepository creates the comment repository adapter.
 func NewCommentRepository(db *sql.DB) *GenericRepo {
 	return &GenericRepo{db: db, table: "case_comments"}
 }
 
-// GenericRepo is a placeholder repository that holds a DB reference for sub-entities.
-// Each sub-entity (parties, documents, etc.) follows the same pattern as CaseRepository.
+// GenericRepo holds the database connection and table identifier for case sub-entities.
+// Handlers execute parameterized persistence operations through this adapter.
 type GenericRepo struct {
 	db    *sql.DB
 	table string

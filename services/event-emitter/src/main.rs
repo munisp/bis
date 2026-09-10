@@ -2,7 +2,7 @@
 //
 // Responsibilities:
 //   1. Consume events from the `bis.case.events` Kafka topic
-//   2. Write immutable audit trail entries to the MySQL/TiDB `audit_log` table
+//   2. Write immutable audit trail entries to the PostgreSQL `audit_log` table
 //   3. Fan-out case status change events to WebSocket subscribers (SSE endpoint)
 //   4. Expose a health check endpoint at GET /health
 //   5. Partition payment events by account range for deterministic ordering
@@ -25,8 +25,9 @@
 use anyhow::Result;
 use axum::{
     extract::State,
-    http::StatusCode,
-    response::{IntoResponse, Json, Sse},
+    http::{HeaderMap, StatusCode},
+    middleware::{self, Next},
+    response::{IntoResponse, Json, Response, Sse},
     routing::{get, post},
     Router,
 };
@@ -43,6 +44,7 @@ use std::{
     time::Duration,
 };
 use tokio::sync::{broadcast, Semaphore};
+use tokio_postgres::{Client as PostgresClient, NoTls};
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
 use tracing::{error, info, warn};
@@ -77,10 +79,10 @@ pub struct BisEvent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PaymentEvent {
     pub transfer_id: String,
-    pub account_id: String,   // Used as partition key
-    pub amount: i64,          // In kobo (smallest unit) — avoids float precision issues
+    pub account_id: String, // Used as partition key
+    pub amount: i64,        // In kobo (smallest unit) — avoids float precision issues
     pub currency: String,
-    pub direction: String,    // "debit" | "credit"
+    pub direction: String, // "debit" | "credit"
     pub status: String,
     pub idempotency_key: Option<String>,
     pub timestamp: String,
@@ -103,13 +105,48 @@ pub struct AuditEntry {
 struct AppState {
     /// Broadcast channel for SSE fan-out — capacity 1024 events
     tx: Arc<broadcast::Sender<String>>,
-    db_url: String,
+    db: Arc<PostgresClient>,
     /// Backpressure semaphore — limits concurrent event processing
     semaphore: Arc<Semaphore>,
     /// Metrics counters
     events_processed: Arc<AtomicUsize>,
     events_dropped: Arc<AtomicUsize>,
     events_inflight: Arc<AtomicUsize>,
+}
+
+// ── Service authentication ────────────────────────────────────────────────────
+
+fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+    let mut difference = 0u8;
+    for (a, b) in left.iter().zip(right.iter()) {
+        difference |= a ^ b;
+    }
+    difference == 0
+}
+
+async fn service_auth(headers: HeaderMap, request: axum::extract::Request, next: Next) -> Response {
+    let expected = std::env::var("BIS_EVENT_EMITTER_KEY").unwrap_or_default();
+    let supplied = headers
+        .get("x-bis-key")
+        .and_then(|value| value.to_str().ok())
+        .or_else(|| {
+            headers
+                .get("authorization")
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| value.strip_prefix("Bearer "))
+        })
+        .unwrap_or("");
+    if expected.is_empty() || !constant_time_eq(supplied.as_bytes(), expected.as_bytes()) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error": "unauthorized"})),
+        )
+            .into_response();
+    }
+    next.run(request).await
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
@@ -128,20 +165,38 @@ async fn main() -> Result<()> {
     dotenvy::dotenv().ok();
 
     let db_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "mysql://root:@localhost:3306/bis_db".to_string());
+        .map_err(|_| anyhow::anyhow!("DATABASE_URL must be configured"))?;
+    if !db_url.starts_with("postgres://") && !db_url.starts_with("postgresql://") {
+        anyhow::bail!("DATABASE_URL must use PostgreSQL");
+    }
     let kafka_brokers = std::env::var("KAFKA_BROKERS")
-        .unwrap_or_else(|_| "localhost:9092".to_string());
+        .map_err(|_| anyhow::anyhow!("KAFKA_BROKERS must be configured"))?;
+    if std::env::var("BIS_EVENT_EMITTER_KEY")
+        .unwrap_or_default()
+        .is_empty()
+    {
+        anyhow::bail!("BIS_EVENT_EMITTER_KEY must be configured");
+    }
     let port: u16 = std::env::var("EVENT_EMITTER_PORT")
         .unwrap_or_else(|_| "8082".to_string())
         .parse()
         .unwrap_or(8082);
+
+    let (database_client, database_connection) = tokio_postgres::connect(&db_url, NoTls).await?;
+    tokio::spawn(async move {
+        if let Err(connection_error) = database_connection.await {
+            error!(error = %connection_error, "PostgreSQL connection terminated");
+        }
+    });
+    database_client.execute("SELECT 1", &[]).await?;
+    let database_client = Arc::new(database_client);
 
     let (tx, _rx) = broadcast::channel::<String>(1024);
     let tx = Arc::new(tx);
 
     let state = AppState {
         tx: tx.clone(),
-        db_url: db_url.clone(),
+        db: database_client.clone(),
         semaphore: Arc::new(Semaphore::new(MAX_INFLIGHT_EVENTS)),
         events_processed: Arc::new(AtomicUsize::new(0)),
         events_dropped: Arc::new(AtomicUsize::new(0)),
@@ -150,7 +205,7 @@ async fn main() -> Result<()> {
 
     // ── Kafka consumer task ───────────────────────────────────────────────────
     let kafka_tx = tx.clone();
-    let kafka_db_url = db_url.clone();
+    let kafka_db = database_client.clone();
     let kafka_sem = state.semaphore.clone();
     let kafka_processed = state.events_processed.clone();
     let kafka_dropped = state.events_dropped.clone();
@@ -159,7 +214,7 @@ async fn main() -> Result<()> {
         run_kafka_consumer(
             kafka_brokers,
             kafka_tx,
-            kafka_db_url,
+            kafka_db,
             kafka_sem,
             kafka_processed,
             kafka_dropped,
@@ -169,11 +224,14 @@ async fn main() -> Result<()> {
     });
 
     // ── HTTP server ───────────────────────────────────────────────────────────
-    let app = Router::new()
-        .route("/health", get(health_handler))
+    let protected = Router::new()
         .route("/metrics", get(metrics_handler))
         .route("/events/stream", get(sse_handler))
         .route("/events/publish", post(publish_handler))
+        .layer(middleware::from_fn(service_auth));
+    let app = Router::new()
+        .route("/health", get(health_handler))
+        .merge(protected)
         .with_state(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
@@ -208,22 +266,46 @@ fn murmur2(data: &[u8]) -> u32 {
     let mut i = 0;
     while i + 4 <= data.len() {
         let mut k = u32::from_le_bytes([data[i], data[i + 1], data[i + 2], data[i + 3]]);
-        k = k.wrapping_mul(M); k ^= k >> R; k = k.wrapping_mul(M);
-        h = h.wrapping_mul(M); h ^= k;
+        k = k.wrapping_mul(M);
+        k ^= k >> R;
+        k = k.wrapping_mul(M);
+        h = h.wrapping_mul(M);
+        h ^= k;
         i += 4;
     }
     let remaining = data.len() - i;
-    if remaining >= 3 { h ^= (data[i + 2] as u32) << 16; }
-    if remaining >= 2 { h ^= (data[i + 1] as u32) << 8; }
-    if remaining >= 1 { h ^= data[i] as u32; h = h.wrapping_mul(M); }
-    h ^= h >> 13; h = h.wrapping_mul(M); h ^= h >> 15;
+    if remaining >= 3 {
+        h ^= (data[i + 2] as u32) << 16;
+    }
+    if remaining >= 2 {
+        h ^= (data[i + 1] as u32) << 8;
+    }
+    if remaining >= 1 {
+        h ^= data[i] as u32;
+        h = h.wrapping_mul(M);
+    }
+    h ^= h >> 13;
+    h = h.wrapping_mul(M);
+    h ^= h >> 15;
     h
+}
+
+async fn persist_audit_entry(
+    db: &PostgresClient,
+    entry: &AuditEntry,
+) -> Result<(), tokio_postgres::Error> {
+    db.execute(
+        "INSERT INTO audit_log (\"category\", \"action\", \"targetRef\", \"result\", \"detail\", \"createdAt\") VALUES ($1, $2, $3, $4, $5, $6)",
+        &[&"system", &entry.event_type, &entry.entity_id, &"success", &entry.payload, &Utc::now()],
+    )
+    .await?;
+    Ok(())
 }
 
 async fn run_kafka_consumer(
     brokers: String,
     tx: Arc<broadcast::Sender<String>>,
-    _db_url: String,
+    db: Arc<PostgresClient>,
     semaphore: Arc<Semaphore>,
     events_processed: Arc<AtomicUsize>,
     events_dropped: Arc<AtomicUsize>,
@@ -248,7 +330,7 @@ async fn run_kafka_consumer(
         .set("socket.keepalive.enable", "true")
         .set("fetch.min.bytes", "1")
         .set("fetch.wait.max.ms", "500")
-        .set("fetch.max.bytes", "10485760")   // 10MB per poll
+        .set("fetch.max.bytes", "10485760") // 10MB per poll
         .set("max.partition.fetch.bytes", "1048576") // 1MB per partition
         .set("enable.partition.eof", "false")
         .set("metadata.max.age.ms", "60000")
@@ -289,7 +371,8 @@ async fn run_kafka_consumer(
 
                     if topic == TOPIC_PAYMENTS {
                         if let Ok(payment) = serde_json::from_str::<PaymentEvent>(&raw) {
-                            let expected_partition = murmur2_partition(&payment.account_id, NUM_PAYMENT_PARTITIONS);
+                            let expected_partition =
+                                murmur2_partition(&payment.account_id, NUM_PAYMENT_PARTITIONS);
                             info!(
                                 transfer_id = %payment.transfer_id,
                                 account_id = %payment.account_id,
@@ -318,6 +401,12 @@ async fn run_kafka_consumer(
                             payload: event.payload.clone(),
                             created_at: Utc::now().to_rfc3339(),
                         };
+                        if let Err(persist_error) = persist_audit_entry(&db, &entry).await {
+                            error!(error = %persist_error, event_id = %entry.id, "failed to persist audit event");
+                            events_dropped.fetch_add(1, Ordering::Relaxed);
+                            events_inflight.fetch_sub(1, Ordering::Relaxed);
+                            continue;
+                        }
                         if let Ok(json) = serde_json::to_string(&entry) {
                             let _ = tx.send(json);
                         }
@@ -387,7 +476,11 @@ async fn metrics_handler(State(state): State<AppState>) -> impl IntoResponse {
          event_emitter_payment_partitions {}\n",
         processed, dropped, inflight, available, NUM_PAYMENT_PARTITIONS
     );
-    (StatusCode::OK, [("Content-Type", "text/plain; version=0.0.4")], body)
+    (
+        StatusCode::OK,
+        [("Content-Type", "text/plain; version=0.0.4")],
+        body,
+    )
 }
 
 /// POST /events/publish — publish an event directly (for testing/internal use)
@@ -415,6 +508,13 @@ async fn publish_handler(
         payload: event.payload.clone(),
         created_at: Utc::now().to_rfc3339(),
     };
+    if let Err(persist_error) = persist_audit_entry(&state.db, &entry).await {
+        error!(error = %persist_error, event_id = %entry.id, "failed to persist directly published audit event");
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "audit persistence unavailable" })),
+        );
+    }
     if let Ok(json) = serde_json::to_string(&entry) {
         let _ = state.tx.send(json);
         state.events_processed.fetch_add(1, Ordering::Relaxed);
@@ -430,9 +530,8 @@ async fn sse_handler(
 ) -> Sse<impl tokio_stream::Stream<Item = Result<axum::response::sse::Event, Infallible>>> {
     let rx = state.tx.subscribe();
     let stream = BroadcastStream::new(rx).filter_map(|msg| {
-        msg.ok().map(|data| {
-            Ok(axum::response::sse::Event::default().data(data))
-        })
+        msg.ok()
+            .map(|data| Ok(axum::response::sse::Event::default().data(data)))
     });
 
     Sse::new(stream).keep_alive(
@@ -485,7 +584,10 @@ mod tests {
     #[test]
     fn test_extract_entity_type() {
         assert_eq!(extract_entity_type("case.created"), "case");
-        assert_eq!(extract_entity_type("investigation.updated"), "investigation");
+        assert_eq!(
+            extract_entity_type("investigation.updated"),
+            "investigation"
+        );
         assert_eq!(extract_entity_type("alert.fired"), "alert");
         assert_eq!(extract_entity_type("payment.completed"), "payment");
         assert_eq!(extract_entity_type("unknown.event"), "unknown");
@@ -536,7 +638,8 @@ mod tests {
         assert!(
             max_count < expected * 3 / 2,
             "Partition distribution too skewed: max={}, expected={}",
-            max_count, expected
+            max_count,
+            expected
         );
     }
 

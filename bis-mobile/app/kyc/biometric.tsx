@@ -15,6 +15,7 @@ import { useState, useRef, useCallback } from "react";
 import {
   View,
   Text,
+  TextInput,
   StyleSheet,
   TouchableOpacity,
   Alert,
@@ -22,7 +23,7 @@ import {
   ActivityIndicator,
   Image,
 } from "react-native";
-import { CameraView, CameraType, useCameraPermissions } from "expo-camera";
+import { CameraView, useCameraPermissions } from "expo-camera";
 import * as ImagePicker from "expo-image-picker";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
@@ -43,11 +44,21 @@ const COLORS = {
 
 type Step = "permissions" | "liveness" | "selfie" | "document" | "confirm" | "done";
 
+type LivenessChallengeType = "blink" | "head_turn_left" | "head_turn_right" | "smile" | "nod";
+
 interface LivenessChallenge {
   id: string;
-  type: string;
+  type: LivenessChallengeType;
   instruction: string;
 }
+
+const CHALLENGE_DISPLAY_TYPES: Record<string, LivenessChallengeType> = {
+  blink: "blink",
+  turn_left: "head_turn_left",
+  turn_right: "head_turn_right",
+  smile: "smile",
+  nod: "nod",
+};
 
 // ── Step indicator ────────────────────────────────────────────────────────────
 function StepIndicator({ current, total }: { current: number; total: number }) {
@@ -152,7 +163,7 @@ function LivenessStep({
 }
 
 // ── Selfie capture step ───────────────────────────────────────────────────────
-function SelfieStep({ onCapture }: { onCapture: (uri: string) => void }) {
+function SelfieStep({ onCapture }: { onCapture: (capture: { uri: string; base64: string }) => void }) {
   const cameraRef = useRef<CameraView>(null);
   const [capturing, setCapturing] = useState(false);
 
@@ -161,12 +172,12 @@ function SelfieStep({ onCapture }: { onCapture: (uri: string) => void }) {
     setCapturing(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
-      const photo = await cameraRef.current.takePictureAsync({ quality: 0.8, base64: false });
-      if (photo?.uri) {
+      const photo = await cameraRef.current.takePictureAsync({ quality: 0.8, base64: true });
+      if (photo?.uri && photo.base64) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        onCapture(photo.uri);
+        onCapture({ uri: photo.uri, base64: photo.base64 });
       }
-    } catch (err) {
+    } catch {
       Alert.alert("Capture Failed", "Could not capture photo. Please try again.");
     } finally {
       setCapturing(false);
@@ -198,7 +209,7 @@ function SelfieStep({ onCapture }: { onCapture: (uri: string) => void }) {
 }
 
 // ── Document capture step ─────────────────────────────────────────────────────
-function DocumentStep({ onCapture }: { onCapture: (uri: string) => void }) {
+function DocumentStep({ onCapture }: { onCapture: (capture: { uri: string; base64: string }) => void }) {
   const cameraRef = useRef<CameraView>(null);
   const [capturing, setCapturing] = useState(false);
 
@@ -207,10 +218,10 @@ function DocumentStep({ onCapture }: { onCapture: (uri: string) => void }) {
     setCapturing(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
-      const photo = await cameraRef.current.takePictureAsync({ quality: 0.9, base64: false });
-      if (photo?.uri) {
+      const photo = await cameraRef.current.takePictureAsync({ quality: 0.9, base64: true });
+      if (photo?.uri && photo.base64) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        onCapture(photo.uri);
+        onCapture({ uri: photo.uri, base64: photo.base64 });
       }
     } catch {
       Alert.alert("Capture Failed", "Could not capture document. Please try again.");
@@ -223,9 +234,10 @@ function DocumentStep({ onCapture }: { onCapture: (uri: string) => void }) {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       quality: 0.9,
+      base64: true,
     });
-    if (!result.canceled && result.assets[0]) {
-      onCapture(result.assets[0].uri);
+    if (!result.canceled && result.assets[0]?.base64) {
+      onCapture({ uri: result.assets[0].uri, base64: result.assets[0].base64 });
     }
   };
 
@@ -265,11 +277,15 @@ function ConfirmStep({
   documentUri,
   onEnroll,
   isEnrolling,
+  subjectRef,
+  onSubjectRefChange,
 }: {
   selfieUri: string;
   documentUri: string;
   onEnroll: () => void;
   isEnrolling: boolean;
+  subjectRef: string;
+  onSubjectRefChange: (value: string) => void;
 }) {
   return (
     <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.confirmContent}>
@@ -300,6 +316,16 @@ function ConfirmStep({
         ))}
       </View>
 
+      <TextInput
+        style={styles.subjectRefInput}
+        value={subjectRef}
+        onChangeText={onSubjectRefChange}
+        placeholder="Authorised subject reference"
+        placeholderTextColor={COLORS.muted}
+        autoCapitalize="characters"
+        accessibilityLabel="Authorised subject reference"
+      />
+
       <TouchableOpacity
         style={[styles.primaryButton, isEnrolling && styles.primaryButtonDisabled]}
         onPress={onEnroll}
@@ -320,14 +346,21 @@ export default function BiometricEnrollmentScreen() {
   const router = useRouter();
   const [step, setStep] = useState<Step>("permissions");
   const [selfieUri, setSelfieUri] = useState<string | null>(null);
+  const [selfieBase64, setSelfieBase64] = useState<string | null>(null);
   const [documentUri, setDocumentUri] = useState<string | null>(null);
+  const [documentBase64, setDocumentBase64] = useState<string | null>(null);
+  const [subjectRef, setSubjectRef] = useState("");
 
-  const { data: challengesData } = trpc.biometric.getChallenges.useQuery();
-  const challenges: LivenessChallenge[] = (challengesData as any)?.challenges ?? [
-    { id: "blink", type: "blink", instruction: "Blink both eyes slowly twice" },
-    { id: "turn_left", type: "head_turn_left", instruction: "Turn your head slowly to the left" },
-    { id: "turn_right", type: "head_turn_right", instruction: "Turn your head slowly to the right" },
-  ];
+  const {
+    data: challengesData,
+    isLoading: challengesLoading,
+    error: challengesError,
+    refetch: refetchChallenges,
+  } = trpc.biometric.getChallenges.useQuery();
+  const challenges: LivenessChallenge[] = (challengesData?.challenges ?? []).flatMap((challenge) => {
+    const type = CHALLENGE_DISPLAY_TYPES[challenge.id];
+    return type ? [{ id: challenge.id, type, instruction: challenge.label }] : [];
+  });
 
   const enrollMutation = trpc.biometric.fullEnrollment.useMutation({
     onSuccess: () => {
@@ -340,14 +373,19 @@ export default function BiometricEnrollmentScreen() {
   });
 
   const handleEnroll = useCallback(() => {
-    if (!selfieUri || !documentUri) return;
+    if (!selfieUri || !selfieBase64 || !documentUri || !documentBase64 || !subjectRef.trim()) {
+      Alert.alert("Subject reference required", "Enter the authorised subject reference before enrollment.");
+      return;
+    }
     enrollMutation.mutate({
-      selfieBase64: selfieUri, // In production: convert to base64
-      documentBase64: documentUri,
-      documentType: "nin",
-      challengeResults: challenges.map(c => ({ challengeId: c.id, passed: true })),
+      enrollImageBase64: selfieBase64,
+      livenessImageBase64: selfieBase64,
+      subjectRef: subjectRef.trim(),
+      documentImageBase64: documentBase64,
+      documentType: "NIN_SLIP",
+      challenge: "blink",
     });
-  }, [selfieUri, documentUri, challenges, enrollMutation]);
+  }, [selfieUri, selfieBase64, documentUri, documentBase64, subjectRef, enrollMutation]);
 
   const STEPS: Step[] = ["permissions", "liveness", "selfie", "document", "confirm", "done"];
   const stepIndex = STEPS.indexOf(step);
@@ -370,23 +408,41 @@ export default function BiometricEnrollmentScreen() {
         <PermissionsStep onGranted={() => setStep("liveness")} />
       )}
       {step === "liveness" && (
-        <LivenessStep
-          challenges={challenges}
-          onComplete={() => setStep("selfie")}
-        />
+        challengesLoading ? (
+          <View style={styles.centeredContent}>
+            <ActivityIndicator color={COLORS.primary} />
+            <Text style={styles.stepDesc}>Loading authorised liveness challenges…</Text>
+          </View>
+        ) : challengesError || challenges.length === 0 ? (
+          <View style={styles.centeredContent}>
+            <Ionicons name="alert-circle-outline" size={48} color={COLORS.warning} />
+            <Text style={styles.stepTitle}>Liveness Check Unavailable</Text>
+            <Text style={styles.stepDesc}>Authorised liveness challenges could not be loaded. Please retry before capturing biometric data.</Text>
+            <TouchableOpacity style={styles.primaryButton} onPress={() => refetchChallenges()}>
+              <Text style={styles.primaryButtonText}>Retry</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <LivenessStep
+            challenges={challenges}
+            onComplete={() => setStep("selfie")}
+          />
+        )
       )}
       {step === "selfie" && (
         <SelfieStep
-          onCapture={(uri) => {
-            setSelfieUri(uri);
+          onCapture={(capture) => {
+            setSelfieUri(capture.uri);
+            setSelfieBase64(capture.base64);
             setStep("document");
           }}
         />
       )}
       {step === "document" && (
         <DocumentStep
-          onCapture={(uri) => {
-            setDocumentUri(uri);
+          onCapture={(capture) => {
+            setDocumentUri(capture.uri);
+            setDocumentBase64(capture.base64);
             setStep("confirm");
           }}
         />
@@ -397,6 +453,8 @@ export default function BiometricEnrollmentScreen() {
           documentUri={documentUri}
           onEnroll={handleEnroll}
           isEnrolling={enrollMutation.isPending}
+          subjectRef={subjectRef}
+          onSubjectRefChange={setSubjectRef}
         />
       )}
       {step === "done" && (
@@ -458,6 +516,16 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 20,
+  },
+  subjectRefInput: {
+    backgroundColor: COLORS.card,
+    borderColor: COLORS.border,
+    borderWidth: 1,
+    borderRadius: 10,
+    color: COLORS.text,
+    marginBottom: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
   },
   primaryButton: {
     backgroundColor: COLORS.primary,

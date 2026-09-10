@@ -1,6 +1,6 @@
 import { trpc } from "@/lib/trpc";
 import "./sentry.client.config";
-import { UNAUTHED_ERR_MSG } from '@shared/const';
+import { UNAUTHED_ERR_MSG } from "@shared/const";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { httpBatchLink, TRPCClientError } from "@trpc/client";
 import { createRoot } from "react-dom/client";
@@ -8,72 +8,76 @@ import superjson from "superjson";
 import App from "./App";
 import { OfflineBanner } from "./components/OfflineBanner";
 import { getLoginUrl } from "./const";
+import { isUnauthenticatedFailure, reportClientFailure } from "./lib/safeClientLogger";
+import { registerBISServiceWorker } from "./lib/serviceWorker";
 import { toast } from "sonner";
 import "./index.css";
 
 const queryClient = new QueryClient();
+let authenticationRedirectInFlight = false;
 
-const redirectToLoginIfUnauthorized = (error: unknown) => {
-  if (!(error instanceof TRPCClientError)) return;
-  if (typeof window === "undefined") return;
+function redirectToLoginIfUnauthorized(error: unknown, source: "query" | "mutation") {
+  const failure = reportClientFailure(error, source);
+  const isUnauthenticated = isUnauthenticatedFailure(failure)
+    || (error instanceof TRPCClientError && error.message === UNAUTHED_ERR_MSG);
 
-  const isUnauthorized = error.message === UNAUTHED_ERR_MSG;
+  if (!isUnauthenticated || typeof window === "undefined" || authenticationRedirectInFlight) return false;
 
-  if (!isUnauthorized) return;
-
-  // Demo mode: server always returns a demo user, so UNAUTHORIZED should not
-  // occur. Log it but do NOT redirect to Manus OAuth to keep the demo open.
-  console.warn("[BIS Demo] Unauthorized API call — skipping OAuth redirect");
-};
-
-queryClient.getQueryCache().subscribe(event => {
-  if (event.type === "updated" && event.action.type === "error") {
-    const error = event.query.state.error;
-    redirectToLoginIfUnauthorized(error);
-    console.error("[API Query Error]", error);
+  const oauthPortalUrl = import.meta.env.VITE_OAUTH_PORTAL_URL;
+  const appId = import.meta.env.VITE_APP_ID;
+  if (!oauthPortalUrl || !appId) {
+    toast.error("Your session has ended", {
+      description: "Sign in again to continue.",
+      duration: 5000,
+    });
+    return true;
   }
+
+  authenticationRedirectInFlight = true;
+  window.location.replace(getLoginUrl());
+  return true;
+}
+
+queryClient.getQueryCache().subscribe((event) => {
+  if (event.type !== "updated" || event.action.type !== "error") return;
+  redirectToLoginIfUnauthorized(event.query.state.error, "query");
 });
 
-queryClient.getMutationCache().subscribe(event => {
-  if (event.type === "updated" && event.action.type === "error") {
-    const error = event.mutation.state.error;
-    redirectToLoginIfUnauthorized(error);
-    // Show demo mode toast for read-only errors
-    if (error instanceof TRPCClientError && error.message.includes("demo mode")) {
-      toast.warning("Demo Mode — Read Only", {
-        description: "Sign in with a real account to make changes.",
-        duration: 4000,
-      });
-    }
-    console.error("[API Mutation Error]", error);
-  }
+queryClient.getMutationCache().subscribe((event) => {
+  if (event.type !== "updated" || event.action.type !== "error") return;
+  const error = event.mutation.state.error;
+  if (redirectToLoginIfUnauthorized(error, "mutation")) return;
+
+  const failure = reportClientFailure(error, "mutation");
+  const description = failure.category === "offline"
+    ? "Check your connection and try again."
+    : "No changes were confirmed. Please try again.";
+  toast.error("We could not complete that action", { description, duration: 5000 });
 });
 
-// ── CSRF Token ────────────────────────────────────────────────────────────────
-// Fetch a CSRF token from the server on app load and inject it into all
-// state-changing tRPC requests via the X-CSRF-Token header.
-// The server validates this header on POST/PUT/PATCH/DELETE requests.
-let _csrfToken: string | null = null;
+let csrfToken: string | null = null;
 
 async function fetchCsrfToken(): Promise<string | null> {
   try {
-    const res = await fetch("/api/csrf-token", {
+    const response = await fetch("/api/csrf-token", {
       credentials: "include",
       cache: "no-store",
     });
-    if (!res.ok) return null;
-    const data = await res.json();
-    _csrfToken = data?.csrfToken ?? null;
-    return _csrfToken;
+    if (!response.ok) {
+      reportClientFailure(null, "transport");
+      return null;
+    }
+    const data = await response.json();
+    csrfToken = typeof data?.csrfToken === "string" ? data.csrfToken : null;
+    return csrfToken;
   } catch {
-    // Non-fatal — CSRF validation is defence-in-depth; app still works
-    console.warn("[BIS] Failed to fetch CSRF token");
+    reportClientFailure(null, "transport");
     return null;
   }
 }
 
-// Pre-fetch CSRF token before first mutation (non-blocking)
-fetchCsrfToken();
+void fetchCsrfToken();
+registerBISServiceWorker();
 
 const trpcClient = trpc.createClient({
   links: [
@@ -81,11 +85,8 @@ const trpcClient = trpc.createClient({
       url: "/api/trpc",
       transformer: superjson,
       async headers() {
-        // Ensure we have a token before any request (lazy fetch if needed)
-        if (!_csrfToken) {
-          await fetchCsrfToken();
-        }
-        return _csrfToken ? { "X-CSRF-Token": _csrfToken } : {};
+        if (!csrfToken) await fetchCsrfToken();
+        return csrfToken ? { "X-CSRF-Token": csrfToken } : {};
       },
       fetch(input, init) {
         return globalThis.fetch(input, {

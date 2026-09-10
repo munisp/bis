@@ -13,7 +13,7 @@ use axum::{extract::State, http::StatusCode, response::Json};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use tracing::{info, warn};
+use tracing::info;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -220,7 +220,10 @@ pub async fn handle_process_event(
 ) -> (StatusCode, Json<serde_json::Value>) {
     let alerts = detector.process(&event);
     let count = alerts.len();
-    info!("[InsiderThreat] Processed event: {} alert(s) triggered", count);
+    info!(
+        "[InsiderThreat] Processed event: {} alert(s) triggered",
+        count
+    );
     (
         StatusCode::OK,
         Json(serde_json::json!({

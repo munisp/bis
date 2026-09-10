@@ -21,6 +21,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -33,8 +34,8 @@ import (
 	daprpkg "bis/gateway/dapr"
 	insiderpkg "bis/gateway/insider"
 	kafkapkg "bis/gateway/kafka"
-	ospkg "bis/gateway/opensearch"
 	keycloakpkg "bis/gateway/keycloak"
+	ospkg "bis/gateway/opensearch"
 	permifypkg "bis/gateway/permify"
 	redispkg "bis/gateway/redis"
 	temporalpkg "bis/gateway/temporal"
@@ -46,11 +47,11 @@ import (
 
 var (
 	port          = envOr("GATEWAY_PORT", "8081")
-	gatewayKey    = envOr("BIS_GATEWAY_KEY", "dev-gateway-key-change-in-prod")
+	gatewayKey    = os.Getenv("BIS_GATEWAY_KEY")
 	riskEngineURL = envOr("RISK_ENGINE_URL", "http://localhost:8082")
 	eventProcURL  = envOr("EVENT_PROCESSOR_URL", "http://localhost:8083")
 
-		// External API credentials — empty means the dependent route is unavailable.
+	// External API credentials — empty means the dependent route is unavailable.
 	nimcAPIURL  = envOr("NIMC_API_URL", "")
 	nimcAPIKey  = envOr("NIMC_API_KEY", "")
 	nibssAPIURL = envOr("NIBSS_API_URL", "")
@@ -66,23 +67,23 @@ var (
 	biometricEngineURL = envOr("BIOMETRIC_ENGINE_URL", "http://localhost:8084")
 
 	// Middleware
-	redisAddr     = envOr("REDIS_ADDR", "localhost:6379")
-	redisPassword = envOr("REDIS_PASSWORD", "bis_redis_dev")
-	kafkaBrokers  = envOr("KAFKA_BROKERS", "localhost:9092")
+	redisAddr     = envOr("REDIS_ADDR", "")
+	redisPassword = envOr("REDIS_PASSWORD", "")
+	kafkaBrokers  = envOr("KAFKA_BROKERS", "")
 	keycloakURL   = envOr("KEYCLOAK_URL", "")
 	permifyURL    = envOr("PERMIFY_URL", "")
 	temporalHost  = envOr("TEMPORAL_HOST", "")
 	tbAddr        = envOr("TIGERBEETLE_ADDR", "")
 
 	// Initialized middleware clients (nil = not configured)
-	redisClient      *redispkg.Client
-	kafkaProducer    *kafkapkg.Producer
-	keycloakClient   *keycloakpkg.OIDCClient
-	permifyClient    *permifypkg.Client
-	temporalClient   *temporalpkg.Client
-	tbClient         *tigerbeetlepkg.Client
+	redisClient    *redispkg.Client
+	kafkaProducer  *kafkapkg.Producer
+	keycloakClient *keycloakpkg.OIDCClient
+	permifyClient  *permifypkg.Client
+	temporalClient *temporalpkg.Client
+	tbClient       *tigerbeetlepkg.Client
 	// BIS own verification engine (with Youverify fallback)
-	verifyEngine     *verifypkg.Engine
+	verifyEngine *verifypkg.Engine
 )
 
 func envOr(key, fallback string) string {
@@ -102,20 +103,30 @@ func initMiddleware() {
 			log.Printf("[WARN] Redis unavailable: %v — caching disabled", err)
 		} else {
 			redisClient = c
+			controlPlaneMetrics.setDependencyHealth("redis", true)
 			log.Printf("[INFO] Redis connected: %s", redisAddr)
 		}
 	}
+	if redisClient == nil {
+		controlPlaneMetrics.setDependencyHealth("redis", false)
+	}
 
-	// Kafka
-	if kafkaBrokers != "" {
+	// Kafka — durable-event handlers reject when this dependency is unavailable.
+	if kafkaBrokers == "" {
+		log.Printf("[WARN] Kafka is not configured; durable-event operations will reject")
+	} else {
 		p, err := kafkapkg.NewProducer(kafkaBrokers)
 		if err != nil {
-			log.Printf("[WARN] Kafka unavailable: %v — event publishing disabled", err)
+			log.Printf("[ERROR] Kafka initialization failed; durable-event operations will reject: %v", err)
 		} else {
 			kafkaProducer = p
-			log.Printf("[INFO] Kafka producer connected: %s", kafkaBrokers)
+			controlPlaneMetrics.setDependencyHealth("kafka", true)
+			log.Printf("[INFO] Kafka producer configured: %s", kafkaBrokers)
 			startDLQReplay()
 		}
+	}
+	if kafkaProducer == nil {
+		controlPlaneMetrics.setDependencyHealth("kafka", false)
 	}
 
 	// Keycloak
@@ -129,10 +140,14 @@ func initMiddleware() {
 		}
 	}
 
-	// Permify
-	if permifyURL != "" {
-		permifyClient = permifypkg.New()
-		log.Printf("[INFO] Permify client initialized: %s", permifyURL)
+	// Permify — a missing or incomplete configuration is non-authorizing.
+	permifyClient = permifypkg.New()
+	if !permifyClient.IsConfigured() {
+		controlPlaneMetrics.setDependencyHealth("permify", false)
+		log.Printf("[WARN] Permify is not fully configured; protected permissions will deny")
+	} else {
+		controlPlaneMetrics.setDependencyHealth("permify", true)
+		log.Printf("[INFO] Permify client configured: %s", permifyURL)
 	}
 
 	// Temporal
@@ -258,24 +273,17 @@ type GatewayError struct {
 
 func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// 1. Try Keycloak Bearer token if configured
-		if keycloakClient != nil {
-			bearer := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-			if bearer != "" {
-				if err := keycloakClient.ValidateToken(r.Context(), bearer); err == nil {
-					next(w, r)
-					return
-				}
-			}
-		}
-
-		// 2. Fall back to X-BIS-Key header / query param
+		// Service callers authenticate with an explicitly configured API key. Browser
+		// clients authenticate through the BFF; query-string credentials are forbidden
+		// because URLs are routinely logged by proxies and observability systems.
 		key := r.Header.Get("X-BIS-Key")
 		if key == "" {
-			key = r.URL.Query().Get("key")
+			if authorization := r.Header.Get("Authorization"); strings.HasPrefix(authorization, "Bearer ") {
+				key = strings.TrimPrefix(authorization, "Bearer ")
+			}
 		}
-		if key != gatewayKey {
-			writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "Invalid or missing API key")
+		if gatewayKey == "" || len(key) != len(gatewayKey) || subtle.ConstantTimeCompare([]byte(key), []byte(gatewayKey)) != 1 {
+			writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "Invalid or missing service credential")
 			return
 		}
 		next(w, r)
@@ -285,17 +293,27 @@ func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 func loggingMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		log.Printf("[%s] %s %s", r.Method, r.URL.Path, r.RemoteAddr)
+		traceContext := traceContextFromRequest(r)
+		log.Printf("method=%s path=%s remote=%s request_id=%s trace_id=%s span_id=%s event=request_started", r.Method, r.URL.Path, r.RemoteAddr, traceContext.RequestID, traceContext.TraceID, traceContext.SpanID)
 		next(w, r)
-		log.Printf("[%s] %s completed in %s", r.Method, r.URL.Path, time.Since(start))
+		log.Printf("method=%s path=%s request_id=%s trace_id=%s span_id=%s duration=%s event=request_completed", r.Method, r.URL.Path, traceContext.RequestID, traceContext.TraceID, traceContext.SpanID, time.Since(start))
 	}
 }
 
 func corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-BIS-Key, Authorization")
+		origin := r.Header.Get("Origin")
+		allowedOrigin := os.Getenv("BIS_CORS_ORIGIN")
+		if origin != "" {
+			if allowedOrigin == "" || origin != allowedOrigin {
+				writeError(w, http.StatusForbidden, "CORS_ORIGIN_FORBIDDEN", "Origin is not allowed")
+				return
+			}
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Vary", "Origin")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-BIS-Key, Authorization")
+		}
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return
@@ -334,41 +352,61 @@ func operationRef(prefix string) string {
 // cacheGet retrieves a cached value from Redis. Returns nil if Redis is not configured or key missing.
 func cacheGet(ctx context.Context, key string) []byte {
 	if redisClient == nil {
+		controlPlaneMetrics.setDependencyHealth("redis", false)
 		return nil
 	}
 	val, err := redisClient.Get(ctx, key)
 	if err != nil {
+		controlPlaneMetrics.setDependencyHealth("redis", false)
 		return nil
 	}
+	controlPlaneMetrics.setDependencyHealth("redis", true)
 	return []byte(val)
 }
 
 // cacheSet stores a value in Redis with a TTL. No-op if Redis is not configured.
 func cacheSet(ctx context.Context, key string, val []byte, ttl time.Duration) {
 	if redisClient == nil {
+		controlPlaneMetrics.setDependencyHealth("redis", false)
 		return
 	}
 	if err := redisClient.Set(ctx, key, string(val), ttl); err != nil {
+		controlPlaneMetrics.setDependencyHealth("redis", false)
 		log.Printf("[WARN] Redis SET failed for key %s: %v", key, err)
+		return
 	}
+	controlPlaneMetrics.setDependencyHealth("redis", true)
 }
 
-// publishEvent sends an event to Kafka with DLQ fallback on failure.
-func publishEvent(topic string, payload any) {
-	publishEventWithDLQ(topic, payload)
+// publishEvent persists an event in PostgreSQL before asynchronous Kafka dispatch.
+// Callers that require an audit event for acceptance must return this error to the client.
+func publishEvent(topic string, payload any) error {
+	if gatewayOutbox == nil {
+		return fmt.Errorf("transactional outbox is unavailable for topic %s", topic)
+	}
+	return gatewayOutbox.enqueue(topic, payload)
 }
 
-// checkPermify verifies fine-grained authorization. Returns true if Permify is not configured (permissive default).
+// checkPermify verifies fine-grained authorization. Authorization fails closed
+// whenever the policy service is unavailable or cannot evaluate a request.
 func checkPermify(ctx context.Context, subject, action, resource string) bool {
 	if permifyClient == nil {
-		return true // permissive when not configured
+		controlPlaneMetrics.permifyChecks.WithLabelValues("unconfigured").Inc()
+		log.Printf("[WARN] Permify is not configured; denying %s on %s", action, resource)
+		return false
 	}
 	allowed, err := permifyClient.Check(ctx, "user", subject, action, resource)
 	if err != nil {
-		log.Printf("[WARN] Permify check failed: %v — allowing by default", err)
-		return true
+		controlPlaneMetrics.permifyChecks.WithLabelValues("error").Inc()
+		log.Printf("[WARN] Permify check failed: %v — denying request", err)
+		return false
 	}
-	return allowed
+	if !allowed {
+		controlPlaneMetrics.permifyChecks.WithLabelValues("denied").Inc()
+		return false
+	}
+	controlPlaneMetrics.permifyChecks.WithLabelValues("allowed").Inc()
+	return true
 }
 
 // proxyExternalAPI makes a real HTTP call to an external API.
@@ -1167,12 +1205,12 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 		"version": "2.0.0",
 		"time":    now(),
 		"middleware": map[string]bool{
-			"redis":        redisClient != nil,
-			"kafka":        kafkaProducer != nil,
-			"keycloak":     keycloakClient != nil,
-			"permify":      permifyClient != nil,
-			"temporal":     temporalClient != nil,
-			"tigerbeetle":  tbClient != nil,
+			"redis":       redisClient != nil,
+			"kafka":       kafkaProducer != nil,
+			"keycloak":    keycloakClient != nil,
+			"permify":     permifyClient != nil,
+			"temporal":    temporalClient != nil,
+			"tigerbeetle": tbClient != nil,
 		},
 		"externalAPIs": map[string]bool{
 			"nimc":      nimcAPIURL != "" && nimcAPIKey != "",
@@ -1265,6 +1303,9 @@ func newRouter() http.Handler {
 	}
 
 	mux.HandleFunc("/health", public(handleHealth))
+	mux.Handle("/internal/metrics", protected(func(w http.ResponseWriter, r *http.Request) {
+		controlPlaneMetrics.handler().ServeHTTP(w, r)
+	}))
 	mux.HandleFunc("/v1/nin/", protected(handleNINLookup))
 	mux.HandleFunc("/v1/bvn/", protected(handleBVNLookup))
 	mux.HandleFunc("/v1/cac/", protected(handleCACLookup))
@@ -1314,40 +1355,72 @@ func newRouter() http.Handler {
 	mux.HandleFunc("/v1/velocity/alert", protected(handleVelocityAlert))
 
 	// ── Criminal Records, Corporate Check, AI Summary, Field Visit, Thin-File ──
-	RegisterCriminalRecordsRoutes(mux)
+	RegisterCriminalRecordsRoutes(mux, protected)
 	RegisterMojaloopComplianceRoutes(mux, protected)
 
 	// ── Dapr pub/sub subscriber endpoints ────────────────────────────────────
 	// Dapr calls GET /dapr/subscribe to discover subscriptions
-	mux.HandleFunc("/dapr/subscribe", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/dapr/subscribe", protected(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(daprpkg.Subscriptions())
-	})
-	mux.HandleFunc("/dapr/subscribe/aml-alerts", daprpkg.HandleAMLAlert)
-	mux.HandleFunc("/dapr/subscribe/investigation-events", daprpkg.HandleInvestigationEvent)
-	mux.HandleFunc("/dapr/subscribe/biometric-events", daprpkg.HandleBiometricEvent)
-	mux.HandleFunc("/dapr/subscribe/kyc-events", daprpkg.HandleKYCEvent)
-		mux.HandleFunc("/dapr/subscribe/payment-events", daprpkg.HandlePaymentEvent)
+	}))
+	mux.HandleFunc("/dapr/subscribe/aml-alerts", protected(daprpkg.HandleAMLAlert))
+	mux.HandleFunc("/dapr/subscribe/investigation-events", protected(daprpkg.HandleInvestigationEvent))
+	mux.HandleFunc("/dapr/subscribe/biometric-events", protected(daprpkg.HandleBiometricEvent))
+	mux.HandleFunc("/dapr/subscribe/kyc-events", protected(daprpkg.HandleKYCEvent))
+	mux.HandleFunc("/dapr/subscribe/payment-events", protected(daprpkg.HandlePaymentEvent))
 	// Insider Threat — Dapr subscription handler
-	mux.HandleFunc("/dapr/subscribe/insider-events", insiderpkg.HandleInsiderEvent)
-	return mux
+	mux.HandleFunc("/dapr/subscribe/insider-events", protected(insiderpkg.HandleInsiderEvent))
+	return traceCorrelationMiddleware(mux)
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
-func main() {
-	// Ensure OpenSearch indices exist at startup (non-fatal)
-	if err := ospkg.EnsureIndices(); err != nil {
-		log.Printf("[OpenSearch] index setup warning: %v", err)
+func validateStartupConfig() {
+	if gatewayKey == "" {
+		log.Fatal("BIS_GATEWAY_KEY must be set")
 	}
-	// Ensure all Kafka topics exist at startup (best-effort)
-	RegisterCriminalRecordsTopics()
+	if strings.EqualFold(os.Getenv("BIS_ENV"), "production") {
+		if keycloakURL == "" || keycloakClient == nil {
+			log.Fatal("production requires a reachable Keycloak OIDC client")
+		}
+		if permifyClient == nil || !permifyClient.IsConfigured() {
+			log.Fatal("production requires PERMIFY_URL, PERMIFY_TENANT_ID, and PERMIFY_API_KEY")
+		}
+		if kafkaBrokers == "" || kafkaProducer == nil {
+			log.Fatal("production requires a configured Kafka producer for durable event delivery")
+		}
+		if redisAddr == "" || redisClient == nil {
+			log.Fatal("production requires a reachable Redis client for rate limiting and durable workflow state")
+		}
+		if gatewayOutbox == nil {
+			log.Fatal("production requires a reachable PostgreSQL transactional outbox for durable event delivery")
+		}
+		if os.Getenv("BIS_CORS_ORIGIN") == "" {
+			log.Fatal("production requires BIS_CORS_ORIGIN when browser access is enabled")
+		}
+	}
+}
 
+func main() {
 	log.Printf("BIS API Gateway v2.0 starting on :%s", port)
 	log.Printf("Risk Engine URL: %s", riskEngineURL)
 	log.Printf("Event Processor URL: %s", eventProcURL)
 
 	initMiddleware()
+	if err := initializeTransactionalOutbox(); err != nil {
+		if strings.EqualFold(os.Getenv("BIS_ENV"), "production") {
+			log.Fatal(err)
+		}
+		log.Printf("[WARN] transactional outbox unavailable; durable event operations will reject: %v", err)
+	}
+	validateStartupConfig()
+
+	// These integrations only run after their clients and durable outbox are ready.
+	if err := ospkg.EnsureIndices(); err != nil {
+		log.Printf("[OpenSearch] index setup warning: %v", err)
+	}
+	RegisterCriminalRecordsTopics()
 
 	srv := &http.Server{
 		Addr:         ":" + port,

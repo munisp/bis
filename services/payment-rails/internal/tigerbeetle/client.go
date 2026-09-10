@@ -14,6 +14,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -158,30 +159,27 @@ func (b *PendingBatch) Len() int {
 // ─── Client ───────────────────────────────────────────────────────────────────
 
 // Client communicates with the TigerBeetle HTTP proxy sidecar.
-// When TIGERBEETLE_URL is not set the client operates in no-op mode (safe for dev).
 type Client struct {
 	baseURL    string
 	httpClient *http.Client
-	enabled    bool
 	batch      *PendingBatch
 }
 
-// New creates a Client from environment variables.
-func New() *Client {
-	url := os.Getenv("TIGERBEETLE_URL")
+// New creates a Client from environment variables. Ledger connectivity is
+// mandatory: the payment service may not run without a durable ledger.
+func New() (*Client, error) {
+	url := strings.TrimRight(os.Getenv("TIGERBEETLE_URL"), "/")
 	if url == "" {
-		log.Println("[TigerBeetle/payment-rails] TIGERBEETLE_URL not set — ledger recording disabled")
-		return &Client{enabled: false}
+		return nil, fmt.Errorf("TIGERBEETLE_URL must be configured")
 	}
 	c := &Client{
 		baseURL: url,
 		httpClient: &http.Client{
 			Timeout: 10 * time.Second,
 		},
-		enabled: true,
 	}
 	c.batch = NewPendingBatch(MaxBatchSize, c.commitBatch)
-	return c
+	return c, nil
 }
 
 // ─── Account management ───────────────────────────────────────────────────────
@@ -189,17 +187,11 @@ func New() *Client {
 // EnsureAccount creates a TigerBeetle account if it does not already exist.
 // TigerBeetle is idempotent on account creation with the same ID.
 func (c *Client) EnsureAccount(ctx context.Context, acct Account) error {
-	if !c.enabled {
-		return nil
-	}
 	return c.post(ctx, "/accounts/create", []Account{acct})
 }
 
 // EnsureSystemAccounts bootstraps the platform's nostro, suspense, and fee accounts.
 func (c *Client) EnsureSystemAccounts(ctx context.Context) error {
-	if !c.enabled {
-		return nil
-	}
 	accounts := []Account{
 		{ID: AccountNostro, Ledger: LedgerNGN, Code: 1, Flags: 0},
 		{ID: AccountSuspense, Ledger: LedgerNGN, Code: 2, Flags: 0},
@@ -214,19 +206,12 @@ func (c *Client) EnsureSystemAccounts(ctx context.Context) error {
 // The transfer ID MUST be derived from the idempotency key to prevent double-posting.
 // When the batch reaches MaxBatchSize (8,190), it is committed automatically.
 func (c *Client) SubmitTransfer(ctx context.Context, t Transfer) ([]TransferResult, error) {
-	if !c.enabled {
-		log.Printf("[TigerBeetle/payment-rails] (disabled) would submit transfer id=%s amount=%d", t.ID, t.Amount)
-		return nil, nil
-	}
 	return c.batch.Add(ctx, t)
 }
 
 // SubmitBatch commits a slice of transfers directly (bypasses the accumulator).
 // Use this for bulk import or archival replay scenarios.
 func (c *Client) SubmitBatch(ctx context.Context, transfers []Transfer) ([]TransferResult, error) {
-	if !c.enabled {
-		return nil, nil
-	}
 	// Split into MaxBatchSize chunks to respect TigerBeetle's 1 MB envelope limit.
 	var allResults []TransferResult
 	for i := 0; i < len(transfers); i += MaxBatchSize {
@@ -246,9 +231,6 @@ func (c *Client) SubmitBatch(ctx context.Context, transfers []Transfer) ([]Trans
 // FlushPending commits any transfers still in the accumulator.
 // Call this on graceful shutdown or at the end of a request cycle.
 func (c *Client) FlushPending(ctx context.Context) ([]TransferResult, error) {
-	if !c.enabled || c.batch == nil {
-		return nil, nil
-	}
 	return c.batch.Flush(ctx)
 }
 
@@ -264,16 +246,13 @@ func (c *Client) PendingCount() int {
 
 // GetBalance returns the posted (settled) balance for an account in the smallest currency unit.
 func (c *Client) GetBalance(ctx context.Context, accountID string) (uint64, error) {
-	if !c.enabled {
-		return 0, nil
-	}
 	resp, err := c.httpClient.Get(fmt.Sprintf("%s/accounts/%s", c.baseURL, accountID))
 	if err != nil {
 		return 0, fmt.Errorf("tigerbeetle get balance: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotFound {
-		return 0, nil
+		return 0, fmt.Errorf("tigerbeetle account %s not found", accountID)
 	}
 	if resp.StatusCode != http.StatusOK {
 		return 0, fmt.Errorf("tigerbeetle get balance: HTTP %d", resp.StatusCode)
@@ -316,8 +295,7 @@ func (c *Client) commitBatch(ctx context.Context, transfers []Transfer) ([]Trans
 	}
 	var results []TransferResult
 	if err := json.NewDecoder(resp.Body).Decode(&results); err != nil {
-		// Empty body = all transfers committed successfully
-		return nil, nil
+		return nil, fmt.Errorf("tigerbeetle commit batch response decode: %w", err)
 	}
 	elapsed := time.Since(start)
 	log.Printf("[TigerBeetle/payment-rails] Committed batch: %d transfers in %v (%.0f TPS)",

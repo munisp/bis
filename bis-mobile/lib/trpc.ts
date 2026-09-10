@@ -66,9 +66,6 @@ export const trpcClient = trpc.createClient({
 
 // ── Provider component ────────────────────────────────────────────────────────
 export function TRPCProvider({ children }: { children: React.ReactNode }) {
-  return React.createElement(
-    trpc.Provider,
-    { client: trpcClient, queryClient },
-    React.createElement(QueryClientProvider, { client: queryClient }, children)
-  );
+  const content = React.createElement(QueryClientProvider, { client: queryClient }, children);
+  return React.createElement(trpc.Provider, { client: trpcClient, queryClient, children: content });
 }

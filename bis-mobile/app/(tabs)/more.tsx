@@ -93,12 +93,12 @@ const MENU_ITEMS: MenuItem[] = [
 export default function MoreScreen() {
   const router = useRouter();
 
-  const { data: healthData } = trpc.system.allServicesHealth.useQuery(undefined, {
+  const { data: healthData } = trpc.lookup.allServicesHealth.useQuery(undefined, {
     refetchInterval: 60_000,
   });
 
   const services = (healthData as unknown[]) ?? [];
-  const healthyCount = services.filter((s) => (s as Record<string, unknown>).status === "healthy").length;
+  const healthyCount = services.filter((s) => (s as Record<string, unknown>).status === "ok").length;
   const totalCount = services.length;
 
   return (

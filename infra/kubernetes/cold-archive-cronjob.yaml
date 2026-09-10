@@ -1,0 +1,82 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: bis-cold-archive-writer
+  labels:
+    app.kubernetes.io/name: bis-cold-archive-writer
+    app.kubernetes.io/component: archival
+spec:
+  # Run after the warm-tier job and outside the operational reporting window.
+  schedule: "30 2 * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 1800
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 10
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 1800
+      ttlSecondsAfterFinished: 604800
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: bis-cold-archive-writer
+        spec:
+          restartPolicy: OnFailure
+          serviceAccountName: bis-cold-archive-writer
+          securityContext:
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: worker
+              image: registry.example.invalid/bis/cold-archive-writer:REPLACE_AT_RELEASE
+              imagePullPolicy: IfNotPresent
+              envFrom:
+                - secretRef:
+                    name: bis-cold-archive-writer
+              resources:
+                requests:
+                  cpu: "250m"
+                  memory: "512Mi"
+                limits:
+                  cpu: "2"
+                  memory: "2Gi"
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              volumeMounts:
+                - name: work
+                  mountPath: /tmp
+          volumes:
+            - name: work
+              emptyDir:
+                sizeLimit: 1Gi
+---
+# Populate this Secret only through the deployment secret manager. The image is
+# patched to a signed digest by the release controller; this base intentionally
+# cannot run until that patch and every secret value are supplied. The S3 bucket
+# must be TLS-only, versioned, SSE-KMS encrypted, and protected by retention.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: bis-cold-archive-writer
+  labels:
+    app.kubernetes.io/name: bis-cold-archive-writer
+type: Opaque
+stringData:
+  DATABASE_URL: "REPLACE_WITH_POSTGRESQL_URL"
+  BIS_ARCHIVE_S3_ENDPOINT: "https://REPLACE_WITH_S3_COMPATIBLE_ENDPOINT"
+  BIS_ARCHIVE_S3_ACCESS_KEY: "REPLACE_WITH_SECRET_MANAGER_REFERENCE"
+  BIS_ARCHIVE_S3_SECRET_KEY: "REPLACE_WITH_SECRET_MANAGER_REFERENCE"
+  BIS_ARCHIVE_S3_BUCKET: "REPLACE_WITH_VERSIONED_ARCHIVE_BUCKET"
+  BIS_ARCHIVE_S3_REGION: "REPLACE_WITH_REGION"
+  BIS_ARCHIVE_S3_KMS_KEY_ID: "REPLACE_WITH_ACTIVE_KMS_KEY_ID"
+  BIS_ARCHIVE_S3_KMS_KEY_EXPIRIES_JSON: "REPLACE_WITH_JSON_KEY_EXPIRY_REGISTRY"
+  BIS_ARCHIVE_KMS_POLICY_ENFORCE_EXPIRY: "true"
+  BIS_ARCHIVE_PUSHGATEWAY_URL: "https://REPLACE_WITH_ARCHIVE_PUSHGATEWAY_URL"
+  BIS_ENV: "production"
+  BIS_COLD_ARCHIVE_BATCH_SIZE: "5000"
+  BIS_COLD_ARCHIVE_AGE_DAYS: "365"

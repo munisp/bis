@@ -1,1 +1,0 @@
-ALTER TABLE "api_tokens" ADD COLUMN "tokensConsumed" integer DEFAULT 0 NOT NULL;

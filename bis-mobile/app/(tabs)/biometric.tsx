@@ -36,7 +36,7 @@ export default function BiometricScreen() {
   const [page, setPage] = useState(1);
   const [showEnrollModal, setShowEnrollModal] = useState(false);
   const [form, setForm] = useState({
-    subjectId: "",
+    subjectRef: "",
     subjectName: "",
     modality: "face",
     imageData: "",
@@ -52,22 +52,9 @@ export default function BiometricScreen() {
   const enrollMutation = trpc.biometric.enroll.useMutation({
     onSuccess: () => {
       setShowEnrollModal(false);
-      setForm({ subjectId: "", subjectName: "", modality: "face", imageData: "" });
+      setForm({ subjectRef: "", subjectName: "", modality: "face", imageData: "" });
       utils.biometric.list.invalidate();
       Alert.alert("Enrolled", "Biometric enrollment successful");
-    },
-    onError: (err) => Alert.alert("Error", err.message),
-  });
-
-  const verifyMutation = trpc.biometric.verify.useMutation({
-    onSuccess: (result) => {
-      const r = result as Record<string, unknown>;
-      Alert.alert(
-        r.match ? "Match Found" : "No Match",
-        r.match
-          ? `Identity verified with ${Number(r.confidence ?? 0).toFixed(1)}% confidence`
-          : "Biometric verification failed — no match found"
-      );
     },
     onError: (err) => Alert.alert("Error", err.message),
   });
@@ -98,7 +85,7 @@ export default function BiometricScreen() {
           </View>
           <View style={styles.cardInfo}>
             <Text style={styles.subjectName}>{(rec.subjectName as string) ?? "—"}</Text>
-            <Text style={styles.subjectId}>ID: {(rec.subjectId as string) ?? "—"}</Text>
+            <Text style={styles.subjectRef}>ID: {(rec.subjectRef as string) ?? "—"}</Text>
           </View>
           <View style={[styles.badge, { backgroundColor: STATUS_COLORS[status] ?? "#64748b" }]}>
             <Text style={styles.badgeText}>{status.toUpperCase()}</Text>
@@ -108,33 +95,8 @@ export default function BiometricScreen() {
         {rec.qualityScore !== undefined && (
           <Text style={styles.detail}>Quality Score: {Number(rec.qualityScore).toFixed(1)}%</Text>
         )}
-        {rec.enrolledAt && (
-          <Text style={styles.timestamp}>
-            Enrolled: {new Date(rec.enrolledAt as string).toLocaleString()}
-          </Text>
-        )}
+        <Text style={styles.timestamp}>Enrollment timestamp unavailable in this review view</Text>
         <View style={styles.actions}>
-          {status === "enrolled" && (
-            <TouchableOpacity
-              style={[styles.actionBtn, { backgroundColor: "#3b82f6" }]}
-              onPress={() =>
-                Alert.alert("Verify", "Run biometric verification for this subject?", [
-                  { text: "Cancel", style: "cancel" },
-                  {
-                    text: "Verify",
-                    onPress: () =>
-                      verifyMutation.mutate({
-                        subjectId: rec.subjectId as string,
-                        modality,
-                        imageData: "live_capture_placeholder",
-                      }),
-                  },
-                ])
-              }
-            >
-              <Text style={styles.actionBtnText}>Verify</Text>
-            </TouchableOpacity>
-          )}
           <TouchableOpacity
             style={[styles.actionBtn, { backgroundColor: "#ef4444" }]}
             onPress={() =>
@@ -210,8 +172,8 @@ export default function BiometricScreen() {
               style={styles.input}
               placeholder="Subject ID (NIN/BVN) *"
               placeholderTextColor="#64748b"
-              value={form.subjectId}
-              onChangeText={(t) => setForm((f) => ({ ...f, subjectId: t }))}
+              value={form.subjectRef}
+              onChangeText={(t) => setForm((f) => ({ ...f, subjectRef: t }))}
             />
             <TextInput
               style={styles.input}
@@ -257,13 +219,11 @@ export default function BiometricScreen() {
               <TouchableOpacity
                 style={[styles.modalBtn, { backgroundColor: "#818cf8" }]}
                 onPress={() => {
-                  if (!form.subjectId.trim() || !form.subjectName.trim())
-                    return Alert.alert("Error", "Subject ID and name are required");
+                  if (!form.subjectRef.trim() || !form.imageData.trim())
+                    return Alert.alert("Error", "Subject ID and captured image data are required");
                   enrollMutation.mutate({
-                    subjectId: form.subjectId,
-                    subjectName: form.subjectName,
-                    modality: form.modality,
-                    imageData: `mock_capture_${Date.now()}`,
+                    subjectRef: form.subjectRef,
+                    imageBase64: form.imageData,
                   });
                 }}
               >
@@ -295,7 +255,7 @@ const styles = StyleSheet.create({
   modalityIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: "#818cf822", alignItems: "center", justifyContent: "center" },
   cardInfo: { flex: 1 },
   subjectName: { fontSize: 14, fontWeight: "600", color: "#f8fafc" },
-  subjectId: { fontSize: 12, color: "#64748b", marginTop: 2 },
+  subjectRef: { fontSize: 12, color: "#64748b", marginTop: 2 },
   badge: { borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 },
   badgeText: { fontSize: 10, fontWeight: "700", color: "#fff" },
   detail: { fontSize: 12, color: "#94a3b8", marginTop: 2 },

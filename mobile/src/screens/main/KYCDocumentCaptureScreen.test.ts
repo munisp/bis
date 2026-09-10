@@ -74,10 +74,9 @@ describe('validateDocument', () => {
     expect(validateDocument(doc)).not.toBeNull();
   });
 
-  it('returns an error for zero-byte file', () => {
-    // Zero bytes is valid size-wise but we still accept it (no size error)
+  it('returns an error for a zero-byte file', () => {
     const doc = makeDoc({ fileSizeBytes: 0 });
-    expect(validateDocument(doc)).toBeNull(); // 0 bytes is under 5 MB
+    expect(validateDocument(doc)).toContain('empty');
   });
 });
 

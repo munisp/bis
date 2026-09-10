@@ -2,25 +2,33 @@ package redis
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"log"
-	"os"
+	"strings"
 	"time"
 
-	"github.com/redis/go-redis/v9"
+	goredis "github.com/redis/go-redis/v9"
 )
 
-var rdb *redis.Client
+// ErrUnavailable indicates an operation cannot rely on Redis. Protected callers
+// must map this to a dependency-unavailable response rather than allow a bypass.
+var ErrUnavailable = errors.New("redis unavailable")
 
-// Init creates the Redis client. Call once at startup.
-func Init() {
-	addr := os.Getenv("REDIS_URL")
+// Client owns one checked Redis connection and has no package-global fallback.
+type Client struct {
+	client *goredis.Client
+}
+
+// NewClient requires an explicit address and confirms connectivity before
+// returning. It never defaults to a local development server.
+func NewClient(addr, password string) (*Client, error) {
+	addr = strings.TrimSpace(addr)
 	if addr == "" {
-		addr = "localhost:6379"
+		return nil, fmt.Errorf("%w: REDIS_ADDR is required", ErrUnavailable)
 	}
-	rdb = redis.NewClient(&redis.Options{
+	client := goredis.NewClient(&goredis.Options{
 		Addr:         addr,
-		Password:     os.Getenv("REDIS_PASSWORD"),
+		Password:     password,
 		DB:           0,
 		DialTimeout:  3 * time.Second,
 		ReadTimeout:  2 * time.Second,
@@ -28,143 +36,106 @@ func Init() {
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	if err := rdb.Ping(ctx).Err(); err != nil {
-		log.Printf("[Redis] Warning: cannot connect to %s: %v (continuing without cache)", addr, err)
-		rdb = nil
-		return
+	if err := client.Ping(ctx).Err(); err != nil {
+		_ = client.Close()
+		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
-	log.Printf("[Redis] Connected → %s", addr)
+	return &Client{client: client}, nil
 }
 
-// RateLimit checks and increments a sliding-window counter for the given key.
-// Returns (allowed bool, remaining int, resetIn time.Duration).
-func RateLimit(ctx context.Context, key string, limit int, window time.Duration) (bool, int, time.Duration) {
-	if rdb == nil {
-		return true, limit, window // fail-open if Redis is down
+func (c *Client) available() error {
+	if c == nil || c.client == nil {
+		return ErrUnavailable
 	}
-	pipe := rdb.Pipeline()
+	return nil
+}
+
+// RateLimit atomically increments a rate counter. Any unavailable backend
+// returns an error so sensitive routes may fail closed with HTTP 503.
+func (c *Client) RateLimit(ctx context.Context, key string, limit int, window time.Duration) (bool, int, time.Duration, error) {
+	if err := c.available(); err != nil {
+		return false, 0, 0, err
+	}
+	if strings.TrimSpace(key) == "" || limit <= 0 || window <= 0 {
+		return false, 0, 0, fmt.Errorf("invalid rate limit input")
+	}
+	pipe := c.client.TxPipeline()
 	incr := pipe.Incr(ctx, key)
 	pipe.Expire(ctx, key, window)
 	if _, err := pipe.Exec(ctx); err != nil {
-		return true, limit, window
+		return false, 0, 0, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
 	count := int(incr.Val())
 	remaining := limit - count
 	if remaining < 0 {
 		remaining = 0
 	}
-	return count <= limit, remaining, window
+	return count <= limit, remaining, window, nil
 }
 
-// CacheGet returns the cached value for key, or ("", false) on miss/error.
-func CacheGet(ctx context.Context, key string) (string, bool) {
-	if rdb == nil {
-		return "", false
-	}
-	val, err := rdb.Get(ctx, key).Result()
-	if err == redis.Nil || err != nil {
-		return "", false
-	}
-	return val, true
-}
-
-// CacheSet stores value under key with the given TTL.
-func CacheSet(ctx context.Context, key string, value string, ttl time.Duration) {
-	if rdb == nil {
-		return
-	}
-	if err := rdb.Set(ctx, key, value, ttl).Err(); err != nil {
-		log.Printf("[Redis] CacheSet error for %s: %v", key, err)
-	}
-}
-
-// CacheDel removes a key.
-func CacheDel(ctx context.Context, key string) {
-	if rdb == nil {
-		return
-	}
-	rdb.Del(ctx, key)
-}
-
-// SessionSet stores a session payload under "session:<token>".
-func SessionSet(ctx context.Context, token string, payload string, ttl time.Duration) {
-	CacheSet(ctx, fmt.Sprintf("session:%s", token), payload, ttl)
-}
-
-// SessionGet retrieves a session payload.
-func SessionGet(ctx context.Context, token string) (string, bool) {
-	return CacheGet(ctx, fmt.Sprintf("session:%s", token))
-}
-
-// SessionDel invalidates a session.
-func SessionDel(ctx context.Context, token string) {
-	CacheDel(ctx, fmt.Sprintf("session:%s", token))
-}
-
-// Close closes the Redis client gracefully.
-func Close() {
-	if rdb != nil {
-		if err := rdb.Close(); err != nil {
-			log.Printf("[Redis] Error closing client: %v", err)
-		}
-	}
-}
-
-// ─── Struct wrapper for dependency injection ──────────────────────────────────
-
-// Client is a thin wrapper around the package-level Redis functions.
-// Use NewClient to create one; it also calls Init().
-type Client struct{}
-
-// NewClient initialises the Redis connection and returns a Client.
-func NewClient(addr, password string) (*Client, error) {
-	if addr != "" {
-		os.Setenv("REDIS_URL", addr)
-	}
-	if password != "" {
-		os.Setenv("REDIS_PASSWORD", password)
-	}
-	Init()
-	return &Client{}, nil
-}
-
-// Get retrieves a value by key.
+// Get returns redis.Nil on a cache miss and ErrUnavailable only when the client
+// cannot be relied upon. Callers may treat a miss differently from an outage.
 func (c *Client) Get(ctx context.Context, key string) (string, error) {
-	val, ok := CacheGet(ctx, key)
-	if !ok {
-		return "", fmt.Errorf("key not found: %s", key)
+	if err := c.available(); err != nil {
+		return "", err
 	}
-	return val, nil
+	value, err := c.client.Get(ctx, key).Result()
+	if errors.Is(err, goredis.Nil) {
+		return "", goredis.Nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("%w: %v", ErrUnavailable, err)
+	}
+	return value, nil
 }
 
-// Set stores a value with TTL.
 func (c *Client) Set(ctx context.Context, key, value string, ttl time.Duration) error {
-	CacheSet(ctx, key, value, ttl)
+	if err := c.available(); err != nil {
+		return err
+	}
+	if err := c.client.Set(ctx, key, value, ttl).Err(); err != nil {
+		return fmt.Errorf("%w: %v", ErrUnavailable, err)
+	}
 	return nil
 }
 
-// Del removes a key.
 func (c *Client) Del(ctx context.Context, key string) error {
-	CacheDel(ctx, key)
+	if err := c.available(); err != nil {
+		return err
+	}
+	if err := c.client.Del(ctx, key).Err(); err != nil {
+		return fmt.Errorf("%w: %v", ErrUnavailable, err)
+	}
 	return nil
 }
 
-// LPush prepends a value to a Redis list (used by DLQ).
 func (c *Client) LPush(key, value string) error {
-	if rdb == nil {
-		return fmt.Errorf("redis not connected")
+	if err := c.available(); err != nil {
+		return err
 	}
-	return rdb.LPush(context.Background(), key, value).Err()
+	if err := c.client.LPush(context.Background(), key, value).Err(); err != nil {
+		return fmt.Errorf("%w: %v", ErrUnavailable, err)
+	}
+	return nil
 }
 
-// RPop removes and returns the last element of a Redis list (used by DLQ replay).
 func (c *Client) RPop(key string) (string, error) {
-	if rdb == nil {
-		return "", fmt.Errorf("redis not connected")
+	if err := c.available(); err != nil {
+		return "", err
 	}
-	val, err := rdb.RPop(context.Background(), key).Result()
-	if err == redis.Nil {
+	value, err := c.client.RPop(context.Background(), key).Result()
+	if errors.Is(err, goredis.Nil) {
 		return "", nil
 	}
-	return val, err
+	if err != nil {
+		return "", fmt.Errorf("%w: %v", ErrUnavailable, err)
+	}
+	return value, nil
+}
+
+func (c *Client) Close() error {
+	if c == nil || c.client == nil {
+		return nil
+	}
+	return c.client.Close()
 }

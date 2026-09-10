@@ -29,8 +29,21 @@ export interface TransferResult {
   txRef: string;
   externalRef: string;
   status: "pending" | "completed" | "failed";
-  mode: "mojaloop" | "nip" | "sandbox";
+  mode: "mojaloop" | "nip";
   message?: string;
+}
+
+export type ActivePaymentRail = "mojaloop" | "nip";
+
+/**
+ * Resolve only a configured live payment rail. Payment initiation must not
+ * synthesize a manual or sandbox result because callers could mistake that for
+ * a submitted funds transfer.
+ */
+export function requireActivePaymentRail(): ActivePaymentRail {
+  if (process.env.MOJALOOP_HUB_URL) return "mojaloop";
+  if (process.env.NIBSS_NIP_URL && process.env.NIBSS_NIP_KEY) return "nip";
+  throw new Error("No credentialed live payment rail is configured");
 }
 
 export interface TransferStatusResult {
@@ -207,52 +220,28 @@ async function nipStatus(txRef: string): Promise<TransferStatusResult> {
 // ── Public API ───────────────────────────────────────────────────────────────
 
 /**
- * Initiate an interbank transfer.
- * Routes to Mojaloop → NIBSS NIP → pending/manual mode based on available env vars.
- * No fake completions — if no rail is configured, the transfer is recorded as pending.
+ * Initiate an interbank transfer through one configured live rail. Missing or
+ * incomplete provider configuration is an explicit failure before any transfer
+ * claim or external money-moving request is created.
  */
 export async function initiateInterBankTransfer(req: TransferRequest): Promise<TransferResult> {
-  if (process.env.MOJALOOP_HUB_URL) {
+  const rail = requireActivePaymentRail();
+  if (rail === "mojaloop") {
     return withCircuitBreaker("mojaloop", () => mojaloopInitiate(req));
   }
-  if (process.env.NIBSS_NIP_URL) {
-    return withCircuitBreaker("nip", () => nipInitiate(req));
-  }
-  // No payment rail configured — record as pending for manual processing
-  console.warn(
-    `[Mojaloop] No payment rail configured (MOJALOOP_HUB_URL or NIBSS_NIP_URL). ` +
-    `Transfer ${req.txRef} recorded as pending for manual processing.`
-  );
-  return {
-    txRef: req.txRef,
-    externalRef: `MANUAL-${req.txRef}`,
-    status: "pending",
-    mode: "sandbox",
-    message:
-      "No payment rail configured — transfer queued for manual processing. " +
-      "Configure MOJALOOP_HUB_URL or NIBSS_NIP_URL to enable live transfers.",
-  };
+  return withCircuitBreaker("nip", () => nipInitiate(req));
 }
 
 /**
  * Poll the status of a previously initiated transfer.
  */
 export async function pollTransferStatus(txRef: string): Promise<TransferStatusResult> {
-  if (process.env.MOJALOOP_HUB_URL) {
-    return mojaloopStatus(txRef);
-  }
-  if (process.env.NIBSS_NIP_URL) {
-    return nipStatus(txRef);
-  }
-  // No rail configured — return pending (do not fabricate completion)
-  return { txRef, externalRef: `MANUAL-${txRef}`, status: "pending" };
+  const rail = requireActivePaymentRail();
+  if (rail === "mojaloop") return mojaloopStatus(txRef);
+  return nipStatus(txRef);
 }
 
-/**
- * Determine which payment rail is active.
- */
-export function getActiveRail(): "mojaloop" | "nip" | "sandbox" {
-  if (process.env.MOJALOOP_HUB_URL) return "mojaloop";
-  if (process.env.NIBSS_NIP_URL) return "nip";
-  return "sandbox";
+/** Resolve the configured live rail for display and durable transfer metadata. */
+export function getActiveRail(): ActivePaymentRail {
+  return requireActivePaymentRail();
 }

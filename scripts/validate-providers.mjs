@@ -80,5 +80,5 @@ console.log('      The fail-closed policy ensures no synthetic results are retur
 
 // Write JSON report
 const fs = await import('fs');
-fs.writeFileSync('/home/ubuntu/bis-pwa/docs/provider-validation-report.json', JSON.stringify({ timestamp: new Date().toISOString(), results }, null, 2));
+fs.writeFileSync('/home/ubuntu/bis/docs/provider-validation-report.json', JSON.stringify({ timestamp: new Date().toISOString(), results }, null, 2));
 console.log('\nJSON report saved to docs/provider-validation-report.json');

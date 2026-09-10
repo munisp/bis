@@ -39,15 +39,10 @@ import {
 import { TRPCError } from "@trpc/server";
 import { storagePut } from "./storage";
 import { ENV } from "./_core/env";
-import {
-  initiateInterBankTransfer,
-  pollTransferStatus,
-  getActiveRail,
-} from "./mojaloop";
+import { getActiveRail } from "./mojaloop";
 import { publishPaymentEvent } from "./dapr";
 import { fluvioPublishPaymentEvent, fluvioCheckVelocity } from "./fluvio";
 import {
-  startPaymentTransferWorkflow,
   getPaymentWorkflowStatus,
   cancelPaymentTransferWorkflow,
 } from "./temporal";
@@ -129,7 +124,8 @@ export const paymentRailsRouter = router({
     .input(
       z.object({
         originatorAccountId: z.string().min(1),
-        beneficiaryAccountId: z.string().min(1),
+        beneficiaryAccountId: z.string().regex(/^\d{10}$/, "A 10-digit NUBAN beneficiary account is required"),
+        beneficiaryBankCode: z.string().regex(/^\d{3,6}$/, "A 3- to 6-digit beneficiary bank code is required"),
         beneficiaryName: z.string().min(1).max(128),
         amount: z.number().positive().multipleOf(0.01).max(100_000_000), // NGN
         currency: z.literal("NGN").default("NGN"),
@@ -138,6 +134,15 @@ export const paymentRailsRouter = router({
       })
     )
     .mutation(async ({ input, ctx }) => {
+      if (!ctx.tenantId || ctx.tenantId <= 0) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "A tenant-scoped payment context is required" });
+      }
+      let activeRail: ReturnType<typeof getActiveRail>;
+      try {
+        activeRail = getActiveRail();
+      } catch {
+        throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "No credentialed live payment rail is configured" });
+      }
       const db = await getDb();
       if (!db)
         throw new TRPCError({
@@ -184,10 +189,7 @@ export const paymentRailsRouter = router({
       // A BLOCK decision means the account has exceeded its transaction velocity
       // threshold (e.g., >10 transfers in 60 s or >₦5M in 5 min) and the transfer
       // is rejected before any money moves.
-      const tenantId = String(
-        (ctx.user as { tenantId?: string | number } | null)?.tenantId ??
-          "default"
-      );
+      const tenantId = String(ctx.tenantId);
       const velocityDecision = await fluvioCheckVelocity({
         account_id: input.originatorAccountId,
         amount_kobo: Math.round(input.amount * 100),
@@ -203,162 +205,65 @@ export const paymentRailsRouter = router({
         });
       }
 
-      // Claim the unique payment reference *before* invoking any external rail.
-      // A concurrent retry either observes this immutable claim or loses the unique
-      // constraint race; in neither case may it submit a second money-moving request.
+      // Create the payment claim and its one-and-only workflow-start instruction
+      // in the same PostgreSQL transaction. No request handler is allowed to call
+      // Temporal, a rail, TigerBeetle, Kafka, or Fluvio after this point.
       let created: typeof transactions.$inferSelect;
       try {
-        const [inserted] = await db
-          .insert(transactions)
-          .values({
-            txRef,
-            idempotencyKey: txRef,
-            tenantId: ctx.tenantId,
-            type: "nip" as const,
-            status: "pending" as const,
-            amount: amountKobo,
-            currency: input.currency,
-            originatorName: input.originatorAccountId,
-            originatorAccount: input.originatorAccountId,
-            beneficiaryAccount: input.beneficiaryAccountId,
-            beneficiaryName: input.beneficiaryName,
-            narration: input.narration ?? undefined,
-          })
-          .returning();
-        if (!inserted)
-          throw new Error("Payment claim insert returned no transaction");
-        created = inserted;
+        created = await db.transaction(async transactionDb => {
+          const [inserted] = await transactionDb
+            .insert(transactions)
+            .values({
+              txRef,
+              idempotencyKey: txRef,
+              tenantId: ctx.tenantId,
+              type: "nip" as const,
+              status: "pending" as const,
+              amount: amountKobo,
+              currency: input.currency,
+              originatorName: input.originatorAccountId,
+              originatorAccount: input.originatorAccountId,
+              beneficiaryAccount: input.beneficiaryAccountId,
+              beneficiaryBank: input.beneficiaryBankCode,
+              beneficiaryName: input.beneficiaryName,
+              narration: input.narration ?? undefined,
+            })
+            .returning();
+          if (!inserted) throw new Error("payment claim insert returned no transaction");
+          await transactionDb.execute(sql`
+            INSERT INTO payment_intent_outbox
+              (transaction_id, tenant_id, idempotency_key, rail, status, next_attempt_at)
+            VALUES
+              (${inserted.id}, ${ctx.tenantId}, ${txRef}, ${activeRail}, 'queued', NOW())
+          `);
+          return inserted;
+        });
       } catch (error) {
-        if (!input.reference) throw error;
-        const [existing] = await db
-          .select()
-          .from(transactions)
-          .where(
-            and(
-              eq(transactions.txRef, input.reference),
-              tenantCondition(ctx.tenantId)
-            )
-          )
-          .limit(1);
-        if (existing) {
-          return {
-            success: true,
-            txRef: existing.txRef,
-            id: existing.id,
-            status: existing.status as TransferStatus,
-            rail: getActiveRail(),
-            idempotent: true,
-          };
+        if (input.reference) {
+          const [existing] = await db
+            .select()
+            .from(transactions)
+            .where(and(eq(transactions.txRef, input.reference), tenantCondition(ctx.tenantId)))
+            .limit(1);
+          if (existing) {
+            return {
+              success: true,
+              txRef: existing.txRef,
+              id: existing.id,
+              status: existing.status as TransferStatus,
+              rail: activeRail,
+              idempotent: true,
+            };
+          }
         }
-        // Do not disclose whether another tenant owns a colliding reference.
-        throw new TRPCError({
-          code: "CONFLICT",
-          message: "Payment reference is unavailable",
-        });
+        throw new TRPCError({ code: "CONFLICT", message: "Payment reference is unavailable" });
       }
 
-      // Initiate via Mojaloop → NIBSS NIP → Sandbox
-      let externalRef: string | undefined;
-      let finalStatus: "pending" | "completed" | "failed" = "pending";
-      const activeRail = getActiveRail();
-      try {
-        const railResult = await initiateInterBankTransfer({
-          txRef,
-          originatorAccount: input.originatorAccountId,
-          originatorName: input.originatorAccountId,
-          beneficiaryAccount: input.beneficiaryAccountId,
-          beneficiaryName: input.beneficiaryName,
-          beneficiaryBankCode: (input as any).beneficiaryBankCode ?? "000",
-          amountKobo,
-          currency: input.currency,
-          narration: input.narration,
-        });
-        externalRef = railResult.externalRef;
-        finalStatus =
-          railResult.status === "completed" ? "completed" : "pending";
-      } catch (err) {
-        console.error(
-          `[PaymentRails] ${activeRail} initiation failed for ${txRef}:`,
-          err
-        );
-        // Store as failed rather than silently dropping
-        finalStatus = "failed";
-      }
-
-      const dbStatus =
-        finalStatus === "completed"
-          ? ("completed" as const)
-          : finalStatus === "failed"
-            ? ("failed" as const)
-            : ("pending" as const);
-
-      // The durable claim remains pending until the rail outcome is persisted.  If
-      // this update fails after a rail submission, reconciliation can resume from
-      // the claim; the API must not report a successful transfer to the caller.
-      try {
-        await db
-          .update(transactions)
-          .set({
-            status: dbStatus,
-            tigerBeetleId: externalRef ?? undefined,
-            updatedAt: new Date(),
-          })
-          .where(eq(transactions.id, created.id));
-      } catch (error) {
-        console.error(
-          `[PaymentRails] failed to persist rail outcome for ${txRef}:`,
-          error
-        );
-        throw new TRPCError({
-          code: "SERVICE_UNAVAILABLE",
-          message:
-            "Transfer outcome pending reconciliation; do not submit a new reference",
-        });
-      }
-      // Dapr pub/sub: publish payment event (non-blocking)
-      publishPaymentEvent({
-        eventType: "initiated",
-        txRef,
-        amountKobo,
-        currency: input.currency,
-        rail: activeRail,
-      }).catch(() => {});
-      // Fluvio velocity processor: publish payment event for sliding-window velocity checks (non-blocking)
-      fluvioPublishPaymentEvent({
-        event_type: "initiated",
-        tx_ref: txRef,
-        account_id: input.originatorAccountId,
-        amount_kobo: amountKobo,
-        currency: input.currency,
-        rail: activeRail,
-        tenant_id: tenantId,
-      }).catch(() => {});
-      // Temporal saga: start PaymentTransferWorkflow for retry, timeout escalation, and compensation.
-      // Only start the saga for pending transfers — completed/failed transfers don't need it.
-      // Non-blocking: a Temporal outage must not block the payment response.
-      if (dbStatus === "pending") {
-        startPaymentTransferWorkflow({
-          txRef,
-          transactionId: created.id,
-          originatorAccountId: input.originatorAccountId,
-          beneficiaryAccountId: input.beneficiaryAccountId,
-          beneficiaryName: input.beneficiaryName,
-          amountKobo,
-          currency: input.currency,
-          rail: activeRail,
-          narration: input.narration,
-        }).catch(err => {
-          console.warn(
-            `[Temporal] PaymentTransferWorkflow start failed for ${txRef} (non-fatal):`,
-            err
-          );
-        });
-      }
       return {
         success: true,
         txRef,
         id: created.id,
-        status: dbStatus,
+        status: "pending" as const,
         rail: activeRail,
       };
     }),
@@ -565,7 +470,7 @@ export const paymentRailsRouter = router({
    * Aggregates debits and credits per originator/beneficiary account.
    *
    * Note: In production, this would query TigerBeetle directly via the Go
-   * payment-rails service. Here we derive balances from the MySQL transactions table.
+   * payment-rails service. Here we derive balances from the PostgreSQL transactions table.
    */
   getAccountBalances: protectedProcedure
     .input(

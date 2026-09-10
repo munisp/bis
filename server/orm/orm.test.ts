@@ -906,56 +906,64 @@ describe("Seed Data", () => {
 
 // ─── Migration SQL tests ──────────────────────────────────────────────────────
 
-describe("Migration SQL Files", () => {
-  it("0055_drizzle_orm_improvements.sql should exist", async () => {
+describe("Canonical PostgreSQL Baseline", () => {
+  const baselinePath = repositoryFile("drizzle", "0000_postgresql_baseline.sql");
+  const journalPath = repositoryFile("drizzle", "meta", "_journal.json");
+
+  it("ships exactly one executable PostgreSQL baseline migration", async () => {
     const fs = await import("fs");
-    expect(fs.existsSync(repositoryFile("drizzle", "0055_drizzle_orm_improvements.sql"))).toBe(true);
+    expect(fs.existsSync(baselinePath)).toBe(true);
+    const journal = JSON.parse(fs.readFileSync(journalPath, "utf8")) as { dialect: string; entries: Array<{ tag: string }> };
+    expect(journal.dialect).toBe("postgresql");
+    expect(journal.entries.map((entry) => entry.tag)).toEqual([
+      "0000_postgresql_baseline",
+      "0001_cold_archive_parquet",
+      "0002_africa_consumer_intelligence",
+      "0003_consumer_governance",
+      "0004_gateway_transactional_outbox",
+      "0005_outbox_and_archive_encryption",
+      "0006_field_evidence_uploads",
+      "0007_kyc_document_uploads",
+      "0008_consumer_dispute_reinvestigation",
+      "0009_consumer_dispute_integrity_and_delivery",
+      "0010_institutional_commercial_biometric_governance",
+      "0011_investigation_intelligence_controls",
+      "0012_investigation_intelligence_billing_events",
+      "0013_intelligence_billing_reconciliation",
+      "0014_compliance_adverse_action_and_pii_encryption",
+      "0015_compliance_workflow_hardening",
+      "0016_pii_transit_rotation_and_forensics",
+      "0017_pii_tenant_rls_and_dispatch",
+      "0018_pii_rotation_dispatch_dead_letter",
+      "0019_pii_forensic_integrity_verification",
+      "0020_pii_forensic_keyset_pagination_index",
+      "0021_payment_intent_outbox",
+      "0022_payment_reconciliation_cases",
+    ]);
   });
 
-  it("0055_drizzle_orm_improvements.rollback.sql should exist", async () => {
+  it("includes jsonb columns and soft-delete fields", async () => {
     const fs = await import("fs");
-    expect(fs.existsSync(repositoryFile("drizzle", "0055_drizzle_orm_improvements.rollback.sql"))).toBe(true);
-  });
-
-  it("migration SQL should include jsonb upgrades", async () => {
-    const fs = await import("fs");
-    const content = fs.readFileSync(repositoryFile("drizzle", "0055_drizzle_orm_improvements.sql"), "utf8");
-    expect(content).toContain("TYPE jsonb");
-  });
-
-  it("migration SQL should include soft-delete columns", async () => {
-    const fs = await import("fs");
-    const content = fs.readFileSync(repositoryFile("drizzle", "0055_drizzle_orm_improvements.sql"), "utf8");
+    const content = fs.readFileSync(baselinePath, "utf8");
+    expect(content).toContain("jsonb");
     expect(content).toContain("deletedAt");
     expect(content).toContain("deletedBy");
   });
 
-  it("migration SQL should include GIN full-text search indexes", async () => {
+  it("includes GIN full-text search indexes", async () => {
     const fs = await import("fs");
-    const content = fs.readFileSync(repositoryFile("drizzle", "0055_drizzle_orm_improvements.sql"), "utf8");
+    const content = fs.readFileSync(baselinePath, "utf8");
     expect(content).toContain("investigations_search_idx");
     expect(content).toContain("kyc_records_search_idx");
     expect(content).toContain("cases_search_idx");
   });
 
-  it("migration SQL should include CHECK constraints", async () => {
+  it("includes risk-score CHECK constraints", async () => {
     const fs = await import("fs");
-    const content = fs.readFileSync(repositoryFile("drizzle", "0055_drizzle_orm_improvements.sql"), "utf8");
+    const content = fs.readFileSync(baselinePath, "utf8");
     expect(content).toContain("investigations_risk_score_check");
     expect(content).toContain("kyc_records_risk_score_check");
     expect(content).toContain("cases_risk_score_check");
-  });
-
-  it("rollback SQL should include DROP INDEX statements", async () => {
-    const fs = await import("fs");
-    const content = fs.readFileSync(repositoryFile("drizzle", "0055_drizzle_orm_improvements.rollback.sql"), "utf8");
-    expect(content).toContain("DROP INDEX");
-  });
-
-  it("rollback SQL should include DROP CONSTRAINT statements", async () => {
-    const fs = await import("fs");
-    const content = fs.readFileSync(repositoryFile("drizzle", "0055_drizzle_orm_improvements.rollback.sql"), "utf8");
-    expect(content).toContain("DROP CONSTRAINT");
   });
 });
 

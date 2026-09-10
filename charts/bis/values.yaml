@@ -1,0 +1,50 @@
+namespace: bis-production
+replicaCount:
+  bff: 3
+  gateway: 3
+imagePullSecrets: []
+rbac:
+  create: true
+  serviceAccounts:
+    bff: bis-bff
+    gateway: bis-gateway
+service:
+  bff:
+    port: 3000
+    targetPort: 3001
+  gateway:
+    port: 8081
+    targetPort: 8081
+images:
+  bff:
+    repository: ghcr.io/munisp/bis-bff
+    digest: ""
+  gateway:
+    repository: ghcr.io/munisp/bis-gateway
+    digest: ""
+existingSecrets:
+  bff: bis-bff-runtime
+  gateway: bis-gateway-runtime
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+  seccompProfile:
+    type: RuntimeDefault
+resources:
+  bff:
+    requests: {cpu: 250m, memory: 512Mi}
+    limits: {cpu: "1", memory: 1Gi}
+  gateway:
+    requests: {cpu: 250m, memory: 256Mi}
+    limits: {cpu: "1", memory: 512Mi}
+rollingUpdate:
+  maxUnavailable: 0
+  maxSurge: 1
+terminationGracePeriodSeconds: 45

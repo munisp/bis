@@ -123,7 +123,7 @@ async function main() {
   // Write report
   const fs = await import("fs");
   const report = { timestamp: new Date().toISOString(), results, summary: { passed, failed, skipped } };
-  fs.writeFileSync("/home/ubuntu/bis-pwa/docs/e2e-verification-report.json", JSON.stringify(report, null, 2));
+  fs.writeFileSync("/home/ubuntu/bis/docs/e2e-verification-report.json", JSON.stringify(report, null, 2));
   console.log("\nReport saved to docs/e2e-verification-report.json");
 }
 

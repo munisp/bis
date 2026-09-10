@@ -112,3 +112,15 @@ export async function createContext(
     authMethod,
   };
 }
+
+/**
+ * Build an authenticated context for a deliberately narrow REST adapter.
+ * It reuses the same request identity and tenant-resolution logic as tRPC
+ * without requiring the adapter to manufacture tRPC request metadata.
+ */
+export async function createContextFromRequest(
+  req: CreateExpressContextOptions["req"],
+  res: CreateExpressContextOptions["res"],
+): Promise<TrpcContext> {
+  return createContext({ req, res, info: {} as CreateExpressContextOptions["info"] });
+}

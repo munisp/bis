@@ -207,7 +207,7 @@ echo ""
 # ─── A06: Vulnerable Components ───────────────────────────────────────────────
 echo "[ A06: Vulnerable Components ]"
 log_info "Run 'pnpm audit' to check for vulnerable npm dependencies"
-AUDIT_RESULT=$(cd /home/ubuntu/bis-pwa && pnpm audit 2>&1 | tail -3 || echo "audit-failed")
+AUDIT_RESULT=$(cd /home/ubuntu/bis && pnpm audit 2>&1 | tail -3 || echo "audit-failed")
 if echo "$AUDIT_RESULT" | grep -qi "0 vulnerabilities\|No known vulnerabilities"; then
   log_pass "pnpm audit: 0 known vulnerabilities"
 else

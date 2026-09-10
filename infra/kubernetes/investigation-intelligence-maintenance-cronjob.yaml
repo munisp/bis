@@ -1,0 +1,67 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: bis-investigation-intelligence-maintenance
+  namespace: bis
+  labels:
+    app.kubernetes.io/name: bis-investigation-intelligence-maintenance
+    app.kubernetes.io/component: worker
+    bis.io/control: explainable-investigation-intelligence
+spec:
+  schedule: "*/15 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 240
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: bis-investigation-intelligence-maintenance
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: maintenance
+              image: ${BIS_BFF_IMAGE:?BIS_BFF_IMAGE must be digest-pinned}
+              imagePullPolicy: IfNotPresent
+              command: ["pnpm", "intelligence:maintenance"]
+              env:
+                - name: NODE_ENV
+                  value: production
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: bis-postgres-runtime
+                      key: DATABASE_URL
+                - name: BIS_ENV
+                  value: production
+              resources:
+                requests:
+                  cpu: "100m"
+                  memory: "192Mi"
+                limits:
+                  cpu: "500m"
+                  memory: "512Mi"
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: tmp
+              emptyDir:
+                sizeLimit: 32Mi

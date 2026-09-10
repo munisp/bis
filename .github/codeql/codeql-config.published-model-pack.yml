@@ -1,0 +1,7 @@
+# Activate this file only after munisp/bis-rust-models@0.1.0 is published
+# to the organization GitHub Container Registry and the repository workflow
+# is switched to a single Rust-language CodeQL initialization or equivalent
+# Rust-specific configuration.
+name: BIS CodeQL Configuration
+packs:
+  - munisp/bis-rust-models@0.1.0

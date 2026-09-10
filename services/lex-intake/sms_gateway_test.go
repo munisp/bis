@@ -72,7 +72,8 @@ func TestParseSMSText_UnknownIncidentType(t *testing.T) {
 
 func TestHandleATWebhook_Valid(t *testing.T) {
 	store := newTestStore(t)
-	srv := &Server{store: store, bis: NewBISClient("http://localhost:9999", ""), config: Config{}}
+	srv := &Server{store: store, bis: NewBISClient("http://localhost:9999", ""), config: Config{PINPepper: "test-pepper"}}
+	issueTestPIN(t, srv, "NPF-LA-001:+2348012345678", "NPF-LA-001", "123456")
 
 	form := url.Values{}
 	form.Set("from", "+2348012345678")
@@ -114,7 +115,8 @@ func TestHandleATWebhook_InvalidFormat(t *testing.T) {
 
 func TestHandleTermiiWebhook_Valid(t *testing.T) {
 	store := newTestStore(t)
-	srv := &Server{store: store, bis: NewBISClient("http://localhost:9999", ""), config: Config{}}
+	srv := &Server{store: store, bis: NewBISClient("http://localhost:9999", ""), config: Config{PINPepper: "test-pepper"}}
+	issueTestPIN(t, srv, "NPF-KN-001:+2348012345678", "NPF-KN-001", "9876")
 
 	body := `{"from":"+2348012345678","to":"12345","text":"LEX NPF-KN-001 9876 DRUG KN Drug cache found in warehouse","id":"termii-001"}`
 	req := httptest.NewRequest(http.MethodPost, "/sms/termii", strings.NewReader(body))
@@ -324,10 +326,10 @@ func TestIssuePIN_ResetsAttemptCounter(t *testing.T) {
 
 func TestHandlePINIssue_And_Verify_HTTP(t *testing.T) {
 	store := newTestStore(t)
-	srv := &Server{store: store, bis: NewBISClient("http://localhost:9999", ""), config: Config{}}
+	srv := &Server{store: store, bis: NewBISClient("http://localhost:9999", ""), config: Config{PINPepper: "test-pepper"}}
 
 	// Issue PIN via HTTP
-	issueBody := `{"phone":"+2348012345678","agencyCode":"NPF-LA-001","pinHash":"sha256:test:1234"}`
+	issueBody := `{"submitterId":"NPF-LA-001:+2348012345678","agencyCode":"NPF-LA-001","pin":"1234"}`
 	req := httptest.NewRequest(http.MethodPost, "/pin/issue", strings.NewReader(issueBody))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
@@ -337,7 +339,7 @@ func TestHandlePINIssue_And_Verify_HTTP(t *testing.T) {
 	}
 
 	// Verify PIN via HTTP
-	verifyBody := `{"phone":"+2348012345678","pinHash":"sha256:test:1234"}`
+	verifyBody := `{"submitterId":"NPF-LA-001:+2348012345678","pin":"1234"}`
 	req2 := httptest.NewRequest(http.MethodPost, "/pin/verify", strings.NewReader(verifyBody))
 	req2.Header.Set("Content-Type", "application/json")
 	rr2 := httptest.NewRecorder()
@@ -349,10 +351,10 @@ func TestHandlePINIssue_And_Verify_HTTP(t *testing.T) {
 
 func TestHandlePINVerify_Lockout_Returns429(t *testing.T) {
 	store := newTestStore(t)
-	srv := &Server{store: store, bis: NewBISClient("http://localhost:9999", ""), config: Config{}}
+	srv := &Server{store: store, bis: NewBISClient("http://localhost:9999", ""), config: Config{PINPepper: "test-pepper"}}
 
 	// Issue PIN
-	issueBody := `{"phone":"+2348099999999","agencyCode":"NPF-KN-001","pinHash":"sha256:correct"}`
+	issueBody := `{"submitterId":"NPF-KN-001:+2348099999999","agencyCode":"NPF-KN-001","pin":"1234"}`
 	req := httptest.NewRequest(http.MethodPost, "/pin/issue", strings.NewReader(issueBody))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
@@ -363,7 +365,7 @@ func TestHandlePINVerify_Lockout_Returns429(t *testing.T) {
 
 	// 3 wrong attempts to trigger lockout
 	for i := 0; i < PINMaxAttempts; i++ {
-		vBody := `{"phone":"+2348099999999","pinHash":"sha256:wrong"}`
+		vBody := `{"submitterId":"NPF-KN-001:+2348099999999","pin":"9999"}`
 		vReq := httptest.NewRequest(http.MethodPost, "/pin/verify", strings.NewReader(vBody))
 		vReq.Header.Set("Content-Type", "application/json")
 		vRR := httptest.NewRecorder()
@@ -371,7 +373,7 @@ func TestHandlePINVerify_Lockout_Returns429(t *testing.T) {
 	}
 
 	// Next attempt should return 429
-	vBody := `{"phone":"+2348099999999","pinHash":"sha256:correct"}`
+	vBody := `{"submitterId":"NPF-KN-001:+2348099999999","pin":"1234"}`
 	vReq := httptest.NewRequest(http.MethodPost, "/pin/verify", strings.NewReader(vBody))
 	vReq.Header.Set("Content-Type", "application/json")
 	vRR := httptest.NewRecorder()
@@ -383,10 +385,10 @@ func TestHandlePINVerify_Lockout_Returns429(t *testing.T) {
 
 func TestHandlePINVerify_Expired_Returns401(t *testing.T) {
 	store := newTestStore(t)
-	srv := &Server{store: store, bis: NewBISClient("http://localhost:9999", ""), config: Config{}}
+	srv := &Server{store: store, bis: NewBISClient("http://localhost:9999", ""), config: Config{PINPepper: "test-pepper"}}
 
 	// Verify with no PIN issued — should return 401 expired
-	vBody := `{"phone":"+2348011111111","pinHash":"sha256:anyhash"}`
+	vBody := `{"submitterId":"NPF-LA-001:+2348011111111","pin":"1234"}`
 	vReq := httptest.NewRequest(http.MethodPost, "/pin/verify", strings.NewReader(vBody))
 	vReq.Header.Set("Content-Type", "application/json")
 	vRR := httptest.NewRecorder()

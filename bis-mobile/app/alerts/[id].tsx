@@ -39,7 +39,7 @@ export default function AlertDetailScreen() {
     { status: "active", limit: 50 },
     { enabled: escalateOpen }
   );
-  const agents: any[] = Array.isArray(agentsData) ? agentsData : (agentsData as any)?.agents ?? [];
+  const agents = agentsData ?? [];
 
   const acknowledgeMutation = trpc.alerts.acknowledge.useMutation({
     onSuccess: () => utils.alerts.getById.invalidate({ id: alertId }),
@@ -82,9 +82,9 @@ export default function AlertDetailScreen() {
     );
   }
 
-  const sc = SEV_COLOR[(alert as any).severity] ?? COLORS.muted;
-  const isResolved = (alert as any).resolved;
-  const isAcknowledged = (alert as any).acknowledged;
+  const sc = SEV_COLOR[alert.severity] ?? COLORS.muted;
+  const isResolved = alert.resolved;
+  const isAcknowledged = alert.acknowledged;
 
   return (
     <>
@@ -93,7 +93,7 @@ export default function AlertDetailScreen() {
         <View style={[styles.severityBanner, { backgroundColor: sc + "20", borderColor: sc + "50" }]}>
           <View style={[styles.sevDot, { backgroundColor: sc }]} />
           <Text style={[styles.sevLabel, { color: sc }]}>
-            {(alert as any).severity?.toUpperCase()} ALERT
+            {alert.severity?.toUpperCase()} ALERT
           </Text>
           {isResolved && (
             <View style={styles.resolvedBadge}>
@@ -104,13 +104,13 @@ export default function AlertDetailScreen() {
         </View>
 
         {/* Title */}
-        <Text style={styles.title}>{(alert as any).title}</Text>
+        <Text style={styles.title}>{alert.title}</Text>
 
         {/* Body */}
-        {(alert as any).body && (
+        {alert.body && (
           <View style={styles.section}>
             <Text style={styles.sectionLabel}>Details</Text>
-            <Text style={styles.bodyText}>{(alert as any).body}</Text>
+            <Text style={styles.bodyText}>{alert.body}</Text>
           </View>
         )}
 
@@ -118,22 +118,22 @@ export default function AlertDetailScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionLabel}>Metadata</Text>
           <View style={styles.metaCard}>
-            <MetaRow label="Alert ID" value={`#${(alert as any).id}`} />
-            <MetaRow label="Category" value={(alert as any).category ?? "—"} />
-            <MetaRow label="Subject Ref" value={(alert as any).subjectRef ?? "—"} />
-            <MetaRow label="Created" value={new Date((alert as any).createdAt).toLocaleString()} />
+            <MetaRow label="Alert ID" value={`#${alert.id}`} />
+            <MetaRow label="Alert type" value={alert.type} />
+            <MetaRow label="Subject Ref" value={alert.subjectRef ?? "—"} />
+            <MetaRow label="Created" value={new Date(alert.createdAt).toLocaleString()} />
             <MetaRow label="Acknowledged" value={isAcknowledged ? "Yes" : "No"} valueColor={isAcknowledged ? COLORS.success : COLORS.muted} />
           </View>
         </View>
 
         {/* Linked investigation */}
-        {(alert as any).subjectRef && (
+        {alert.subjectRef && (
           <TouchableOpacity
             style={styles.linkCard}
-            onPress={() => router.push(`/investigation/${(alert as any).subjectRef}` as any)}
+            onPress={() => router.push({ pathname: "/investigation/[id]", params: { id: alert.subjectRef } })}
           >
             <Ionicons name="search" size={16} color={COLORS.primary} />
-            <Text style={styles.linkText}>View Investigation {(alert as any).subjectRef}</Text>
+            <Text style={styles.linkText}>View Investigation {alert.subjectRef}</Text>
             <Ionicons name="chevron-forward" size={14} color={COLORS.muted} />
           </TouchableOpacity>
         )}
@@ -206,9 +206,9 @@ export default function AlertDetailScreen() {
             {/* Agent list */}
             <FlatList
               data={agents}
-              keyExtractor={(a: any) => String(a.id)}
+              keyExtractor={(agent) => String(agent.id)}
               style={styles.agentList}
-              renderItem={({ item }: { item: any }) => {
+              renderItem={({ item }) => {
                 const isChosen = selectedAgentId === String(item.id);
                 return (
                   <TouchableOpacity

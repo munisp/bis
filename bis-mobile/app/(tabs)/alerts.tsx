@@ -15,7 +15,7 @@ const SEV_COLOR: Record<string, string> = {
 export default function AlertsScreen() {
   const utils = trpc.useUtils();
   const { data, isLoading, refetch, isRefetching } = trpc.alerts.list.useQuery(
-    { page: 1, limit: 30, resolved: false },
+    { unreadOnly: true, limit: 30 },
     { staleTime: 30_000 }
   );
 
@@ -23,19 +23,20 @@ export default function AlertsScreen() {
     onSuccess: () => utils.alerts.list.invalidate(),
   });
 
-  const alerts = (data as any)?.alerts ?? [];
+  const alerts = data ?? [];
+  type AlertRow = (typeof alerts)[number];
 
   return (
     <View style={styles.container}>
       {isLoading ? (
         <ActivityIndicator color={COLORS.primary} style={{ marginTop: 40 }} />
       ) : (
-        <FlatList
+        <FlatList<AlertRow>
           data={alerts}
-          keyExtractor={(item: any) => String(item.id)}
+          keyExtractor={(item) => String(item.id)}
           refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={COLORS.primary} />}
           contentContainerStyle={styles.list}
-          renderItem={({ item }: { item: any }) => {
+          renderItem={({ item }) => {
             const sc = SEV_COLOR[item.severity] ?? COLORS.muted;
             return (
               <View style={[styles.card, { borderLeftColor: sc, borderLeftWidth: 3 }]}>
@@ -45,7 +46,7 @@ export default function AlertsScreen() {
                   </View>
                   {!item.acknowledged && (
                     <TouchableOpacity
-                      onPress={() => acknowledgeMutation.mutate({ alertId: item.id })}
+                      onPress={() => acknowledgeMutation.mutate({ id: item.id })}
                       style={styles.ackButton}
                     >
                       <Ionicons name="checkmark-outline" size={14} color={COLORS.primary} />

@@ -12,23 +12,41 @@ describe("permify helper", () => {
     vi.resetModules();
   });
 
-  it("rejects when PERMIFY_URL is not set", async () => {
+  it("rejects when the required Permify configuration is incomplete", async () => {
     delete process.env.PERMIFY_URL;
+    delete process.env.PERMIFY_TENANT_ID;
+    delete process.env.PERMIFY_API_KEY;
     const { permifyCheck } = await import("./permify");
     await expect(permifyCheck("investigation", "inv-001", "read", "user-1")).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
+  it("rejects when PERMIFY_API_KEY is absent even when a URL is configured", async () => {
+    process.env.PERMIFY_URL = "https://permify.staging.example";
+    process.env.PERMIFY_TENANT_ID = "t1";
+    delete process.env.PERMIFY_API_KEY;
+    const { permifyCheck } = await import("./permify");
+    await expect(permifyCheck("investigation", "inv-001", "read", "user-1")).rejects.toMatchObject({ code: "FORBIDDEN" });
+    delete process.env.PERMIFY_URL;
+    delete process.env.PERMIFY_TENANT_ID;
+  });
+
   it("rejects when fetch throws", async () => {
     process.env.PERMIFY_URL = "http://localhost:3476";
+    process.env.PERMIFY_TENANT_ID = "t1";
+    process.env.PERMIFY_API_KEY = "test-permify-key";
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("connection refused")));
     const { permifyCheck } = await import("./permify");
     await expect(permifyCheck("investigation", "inv-001", "read", "user-1")).rejects.toMatchObject({ code: "FORBIDDEN" });
     vi.unstubAllGlobals();
     delete process.env.PERMIFY_URL;
+    delete process.env.PERMIFY_TENANT_ID;
+    delete process.env.PERMIFY_API_KEY;
   });
 
   it("returns true when Permify responds RESULT_ALLOWED", async () => {
     process.env.PERMIFY_URL = "http://localhost:3476";
+    process.env.PERMIFY_TENANT_ID = "t1";
+    process.env.PERMIFY_API_KEY = "test-permify-key";
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({
@@ -41,10 +59,14 @@ describe("permify helper", () => {
     expect(result).toBe(true);
     vi.unstubAllGlobals();
     delete process.env.PERMIFY_URL;
+    delete process.env.PERMIFY_TENANT_ID;
+    delete process.env.PERMIFY_API_KEY;
   });
 
   it("returns false when Permify responds RESULT_DENIED", async () => {
     process.env.PERMIFY_URL = "http://localhost:3476";
+    process.env.PERMIFY_TENANT_ID = "t1";
+    process.env.PERMIFY_API_KEY = "test-permify-key";
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({
@@ -57,6 +79,8 @@ describe("permify helper", () => {
     expect(result).toBe(false);
     vi.unstubAllGlobals();
     delete process.env.PERMIFY_URL;
+    delete process.env.PERMIFY_TENANT_ID;
+    delete process.env.PERMIFY_API_KEY;
   });
 
   it("permifyWriteRelationship is a no-op when PERMIFY_URL is not set", async () => {

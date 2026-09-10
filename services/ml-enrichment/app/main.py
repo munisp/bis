@@ -18,6 +18,8 @@ import structlog
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.routers import risk, adverse_media, ollama_proxy, lakehouse, case_enrichment, ueba, criminal_enrichment
 from app.services.ollama_client import OllamaClient
@@ -45,6 +47,17 @@ settings = Settings()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown lifecycle."""
+    if not settings.database_url.startswith(("postgresql://", "postgres://", "postgresql+asyncpg://")):
+        raise RuntimeError("DATABASE_URL must be an explicit PostgreSQL URL")
+    database_url = lakehouse._make_async_url(settings.database_url)
+    database_engine = create_async_engine(database_url, pool_pre_ping=True, pool_size=5, max_overflow=5)
+    try:
+        async with database_engine.connect() as connection:
+            await connection.execute(text("SELECT 1"))
+    except Exception:
+        await database_engine.dispose()
+        raise
+    app.state.database_engine = database_engine
     log.info("bis_ml_enrichment.startup", ollama_url=settings.ollama_url)
 
     # Warm up Ollama client
@@ -72,6 +85,7 @@ async def lifespan(app: FastAPI):
         await consumer_task
     except asyncio.CancelledError:
         pass
+    await database_engine.dispose()
     log.info("bis_ml_enrichment.shutdown")
 
 

@@ -1,0 +1,133 @@
+{{- if .Values.rbac.create }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Values.rbac.serviceAccounts.bff }}
+  namespace: {{ .Values.namespace }}
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Values.rbac.serviceAccounts.gateway }}
+  namespace: {{ .Values.namespace }}
+automountServiceAccountToken: false
+---
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bis-bff
+  namespace: {{ .Values.namespace }}
+  labels: {{- include "bis.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount.bff }}
+  revisionHistoryLimit: 3
+  progressDeadlineSeconds: 600
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: {{ .Values.rollingUpdate.maxUnavailable }}
+      maxSurge: {{ .Values.rollingUpdate.maxSurge }}
+  selector:
+    matchLabels: {app.kubernetes.io/component: bff, app.kubernetes.io/instance: {{ .Release.Name }}}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: bis, app.kubernetes.io/component: bff, app.kubernetes.io/instance: {{ .Release.Name }}}
+    spec:
+      serviceAccountName: {{ .Values.rbac.serviceAccounts.bff }}
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: bff
+          image: {{ include "bis.image" .Values.images.bff }}
+          imagePullPolicy: IfNotPresent
+          securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          ports: [{name: http, containerPort: {{ .Values.service.bff.targetPort }}, protocol: TCP}]
+          envFrom: [{secretRef: {name: {{ required "existingSecrets.bff is required" .Values.existingSecrets.bff }}}}]
+          readinessProbe: {httpGet: {path: /api/health, port: http}, initialDelaySeconds: 10, timeoutSeconds: 3, periodSeconds: 10, failureThreshold: 3}
+          livenessProbe: {httpGet: {path: /api/health, port: http}, initialDelaySeconds: 30, timeoutSeconds: 3, periodSeconds: 20, failureThreshold: 3}
+          startupProbe: {httpGet: {path: /api/health, port: http}, failureThreshold: 30, periodSeconds: 5}
+          resources: {{- toYaml .Values.resources.bff | nindent 12 }}
+          volumeMounts: [{name: tmp, mountPath: /tmp}]
+      volumes: [{name: tmp, emptyDir: {sizeLimit: 64Mi}}]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bis-bff
+  namespace: {{ .Values.namespace }}
+  labels: {{- include "bis.labels" . | nindent 4 }}
+spec:
+  selector: {app.kubernetes.io/component: bff, app.kubernetes.io/instance: {{ .Release.Name }}}
+  ports: [{name: http, port: {{ .Values.service.bff.port }}, targetPort: http, protocol: TCP}]
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: {name: bis-bff, namespace: {{ .Values.namespace }}}
+spec:
+  minAvailable: 2
+  selector: {matchLabels: {app.kubernetes.io/component: bff, app.kubernetes.io/instance: {{ .Release.Name }}}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bis-gateway
+  namespace: {{ .Values.namespace }}
+  labels: {{- include "bis.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount.gateway }}
+  revisionHistoryLimit: 3
+  progressDeadlineSeconds: 600
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: {{ .Values.rollingUpdate.maxUnavailable }}
+      maxSurge: {{ .Values.rollingUpdate.maxSurge }}
+  selector:
+    matchLabels: {app.kubernetes.io/component: gateway, app.kubernetes.io/instance: {{ .Release.Name }}}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: bis, app.kubernetes.io/component: gateway, app.kubernetes.io/instance: {{ .Release.Name }}}
+    spec:
+      serviceAccountName: {{ .Values.rbac.serviceAccounts.gateway }}
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: gateway
+          image: {{ include "bis.image" .Values.images.gateway }}
+          imagePullPolicy: IfNotPresent
+          securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          ports: [{name: http, containerPort: {{ .Values.service.gateway.targetPort }}, protocol: TCP}]
+          envFrom: [{secretRef: {name: {{ required "existingSecrets.gateway is required" .Values.existingSecrets.gateway }}}}]
+          readinessProbe: {httpGet: {path: /health, port: http}, initialDelaySeconds: 10, timeoutSeconds: 3, periodSeconds: 10, failureThreshold: 3}
+          livenessProbe: {httpGet: {path: /health, port: http}, initialDelaySeconds: 30, timeoutSeconds: 3, periodSeconds: 20, failureThreshold: 3}
+          startupProbe: {httpGet: {path: /health, port: http}, failureThreshold: 30, periodSeconds: 5}
+          resources: {{- toYaml .Values.resources.gateway | nindent 12 }}
+          volumeMounts: [{name: tmp, mountPath: /tmp}]
+      volumes: [{name: tmp, emptyDir: {sizeLimit: 64Mi}}]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bis-gateway
+  namespace: {{ .Values.namespace }}
+  labels: {{- include "bis.labels" . | nindent 4 }}
+spec:
+  selector: {app.kubernetes.io/component: gateway, app.kubernetes.io/instance: {{ .Release.Name }}}
+  ports: [{name: http, port: {{ .Values.service.gateway.port }}, targetPort: http, protocol: TCP}]
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: {name: bis-gateway, namespace: {{ .Values.namespace }}}
+spec:
+  minAvailable: 2
+  selector: {matchLabels: {app.kubernetes.io/component: gateway, app.kubernetes.io/instance: {{ .Release.Name }}}}

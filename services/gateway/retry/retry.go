@@ -3,11 +3,12 @@ package retry
 
 import (
 	"context"
+	cryptorand "crypto/rand"
 	"errors"
 	"fmt"
 	"log"
 	"math"
-	"math/rand"
+	"math/big"
 	"time"
 )
 
@@ -39,6 +40,18 @@ func NotRetryable(err error) error {
 	return fmt.Errorf("%w: %v", ErrNotRetryable, err)
 }
 
+func secureJitter(wait time.Duration) (time.Duration, error) {
+	span := big.NewInt(int64(wait) / 2)
+	if span.Sign() <= 0 {
+		return 0, nil
+	}
+	sample, err := cryptorand.Int(cryptorand.Reader, span)
+	if err != nil {
+		return 0, err
+	}
+	return time.Duration(sample.Int64() - int64(wait)/4), nil
+}
+
 // Do executes fn with exponential backoff retry.
 func Do(ctx context.Context, cfg Config, name string, fn func() error) error {
 	var lastErr error
@@ -61,8 +74,9 @@ func Do(ctx context.Context, cfg Config, name string, fn func() error) error {
 			wait = cfg.MaxWait
 		}
 		if cfg.Jitter {
-			jitter := time.Duration(rand.Float64()*0.5*float64(wait) - 0.25*float64(wait))
-			wait += jitter
+			if jitter, err := secureJitter(wait); err == nil {
+				wait += jitter
+			}
 			if wait < 0 {
 				wait = cfg.InitialWait
 			}

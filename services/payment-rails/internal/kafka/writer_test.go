@@ -8,25 +8,52 @@ import (
 	"bis/payment-rails/internal/kafka"
 )
 
-// TestNewReturnsStubWhenNoBrokers verifies that New() returns a no-op stub
-// when KAFKA_BROKERS is not set, so the service starts cleanly in dev/test.
-func TestNewReturnsStubWhenNoBrokers(t *testing.T) {
-	t.Setenv("KAFKA_BROKERS", "")
-	pub := kafka.New(kafka.LoadConfigFromEnv())
-	if pub == nil {
-		t.Fatal("expected non-nil publisher")
-	}
-	// Stub publish must not error.
-	ctx := context.Background()
-	if err := pub.Publish(ctx, "test-topic", "k1", []byte(`{"test":true}`)); err != nil {
-		t.Fatalf("stub publish returned error: %v", err)
-	}
-	if err := pub.Close(); err != nil {
-		t.Fatalf("stub close returned error: %v", err)
+func TestNewRejectsMissingBrokers(t *testing.T) {
+	_, err := kafka.New(kafka.WriterConfig{})
+	if err == nil {
+		t.Fatal("expected missing KAFKA_BROKERS to be rejected")
 	}
 }
 
-// TestLoadConfigFromEnvDefaults verifies default values when env vars are absent.
+func TestNewRejectsMissingSASLCredentials(t *testing.T) {
+	_, err := kafka.New(kafka.WriterConfig{Brokers: "broker.example.test:9093"})
+	if err == nil {
+		t.Fatal("expected missing SASL credentials to be rejected")
+	}
+}
+
+func TestNewRejectsAsyncPublishing(t *testing.T) {
+	_, err := kafka.New(kafka.WriterConfig{
+		Brokers:  "broker.example.test:9093",
+		Username: "payment-writer",
+		Password: "test-secret",
+		Async:    true,
+	})
+	if err == nil {
+		t.Fatal("expected asynchronous payment publishing to be rejected")
+	}
+}
+
+func TestNewCreatesDurablePublisher(t *testing.T) {
+	pub, err := kafka.New(kafka.WriterConfig{
+		Brokers:      "broker.example.test:9093",
+		Username:     "payment-writer",
+		Password:     "test-secret",
+		BatchSize:    100,
+		BatchTimeout: 10 * time.Millisecond,
+		WriteTimeout: 10 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("expected durable publisher: %v", err)
+	}
+	if pub == nil {
+		t.Fatal("expected non-nil durable publisher")
+	}
+	if err := pub.Close(); err != nil {
+		t.Fatalf("close returned error: %v", err)
+	}
+}
+
 func TestLoadConfigFromEnvDefaults(t *testing.T) {
 	t.Setenv("KAFKA_BROKERS", "")
 	t.Setenv("KAFKA_BATCH_SIZE", "")
@@ -44,7 +71,6 @@ func TestLoadConfigFromEnvDefaults(t *testing.T) {
 	}
 }
 
-// TestLoadConfigFromEnvCustom verifies env var overrides are applied.
 func TestLoadConfigFromEnvCustom(t *testing.T) {
 	t.Setenv("KAFKA_BROKERS", "broker1:9092,broker2:9092")
 	t.Setenv("KAFKA_USERNAME", "alice")
@@ -70,23 +96,11 @@ func TestLoadConfigFromEnvCustom(t *testing.T) {
 	}
 }
 
-// TestStubPublisherMultipleMessages verifies the stub handles multiple publishes.
-func TestStubPublisherMultipleMessages(t *testing.T) {
-	t.Setenv("KAFKA_BROKERS", "")
-	pub := kafka.New(kafka.LoadConfigFromEnv())
-	ctx := context.Background()
-	topics := []string{"payments.swift", "payments.sepa", "payments.travel_rule"}
-	for _, topic := range topics {
-		for i := 0; i < 10; i++ {
-			if err := pub.Publish(ctx, topic, "key", []byte(`{}`)); err != nil {
-				t.Fatalf("publish to %s failed: %v", topic, err)
-			}
-		}
-	}
+func TestPublisherInterface(t *testing.T) {
+	var _ kafka.Publisher = (*testPublisher)(nil)
 }
 
-// TestPublisherInterface verifies that both stub and real writer satisfy Publisher.
-func TestPublisherInterface(t *testing.T) {
-	t.Setenv("KAFKA_BROKERS", "")
-	var _ kafka.Publisher = kafka.New(kafka.LoadConfigFromEnv())
-}
+type testPublisher struct{}
+
+func (*testPublisher) Publish(_ context.Context, _ string, _ string, _ []byte) error { return nil }
+func (*testPublisher) Close() error                                                  { return nil }

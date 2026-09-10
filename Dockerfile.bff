@@ -18,6 +18,13 @@ COPY . .
 # Build Vite frontend + esbuild server bundle
 RUN pnpm run build
 
+# ─── Canonical migration image ───────────────────────────────────────────────
+# This target retains the checked-in migration runner and its pinned tooling. It
+# is published separately and run once by the promotion workflow before the BFF
+# is rolled forward; the production runtime image stays lean.
+FROM builder AS migrations
+CMD ["pnpm", "db:migrate"]
+
 # ─── Production image ─────────────────────────────────────────────────────────
 FROM node:22-alpine AS runner
 

@@ -21,11 +21,11 @@ import pg from "pg";
 const { Pool } = pg;
 
 // ── Connection ────────────────────────────────────────────────────────────────
-// Always seed against local PostgreSQL (the platform's actual DB)
-const DATABASE_URL =
-  process.env.DATABASE_URL?.startsWith("mysql")
-    ? "postgresql://bis_user:bis_secure_2026@localhost:5432/bis_db"
-    : (process.env.DATABASE_URL ?? "postgresql://bis_user:bis_secure_2026@localhost:5432/bis_db");
+// Seed only an explicitly configured PostgreSQL database.
+const DATABASE_URL = process.env.BIS_DATABASE_URL ?? process.env.DATABASE_URL ?? "";
+if (!DATABASE_URL.startsWith("postgresql://") && !DATABASE_URL.startsWith("postgres://")) {
+  throw new Error("BIS_DATABASE_URL or DATABASE_URL must be a PostgreSQL URL");
+}
 
 const pool = new Pool({ connectionString: DATABASE_URL });
 
