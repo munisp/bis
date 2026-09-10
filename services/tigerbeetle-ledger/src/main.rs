@@ -571,8 +571,8 @@ mod service_auth_tests {
             .expect("system time")
             .as_secs() as i64;
         let body = br#"{"amount":100,"currency":"NGN"}"#.to_vec();
-        let nonce = "RwvS4rY4Rfd3rPlwYqkUZw";
-        let headers = signed_headers(Method::POST, "/protected", &body, 101, 202, now, nonce);
+        let nonce = Uuid::new_v4().to_string();
+        let headers = signed_headers(Method::POST, "/protected", &body, 101, 202, now, &nonce);
         let router = protected_router();
 
         assert_eq!(
