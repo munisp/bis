@@ -40,6 +40,7 @@ import { startBroadcastScheduler } from "../broadcastScheduler";
 import { validateEnv } from "../envValidation";
 import { ENV } from "./env";
 import { startWebhookRetryScheduler } from "../webhookRetry";
+import { startPaymentIntentOutboxDispatcher } from "../paymentIntentOutbox";
 import { FORENSIC_EXPORT_MAX_EVENTS, iterateVerifiedForensicExport } from "../piiForensicExport";
 import { forensicIncidentReferenceSchema, serializeForensicExportRecord } from "../forensicExportProtocol";
 
@@ -1848,6 +1849,7 @@ startServer()
     startVapidRotationReminderScheduler(); // Daily VAPID key age check — notifies owner after 90 days
     startBroadcastScheduler(); // 1-min poll for overdue scheduled broadcasts
     startWebhookRetryScheduler(); // 10s poll for failed Paystack webhook credits (exponential backoff)
+    startPaymentIntentOutboxDispatcher(); // 5s leased PostgreSQL dispatch for payment workflow starts
     void import("../platform").then(async ({ migrateLegacyTotpSeedsAtRest }) => {
       const migrated = await migrateLegacyTotpSeedsAtRest();
       if (migrated > 0) log("info", "Encrypted legacy TOTP seeds", { migrated });
