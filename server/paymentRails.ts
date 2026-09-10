@@ -129,7 +129,8 @@ export const paymentRailsRouter = router({
     .input(
       z.object({
         originatorAccountId: z.string().min(1),
-        beneficiaryAccountId: z.string().min(1),
+        beneficiaryAccountId: z.string().regex(/^\d{10}$/, "A 10-digit NUBAN beneficiary account is required"),
+        beneficiaryBankCode: z.string().regex(/^\d{3,6}$/, "A 3- to 6-digit beneficiary bank code is required"),
         beneficiaryName: z.string().min(1).max(128),
         amount: z.number().positive().multipleOf(0.01).max(100_000_000), // NGN
         currency: z.literal("NGN").default("NGN"),
@@ -138,6 +139,15 @@ export const paymentRailsRouter = router({
       })
     )
     .mutation(async ({ input, ctx }) => {
+      if (!ctx.tenantId || ctx.tenantId <= 0) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "A tenant-scoped payment context is required" });
+      }
+      let activeRail: ReturnType<typeof getActiveRail>;
+      try {
+        activeRail = getActiveRail();
+      } catch {
+        throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "No credentialed live payment rail is configured" });
+      }
       const db = await getDb();
       if (!db)
         throw new TRPCError({
@@ -184,10 +194,7 @@ export const paymentRailsRouter = router({
       // A BLOCK decision means the account has exceeded its transaction velocity
       // threshold (e.g., >10 transfers in 60 s or >₦5M in 5 min) and the transfer
       // is rejected before any money moves.
-      const tenantId = String(
-        (ctx.user as { tenantId?: string | number } | null)?.tenantId ??
-          "default"
-      );
+      const tenantId = String(ctx.tenantId);
       const velocityDecision = await fluvioCheckVelocity({
         account_id: input.originatorAccountId,
         amount_kobo: Math.round(input.amount * 100),
@@ -257,10 +264,9 @@ export const paymentRailsRouter = router({
         });
       }
 
-      // Initiate via Mojaloop → NIBSS NIP → Sandbox
+      // Initiate through the verified live rail selected before the durable claim.
       let externalRef: string | undefined;
       let finalStatus: "pending" | "completed" | "failed" = "pending";
-      const activeRail = getActiveRail();
       try {
         const railResult = await initiateInterBankTransfer({
           txRef,
@@ -268,7 +274,7 @@ export const paymentRailsRouter = router({
           originatorName: input.originatorAccountId,
           beneficiaryAccount: input.beneficiaryAccountId,
           beneficiaryName: input.beneficiaryName,
-          beneficiaryBankCode: (input as any).beneficiaryBankCode ?? "000",
+          beneficiaryBankCode: input.beneficiaryBankCode,
           amountKobo,
           currency: input.currency,
           narration: input.narration,
@@ -276,12 +282,9 @@ export const paymentRailsRouter = router({
         externalRef = railResult.externalRef;
         finalStatus =
           railResult.status === "completed" ? "completed" : "pending";
-      } catch (err) {
-        console.error(
-          `[PaymentRails] ${activeRail} initiation failed for ${txRef}:`,
-          err
-        );
-        // Store as failed rather than silently dropping
+      } catch {
+        // Store an internal failure state without emitting payment references,
+        // counterparty details, or provider response bodies to application logs.
         finalStatus = "failed";
       }
 
@@ -304,17 +307,20 @@ export const paymentRailsRouter = router({
             updatedAt: new Date(),
           })
           .where(eq(transactions.id, created.id));
-      } catch (error) {
-        console.error(
-          `[PaymentRails] failed to persist rail outcome for ${txRef}:`,
-          error
-        );
+      } catch {
         throw new TRPCError({
           code: "SERVICE_UNAVAILABLE",
           message:
             "Transfer outcome pending reconciliation; do not submit a new reference",
         });
       }
+      if (dbStatus === "failed") {
+        throw new TRPCError({
+          code: "SERVICE_UNAVAILABLE",
+          message: "The live payment rail rejected or could not accept this transfer; the reference is retained for reconciliation and must not be retried.",
+        });
+      }
+
       // Dapr pub/sub: publish payment event (non-blocking)
       publishPaymentEvent({
         eventType: "initiated",
@@ -333,26 +339,32 @@ export const paymentRailsRouter = router({
         rail: activeRail,
         tenant_id: tenantId,
       }).catch(() => {});
-      // Temporal saga: start PaymentTransferWorkflow for retry, timeout escalation, and compensation.
-      // Only start the saga for pending transfers — completed/failed transfers don't need it.
-      // Non-blocking: a Temporal outage must not block the payment response.
+      // A pending provider outcome must be covered by a durable workflow before
+      // this API reports it as accepted. If orchestration cannot start, quarantine
+      // the claim for human reconciliation rather than allowing the caller to retry.
       if (dbStatus === "pending") {
-        startPaymentTransferWorkflow({
-          txRef,
-          transactionId: created.id,
-          originatorAccountId: input.originatorAccountId,
-          beneficiaryAccountId: input.beneficiaryAccountId,
-          beneficiaryName: input.beneficiaryName,
-          amountKobo,
-          currency: input.currency,
-          rail: activeRail,
-          narration: input.narration,
-        }).catch(err => {
-          console.warn(
-            `[Temporal] PaymentTransferWorkflow start failed for ${txRef} (non-fatal):`,
-            err
-          );
-        });
+        try {
+          await startPaymentTransferWorkflow({
+            txRef,
+            transactionId: created.id,
+            originatorAccountId: input.originatorAccountId,
+            beneficiaryAccountId: input.beneficiaryAccountId,
+            beneficiaryName: input.beneficiaryName,
+            amountKobo,
+            currency: input.currency,
+            rail: activeRail,
+            narration: input.narration,
+          });
+        } catch {
+          await db
+            .update(transactions)
+            .set({ status: "under_review" as any, updatedAt: new Date() })
+            .where(eq(transactions.id, created.id));
+          throw new TRPCError({
+            code: "SERVICE_UNAVAILABLE",
+            message: "Transfer outcome is held for reconciliation; do not submit a new reference.",
+          });
+        }
       }
       return {
         success: true,

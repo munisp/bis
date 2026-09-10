@@ -52,6 +52,7 @@ const tenantContext = (): TrpcContext => ({
 const request = {
   originatorAccountId: "1000000001",
   beneficiaryAccountId: "2000000002",
+  beneficiaryBankCode: "058",
   beneficiaryName: "Beneficiary",
   amount: 2500.5,
   reference: "PAYMENT-GUARD-001",

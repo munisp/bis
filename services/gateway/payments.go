@@ -21,6 +21,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -42,6 +43,21 @@ func envOrDefault(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// requireSecureProviderURL prevents a payment path from treating an absent or
+// plaintext provider URL as a usable rail. Provider configuration is a safety
+// prerequisite; callers must receive an explicit unavailable response instead
+// of a synthetic pending transfer.
+func requireSecureProviderURL(raw string) error {
+	if strings.TrimSpace(raw) == "" {
+		return fmt.Errorf("live provider URL is not configured")
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil {
+		return fmt.Errorf("provider URL must be an absolute HTTPS URL")
+	}
+	return nil
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -135,7 +151,13 @@ func handleMojaloopTransfer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Publish Kafka event for audit trail
+	if err := requireSecureProviderURL(mojaloopHubURL); err != nil {
+		writeError(w, http.StatusServiceUnavailable, "MOJALOOP_UNAVAILABLE", "A credentialed HTTPS Mojaloop provider is required")
+		return
+	}
+
+	// Publish only after live-provider admission succeeds; an unavailable rail is
+	// not a payment initiation event.
 	publishEvent("bis.payment.events", map[string]interface{}{
 		"event_type":  "PAYMENT_INITIATED",
 		"tx_ref":      req.TxRef,
@@ -144,20 +166,6 @@ func handleMojaloopTransfer(w http.ResponseWriter, r *http.Request) {
 		"rail":        "mojaloop",
 		"source":      "bis-gateway",
 	})
-
-	if mojaloopHubURL == "" {
-		// Sandbox mode — deterministic response
-		log.Printf("[Mojaloop] Sandbox mode — MOJALOOP_HUB_URL not set, returning sandbox response for %s", req.TxRef)
-		writeJSON(w, http.StatusAccepted, MojaloopTransferResponse{
-			TxRef:       req.TxRef,
-			ExternalRef: fmt.Sprintf("ML-%s-%d", req.TxRef, time.Now().UnixMilli()),
-			Status:      "pending",
-			Mode:        "sandbox",
-			Message:     "Sandbox: set MOJALOOP_HUB_URL for live Mojaloop integration",
-			Sandbox:     true,
-		})
-		return
-	}
 
 	// Live Mojaloop call
 	body := map[string]interface{}{
@@ -224,12 +232,8 @@ func handleMojaloopStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if mojaloopHubURL == "" {
-		writeJSON(w, http.StatusOK, MojaloopStatusResponse{
-			TxRef:       txRef,
-			ExternalRef: txRef,
-			Status:      "pending",
-		})
+	if err := requireSecureProviderURL(mojaloopHubURL); err != nil {
+		writeError(w, http.StatusServiceUnavailable, "MOJALOOP_UNAVAILABLE", "A credentialed HTTPS Mojaloop provider is required")
 		return
 	}
 
@@ -283,6 +287,13 @@ func handleNIPTransfer(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
+	if err := requireSecureProviderURL(nibssNIPURL); err != nil || strings.TrimSpace(nibssNIPKey) == "" {
+		writeError(w, http.StatusServiceUnavailable, "NIP_UNAVAILABLE", "A credentialed HTTPS NIP provider is required")
+		return
+	}
+
+	// Publish only after live-provider admission succeeds; an unavailable rail is
+	// not a payment initiation event.
 	publishEvent("bis.payment.events", map[string]interface{}{
 		"event_type":  "PAYMENT_INITIATED",
 		"tx_ref":      req.TxRef,
@@ -291,18 +302,6 @@ func handleNIPTransfer(w http.ResponseWriter, r *http.Request) {
 		"rail":        "nip",
 		"source":      "bis-gateway",
 	})
-
-	if nibssNIPURL == "" {
-		writeJSON(w, http.StatusAccepted, MojaloopTransferResponse{
-			TxRef:       req.TxRef,
-			ExternalRef: fmt.Sprintf("NIP-%s-%d", req.TxRef, time.Now().UnixMilli()),
-			Status:      "pending",
-			Mode:        "sandbox",
-			Message:     "Sandbox: set NIBSS_NIP_URL for live NIP integration",
-			Sandbox:     true,
-		})
-		return
-	}
 
 	body := map[string]interface{}{
 		"sessionId":                req.TxRef,
@@ -457,14 +456,8 @@ func handleStablecoinBalance(w http.ResponseWriter, r *http.Request) {
 		network = "ethereum"
 	}
 
-	if stablecoinBridge == "" {
-		writeJSON(w, http.StatusOK, StablecoinBalanceResponse{
-			Address:  address,
-			Currency: currency,
-			Network:  network,
-			Balance:  "0",
-			Sandbox:  true,
-		})
+	if err := requireSecureProviderURL(stablecoinBridge); err != nil || strings.TrimSpace(stablecoinKey) == "" {
+		writeError(w, http.StatusServiceUnavailable, "STABLECOIN_BALANCE_UNAVAILABLE", "A credentialed HTTPS stablecoin bridge is required")
 		return
 	}
 
@@ -631,8 +624,8 @@ func handleStablecoinQuote(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if stablecoinBridge == "" {
-		writeError(w, http.StatusServiceUnavailable, "STABLECOIN_QUOTE_UNAVAILABLE", "No live stablecoin price oracle is configured")
+	if err := requireSecureProviderURL(stablecoinBridge); err != nil || strings.TrimSpace(stablecoinKey) == "" {
+		writeError(w, http.StatusServiceUnavailable, "STABLECOIN_QUOTE_UNAVAILABLE", "No credentialed HTTPS stablecoin price oracle is configured")
 		return
 	}
 
@@ -683,8 +676,8 @@ func handleStablecoinHistory(w http.ResponseWriter, r *http.Request) {
 		limit = "20"
 	}
 
-	if stablecoinBridge == "" {
-		writeError(w, http.StatusServiceUnavailable, "STABLECOIN_HISTORY_UNAVAILABLE", "No live stablecoin history provider is configured")
+	if err := requireSecureProviderURL(stablecoinBridge); err != nil || strings.TrimSpace(stablecoinKey) == "" {
+		writeError(w, http.StatusServiceUnavailable, "STABLECOIN_HISTORY_UNAVAILABLE", "No credentialed HTTPS stablecoin history provider is configured")
 		return
 	}
 

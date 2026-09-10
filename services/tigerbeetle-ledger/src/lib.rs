@@ -8,8 +8,8 @@
 ///   - Prometheus metrics
 use bis_transport_policy::{required_allowed_hosts, MtlsTrustedHttpsClient, TrustedEndpoint};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use thiserror::Error;
-use uuid::Uuid;
 
 // ─── Ledger Constants ─────────────────────────────────────────────────────────
 
@@ -417,6 +417,31 @@ impl TbClient {
 
 // ─── Ledger Operations ────────────────────────────────────────────────────────
 
+/// Derive the 128-bit TigerBeetle transfer identifier from immutable business
+/// idempotency dimensions. Exact retries produce the same ID; changed economic
+/// terms cannot create a second transfer under the same business reference.
+fn deterministic_transfer_id(
+    operation: &str,
+    tenant_id: i32,
+    currency: &str,
+    business_ref: &str,
+    code: u64,
+) -> String {
+    let mut digest = Sha256::new();
+    digest.update(b"bis-tigerbeetle-transfer-v1\0");
+    for component in [
+        operation,
+        &tenant_id.to_string(),
+        currency,
+        business_ref,
+        &code.to_string(),
+    ] {
+        digest.update((component.len() as u64).to_be_bytes());
+        digest.update(component.as_bytes());
+    }
+    hex::encode(&digest.finalize()[..16])
+}
+
 /// Execute a tenant topup (credit tenant account from float)
 pub async fn execute_topup(
     client: &TbClient,
@@ -428,8 +453,15 @@ pub async fn execute_topup(
     client
         .ensure_account(&tenant_account_id, ledger_code, req.tenant_id)
         .await?;
-    // Transfer: FLOAT → TENANT
-    let transfer_id = Uuid::new_v4().to_string();
+    // Transfer: FLOAT → TENANT. The provider reference is the durable
+    // idempotency boundary, so retries cannot create a second ledger credit.
+    let transfer_id = deterministic_transfer_id(
+        "topup",
+        req.tenant_id,
+        &req.currency,
+        &req.reference,
+        tier::TOPUP,
+    );
     let transfer = CreateTransferRequest {
         id: transfer_id.clone(),
         debit_account_id: accounts::FLOAT.to_string(),
@@ -472,8 +504,15 @@ pub async fn execute_debit(
             required: req.amount_kobo,
         });
     }
-    // Transfer: TENANT → REVENUE
-    let transfer_id = Uuid::new_v4().to_string();
+    // Transfer: TENANT → REVENUE. The investigation reference is the durable
+    // idempotency boundary for a metered debit and is stable across retries.
+    let transfer_id = deterministic_transfer_id(
+        "debit",
+        req.tenant_id,
+        &req.currency,
+        &req.investigation_ref,
+        req.tier,
+    );
     let transfer = CreateTransferRequest {
         id: transfer_id.clone(),
         debit_account_id: tenant_account_id.clone(),
@@ -576,5 +615,44 @@ mod tests {
         };
         // available = 1000 - 500 - 100 = 400
         assert_eq!(account.available_balance(), 400);
+    }
+}
+
+#[cfg(test)]
+mod deterministic_transfer_id_tests {
+    use super::deterministic_transfer_id;
+
+    #[test]
+    fn exact_retry_uses_the_same_128_bit_transfer_id() {
+        let first = deterministic_transfer_id("topup", 42, "NGN", "PAYSTACK-REF-001", 100);
+        let retry = deterministic_transfer_id("topup", 42, "NGN", "PAYSTACK-REF-001", 100);
+        assert_eq!(first, retry);
+        assert_eq!(first.len(), 32);
+        assert!(first.chars().all(|character| character.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn transfer_id_separates_operation_tenant_currency_reference_and_code() {
+        let baseline = deterministic_transfer_id("debit", 42, "NGN", "INV-001", 2);
+        assert_ne!(
+            baseline,
+            deterministic_transfer_id("topup", 42, "NGN", "INV-001", 2)
+        );
+        assert_ne!(
+            baseline,
+            deterministic_transfer_id("debit", 43, "NGN", "INV-001", 2)
+        );
+        assert_ne!(
+            baseline,
+            deterministic_transfer_id("debit", 42, "USD", "INV-001", 2)
+        );
+        assert_ne!(
+            baseline,
+            deterministic_transfer_id("debit", 42, "NGN", "INV-002", 2)
+        );
+        assert_ne!(
+            baseline,
+            deterministic_transfer_id("debit", 42, "NGN", "INV-001", 3)
+        );
     }
 }

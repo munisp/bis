@@ -1177,6 +1177,16 @@ export default function PaymentRailsPage() {
               </div>
             </div>
             <div className="space-y-1.5">
+              <Label className="text-xs text-slate-400">Beneficiary Bank Code</Label>
+              <Input
+                inputMode="numeric"
+                placeholder="3–6 digit bank code"
+                value={lookupBankCode}
+                onChange={e => setLookupBankCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                className="bg-slate-800 border-slate-700 text-slate-100 text-xs h-8"
+              />
+            </div>
+            <div className="space-y-1.5">
               <Label className="text-xs text-slate-400">Beneficiary Account (NUBAN)</Label>
               <div className="relative">
                 <Input
@@ -1253,10 +1263,11 @@ export default function PaymentRailsPage() {
             <Button
               size="sm"
               className="bg-indigo-600 hover:bg-indigo-700 text-white gap-1.5"
-              disabled={initiateTransfer.isPending || !transferForm.debitAccountId || !transferForm.creditAccountId || !transferForm.amountNgn || !transferForm.beneficiaryName}
+              disabled={initiateTransfer.isPending || !transferForm.debitAccountId || !transferForm.creditAccountId || !/^\d{3,6}$/.test(lookupBankCode) || !transferForm.amountNgn || !transferForm.beneficiaryName}
               onClick={() => initiateTransfer.mutate({
                 originatorAccountId: transferForm.debitAccountId,
                 beneficiaryAccountId: transferForm.creditAccountId,
+                beneficiaryBankCode: lookupBankCode,
                 beneficiaryName: transferForm.beneficiaryName || transferForm.creditAccountId,
                 amount: parseFloat(transferForm.amountNgn),
                 narration: transferForm.narration || undefined,
