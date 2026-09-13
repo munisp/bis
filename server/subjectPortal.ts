@@ -331,7 +331,7 @@ export const subjectPortalRouter = router({
           investigationStatus: inv.rows[0].status as string,
           dataCompleteness: {
             score: completeness.score,
-            sourcesChecked: completeness.sourcesTotal > 0 ? completeness.sourcesChecked : 0,
+            sourcesChecked: completeness.sourcesChecked,
             sourcesTotal: completeness.sourcesTotal,
             thinFile: completeness.thinFile,
           },
