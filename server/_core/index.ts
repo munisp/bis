@@ -15,12 +15,7 @@ import compression from "compression";
 import { register as promRegister, collectDefaultMetrics, Counter, Histogram, Gauge } from "prom-client";
 import { registerOAuthRoutes } from "./oauth";
 import { registerStorageProxy } from "./storageProxy";
-import { appRouter as baseAppRouter } from "../routers";
-import { entitySearchRouter } from "../entitySearch";
-import { mergeRouters, router } from "./trpc";
-// WP1: entitySearch registered via mergeRouters to keep server/routers.ts untouched;
-// endpoints remain namespaced as entitySearch.search / getAssociates / searchHistory.
-const appRouter = mergeRouters(baseAppRouter, router({ entitySearch: entitySearchRouter }));
+import { appRouter } from "../routers";
 import { createContext, createContextFromRequest } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { notifyOwner } from "./notification";
