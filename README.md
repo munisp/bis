@@ -176,7 +176,7 @@ All environment variables are documented in `.env.example`. The server validates
 | `RISK_ENGINE_URL` | `http://localhost:8082` | Python risk engine |
 | `LEX_INTAKE_URL` | `http://localhost:8087` | Go LEX intake service |
 | `LEX_VALIDATOR_URL` | `http://localhost:8088` | Python LEX validator |
-| `OLLAMA_ADAPTER_URL` | `http://localhost:8086` | Ollama LLM adapter |
+| `OLLAMA_ADAPTER_URL` | `http://localhost:18090` | Ollama LLM adapter |
 | `LAKEHOUSE_URL` | `http://localhost:8085` | Delta Lake writer |
 
 ### Security
