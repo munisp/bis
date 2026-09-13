@@ -108,7 +108,7 @@ describe('OfflineQueue.remove', () => {
 describe('OfflineQueue.clear', () => {
   it('removes all pending operations', async () => {
     const q = makeQueue();
-    for (let i = 0; i < 5; i++) await q.enqueue(makeOp());
+    for (let i = 0; i < 5; i++) {await q.enqueue(makeOp());}
     expect(await q.size()).toBe(5);
     await q.clear();
     expect(await q.size()).toBe(0);

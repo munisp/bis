@@ -31,10 +31,27 @@
 import { ENV } from "./_core/env";
 import { getDb } from "./db";
 import { velocityBlocks } from "../drizzle/schema";
-const FLUVIO_VELOCITY_URL =
-  process.env.FLUVIO_VELOCITY_URL ?? "http://localhost:9090";
 
+// Non-blocking domain publishers retain the configured base string; the
+// payment-blocking preflight below independently validates it at request time.
+const FLUVIO_VELOCITY_URL = process.env.FLUVIO_VELOCITY_URL ?? "";
 const TIMEOUT_MS = 5_000;
+
+function configuredVelocityEndpoint(): string | null {
+  try {
+    const endpoint = new URL(process.env.FLUVIO_VELOCITY_URL ?? "");
+    const hasNoCredentials = endpoint.username === "" && endpoint.password === "";
+    const testLoopback =
+      process.env.NODE_ENV === "test" &&
+      endpoint.protocol === "http:" &&
+      ["127.0.0.1", "localhost", "[::1]"].includes(endpoint.hostname);
+    return hasNoCredentials && (endpoint.protocol === "https:" || testLoopback)
+      ? endpoint.toString().replace(/\/$/, "")
+      : null;
+  } catch {
+    return null;
+  }
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -253,8 +270,12 @@ export interface FluvioVelocityDecision {
 export async function fluvioCheckVelocity(
   input: FluvioVelocityCheckInput
 ): Promise<FluvioVelocityDecision> {
+  const endpoint = configuredVelocityEndpoint();
+  if (!endpoint) {
+    return { decision: "block", reason: "Velocity-control service is not securely configured", service_available: false };
+  }
   try {
-    const res = await fetch(`${FLUVIO_VELOCITY_URL}/v1/velocity/check`, {
+    const res = await fetch(`${endpoint}/v1/velocity/check`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -290,9 +311,9 @@ export async function fluvioCheckVelocity(
             decision: "block",
             reason: body.reason ?? "velocity threshold exceeded",
           });
-        } catch (dbErr) {
-          // Non-fatal: audit write failure must not block the payment rejection
-          console.warn("[Fluvio] failed to record velocity block to DB:", dbErr);
+        } catch {
+          // Non-fatal for the already-blocked transfer: the decision remains
+          // fail-closed even if a secondary audit write is unavailable.
         }
       }
       return {
@@ -304,23 +325,9 @@ export async function fluvioCheckVelocity(
 
     // Non-2xx from velocity processor: fail closed.
     const text = await res.text().catch(() => "");
-    console.warn(
-      `[Fluvio] velocity check returned HTTP ${res.status}: ${text.slice(0, 200)} — blocking transfer`
-    );
+    void text;
     return { decision: "block", reason: "Velocity-control service rejected the pre-flight request", service_available: false };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    // ECONNREFUSED / timeout = velocity sidecar not running.
-    if (
-      msg.includes("ECONNREFUSED") ||
-      msg.includes("fetch failed") ||
-      msg.includes("AbortError") ||
-      (err as Error)?.name === "AbortError"
-    ) {
-      console.debug("[Fluvio] velocity processor unavailable — blocking transfer:", msg);
-    } else {
-      console.warn("[Fluvio] unexpected error in velocity check — blocking transfer:", msg);
-    }
+  } catch {
     return { decision: "block", reason: "Velocity-control service is unavailable", service_available: false };
   }
 }

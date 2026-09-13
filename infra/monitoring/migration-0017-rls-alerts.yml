@@ -1,0 +1,98 @@
+groups:
+  - name: bis-migration-0017-rls
+    rules:
+      - alert: BisRlsTenantContextResidual
+        expr: increase(bis_rls_pool_context_residual_total[5m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          domain: pii-custody
+          service: bis
+        annotations:
+          summary: "A pooled PostgreSQL connection retained a tenant context"
+          description: "The tenant transaction helper found a residual session-level bis.tenant_id after RESET. Pause PII rotation dispatch, preserve aggregate evidence, and investigate the pooler/client path."
+          runbook: "MIGRATION_0017_STAGING_PRODUCTION_ROLLOUT_AND_ALERTS.md#6-response-and-rollback-posture"
+
+      - alert: BisRlsContextSetupFailure
+        expr: sum by (component, outcome) (increase(bis_rls_tenant_context_setup_total{outcome=~"reset_failed|residual_detected|set_failed|verify_failed"}[5m])) > 0
+        for: 0m
+        labels:
+          severity: critical
+          domain: pii-custody
+          service: bis
+        annotations:
+          summary: "Tenant RLS transaction setup failed closed"
+          description: "A protected PII transaction could not reset, set, or verify its transaction-local tenant context. Do not bypass RLS or grant BYPASSRLS."
+          runbook: "MIGRATION_0017_STAGING_PRODUCTION_ROLLOUT_AND_ALERTS.md#6-response-and-rollback-posture"
+
+      - alert: BisRlsPolicyDenialSpike
+        expr: sum by (component, operation, sqlstate_class) (increase(bis_rls_policy_denial_total[5m])) > 5
+        for: 5m
+        labels:
+          severity: warning
+          domain: pii-custody
+          service: bis
+        annotations:
+          summary: "Unexpected RLS or permission-denial rate"
+          description: "More than five bounded RLS/permission denials occurred for one component and operation in five minutes. Compare deployment revision, pooler mode, and tenant-transaction path."
+          runbook: "MIGRATION_0017_STAGING_PRODUCTION_ROLLOUT_AND_ALERTS.md#5-monitoring-signals-and-alert-definitions"
+
+      - alert: BisRlsTenantScopeMismatch
+        expr: increase(bis_pii_rotation_tenant_scope_mismatch_total[5m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          domain: pii-custody
+          service: bis
+        annotations:
+          summary: "PII rotation detected a tenant-scope mismatch"
+          description: "A rotation source registry did not match the tenant-bound job scope. Pause PII rotation workers and open a key-custody incident."
+          runbook: "PII_TRANSIT_ROTATION_AND_KEY_COMPROMISE_IMPLEMENTATION.md"
+
+      - alert: BisPiiRotationDispatchBacklog
+        expr: bis_pii_rotation_dispatch_queue_age_seconds{component="pii_rotation_worker"} > 300
+        for: 10m
+        labels:
+          severity: warning
+          domain: pii-custody
+          service: bis
+        annotations:
+          summary: "PII rotation dispatch queue age exceeds five minutes"
+          description: "The oldest non-PII dispatch row has remained queued for more than five minutes for ten minutes. Check worker health and lease recovery without querying PII payloads."
+          runbook: "MIGRATION_0017_STAGING_PRODUCTION_ROLLOUT_AND_ALERTS.md#5-monitoring-signals-and-alert-definitions"
+
+      - alert: BisPiiRotationLeaseRecoverySpike
+        expr: sum by (component) (increase(bis_pii_rotation_dispatch_total{outcome="lease_recovered"}[15m])) > 3
+        for: 5m
+        labels:
+          severity: warning
+          domain: pii-custody
+          service: bis
+        annotations:
+          summary: "Repeated stale PII rotation lease recovery"
+          description: "More than three dispatch leases were recovered in fifteen minutes. Check worker restarts, pool saturation, Vault dependency latency, and split-brain symptoms."
+          runbook: "PII_TRANSIT_ROTATION_AND_KEY_COMPROMISE_IMPLEMENTATION.md"
+
+      - alert: BisPiiRotationWorkerFailure
+        expr: sum by (component, reason_code) (increase(bis_pii_rotation_worker_failures_total[5m])) > 0
+        for: 0m
+        labels:
+          severity: critical
+          domain: pii-custody
+          service: bis
+        annotations:
+          summary: "PII rotation worker failure"
+          description: "A bounded PII rotation worker marked a job failed. Review the approved reason code and forensic event sequence; do not emit decrypted payloads into incident tooling."
+          runbook: "PII_TRANSIT_ROTATION_AND_KEY_COMPROMISE_IMPLEMENTATION.md"
+
+      - alert: BisPiiForensicAuditAppendFailure
+        expr: sum by (event_type) (increase(bis_pii_forensic_append_total{outcome="failure"}[5m])) > 0
+        for: 0m
+        labels:
+          severity: critical
+          domain: pii-custody
+          service: bis
+        annotations:
+          summary: "PII forensic audit append failed"
+          description: "An append-only PII forensic record could not be written. Consequential key-custody and rotation workflows must remain paused until audit durability is restored."
+          runbook: "PII_TRANSIT_ROTATION_AND_KEY_COMPROMISE_IMPLEMENTATION.md"

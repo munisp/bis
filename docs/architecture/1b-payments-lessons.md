@@ -47,17 +47,17 @@ When the system is saturated, return 503 immediately rather than queuing indefin
 
 ## Lesson 5: Hot/Warm/Cold Data Tiering
 
-Keep 90 days in MySQL (hot), 1 year in S3 Parquet (warm), archive older data to Glacier (cold).
+Keep 90 days in PostgreSQL (hot), 1 year in S3 Parquet (warm), archive older data to Glacier (cold).
 
 **BIS Implementation:** `server/archival.ts`
-- HOT: MySQL, under 90 days, under 50ms query latency
+- HOT: PostgreSQL, under 90 days, under 50ms query latency
 - WARM: S3 Parquet, 90d-365d, under 2s query latency
 - COLD: S3 Glacier, over 365d, under 4h retrieval
 - Nightly archival job via `archival.runNightlyArchival`
 
 ## Lesson 6: Integer Amounts
 
-0.1 + 0.2 = 0.30000000000000004 in IEEE 754. Use integers. All amounts in kobo throughout the stack (TigerBeetle uint64, MySQL bigint, Kafka i64, tRPC number, UI divides by 100 for display).
+0.1 + 0.2 = 0.30000000000000004 in IEEE 754. Use integers. All amounts in kobo throughout the stack (TigerBeetle uint64, PostgreSQL bigint, Kafka i64, tRPC number, UI divides by 100 for display).
 
 ## Lesson 7: Redis Sentinel for Cache HA
 

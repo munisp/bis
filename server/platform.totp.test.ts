@@ -1,7 +1,17 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { decryptTotpSecret, encryptTotpSecret, generateTotpSecret, hashTotpBackupCode, isEncryptedTotpSecret } from "./platform";
 
 describe("TOTP enrollment secrets", () => {
+  const originalEncryptionKey = process.env.TOTP_ENCRYPTION_KEY;
+
+  beforeEach(() => {
+    process.env.TOTP_ENCRYPTION_KEY = "test-only-totp-encryption-root-with-adequate-length";
+  });
+
+  afterEach(() => {
+    if (originalEncryptionKey === undefined) delete process.env.TOTP_ENCRYPTION_KEY;
+    else process.env.TOTP_ENCRYPTION_KEY = originalEncryptionKey;
+  });
   it("generates a complete RFC 4648 Base32 secret for a 20-byte authenticator seed", () => {
     const secret = generateTotpSecret();
     expect(secret).toMatch(/^[A-Z2-7]{32}$/);

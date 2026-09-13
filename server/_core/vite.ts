@@ -9,18 +9,11 @@ import { ENV } from "./env";
 
 /**
  * Inject server-side runtime values as <meta> tags into the HTML shell.
- * Also injects cache-busting meta tags so browsers never cache the HTML entry point.
- * Currently injects:
- *   - vapid-public-key: VAPID public key for Web Push subscription in the browser
- *   - http-equiv Cache-Control / Pragma / Expires: prevent browser HTML caching
+ * The static index template contains cache-busting meta tags; this function only
+ * supplies server-owned runtime metadata that cannot be present at build time.
  */
 function injectServerMeta(html: string): string {
-  const metas: string[] = [
-    // Cache-busting meta tags — belt-and-suspenders alongside the Cache-Control header
-    `<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />`,
-    `<meta http-equiv="Pragma" content="no-cache" />`,
-    `<meta http-equiv="Expires" content="0" />`,
-  ];
+  const metas: string[] = [];
   if (ENV.vapidPublicKey) {
     // Escape any quotes in the key (should not occur for base64url, but defensive)
     const safeKey = ENV.vapidPublicKey.replace(/"/g, '&quot;');
@@ -32,7 +25,7 @@ function injectServerMeta(html: string): string {
 
 /** Set no-cache headers on the HTML entry point response. */
 function setNoCacheHeaders(res: import("express").Response): void {
-  res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+  res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate, max-age=0");
   res.setHeader("Pragma", "no-cache");
   res.setHeader("Expires", "0");
 }
@@ -96,8 +89,9 @@ export function serveStatic(app: Express) {
     // 1 year for hashed assets, but index.html is handled separately below
     maxAge: "1y",
     setHeaders: (res, filePath) => {
-      // Never cache the HTML entry point — it must always be fresh
-      if (filePath.endsWith("index.html")) {
+      // Never cache the authenticated HTML shell or the root worker script.
+      // Hashed JS/CSS assets retain the one-year immutable cache lifetime above.
+      if (filePath.endsWith("index.html") || filePath.endsWith(`${path.sep}sw.js`)) {
         setNoCacheHeaders(res);
       }
     },

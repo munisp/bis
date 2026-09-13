@@ -6,9 +6,9 @@ pub mod db;
 pub mod insider_threat;
 pub mod kafka;
 pub mod otel;
-pub mod traceparent;
 #[cfg(test)]
 mod tests;
+pub mod traceparent;
 
 use axum::{
     extract::{Path, State},
@@ -18,18 +18,18 @@ use axum::{
     routing::{get, post},
     Router,
 };
+use bis_transport_policy::{required_allowed_hosts, TrustedEndpoint};
 use chrono::{DateTime, Utc};
 use dashmap::DashMap;
 use insider_threat::InsiderThreatDetector;
+use otel::{init_otel, SpanSender};
 use serde::{Deserialize, Serialize};
+use std::sync::OnceLock;
 use std::{
     env,
     sync::{Arc, Mutex},
     time::Instant,
 };
-#[allow(unused_imports)]
-use otel::{init_otel, OtlpAnyValue, SpanBuilder, SpanSender};
-use std::sync::OnceLock;
 use tokio::sync::broadcast;
 use tracing::{info, warn};
 use uuid::Uuid;
@@ -46,7 +46,7 @@ const AUDIT_LOG_CAPACITY: usize = 10_000;
 const BROADCAST_CAPACITY: usize = 256;
 
 fn gateway_key() -> String {
-    env::var("BIS_GATEWAY_KEY").unwrap_or_else(|_| "dev-gateway-key-change-in-prod".to_string())
+    env::var("BIS_EVENT_PROCESSOR_KEY").unwrap_or_default()
 }
 
 fn port() -> String {
@@ -181,6 +181,12 @@ pub struct AppState {
     pub db_pool: Option<Arc<deadpool_postgres::Pool>>,
 }
 
+impl Default for AppState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AppState {
     pub fn new() -> Self {
         let (tx, _) = broadcast::channel(BROADCAST_CAPACITY);
@@ -209,7 +215,16 @@ async fn auth_middleware(
         .get("x-bis-key")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
-    if key != gateway_key() {
+    let expected = gateway_key();
+    if expected.is_empty()
+        || key.len() != expected.len()
+        || !key
+            .as_bytes()
+            .iter()
+            .zip(expected.as_bytes())
+            .fold(0u8, |diff, (a, b)| diff | (a ^ b))
+            .eq(&0)
+    {
         return (
             StatusCode::UNAUTHORIZED,
             Json(ErrorResponse {
@@ -255,7 +270,9 @@ async fn publish_event(
     let http_headers: Vec<(String, String)> = headers
         .iter()
         .filter_map(|(k, v)| {
-            v.to_str().ok().map(|val| (k.as_str().to_string(), val.to_string()))
+            v.to_str()
+                .ok()
+                .map(|val| (k.as_str().to_string(), val.to_string()))
         })
         .collect();
     let trace_ctx = traceparent::TraceContext::from_http_headers(&http_headers);
@@ -264,11 +281,14 @@ async fn publish_event(
     let span_builder = trace_ctx
         .child_span("event.publish")
         .server()
-        .attr_str("event.type",    format!("{:?}", req.event_type))
+        .attr_str("event.type", format!("{:?}", req.event_type))
         .attr_str("event.subject", req.subject_ref.clone())
-        .attr_str("event.source",  req.source_service.clone())
-        .attr_str("event.severity",format!("{:?}", req.severity))
-        .attr_str("trace.upstream", if trace_ctx.is_remote { "true" } else { "false" });
+        .attr_str("event.source", req.source_service.clone())
+        .attr_str("event.severity", format!("{:?}", req.severity))
+        .attr_str(
+            "trace.upstream",
+            if trace_ctx.is_remote { "true" } else { "false" },
+        );
 
     let _ = state.event_tx.send(event.clone());
     let sub_count = state
@@ -363,10 +383,32 @@ async fn publish_event(
 async fn subscribe(
     State(state): State<AppState>,
     Json(req): Json<SubscribeRequest>,
-) -> Json<Subscription> {
+) -> Result<Json<Subscription>, (StatusCode, Json<ErrorResponse>)> {
+    let allowed_hosts =
+        required_allowed_hosts("BIS_EVENT_SUBSCRIBER_ALLOWED_HOSTS").map_err(|_| {
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(ErrorResponse {
+                    code: "SUBSCRIPTION_TRANSPORT_UNAVAILABLE".to_string(),
+                    message: "Subscription delivery is not configured".to_string(),
+                }),
+            )
+        })?;
+    let subscriber_url =
+        TrustedEndpoint::parse("subscriber_url", &req.subscriber_url, &allowed_hosts).map_err(
+            |_| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(ErrorResponse {
+                        code: "INVALID_SUBSCRIBER_URL".to_string(),
+                        message: "Subscriber URL must be an approved HTTPS endpoint".to_string(),
+                    }),
+                )
+            },
+        )?;
     let sub = Subscription {
         id: Uuid::new_v4().to_string(),
-        subscriber_url: req.subscriber_url,
+        subscriber_url: subscriber_url.as_url().as_str().to_string(),
         event_types: req.event_types,
         min_severity: req.min_severity,
         active: true,
@@ -383,7 +425,7 @@ async fn subscribe(
             db::insert_subscription(&pool, &sub_clone).await;
         });
     }
-    Json(sub)
+    Ok(Json(sub))
 }
 
 async fn list_subscriptions(State(state): State<AppState>) -> Json<Vec<Subscription>> {
@@ -396,10 +438,7 @@ async fn list_subscriptions(State(state): State<AppState>) -> Json<Vec<Subscript
     )
 }
 
-async fn delete_subscription(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> StatusCode {
+async fn delete_subscription(State(state): State<AppState>, Path(id): Path<String>) -> StatusCode {
     if state.subscriptions.remove(&id).is_some() {
         // Mark inactive in PostgreSQL
         if let Some(pool) = state.db_pool.clone() {
@@ -443,13 +482,18 @@ async fn main() {
         .init();
 
     // ── OpenTelemetry OTLP span exporter ─────────────────────────────────────────
-    // Set OTEL_EXPORTER_OTLP_ENDPOINT to enable (e.g. http://jaeger:4318 or
-    // http://grafana-tempo:4318).  When unset, spans are silently discarded.
+    // Export requires an allow-listed HTTPS collector plus custom CA and mTLS identity.
+    // When incomplete, spans are discarded locally rather than sent over a weaker path.
     let (otel_sender, _otel_handle) = init_otel();
     OTEL_TX.set(otel_sender).ok();
 
-    // ── PostgreSQL pool (optional) ───────────────────────────────────────────────────────────────────
-    let db_pool = db::build_pool().await;
+    if gateway_key().is_empty() {
+        panic!("BIS_EVENT_PROCESSOR_KEY must be configured");
+    }
+    // ── PostgreSQL pool (TLS-only when configured) ───────────────────────────────────────────────────
+    let db_pool = db::build_pool()
+        .await
+        .unwrap_or_else(|_| panic!("Event Processor PostgreSQL TLS configuration is invalid"));
     if let Some(pool) = &db_pool {
         db::migrate(pool).await;
     }
@@ -489,10 +533,7 @@ async fn main() {
 
     let protected = Router::new()
         .route("/v1/events", post(publish_event))
-        .route(
-            "/v1/subscriptions",
-            post(subscribe).get(list_subscriptions),
-        )
+        .route("/v1/subscriptions", post(subscribe).get(list_subscriptions))
         .route(
             "/v1/subscriptions/:id",
             axum::routing::delete(delete_subscription),

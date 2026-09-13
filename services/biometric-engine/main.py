@@ -78,6 +78,17 @@ _models: dict[str, Any] = {}
 _redis: Optional[aioredis.Redis] = None
 
 
+class BiometricCapabilityUnavailable(RuntimeError):
+    """Raised when an authoritative biometric control cannot evaluate a request."""
+
+
+def require_model(name: str) -> Any:
+    model = _models.get(name)
+    if model is None:
+        raise BiometricCapabilityUnavailable(f"required biometric capability '{name}' is unavailable")
+    return model
+
+
 async def load_models():
     """Load all ML models at startup. Verification routes fail closed if a required model is unavailable."""
     global _models
@@ -208,10 +219,8 @@ class AntiSpoofRequest(BaseModel):
 
 class FullVerifyRequest(BaseModel):
     selfie: str = Field(..., description="Base64-encoded selfie image")
-    reference: Optional[str] = Field(None, description="Base64-encoded reference image (optional)")
+    reference: str = Field(..., description="Base64-encoded reference image for mandatory 1:1 verification")
     session_id: Optional[str] = None
-    run_antispoofing: bool = True
-    run_match: bool = True
 
 
 class DocumentOCRRequest(BaseModel):
@@ -292,7 +301,7 @@ def _mediapipe_liveness(img_bgr: np.ndarray) -> dict:
       - Texture gradient analysis (printed photos have lower gradient energy)
     """
     if _models.get("face_mesh") is None:
-        return {"score": 0.0, "live": False, "reason": "liveness_model_unavailable", "landmarks_found": False, "error": "MediaPipe FaceMesh is unavailable"}
+        raise BiometricCapabilityUnavailable("MediaPipe FaceMesh is unavailable")
 
     import mediapipe as mp
     h, w = img_bgr.shape[:2]
@@ -349,6 +358,7 @@ def _mediapipe_liveness(img_bgr: np.ndarray) -> dict:
         "live": live,
         "reason": "passed" if live else "liveness_check_failed",
         "landmarks_found": True,
+        "model_version": "mediapipe_face_mesh",
         "details": {
             "ear": round(avg_ear, 4),
             "texture_score": round(texture_score, 4),
@@ -359,45 +369,8 @@ def _mediapipe_liveness(img_bgr: np.ndarray) -> dict:
 
 
 def _fallback_liveness(img_bgr: np.ndarray) -> dict:
-    """
-    Fallback liveness when MediaPipe is unavailable.
-    Uses OpenCV Haar cascade + Laplacian texture analysis.
-    """
-    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-
-    # Face detection
-    cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-    cascade = cv2.CascadeClassifier(cascade_path)
-    faces = cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(80, 80))
-
-    if len(faces) == 0:
-        return {"score": 0.0, "live": False, "reason": "no_face_detected", "landmarks_found": False}
-
-    # Texture analysis on face crop
-    x, y, fw, fh = faces[0]
-    face_crop = gray[y:y+fh, x:x+fw]
-    laplacian_var = float(cv2.Laplacian(face_crop, cv2.CV_64F).var())
-    texture_score = min(1.0, laplacian_var / 300.0)
-
-    # Colour distribution (printed photos tend to have lower saturation variance)
-    hsv = cv2.cvtColor(img_bgr[y:y+fh, x:x+fw], cv2.COLOR_BGR2HSV)
-    sat_var = float(np.var(hsv[:, :, 1])) / 10000.0
-    colour_score = min(1.0, sat_var)
-
-    composite = 0.6 * texture_score + 0.4 * colour_score
-    live = composite >= LIVENESS_THRESHOLD
-
-    return {
-        "score": round(composite, 4),
-        "live": live,
-        "reason": "passed" if live else "liveness_check_failed",
-        "landmarks_found": False,
-        "fallback": True,
-        "details": {
-            "texture_score": round(texture_score, 4),
-            "colour_score": round(colour_score, 4),
-        }
-    }
+    """Compatibility entry point retained only to fail closed."""
+    raise BiometricCapabilityUnavailable("authoritative MediaPipe liveness is required")
 
 
 def _active_liveness(frames_bgr: list[np.ndarray], challenge: str) -> dict:
@@ -406,15 +379,7 @@ def _active_liveness(frames_bgr: list[np.ndarray], challenge: str) -> dict:
     Challenges: blink | nod | turn_left | turn_right
     """
     if _models.get("face_mesh") is None:
-        return {
-            "score": 0.0,
-            "live": False,
-            "challenge": challenge,
-            "challenge_completed": False,
-            "reason": "liveness_model_unavailable",
-            "frames_analysed": len(frames_bgr),
-            "error": "MediaPipe FaceMesh is unavailable",
-        }
+        raise BiometricCapabilityUnavailable("MediaPipe FaceMesh is unavailable")
 
     import mediapipe as mp
     ear_series = []
@@ -489,6 +454,7 @@ def _active_liveness(frames_bgr: list[np.ndarray], challenge: str) -> dict:
         "challenge_completed": challenge_completed,
         "reason": "passed" if live else ("challenge_not_completed" if not challenge_completed else "score_below_threshold"),
         "frames_analysed": len(ear_series),
+        "model_version": "mediapipe_face_mesh",
         "details": {
             "ear_min": round(min(ear_series), 4) if ear_series else None,
             "ear_max": round(max(ear_series), 4) if ear_series else None,
@@ -501,10 +467,8 @@ def _active_liveness(frames_bgr: list[np.ndarray], challenge: str) -> dict:
 # ── Facial matching ───────────────────────────────────────────────────────────
 def _get_embedding(img_bgr: np.ndarray) -> Optional[np.ndarray]:
     """Extract 512-d ArcFace embedding using InsightFace."""
-    if _models.get("insightface") is None:
-        return None
-
-    faces = _models["insightface"].get(img_bgr)
+    model = require_model("insightface")
+    faces = model.get(img_bgr)
     if not faces:
         return None
     # Use the largest detected face
@@ -513,31 +477,15 @@ def _get_embedding(img_bgr: np.ndarray) -> Optional[np.ndarray]:
 
 
 def _fallback_embedding(img_bgr: np.ndarray) -> Optional[np.ndarray]:
-    """
-    Fallback embedding using OpenCV LBPH feature extraction.
-    Less accurate than ArcFace but functional without InsightFace.
-    """
-    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-    cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-    cascade = cv2.CascadeClassifier(cascade_path)
-    faces = cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(80, 80))
-    if len(faces) == 0:
-        return None
-    x, y, fw, fh = faces[0]
-    face_crop = cv2.resize(gray[y:y+fh, x:x+fw], (128, 128))
-    # Flatten + normalise as a simple descriptor
-    flat = face_crop.flatten().astype(np.float32)
-    norm = np.linalg.norm(flat)
-    return flat / (norm + 1e-6)
+    """Compatibility entry point retained only to fail closed."""
+    raise BiometricCapabilityUnavailable("authoritative ArcFace embedding is required")
 
 
 def _cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
     """Cosine similarity between two embedding vectors."""
     # If embeddings are already normalised (InsightFace), dot product = cosine sim
     if a.shape != b.shape:
-        # Resize to the smaller dimension
-        min_dim = min(a.shape[0], b.shape[0])
-        a, b = a[:min_dim], b[:min_dim]
+        raise BiometricCapabilityUnavailable("ArcFace embedding dimensions are inconsistent")
     dot = float(np.dot(a, b))
     norm_a = float(np.linalg.norm(a))
     norm_b = float(np.linalg.norm(b))
@@ -569,7 +517,8 @@ def _match_faces(probe_bgr: np.ndarray, ref_bgr: np.ndarray) -> dict:
         "match": match,
         "threshold": MATCH_THRESHOLD,
         "reason": "match" if match else "no_match",
-        "using_arcface": _models.get("insightface") is not None,
+        "using_arcface": True,
+        "model_version": "insightface_arcface_buffalo_l",
     }
 
 
@@ -581,7 +530,7 @@ def _antispoofing(img_bgr: np.ndarray) -> dict:
     """
     if _models.get("antispoofing") is not None:
         try:
-            result = _models["antispoofing"].predict(img_bgr)
+            result = require_model("antispoofing").predict(img_bgr)
             return {
                 "score": round(float(result["genuine_score"]), 4),
                 "genuine": result["genuine_score"] >= ANTISPOOFING_THRESHOLD,
@@ -610,39 +559,6 @@ def _antispoofing(img_bgr: np.ndarray) -> dict:
         "error": "Anti-spoofing model failed to produce a result",
     }
 
-    # Historical texture analysis retained below for reference only and unreachable.
-    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-
-    # Laplacian variance (sharpness)
-    lap_var = float(cv2.Laplacian(gray, cv2.CV_64F).var())
-    sharpness = min(1.0, lap_var / 400.0)
-
-    # Colour channel variance (printed photos have less colour depth)
-    b, g, r = cv2.split(img_bgr)
-    colour_depth = min(1.0, (float(np.var(b)) + float(np.var(g)) + float(np.var(r))) / 30000.0)
-
-    # High-frequency content (Fourier analysis — real faces have more HF content)
-    f = np.fft.fft2(gray)
-    fshift = np.fft.fftshift(f)
-    magnitude = 20 * np.log(np.abs(fshift) + 1)
-    h, w = magnitude.shape
-    hf_region = magnitude[h//4:3*h//4, w//4:3*w//4]
-    hf_score = min(1.0, float(np.mean(hf_region)) / 80.0)
-
-    composite = 0.4 * sharpness + 0.3 * colour_depth + 0.3 * hf_score
-    genuine = composite >= ANTISPOOFING_THRESHOLD
-
-    return {
-        "score": round(composite, 4),
-        "genuine": genuine,
-        "reason": "passed" if genuine else "spoof_suspected",
-        "model": "texture_analysis_fallback",
-        "details": {
-            "sharpness": round(sharpness, 4),
-            "colour_depth": round(colour_depth, 4),
-            "hf_score": round(hf_score, 4),
-        }
-    }
 
 
 # ── Document OCR ──────────────────────────────────────────────────────────────
@@ -658,19 +574,23 @@ def _ocr_document(img_bgr: np.ndarray, doc_type: str = "auto") -> dict:
     enhanced = clahe.apply(denoised)
 
     raw_text = ""
+    token_confidences: list[float] = []
+    model = require_model("ocr")
+    try:
+        result = model.ocr(img_bgr, cls=True)
+        if result and result[0]:
+            accepted = [line[1] for line in result[0] if isinstance(line[1][1], (int, float)) and line[1][1] >= 0.5]
+            lines = [str(value[0]) for value in accepted]
+            token_confidences = [float(value[1]) for value in accepted]
+            raw_text = "\n".join(lines)
+    except BiometricCapabilityUnavailable:
+        raise
+    except Exception as e:
+        log.warning(f"PaddleOCR error: {e}")
+        raise BiometricCapabilityUnavailable("PaddleOCR failed to produce a document result")
 
-    # Try PaddleOCR first
-    if _models.get("ocr") is not None:
-        try:
-            result = _models["ocr"].ocr(img_bgr, cls=True)
-            if result and result[0]:
-                lines = [line[1][0] for line in result[0] if line[1][1] > 0.5]
-                raw_text = "\n".join(lines)
-        except Exception as e:
-            log.warning(f"PaddleOCR error: {e}")
-
-    if not raw_text:
-        return {"success": False, "reason": "ocr_model_unavailable", "raw_text": "", "fields": {}, "error": "PaddleOCR did not produce a document result"}
+    if not raw_text or not token_confidences:
+        raise BiometricCapabilityUnavailable("PaddleOCR did not produce a reliable document result")
 
     # Parse structured fields based on document type
     fields = _parse_document_fields(raw_text, doc_type)
@@ -680,7 +600,8 @@ def _ocr_document(img_bgr: np.ndarray, doc_type: str = "auto") -> dict:
         "doc_type": doc_type,
         "raw_text": raw_text,
         "fields": fields,
-        "confidence": 0.85,
+        "confidence": round(sum(token_confidences) / len(token_confidences), 4),
+        "model": "paddleocr",
     }
 
 
@@ -906,7 +827,8 @@ async def verify_match(req: MatchRequest):
             "reason": "match" if match else "no_match",
             "request_id": str(uuid.uuid4()),
             "latency_ms": round((time.time() - start) * 1000, 1),
-            "using_arcface": _models.get("insightface") is not None,
+            "using_arcface": True,
+            "model_version": "insightface_arcface_buffalo_l",
             "embedding_cached": probe_emb is not None,
         }
     except ValueError as e:
@@ -948,26 +870,16 @@ async def verify_full(req: FullVerifyRequest):
         # 1. Liveness
         liveness = _mediapipe_liveness(selfie_bgr)
 
-        # 2. Anti-spoofing
-        spoof = _antispoofing(selfie_bgr) if req.run_antispoofing else {"score": 1.0, "genuine": True, "reason": "skipped"}
+        # 2. Anti-spoofing and 3. 1:1 face matching are mandatory.
+        spoof = _antispoofing(selfie_bgr)
+        ref_bgr = decode_image(req.reference)
+        match_result = _match_faces(selfie_bgr, ref_bgr)
 
-        # 3. Face match (if reference provided)
-        match_result = None
-        if req.run_match and req.reference:
-            ref_bgr = decode_image(req.reference)
-            match_result = _match_faces(selfie_bgr, ref_bgr)
-
-        # Overall pass/fail
         liveness_pass = liveness["live"]
         spoof_pass = spoof["genuine"]
-        match_pass = match_result["match"] if match_result else True  # Skip if no reference
-
+        match_pass = match_result["match"]
         overall_pass = liveness_pass and spoof_pass and match_pass
-        overall_score = (
-            liveness["score"] * 0.4 +
-            spoof["score"] * 0.3 +
-            (match_result["score"] if match_result else 1.0) * 0.3
-        )
+        overall_score = liveness["score"] * 0.4 + spoof["score"] * 0.3 + match_result["score"] * 0.3
 
         REQUEST_COUNT.labels(endpoint="full_verify", status="ok").inc()
         REQUEST_LATENCY.labels(endpoint="full_verify").observe(time.time() - start)
@@ -1114,23 +1026,13 @@ async def enroll_subject(req: EnrollRequest):
         img = decode_image(req.image)
         embedding = _get_embedding(img)
         if embedding is None:
-            # Fallback: use texture hash as pseudo-embedding
-            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            resized = cv2.resize(gray, (16, 16))
-            embedding = resized.flatten().astype(np.float32) / 255.0
-            embedding = np.pad(embedding, (0, 512 - len(embedding)), mode="constant")
-            enrolled_with_fallback = True
-        else:
-            enrolled_with_fallback = False
+            return {"enrolled": False, "reason": "no_face_detected", "model_version": "insightface_arcface_buffalo_l", "request_id": str(uuid.uuid4())}
+        if _redis is None:
+            raise BiometricCapabilityUnavailable("encrypted biometric embedding custody is unavailable")
 
-        # Store embedding in Redis keyed by subject_ref
+        # Store only the authoritative ArcFace embedding in the protected cache.
         face_id = f"face:{req.subject_ref}"
-        if _redis is not None:
-            await _redis.setex(
-                face_id,
-                EMBEDDING_CACHE_TTL,
-                embedding.tobytes(),
-            )
+        await _redis.setex(face_id, EMBEDDING_CACHE_TTL, embedding.tobytes())
 
         REQUEST_COUNT.labels(endpoint="enroll", status="ok").inc()
         REQUEST_LATENCY.labels(endpoint="enroll").observe(time.time() - start)
@@ -1138,7 +1040,8 @@ async def enroll_subject(req: EnrollRequest):
             "enrolled": True,
             "face_id": face_id,
             "subject_ref": req.subject_ref,
-            "using_arcface": not enrolled_with_fallback,
+            "using_arcface": True,
+            "model_version": "insightface_arcface_buffalo_l",
             "request_id": str(uuid.uuid4()),
             "latency_ms": round((time.time() - start) * 1000, 1),
         }
@@ -1162,13 +1065,11 @@ async def verify_enrolled_subject(req: VerifyEnrolledRequest):
     try:
         face_id = f"face:{req.subject_ref}"
 
-        # Load enrolled embedding from Redis
-        enrolled_emb = None
-        if _redis is not None:
-            raw = await _redis.get(face_id)
-            if raw:
-                enrolled_emb = np.frombuffer(raw, dtype=np.float32)
-
+        # Redis is the protected custody layer for active enrolled templates.
+        if _redis is None:
+            raise BiometricCapabilityUnavailable("encrypted biometric embedding custody is unavailable")
+        raw = await _redis.get(face_id)
+        enrolled_emb = np.frombuffer(raw, dtype=np.float32) if raw else None
         if enrolled_emb is None:
             return {
                 "match": False,
@@ -1231,8 +1132,9 @@ async def batch_enroll(req: BatchEnrollRequest):
             results.append({"subject_ref": item.subject_ref, "ok": True, **result})
         except HTTPException as e:
             results.append({"subject_ref": item.subject_ref, "ok": False, "error": e.detail})
-        except Exception as e:
-            results.append({"subject_ref": item.subject_ref, "ok": False, "error": str(e)})
+        except Exception:
+            log.exception("Batch enrollment item failed", extra={"subject_ref": item.subject_ref})
+            results.append({"subject_ref": item.subject_ref, "ok": False, "error": "Enrollment could not be completed"})
     ok_count = sum(1 for r in results if r["ok"])
     return {"total": len(results), "enrolled": ok_count, "failed": len(results) - ok_count, "results": results}
 

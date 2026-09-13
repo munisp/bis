@@ -15,7 +15,7 @@
 # ============================================================================
 set -euo pipefail
 
-BINARY_URL="https://github.com/your-org/bis-pwa/releases/latest/download/lex-intake-linux-amd64"
+BINARY_URL="https://github.com/munisp/bis/releases/latest/download/lex-intake-linux-amd64"
 SERVICE_USER="lexintake"
 DATA_DIR="/var/lib/lex-intake"
 CONFIG_DIR="/etc/lex-intake"
@@ -73,7 +73,7 @@ case $ARCH in
   armv7l)  ARCH_SUFFIX="linux-armv7" ;;
   *)       error "Unsupported architecture: $ARCH" ;;
 esac
-BINARY_URL="https://github.com/your-org/bis-pwa/releases/latest/download/lex-intake-${ARCH_SUFFIX}"
+BINARY_URL="https://github.com/munisp/bis/releases/latest/download/lex-intake-${ARCH_SUFFIX}"
 
 # ── Create service user ───────────────────────────────────────────────────────
 if ! id "$SERVICE_USER" &>/dev/null; then

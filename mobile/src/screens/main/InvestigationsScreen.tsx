@@ -11,7 +11,7 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { InvestigationsStackParamList } from '../../navigation/RootNavigator';
 import { investigationsApi } from '../../services/api';
-import { colors, typography, spacing } from '../../utils/theme';
+import { colors, spacing } from '../../utils/theme';
 
 type Nav = NativeStackNavigationProp<InvestigationsStackParamList, 'InvestigationsList'>;
 
@@ -89,8 +89,8 @@ export function InvestigationsScreen() {
       </View>
       <View style={styles.filtersRow}>
         {['all','open','in_progress','pending_review','closed'].map(s => (
-          <TouchableOpacity key={s} style={[styles.chip, statusFilter===s && styles.chipActive]} onPress={() => setStatusFilter(s)}>
-            <Text style={[styles.chipText, statusFilter===s && styles.chipTextActive]}>{s==='all'?'All':s.replace(/_/g,' ')}</Text>
+          <TouchableOpacity key={s} style={[styles.chip, statusFilter === s && styles.chipActive]} onPress={() => setStatusFilter(s)}>
+            <Text style={[styles.chipText, statusFilter === s && styles.chipTextActive]}>{s === 'all' ? 'All' : s.replace(/_/g,' ')}</Text>
           </TouchableOpacity>
         ))}
       </View>

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -51,7 +52,7 @@ func TestAuthMiddleware_MissingKey(t *testing.T) {
 	}
 }
 
-func TestAuthMiddleware_KeyInQueryParam(t *testing.T) {
+func TestAuthMiddleware_RejectsQueryParamCredential(t *testing.T) {
 	gatewayKey = "test-key-123"
 	handler := authMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -59,25 +60,77 @@ func TestAuthMiddleware_KeyInQueryParam(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/health?key=test-key-123", nil)
 	rr := httptest.NewRecorder()
 	handler(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rr.Code)
+	if rr.Code != http.StatusUnauthorized {
+		t.Errorf("expected query-string credential rejection with 401, got %d", rr.Code)
+	}
+}
+
+func TestStablecoinTransferRequiresCredentialedBridge(t *testing.T) {
+	previousBridge, previousKey := stablecoinBridge, stablecoinKey
+	defer func() { stablecoinBridge, stablecoinKey = previousBridge, previousKey }()
+	stablecoinBridge, stablecoinKey = "", ""
+
+	request := httptest.NewRequest(http.MethodPost, "/v1/stablecoin/transfer", bytes.NewBufferString(`{"txRef":"T-bridge-required","fromAddress":"0xfrom","toAddress":"0xto","amountUnits":"1"}`))
+	response := httptest.NewRecorder()
+	handleStablecoinTransfer(response, request)
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("missing settlement bridge: expected 503, got %d", response.Code)
+	}
+	var body GatewayError
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	if body.Code != "STABLECOIN_BRIDGE_UNAVAILABLE" {
+		t.Fatalf("expected bridge-unavailable code, got %q", body.Code)
+	}
+}
+
+func TestSensitiveGatewayRoutesRejectUnauthenticatedRequests(t *testing.T) {
+	gatewayKey = "route-test-key"
+
+	stablecoinHandler := StablecoinTransferRateLimitMiddleware(authMiddleware(http.HandlerFunc(handleStablecoinTransfer)))
+	stablecoinRequest := httptest.NewRequest(http.MethodPost, "/v1/stablecoin/transfer", bytes.NewBufferString(`{"txRef":"T-1","fromAddress":"from","toAddress":"to","amountUnits":"1"}`))
+	stablecoinResponse := httptest.NewRecorder()
+	stablecoinHandler.ServeHTTP(stablecoinResponse, stablecoinRequest)
+	if stablecoinResponse.Code != http.StatusUnauthorized {
+		t.Fatalf("stablecoin transfer without an API key: expected 401, got %d", stablecoinResponse.Code)
+	}
+
+	criminalRoutes := http.NewServeMux()
+	RegisterCriminalRecordsRoutes(criminalRoutes, authMiddleware)
+	for _, path := range []string{
+		"/v1/criminal-records/request",
+		"/v1/criminal-records/ingest",
+		"/v1/criminal-records/verify",
+		"/v1/corporate/check",
+		"/v1/field-visit/checkin",
+		"/v1/thin-file/flag",
+		"/v1/mojaloop/compliance-check",
+	} {
+		response := httptest.NewRecorder()
+		criminalRoutes.ServeHTTP(response, httptest.NewRequest(http.MethodPost, path, nil))
+		if response.Code != http.StatusUnauthorized {
+			t.Errorf("%s without an API key: expected 401, got %d", path, response.Code)
+		}
 	}
 }
 
 // ─── corsMiddleware tests ─────────────────────────────────────────────────────
 
 func TestCORSMiddleware_OptionsRequest(t *testing.T) {
+	t.Setenv("BIS_CORS_ORIGIN", "https://app.example.test")
 	handler := corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
 	req := httptest.NewRequest(http.MethodOptions, "/api/nin", nil)
+	req.Header.Set("Origin", "https://app.example.test")
 	rr := httptest.NewRecorder()
 	handler(rr, req)
 	if rr.Code != http.StatusNoContent {
 		t.Errorf("expected 204 for OPTIONS, got %d", rr.Code)
 	}
-	if rr.Header().Get("Access-Control-Allow-Origin") != "*" {
-		t.Error("expected Access-Control-Allow-Origin: *")
+	if rr.Header().Get("Access-Control-Allow-Origin") != "https://app.example.test" {
+		t.Error("expected explicit Access-Control-Allow-Origin")
 	}
 }
 
@@ -169,5 +222,66 @@ func TestChain_OrderPreserved(t *testing.T) {
 	handler(rr, req)
 	if len(order) != 3 || order[0] != "m1" || order[1] != "m2" || order[2] != "handler" {
 		t.Errorf("unexpected middleware order: %v", order)
+	}
+}
+
+func TestPaymentRailHandlersFailClosedWithoutCredentialedHTTPSProvider(t *testing.T) {
+	previousMojaloopURL, previousNIPURL, previousNIPKey := mojaloopHubURL, nibssNIPURL, nibssNIPKey
+	defer func() {
+		mojaloopHubURL, nibssNIPURL, nibssNIPKey = previousMojaloopURL, previousNIPURL, previousNIPKey
+	}()
+
+	requestBody := `{"txRef":"PAYMENT-FAIL-CLOSED-001","amountKobo":100,"currency":"NGN"}`
+
+	mojaloopHubURL = ""
+	mojaloopResponse := httptest.NewRecorder()
+	handleMojaloopTransfer(mojaloopResponse, httptest.NewRequest(http.MethodPost, "/v1/mojaloop/transfer", bytes.NewBufferString(requestBody)))
+	if mojaloopResponse.Code != http.StatusServiceUnavailable {
+		t.Fatalf("missing Mojaloop provider: expected 503, got %d", mojaloopResponse.Code)
+	}
+
+	mojaloopHubURL = "http://plaintext.example.test"
+	plaintextResponse := httptest.NewRecorder()
+	handleMojaloopTransfer(plaintextResponse, httptest.NewRequest(http.MethodPost, "/v1/mojaloop/transfer", bytes.NewBufferString(requestBody)))
+	if plaintextResponse.Code != http.StatusServiceUnavailable {
+		t.Fatalf("plaintext Mojaloop provider: expected 503, got %d", plaintextResponse.Code)
+	}
+
+	nibssNIPURL, nibssNIPKey = "", ""
+	nipResponse := httptest.NewRecorder()
+	handleNIPTransfer(nipResponse, httptest.NewRequest(http.MethodPost, "/v1/nip/transfer", bytes.NewBufferString(requestBody)))
+	if nipResponse.Code != http.StatusServiceUnavailable {
+		t.Fatalf("missing NIP provider: expected 503, got %d", nipResponse.Code)
+	}
+}
+
+func TestRequireSecureProviderURL(t *testing.T) {
+	for _, raw := range []string{"", "http://provider.example.test", "https://user:pass@provider.example.test"} {
+		if err := requireSecureProviderURL(raw); err == nil {
+			t.Fatalf("expected provider URL %q to be rejected", raw)
+		}
+	}
+	if err := requireSecureProviderURL("https://provider.example.test"); err != nil {
+		t.Fatalf("expected HTTPS provider URL to be accepted: %v", err)
+	}
+}
+
+func TestStablecoinBalanceRequiresCredentialedHTTPSBridge(t *testing.T) {
+	previousBridge, previousKey := stablecoinBridge, stablecoinKey
+	defer func() { stablecoinBridge, stablecoinKey = previousBridge, previousKey }()
+	stablecoinBridge, stablecoinKey = "", ""
+
+	request := httptest.NewRequest(http.MethodGet, "/v1/stablecoin/balance/0xabc?currency=USDC&network=ethereum", nil)
+	response := httptest.NewRecorder()
+	handleStablecoinBalance(response, request)
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("missing stablecoin bridge: expected 503, got %d", response.Code)
+	}
+	var body GatewayError
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	if body.Code != "STABLECOIN_BALANCE_UNAVAILABLE" {
+		t.Fatalf("expected balance-unavailable code, got %q", body.Code)
 	}
 }

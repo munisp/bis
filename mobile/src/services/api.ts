@@ -1,28 +1,20 @@
 /**
  * BIS Mobile API Service
  * Thin wrapper around fetch for the BIS REST API.
- * Uses MMKV for token storage and automatic token refresh.
+ * Uses the operating-system Keychain/Keystore for device-protected session storage.
  */
 
-import { MMKV } from 'react-native-mmkv';
-
-const storage = new MMKV({ id: 'bis-auth' });
+import {
+  clearStoredToken,
+  getStoredToken,
+  setStoredToken,
+} from './secureSession';
 
 export const BIS_API_URL = __DEV__
   ? 'http://10.0.2.2:3000/api' // Android emulator → host machine
   : 'https://bis.example.ng/api';
 
-export function getStoredToken(): string | undefined {
-  return storage.getString('access_token');
-}
-
-export function setStoredToken(token: string): void {
-  storage.set('access_token', token);
-}
-
-export function clearStoredToken(): void {
-  storage.delete('access_token');
-}
+export { clearStoredToken, getStoredToken, setStoredToken };
 
 async function request<T>(
   method: string,
@@ -36,17 +28,17 @@ async function request<T>(
       .filter(([, v]) => v !== undefined)
       .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
       .join('&');
-    if (qs) url += `?${qs}`;
+    if (qs) {url += `?${qs}`;}
   }
 
-  const token = getStoredToken();
+  const token = await getStoredToken();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     Accept: 'application/json',
     'User-Agent': 'bis-mobile/1.0.0',
   };
   if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
+    headers.Authorization = `Bearer ${token}`;
   }
 
   const response = await fetch(url, {
@@ -98,15 +90,29 @@ export const investigationsApi = {
   addNote: (id: string, note: string) =>
     request<void>('POST', `/investigations/${id}/notes`, { note }),
 
-  dispatchFieldAgent: (id: string, agentId: string, location: string) =>
-    request<void>('POST', `/investigations/${id}/dispatch`, { agentId, location }),
+  dispatchFieldAgent: (id: string, agentId: string, agentName: string, location: string, idempotencyKey: string) =>
+    request<void>('POST', `/investigations/${id}/dispatch`, { agentId, agentName, location, idempotencyKey }),
 };
 
 // ── Alerts ─────────────────────────────────────────────────────────────────────
 
+export type MobileAlert = {
+  id: number;
+  ruleId: number;
+  ruleName: string;
+  severity: 'critical' | 'high' | 'medium' | 'low';
+  status: 'open' | 'acknowledged' | 'resolved' | 'escalated';
+  subject: string;
+  description: string;
+  triggeredAt: string;
+  acknowledgedAt?: string;
+  resolvedAt?: string;
+  assignedTo?: string;
+};
+
 export const alertsApi = {
   list: (params?: Record<string, string | number>) =>
-    request<{ data: unknown[]; total: number }>('GET', '/alerts', undefined, params),
+    request<{ data: MobileAlert[]; total: number }>('GET', '/alerts', undefined, params),
 
   markRead: (id: string) => request<void>('POST', `/alerts/${id}/read`),
 
@@ -126,26 +132,65 @@ export const quickCheckApi = {
     request<{ data: unknown[] }>('GET', '/quickcheck/history'),
 };
 
+// ── Consumer Discovery — Nigeria-first, synthetic fixtures only ──────────────────
+export type ConsumerDiscoveryPurpose = 'self' | 'personal_safety' | 'fraud_prevention' | 'account_security' | 'compliance_investigation' | 'legal_authority';
+export type ConsumerDiscoveryMode = 'consumer' | 'institutional';
+export type ConsumerDiscoveryProfile = {
+  profileRef: string;
+  name: string;
+  countryCode: 'NG';
+  contact: { phone: string | null; email: string | null };
+  location: { stateOrRegion: string | null; cityOrLocality: string | null; addressLine: string | null; postalCode: string | null };
+  occupation: string | null;
+  provenance: { datasetOrigin: 'synthetic_demo'; isSynthetic: true; notice: string; observedAt: string; expiresAt: string | null };
+};
+
+export const consumerDiscoveryApi = {
+  grantConsent: (input: {
+    purpose: ConsumerDiscoveryPurpose;
+    legalBasis: 'consent' | 'legal_obligation' | 'legitimate_interest' | 'legal_authority';
+    policyVersion: string;
+    scopes: Array<'consumer_discovery' | 'profile_detail' | 'provenance' | 'relationship_linkage'>;
+  }) => request<{ consentId: string; grantedAt: string }>('POST', '/consumer-discovery/consent', input),
+  search: (input: {
+    mode: ConsumerDiscoveryMode;
+    purpose: ConsumerDiscoveryPurpose;
+    consentConfirmed: true;
+    countryCode: 'NG';
+    name?: string;
+    phone?: string;
+    email?: string;
+    address?: string;
+  }) => request<{ countryCode: 'NG'; datasetOrigin: 'synthetic_demo'; isSynthetic: true; notice: string; declaredPurpose: ConsumerDiscoveryPurpose; results: ConsumerDiscoveryProfile[] }>(
+    'POST', '/consumer-discovery/search', input,
+  ),
+};
+
 // ── Evidence ───────────────────────────────────────────────────────────────────
 
 export const evidenceApi = {
-  upload: async (investigationId: string, fileUri: string, mimeType: string, description: string) => {
-    const formData = new FormData();
-    formData.append('file', { uri: fileUri, type: mimeType, name: 'evidence' } as unknown as Blob);
-    formData.append('investigationId', investigationId);
-    formData.append('description', description);
+  initiate: (input: {
+    investigationId: number;
+    contentType: 'image/jpeg' | 'image/png' | 'application/pdf';
+    contentLength: number;
+    sha256: string;
+    description: string;
+    idempotencyKey: string;
+  }) => request<{ uploadId: string; objectKey: string; uploadUrl: string; expiresAt: string; headers: Record<string, string> }>('POST', '/evidence/initiate', input),
+  complete: (uploadId: string) => request<{ uploadId: string; status: 'verified'; objectVersionId: string | null }>('POST', `/evidence/${uploadId}/complete`),
+};
 
-    const token = getStoredToken();
-    const response = await fetch(`${BIS_API_URL}/evidence/upload`, {
-      method: 'POST',
-      headers: {
-        Authorization: token ? `Bearer ${token}` : '',
-        Accept: 'application/json',
-      },
-      body: formData,
-    });
-    return response.json();
-  },
+export const kycDocumentEvidenceApi = {
+  initiate: (input: {
+    kycRecordId: number;
+    documentType: 'nin_slip' | 'passport' | 'drivers_license' | 'voters_card' | 'utility_bill' | 'bank_statement' | 'cac_certificate' | 'other';
+    contentType: 'image/jpeg' | 'image/png';
+    contentLength: number;
+    sha256: string;
+    description: string;
+    idempotencyKey: string;
+  }) => request<{ uploadId: string; objectKey: string; uploadUrl: string; expiresAt: string; headers: Record<string, string> }>('POST', '/kyc/documents/initiate', input),
+  complete: (uploadId: string) => request<{ uploadId: string; status: 'verified'; objectVersionId: string | null }>('POST', `/kyc/documents/${uploadId}/complete`),
 };
 
 // ── Field Agent ────────────────────────────────────────────────────────────────
@@ -580,10 +625,26 @@ export const lakehouseApi = {
 };
 
 // ── Insider Threat ────────────────────────────────────────────────────────────
+export type MobileInsiderEvent = {
+  id: number;
+  userId: string;
+  userName: string;
+  eventType: string;
+  severity: 'critical' | 'high' | 'medium' | 'low' | 'info';
+  status: 'open' | 'investigating' | 'resolved' | 'false_positive';
+  description: string;
+  sourceIp?: string;
+  resourceAccessed?: string;
+  anomalyScore: number;
+  detectedAt: string;
+  resolvedAt?: string;
+  tenantId?: number;
+};
+
 export const insiderThreatApi = {
   // Events
   listEvents: (params?: Record<string, string | number>) =>
-    request<{ data: unknown[]; total: number }>('GET', '/insider-threat/events', undefined, params),
+    request<{ data: MobileInsiderEvent[]; total: number }>('GET', '/insider-threat/events', undefined, params),
   getEvent: (id: number) =>
     request<{ data: unknown }>('GET', `/insider-threat/events/${id}`),
   ingestEvent: (data: Record<string, unknown>) =>

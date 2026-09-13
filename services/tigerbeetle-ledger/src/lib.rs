@@ -6,9 +6,10 @@
 ///   - PostgreSQL reconciliation writer
 ///   - Idempotency key management via Redis
 ///   - Prometheus metrics
+use bis_transport_policy::{required_allowed_hosts, MtlsTrustedHttpsClient, TrustedEndpoint};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use thiserror::Error;
-use uuid::Uuid;
 
 // ─── Ledger Constants ─────────────────────────────────────────────────────────
 
@@ -60,7 +61,11 @@ pub enum LedgerError {
     #[error("TigerBeetle HTTP proxy error: {0}")]
     ProxyError(String),
     #[error("Insufficient balance: account {account_id} has {available} but {required} required")]
-    InsufficientBalance { account_id: String, available: u64, required: u64 },
+    InsufficientBalance {
+        account_id: String,
+        available: u64,
+        required: u64,
+    },
     #[error("Account not found: {0}")]
     AccountNotFound(String),
     #[error("Duplicate transfer: idempotency key {0} already processed")]
@@ -73,6 +78,12 @@ pub enum LedgerError {
     InvalidLedger(u32),
     #[error("HTTP client error: {0}")]
     HttpError(#[from] reqwest::Error),
+    #[error("Invalid TigerBeetle proxy endpoint: {0}")]
+    InvalidProxyEndpoint(String),
+    #[error("TigerBeetle TLS configuration error: {0}")]
+    TlsConfiguration(String),
+    #[error("Invalid ledger account identifier")]
+    InvalidAccountId,
     #[error("Serialization error: {0}")]
     SerdeError(#[from] serde_json::Error),
 }
@@ -229,22 +240,96 @@ pub struct StablecoinTransferRequest {
 
 #[derive(Clone)]
 pub struct TbClient {
-    base_url: String,
-    http: reqwest::Client,
-    pub enabled: bool,
+    proxy: MtlsTrustedHttpsClient,
+}
+
+fn required_tls_path(variable: &str) -> Result<String, LedgerError> {
+    let value = std::env::var(variable)
+        .map_err(|_| LedgerError::TlsConfiguration(format!("{variable} must be configured")))?;
+    if value.trim().is_empty() {
+        return Err(LedgerError::TlsConfiguration(format!(
+            "{variable} must be configured"
+        )));
+    }
+    Ok(value)
+}
+
+fn validate_account_id(account_id: &str) -> Result<(), LedgerError> {
+    if account_id.is_empty()
+        || account_id.len() > 39
+        || !account_id.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return Err(LedgerError::InvalidAccountId);
+    }
+    Ok(())
 }
 
 impl TbClient {
-    pub fn new(base_url: &str) -> Self {
-        let enabled = !base_url.is_empty() && base_url != "disabled";
-        Self {
-            base_url: base_url.to_string(),
-            http: reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(10))
-                .build()
-                .expect("Failed to build HTTP client"),
-            enabled,
-        }
+    /// Creates a TLS-only client for one configured, allow-listed ledger proxy.
+    ///
+    /// The proxy URL and certificate paths are deployment configuration, never a
+    /// request field. Both the CA bundle and client identity are mandatory so the
+    /// financial transport is mutually authenticated and fails closed.
+    pub fn new(base_url: &str) -> Result<Self, LedgerError> {
+        let allowed_hosts =
+            required_allowed_hosts("TIGERBEETLE_PROXY_ALLOWED_HOSTS").map_err(|_| {
+                LedgerError::InvalidProxyEndpoint(
+                    "TIGERBEETLE_PROXY_ALLOWED_HOSTS must be configured".to_string(),
+                )
+            })?;
+        let base_url = TrustedEndpoint::parse("TIGERBEETLE_HTTP_URL", base_url, &allowed_hosts)
+            .map_err(|_| LedgerError::InvalidProxyEndpoint("TIGERBEETLE_HTTP_URL must be an allow-listed HTTPS endpoint without credentials, query parameters, or fragments".to_string()))?;
+        let ca_path = required_tls_path("TIGERBEETLE_TLS_CA_PEM_FILE")?;
+        let identity_path = required_tls_path("TIGERBEETLE_TLS_CLIENT_IDENTITY_PEM_FILE")?;
+        let proxy = MtlsTrustedHttpsClient::new(
+            base_url,
+            std::time::Duration::from_secs(10),
+            std::time::Duration::from_secs(5),
+            &ca_path,
+            &identity_path,
+        )
+        .map_err(|_| {
+            LedgerError::TlsConfiguration(
+                "TLS trust material or client identity is invalid".to_string(),
+            )
+        })?;
+        Ok(Self { proxy })
+    }
+
+    async fn account_get(&self, account_id: &str) -> Result<reqwest::Response, LedgerError> {
+        validate_account_id(account_id)?;
+        self.proxy
+            .get(&["accounts", account_id])
+            .await
+            .map_err(|_| {
+                LedgerError::ProxyError("TigerBeetle mTLS account lookup failed".to_string())
+            })
+    }
+
+    async fn accounts_post(
+        &self,
+        request: &CreateAccountRequest,
+    ) -> Result<reqwest::Response, LedgerError> {
+        self.proxy
+            .post_json(&["accounts"], &[request])
+            .await
+            .map_err(|_| {
+                LedgerError::ProxyError(
+                    "TigerBeetle mTLS account creation request failed".to_string(),
+                )
+            })
+    }
+
+    async fn transfers_post(
+        &self,
+        request: &CreateTransferRequest,
+    ) -> Result<reqwest::Response, LedgerError> {
+        self.proxy
+            .post_json(&["transfers"], &[request])
+            .await
+            .map_err(|_| {
+                LedgerError::ProxyError("TigerBeetle mTLS transfer request failed".to_string())
+            })
     }
 
     pub fn tenant_account_id(tenant_id: i32) -> String {
@@ -270,15 +355,14 @@ impl TbClient {
     }
 
     /// Create or ensure a tenant account exists in TigerBeetle
-    pub async fn ensure_account(&self, account_id: &str, ledger_code: u32, tenant_id: i32) -> Result<TbAccount, LedgerError> {
-        if !self.enabled {
-            return Ok(self.mock_account(account_id, ledger_code));
-        }
+    pub async fn ensure_account(
+        &self,
+        account_id: &str,
+        ledger_code: u32,
+        tenant_id: i32,
+    ) -> Result<TbAccount, LedgerError> {
         // Try to fetch existing account first
-        let resp = self.http
-            .get(format!("{}/accounts/{}", self.base_url, account_id))
-            .send()
-            .await?;
+        let resp = self.account_get(account_id).await?;
         if resp.status().is_success() {
             let account: TbAccount = resp.json().await?;
             return Ok(account);
@@ -293,73 +377,70 @@ impl TbClient {
             code: 1000, // Tenant debit account code
             flags: 0,
         };
-        let resp = self.http
-            .post(format!("{}/accounts", self.base_url))
-            .json(&[&req])
-            .send()
-            .await?;
+        let resp = self.accounts_post(&req).await?;
         if !resp.status().is_success() {
-            let body = resp.text().await.unwrap_or_default();
-            return Err(LedgerError::ProxyError(format!("create account failed: {}", body)));
+            return Err(LedgerError::ProxyError(
+                "TigerBeetle proxy rejected account creation".to_string(),
+            ));
         }
-        Ok(self.mock_account(account_id, ledger_code))
+        self.get_account(account_id).await
     }
 
     /// Post a double-entry transfer
-    pub async fn create_transfer(&self, req: &CreateTransferRequest) -> Result<String, LedgerError> {
-        if !self.enabled {
-            tracing::debug!("[TigerBeetle] (dev) transfer {} → {} amount={}", req.debit_account_id, req.credit_account_id, req.amount);
-            return Ok(req.id.clone());
-        }
-        let resp = self.http
-            .post(format!("{}/transfers", self.base_url))
-            .json(&[req])
-            .send()
-            .await?;
+    pub async fn create_transfer(
+        &self,
+        req: &CreateTransferRequest,
+    ) -> Result<String, LedgerError> {
+        let resp = self.transfers_post(req).await?;
         if !resp.status().is_success() {
-            let body = resp.text().await.unwrap_or_default();
-            return Err(LedgerError::ProxyError(format!("create transfer failed: {}", body)));
+            return Err(LedgerError::ProxyError(
+                "TigerBeetle proxy rejected transfer creation".to_string(),
+            ));
         }
         Ok(req.id.clone())
     }
 
     /// Fetch account balance
     pub async fn get_account(&self, account_id: &str) -> Result<TbAccount, LedgerError> {
-        if !self.enabled {
-            return Ok(self.mock_account(account_id, ledger::NGN));
-        }
-        let resp = self.http
-            .get(format!("{}/accounts/{}", self.base_url, account_id))
-            .send()
-            .await?;
+        let resp = self.account_get(account_id).await?;
         if resp.status() == 404 {
             return Err(LedgerError::AccountNotFound(account_id.to_string()));
         }
         if !resp.status().is_success() {
-            let body = resp.text().await.unwrap_or_default();
-            return Err(LedgerError::ProxyError(body));
+            return Err(LedgerError::ProxyError(
+                "TigerBeetle proxy rejected account lookup".to_string(),
+            ));
         }
         Ok(resp.json().await?)
-    }
-
-    fn mock_account(&self, id: &str, ledger_code: u32) -> TbAccount {
-        TbAccount {
-            id: id.to_string(),
-            debits_pending: 0,
-            debits_posted: 0,
-            credits_pending: 0,
-            credits_posted: 10_000_000_000, // ₦100,000 mock balance
-            user_data_128: String::new(),
-            user_data_64: 0,
-            user_data_32: 0,
-            ledger: ledger_code,
-            code: 1000,
-            flags: 0,
-        }
     }
 }
 
 // ─── Ledger Operations ────────────────────────────────────────────────────────
+
+/// Derive the 128-bit TigerBeetle transfer identifier from immutable business
+/// idempotency dimensions. Exact retries produce the same ID; changed economic
+/// terms cannot create a second transfer under the same business reference.
+fn deterministic_transfer_id(
+    operation: &str,
+    tenant_id: i32,
+    currency: &str,
+    business_ref: &str,
+    code: u64,
+) -> String {
+    let mut digest = Sha256::new();
+    digest.update(b"bis-tigerbeetle-transfer-v1\0");
+    for component in [
+        operation,
+        &tenant_id.to_string(),
+        currency,
+        business_ref,
+        &code.to_string(),
+    ] {
+        digest.update((component.len() as u64).to_be_bytes());
+        digest.update(component.as_bytes());
+    }
+    hex::encode(&digest.finalize()[..16])
+}
 
 /// Execute a tenant topup (credit tenant account from float)
 pub async fn execute_topup(
@@ -369,9 +450,18 @@ pub async fn execute_topup(
     let ledger_code = TbClient::ledger_for_currency(&req.currency);
     let tenant_account_id = TbClient::tenant_account_id(req.tenant_id);
     // Ensure tenant account exists
-    client.ensure_account(&tenant_account_id, ledger_code, req.tenant_id).await?;
-    // Transfer: FLOAT → TENANT
-    let transfer_id = Uuid::new_v4().to_string();
+    client
+        .ensure_account(&tenant_account_id, ledger_code, req.tenant_id)
+        .await?;
+    // Transfer: FLOAT → TENANT. The provider reference is the durable
+    // idempotency boundary, so retries cannot create a second ledger credit.
+    let transfer_id = deterministic_transfer_id(
+        "topup",
+        req.tenant_id,
+        &req.currency,
+        &req.reference,
+        tier::TOPUP,
+    );
     let transfer = CreateTransferRequest {
         id: transfer_id.clone(),
         debit_account_id: accounts::FLOAT.to_string(),
@@ -414,8 +504,15 @@ pub async fn execute_debit(
             required: req.amount_kobo,
         });
     }
-    // Transfer: TENANT → REVENUE
-    let transfer_id = Uuid::new_v4().to_string();
+    // Transfer: TENANT → REVENUE. The investigation reference is the durable
+    // idempotency boundary for a metered debit and is stable across retries.
+    let transfer_id = deterministic_transfer_id(
+        "debit",
+        req.tenant_id,
+        &req.currency,
+        &req.investigation_ref,
+        req.tier,
+    );
     let transfer = CreateTransferRequest {
         id: transfer_id.clone(),
         debit_account_id: tenant_account_id.clone(),
@@ -459,6 +556,49 @@ mod tests {
     }
 
     #[test]
+    fn test_trusted_proxy_endpoint_requires_allowlisted_https_without_userinfo() {
+        let allowed_hosts = std::collections::HashSet::from(["ledger-proxy.internal".to_string()]);
+        assert!(TrustedEndpoint::parse(
+            "TIGERBEETLE_HTTP_URL",
+            "https://ledger-proxy.internal/api/",
+            &allowed_hosts,
+        )
+        .is_ok());
+        assert!(TrustedEndpoint::parse(
+            "TIGERBEETLE_HTTP_URL",
+            "http://ledger-proxy.internal",
+            &allowed_hosts,
+        )
+        .is_err());
+        assert!(TrustedEndpoint::parse(
+            "TIGERBEETLE_HTTP_URL",
+            "https://user:secret@ledger-proxy.internal",
+            &allowed_hosts,
+        )
+        .is_err());
+        assert!(TrustedEndpoint::parse(
+            "TIGERBEETLE_HTTP_URL",
+            "https://metadata.google.internal",
+            &allowed_hosts,
+        )
+        .is_err());
+        assert!(TrustedEndpoint::parse(
+            "TIGERBEETLE_HTTP_URL",
+            "https://ledger-proxy.internal?redirect=https://metadata.google.internal",
+            &allowed_hosts,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn test_account_ids_must_be_decimal_tigerbeetle_identifiers() {
+        assert!(validate_account_id("1000042").is_ok());
+        assert!(validate_account_id("../../metadata").is_err());
+        assert!(validate_account_id("1000042?admin=true").is_err());
+        assert!(validate_account_id("").is_err());
+    }
+
+    #[test]
     fn test_available_balance() {
         let account = TbAccount {
             id: "test".to_string(),
@@ -475,5 +615,44 @@ mod tests {
         };
         // available = 1000 - 500 - 100 = 400
         assert_eq!(account.available_balance(), 400);
+    }
+}
+
+#[cfg(test)]
+mod deterministic_transfer_id_tests {
+    use super::deterministic_transfer_id;
+
+    #[test]
+    fn exact_retry_uses_the_same_128_bit_transfer_id() {
+        let first = deterministic_transfer_id("topup", 42, "NGN", "PAYSTACK-REF-001", 100);
+        let retry = deterministic_transfer_id("topup", 42, "NGN", "PAYSTACK-REF-001", 100);
+        assert_eq!(first, retry);
+        assert_eq!(first.len(), 32);
+        assert!(first.chars().all(|character| character.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn transfer_id_separates_operation_tenant_currency_reference_and_code() {
+        let baseline = deterministic_transfer_id("debit", 42, "NGN", "INV-001", 2);
+        assert_ne!(
+            baseline,
+            deterministic_transfer_id("topup", 42, "NGN", "INV-001", 2)
+        );
+        assert_ne!(
+            baseline,
+            deterministic_transfer_id("debit", 43, "NGN", "INV-001", 2)
+        );
+        assert_ne!(
+            baseline,
+            deterministic_transfer_id("debit", 42, "USD", "INV-001", 2)
+        );
+        assert_ne!(
+            baseline,
+            deterministic_transfer_id("debit", 42, "NGN", "INV-002", 2)
+        );
+        assert_ne!(
+            baseline,
+            deterministic_transfer_id("debit", 42, "NGN", "INV-001", 3)
+        );
     }
 }

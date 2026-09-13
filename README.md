@@ -36,7 +36,7 @@ BIS is a full-stack compliance intelligence platform built for Nigerian AML/CFT 
 │                         BIS Platform                             │
 │                                                                   │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │
-│  │  React PWA  │  │  BIS BFF    │  │   PostgreSQL (TiDB)      │  │
+│  │  React PWA  │  │  BIS BFF    │  │   PostgreSQL      │  │
 │  │  (Vite 7)   │◄─┤  (Express)  ├──┤   46 tables, 25 migs    │  │
 │  │  Tailwind 4 │  │  tRPC 11    │  │   Drizzle ORM            │  │
 │  │  shadcn/ui  │  │  Node 22    │  └─────────────────────────┘  │
@@ -66,14 +66,14 @@ BIS is a full-stack compliance intelligence platform built for Nigerian AML/CFT 
 - Go 1.21+
 - Python 3.11+
 - Rust 1.75+ (for event processor)
-- PostgreSQL 15+ (or TiDB Serverless)
+- PostgreSQL 15+
 - Docker + Docker Compose (optional, for full stack)
 
 ### 1. Clone and install
 
 ```bash
-git clone https://github.com/your-org/bis-pwa.git
-cd bis-pwa
+git clone https://github.com/munisp/bis.git
+cd bis
 pnpm install
 ```
 
@@ -358,7 +358,7 @@ Local LLM adapter for on-premise AI inference via Ollama.
 ### Project Structure
 
 ```
-bis-pwa/
+bis/
 ├── client/              # React PWA (Vite 7, Tailwind 4, shadcn/ui)
 │   ├── src/
 │   │   ├── pages/       # 53 page components

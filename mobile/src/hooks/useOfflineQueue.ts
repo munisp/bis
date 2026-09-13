@@ -5,8 +5,8 @@
  * Usage:
  *   const { enqueue, pending, drain, remove } = useOfflineQueue();
  *
- * The hook polls queue size every 2 seconds so components stay in sync
- * with the underlying async storage-backed queue.
+ * This queue is limited to explicitly registered, non-sensitive operations.
+ * Field dispatches and evidence uploads use their dedicated encrypted queues.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -20,7 +20,7 @@ import {
   OperationExecutor,
 } from '../offline/OfflineQueue';
 
-// ─── In-memory storage adapter (for dev/test; swap for AsyncStorage in prod) ──
+// ─── In-memory storage adapter for non-sensitive ephemeral operations ──────────
 
 class InMemoryStorage implements StorageAdapter {
   private store: Map<string, string> = new Map();
@@ -35,7 +35,7 @@ class InMemoryStorage implements StorageAdapter {
   }
 }
 
-// ─── No-op network adapter (auto-drain disabled; banner handles reconnect) ────
+// ─── Explicit network adapter (auto-drain disabled; banner handles reconnect) ──
 
 class NoOpNetworkAdapter implements NetworkAdapter {
   async isConnected(): Promise<boolean> {
@@ -46,10 +46,10 @@ class NoOpNetworkAdapter implements NetworkAdapter {
   }
 }
 
-// ─── Default executor — logs and resolves (real executor injected per-app) ────
+// ─── Default executor — deny unconfigured operations rather than acknowledge them ─
 
 const defaultExecutor: OperationExecutor = async (op: QueuedOperation) => {
-  console.warn('[OfflineQueue] No executor configured for operation:', op.type);
+  throw new Error(`No secure executor is registered for offline operation type ${op.type}`);
 };
 
 // ─── Singleton queue instance ─────────────────────────────────────────────────
@@ -107,7 +107,7 @@ export function useOfflineQueue(): UseOfflineQueueResult {
     refresh();
     intervalRef.current = setInterval(refresh, 2_000);
     return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
+      if (intervalRef.current) {clearInterval(intervalRef.current);}
     };
   }, [refresh]);
 
@@ -127,7 +127,7 @@ export function useOfflineQueue(): UseOfflineQueueResult {
   );
 
   const drain = useCallback(async (): Promise<void> => {
-    if (isDraining) return;
+    if (isDraining) {return;}
     setIsDraining(true);
     try {
       await queue.drain();

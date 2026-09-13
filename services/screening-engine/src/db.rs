@@ -176,9 +176,10 @@ async fn update_order_outcome(pool: &Pool, order_ref: &str) {
         })
         .collect();
 
-    let overall = if outcomes.iter().any(|o| {
-        o == "adverse" || o == "suspended_licence" || o == "revoked_licence"
-    }) {
+    let overall = if outcomes
+        .iter()
+        .any(|o| o == "adverse" || o == "suspended_licence" || o == "revoked_licence")
+    {
         "adverse"
     } else if outcomes.iter().any(|o| o == "consider") {
         "consider"
@@ -209,44 +210,44 @@ async fn update_order_outcome(pool: &Pool, order_ref: &str) {
 
 fn outcome_to_str(outcome: &ScreeningOutcome) -> &'static str {
     match outcome {
-        ScreeningOutcome::Clear      => "clear",
-        ScreeningOutcome::Consider   => "consider",
-        ScreeningOutcome::Adverse    => "adverse",
+        ScreeningOutcome::Clear => "clear",
+        ScreeningOutcome::Consider => "consider",
+        ScreeningOutcome::Adverse => "adverse",
         ScreeningOutcome::Unverified => "unverified",
-        ScreeningOutcome::Error      => "consider", // map Error → consider (no adverse evidence)
+        ScreeningOutcome::Error => "consider", // map Error → consider (no adverse evidence)
     }
 }
 
 /// Convert ScreeningType to the snake_case DB enum value used in `screening_type` PG enum.
 fn screening_type_to_db_str(t: &ScreeningType) -> &'static str {
     match t {
-        ScreeningType::NinTrace               => "nin_trace",
-        ScreeningType::CriminalEfcc           => "criminal_efcc",
-        ScreeningType::CriminalIcpc           => "criminal_icpc",
-        ScreeningType::CourtRecord            => "court_record",
-        ScreeningType::CacDirectorship        => "cac_directorship",
-        ScreeningType::EducationWaec          => "education_waec",
-        ScreeningType::EducationNeco          => "education_neco",
-        ScreeningType::EducationUniversity    => "education_university",
-        ScreeningType::NyscDischarge          => "nysc_discharge",
+        ScreeningType::NinTrace => "nin_trace",
+        ScreeningType::CriminalEfcc => "criminal_efcc",
+        ScreeningType::CriminalIcpc => "criminal_icpc",
+        ScreeningType::CourtRecord => "court_record",
+        ScreeningType::CacDirectorship => "cac_directorship",
+        ScreeningType::EducationWaec => "education_waec",
+        ScreeningType::EducationNeco => "education_neco",
+        ScreeningType::EducationUniversity => "education_university",
+        ScreeningType::NyscDischarge => "nysc_discharge",
         ScreeningType::EmploymentVerification => "employment_verification",
         ScreeningType::ProfessionalLicenceCoren => "professional_licence_coren",
-        ScreeningType::ProfessionalLicenceNba   => "professional_licence_nba",
-        ScreeningType::ProfessionalLicenceMdcn  => "professional_licence_mdcn",
-        ScreeningType::ProfessionalLicenceIcan  => "professional_licence_ican",
-        ScreeningType::ProfessionalLicenceCibn  => "professional_licence_cibn",
-        ScreeningType::AdverseMedia           => "adverse_media",
-        ScreeningType::PepSanctions           => "pep_sanctions",
-        ScreeningType::Watchlist              => "watchlist",
-        ScreeningType::WorkPermit             => "work_permit",
-        ScreeningType::ContinuousMonitor      => "continuous_monitor",
-        ScreeningType::AddressVerification    => "address_verification",
-        ScreeningType::BvnVerification        => "bvn_fraud_check",
-        ScreeningType::CreditCheck            => "credit_check",
-        ScreeningType::DrugTest               => "drug_test",
-        ScreeningType::SexOffenderRegistry    => "sex_offender_registry",
-        ScreeningType::TerrorismWatchlist     => "terrorism_watchlist",
-        ScreeningType::InterpolNotice         => "interpol_notice",
-        ScreeningType::SocialMedia            => "social_media",
+        ScreeningType::ProfessionalLicenceNba => "professional_licence_nba",
+        ScreeningType::ProfessionalLicenceMdcn => "professional_licence_mdcn",
+        ScreeningType::ProfessionalLicenceIcan => "professional_licence_ican",
+        ScreeningType::ProfessionalLicenceCibn => "professional_licence_cibn",
+        ScreeningType::AdverseMedia => "adverse_media",
+        ScreeningType::PepSanctions => "pep_sanctions",
+        ScreeningType::Watchlist => "watchlist",
+        ScreeningType::WorkPermit => "work_permit",
+        ScreeningType::ContinuousMonitor => "continuous_monitor",
+        ScreeningType::AddressVerification => "address_verification",
+        ScreeningType::BvnVerification => "bvn_fraud_check",
+        ScreeningType::CreditCheck => "credit_check",
+        ScreeningType::DrugTest => "drug_test",
+        ScreeningType::SexOffenderRegistry => "sex_offender_registry",
+        ScreeningType::TerrorismWatchlist => "terrorism_watchlist",
+        ScreeningType::InterpolNotice => "interpol_notice",
+        ScreeningType::SocialMedia => "social_media",
     }
 }

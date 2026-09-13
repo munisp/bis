@@ -25,7 +25,7 @@ export function useAlerts() {
     setError(null);
     try {
       const result = await alertsApi.list({ limit: 50 });
-      setAlerts((result.data ?? []) as Alert[]);
+      setAlerts(result.data ?? []);
     } catch (err) {
       setError(err instanceof Error ? err : new Error('Failed to load alerts'));
     } finally {

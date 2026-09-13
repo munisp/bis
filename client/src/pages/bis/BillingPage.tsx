@@ -117,22 +117,19 @@ export default function BillingPage() {
   const initiateMutation = trpc.billing.initiateTopUp.useMutation({
     onSuccess: (data) => {
       setTopUpOpen(false);
-      if (data.simulated) {
-        // Demo mode: skip real redirect, just show a success toast
-        toast.success("Demo top-up initiated", {
-          description: `Reference: ${data.reference} (no real payment in demo mode)`,
+      if (data.simulated || !data.authorizationUrl) {
+        toast.error("Payment provider unavailable", {
+          description: "Top-up was not initiated because a verified Paystack checkout session was not returned.",
         });
-        // Immediately verify the simulated reference
-        verifyMutation.mutate({ tenantId, reference: data.reference });
-      } else {
-        // Real Paystack: open checkout in new tab, store ref for verification on return
-        setPaystackRef(data.reference);
-        window.open(data.authorizationUrl, "_blank", "noopener,noreferrer");
-        toast.info("Paystack checkout opened", {
-          description: "Complete the payment in the new tab, then click Verify Payment below.",
-          duration: 8000,
-        });
+        return;
       }
+      // A live, provider-returned checkout URL is required before a user can pay.
+      setPaystackRef(data.reference);
+      window.open(data.authorizationUrl, "_blank", "noopener,noreferrer");
+      toast.info("Paystack checkout opened", {
+        description: "Complete the payment in the new tab, then click Verify Payment below.",
+        duration: 8000,
+      });
     },
     onError: (err) => {
       toast.error("Payment initiation failed", { description: err.message });
@@ -276,11 +273,11 @@ export default function BillingPage() {
                   <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
                 ) : (
                   <p className="text-2xl font-bold text-emerald-400 font-mono">
-                    {formatNGN(balanceAvailable ? balanceKobo : 14_300_000)}
+                    {balanceAvailable ? formatNGN(balanceKobo) : "—"}
                   </p>
                 )}
                 <p className="text-xs text-slate-500 mt-1">
-                  {balanceAvailable ? "Live from TigerBeetle" : "Simulated balance"}
+                  {balanceAvailable ? "Live from TigerBeetle" : "Ledger unavailable — no balance is shown"}
                 </p>
               </div>
               <div className="p-2 rounded-lg bg-emerald-500/10">

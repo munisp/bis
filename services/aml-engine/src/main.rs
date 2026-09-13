@@ -1,27 +1,26 @@
 use axum::{
     extract::{Json, State},
-    http::StatusCode,
-    response::IntoResponse,
+    http::{HeaderMap, StatusCode},
+    middleware::{self, Next},
+    response::{IntoResponse, Response},
     routing::{get, post},
     Router,
 };
+use bis_transport_policy::{https_client, required_allowed_hosts, TrustedEndpoint};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tower_http::cors::CorsLayer;
 use tracing::{info, warn};
 
-use aml_engine::{
-    score_transaction, verify_evidence_chain,
-    TransactionScreenRequest, EvidenceItem,
-};
 use aml_engine::sdn_sync::{
-    new_cache, seed_static_lists, get_status, name_hits_sdn,
-    SharedSdnCache, REFRESH_INTERVAL,
+    get_status, name_hits_sdn, new_cache, seed_static_lists, SharedSdnCache, REFRESH_INTERVAL,
+};
+use aml_engine::{
+    score_transaction, verify_evidence_chain, EvidenceItem, TransactionScreenRequest,
 };
 
-mod metrics;
 mod dlq;
+mod metrics;
 
 use dlq::AmlDlq;
 
@@ -31,6 +30,41 @@ use dlq::AmlDlq;
 struct AppState {
     sdn_cache: SharedSdnCache,
     dlq: Arc<AmlDlq>,
+}
+
+// ─── Service authentication ────────────────────────────────────────────────────
+
+fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+    let mut difference = 0u8;
+    for (a, b) in left.iter().zip(right.iter()) {
+        difference |= a ^ b;
+    }
+    difference == 0
+}
+
+async fn service_auth(headers: HeaderMap, request: axum::extract::Request, next: Next) -> Response {
+    let expected = std::env::var("BIS_AML_ENGINE_KEY").unwrap_or_default();
+    let supplied = headers
+        .get("x-bis-key")
+        .and_then(|v| v.to_str().ok())
+        .or_else(|| {
+            headers
+                .get("authorization")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.strip_prefix("Bearer "))
+        })
+        .unwrap_or("");
+    if expected.is_empty() || !constant_time_eq(supplied.as_bytes(), expected.as_bytes()) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error": "unauthorized"})),
+        )
+            .into_response();
+    }
+    next.run(request).await
 }
 
 // ─── Handlers ─────────────────────────────────────────────────────────────────
@@ -65,6 +99,7 @@ async fn screen_transaction(
     State(state): State<AppState>,
     Json(req): Json<TransactionScreenRequest>,
 ) -> impl IntoResponse {
+    let started = std::time::Instant::now();
     // Wrap screening in a catch — any panic or internal error sends to DLQ.
     let req_clone = req.clone();
     let mut result = score_transaction(&req);
@@ -87,9 +122,16 @@ async fn screen_transaction(
     }
 
     // Check BIC against live cache
-    let bics = [req.originator_bic.as_deref(), req.beneficiary_bic.as_deref()];
+    let bics = [
+        req.originator_bic.as_deref(),
+        req.beneficiary_bic.as_deref(),
+    ];
     for bic in bics.iter().flatten() {
-        if cache.bic_prefixes.iter().any(|prefix| bic.starts_with(prefix.as_str())) {
+        if cache
+            .bic_prefixes
+            .iter()
+            .any(|prefix| bic.starts_with(prefix.as_str()))
+        {
             result.risk_score = 100;
             result.blocked = true;
             if !result.flags.contains(&"sanctioned_bic".to_string()) {
@@ -98,31 +140,44 @@ async fn screen_transaction(
                     rule_id: "AML-SDN-002".to_string(),
                     rule_name: "Sanctioned Institution BIC (Live Cache)".to_string(),
                     score_contribution: 100,
-                    description: format!("BIC {} matches live SDN sanctioned institution cache", bic),
+                    description: format!(
+                        "BIC {} matches live SDN sanctioned institution cache",
+                        bic
+                    ),
                 });
             }
         }
     }
 
     // Check country against live sanctioned countries
-    if cache.sanctioned_countries.contains(req.originator_country.as_str())
-        || cache.sanctioned_countries.contains(req.beneficiary_country.as_str())
+    if (cache
+        .sanctioned_countries
+        .contains(req.originator_country.as_str())
+        || cache
+            .sanctioned_countries
+            .contains(req.beneficiary_country.as_str()))
+        && !result
+            .flags
+            .contains(&"high_risk_originator_country".to_string())
+        && !result
+            .flags
+            .contains(&"high_risk_beneficiary_country".to_string())
     {
-        if !result.flags.contains(&"high_risk_originator_country".to_string())
-            && !result.flags.contains(&"high_risk_beneficiary_country".to_string())
-        {
-            result.risk_score = (result.risk_score + 35).min(100);
-            result.flags.push("sanctioned_country_live".to_string());
-        }
+        result.risk_score = (result.risk_score + 35).min(100);
+        result.flags.push("sanctioned_country_live".to_string());
     }
 
     drop(cache);
 
     // If the engine itself returned an internal error flag, push to DLQ for replay.
     if result.flags.contains(&"internal_error".to_string()) {
-        state.dlq.enqueue(req_clone, "score_transaction returned internal_error flag".to_string());
+        state.dlq.enqueue(
+            req_clone,
+            "score_transaction returned internal_error flag".to_string(),
+        );
     }
 
+    metrics::record_latency(started);
     (StatusCode::OK, Json(result))
 }
 
@@ -139,14 +194,15 @@ async fn dlq_list(State(state): State<AppState>) -> impl IntoResponse {
 async fn dlq_metrics(State(state): State<AppState>) -> impl IntoResponse {
     (
         StatusCode::OK,
-        [(axum::http::header::CONTENT_TYPE, "text/plain; version=0.0.4")],
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "text/plain; version=0.0.4",
+        )],
         state.dlq.prometheus_metrics(),
     )
 }
 
-async fn verify_chain(
-    Json(req): Json<VerifyChainRequest>,
-) -> impl IntoResponse {
+async fn verify_chain(Json(req): Json<VerifyChainRequest>) -> impl IntoResponse {
     let result = verify_evidence_chain(&req.items);
     let status = if result.is_valid {
         StatusCode::OK
@@ -161,7 +217,10 @@ async fn verify_chain(
 async fn prometheus_metrics() -> impl IntoResponse {
     (
         StatusCode::OK,
-        [(axum::http::header::CONTENT_TYPE, "text/plain; version=0.0.4")],
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "text/plain; version=0.0.4",
+        )],
         metrics::render(),
     )
 }
@@ -194,24 +253,28 @@ fn spawn_sdn_refresh(cache: SharedSdnCache) {
 async fn fetch_and_update_cache(cache: &SharedSdnCache) -> Result<usize, String> {
     // Use reqwest if available; otherwise return an error so the static seed remains.
     // This is a best-effort refresh — the engine works without it.
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
-        .user_agent("BIS-AML-Engine/2.0 (compliance@bis.ng)")
-        .build()
-        .map_err(|e| format!("HTTP client build failed: {e}"))?;
-
-    let url = aml_engine::sdn_sync::OFAC_SDN_URL;
+    let hosts = std::collections::HashSet::from(["www.treasury.gov".to_string()]);
+    let url = TrustedEndpoint::parse("OFAC_SDN_URL", aml_engine::sdn_sync::OFAC_SDN_URL, &hosts)
+        .map_err(|_| "sanctions-feed endpoint policy rejected".to_string())?;
+    let client = https_client(
+        std::time::Duration::from_secs(30),
+        std::time::Duration::from_secs(10),
+    )
+    .map_err(|_| "sanctions-feed transport initialization failed".to_string())?;
     let resp = client
-        .get(url)
+        .get(url.as_url().clone())
         .send()
         .await
-        .map_err(|e| format!("HTTP GET {url} failed: {e}"))?;
+        .map_err(|_| "sanctions-feed request failed".to_string())?;
 
     if !resp.status().is_success() {
-        return Err(format!("HTTP {}: {}", resp.status(), url));
+        return Err("sanctions-feed request was rejected".to_string());
     }
 
-    let body = resp.text().await.map_err(|e| format!("Body read failed: {e}"))?;
+    let body = resp
+        .text()
+        .await
+        .map_err(|e| format!("Body read failed: {e}"))?;
 
     // Parse the SDN XML — extract <lastName> and <firstName> elements.
     // This is a simplified parser; a production system would use a proper XML library.
@@ -263,15 +326,20 @@ fn extract_name_tokens_from_xml(xml: &str) -> Vec<String> {
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt()
-        .with_env_filter(
-            std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string()),
-        )
+        .with_env_filter(std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string()))
         .init();
 
     let port: u16 = std::env::var("PORT")
         .unwrap_or_else(|_| "8085".to_string())
         .parse()
         .unwrap_or(8085);
+    let service_key = match std::env::var("BIS_AML_ENGINE_KEY") {
+        Ok(value) if !value.trim().is_empty() => value,
+        _ => {
+            tracing::error!("BIS_AML_ENGINE_KEY must be configured");
+            return;
+        }
+    };
 
     // Initialise SDN cache with static seed lists so screening works immediately.
     let sdn_cache = new_cache();
@@ -282,15 +350,15 @@ async fn main() {
     }
 
     // Spawn background refresh task.
-        spawn_sdn_refresh(Arc::clone(&sdn_cache));
+    spawn_sdn_refresh(Arc::clone(&sdn_cache));
 
     // ── SIGHUP handler: hot-reload sanctions list without restart ──────────────
     {
         use tokio::signal::unix::{signal, SignalKind};
         let cache_for_signal = Arc::clone(&sdn_cache);
         tokio::spawn(async move {
-            let mut stream = signal(SignalKind::hangup())
-                .expect("Failed to register SIGHUP handler");
+            let mut stream =
+                signal(SignalKind::hangup()).expect("Failed to register SIGHUP handler");
             loop {
                 stream.recv().await;
                 info!("[AML] SIGHUP received — hot-reloading sanctions lists");
@@ -299,7 +367,8 @@ async fn main() {
                     Ok(count) => info!("[AML] Hot-reload complete: {} entries", count),
                     Err(e) => {
                         warn!("[AML] Hot-reload failed: {}", e);
-                        metrics::RELOAD_ERRORS_TOTAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        metrics::RELOAD_ERRORS_TOTAL
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     }
                 }
             }
@@ -309,20 +378,35 @@ async fn main() {
     // ── DLQ: initialise and start replay background task ──────────────────────
     let dlq = Arc::new(AmlDlq::new());
     {
-        let replay_url = format!(
-            "http://localhost:{}/screen",
-            std::env::var("PORT").unwrap_or_else(|_| "8085".to_string())
-        );
-        let api_key = std::env::var("BIS_GATEWAY_KEY")
-            .unwrap_or_else(|_| "dev-gateway-key-change-in-prod".to_string());
-        dlq.clone().start_replay_task(replay_url, api_key);
-        info!("[AML-DLQ] Dead-letter queue initialised (capacity 1000, replay every 30s)");
+        let replay_url = std::env::var("BIS_AML_REPLAY_URL").ok().and_then(|raw| {
+            required_allowed_hosts("BIS_AML_REPLAY_ALLOWED_HOSTS")
+                .ok()
+                .and_then(|hosts| TrustedEndpoint::parse("BIS_AML_REPLAY_URL", &raw, &hosts).ok())
+                .and_then(|endpoint| endpoint.with_path_segments(&["screen"]).ok())
+                .map(|endpoint| endpoint.as_str().to_string())
+        });
+        if let Some(replay_url) = replay_url {
+            match https_client(
+                std::time::Duration::from_secs(10),
+                std::time::Duration::from_secs(5),
+            ) {
+                Ok(client) => {
+                    dlq.clone()
+                        .start_replay_task(replay_url, service_key.clone(), client);
+                    info!("[AML-DLQ] Dead-letter queue replay initialised");
+                }
+                Err(_) => {
+                    warn!("[AML-DLQ] Replay transport is disabled because TLS client setup failed")
+                }
+            }
+        } else {
+            warn!("[AML-DLQ] Replay transport is disabled until an approved HTTPS endpoint is configured");
+        }
     }
 
     let state = AppState { sdn_cache, dlq };
 
-    let app = Router::new()
-        .route("/health", get(health))
+    let protected = Router::new()
         .route("/screen", post(screen_transaction))
         .route("/evidence/verify-chain", post(verify_chain))
         .route("/sanctions/status", get(sanctions_status))
@@ -330,11 +414,41 @@ async fn main() {
         .route("/dlq/stats", get(dlq_stats))
         .route("/dlq/list", get(dlq_list))
         .route("/dlq/metrics", get(dlq_metrics))
-        .with_state(state)
-        .layer(CorsLayer::permissive());
+        .layer(middleware::from_fn(service_auth));
+    let app = Router::new()
+        .route("/health", get(health))
+        .merge(protected)
+        .with_state(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     info!("BIS AML Engine v2.0 listening on {}", addr);
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
+}
+
+#[cfg(test)]
+mod transport_policy_tests {
+    use bis_transport_policy::TrustedEndpoint;
+    use std::collections::HashSet;
+
+    #[test]
+    fn aml_sanctions_feed_rejects_cleartext_and_untrusted_hosts() {
+        let hosts = HashSet::from(["www.treasury.gov".to_string()]);
+        assert!(TrustedEndpoint::parse(
+            "OFAC_SDN_URL",
+            "https://www.treasury.gov/ofac/downloads/sdn.xml",
+            &hosts,
+        )
+        .is_ok());
+        assert!(
+            TrustedEndpoint::parse("OFAC_SDN_URL", "http://www.treasury.gov/sdn.xml", &hosts)
+                .is_err()
+        );
+        assert!(TrustedEndpoint::parse(
+            "OFAC_SDN_URL",
+            "https://metadata.google.internal/sdn.xml",
+            &hosts
+        )
+        .is_err());
+    }
 }

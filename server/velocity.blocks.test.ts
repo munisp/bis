@@ -28,6 +28,8 @@ vi.mock("./db");
 import { getDb, __resetStore } from "./db";
 import { fluvioCheckVelocity, type FluvioVelocityCheckInput } from "./fluvio";
 
+const savedVelocityUrl = process.env.FLUVIO_VELOCITY_URL;
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const BASE_INPUT: FluvioVelocityCheckInput = {
@@ -43,6 +45,7 @@ describe("fluvioCheckVelocity — velocity_blocks DB-write path", () => {
   let mockFetch: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
+    process.env.FLUVIO_VELOCITY_URL = "https://velocity.unit.test";
     __resetStore();
     // Clear call history on the insert spy so tests are independent
     const db = await getDb();
@@ -54,6 +57,8 @@ describe("fluvioCheckVelocity — velocity_blocks DB-write path", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    if (savedVelocityUrl === undefined) delete process.env.FLUVIO_VELOCITY_URL;
+    else process.env.FLUVIO_VELOCITY_URL = savedVelocityUrl;
     __resetStore();
   });
 

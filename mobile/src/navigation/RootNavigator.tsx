@@ -26,6 +26,7 @@ import { ProfileScreen } from '../screens/main/ProfileScreen';
 import { FieldAgentScreen } from '../screens/main/FieldAgentScreen';
 import { CaptureEvidenceScreen } from '../screens/main/CaptureEvidenceScreen';
 import { KYCDocumentCaptureScreen } from '../screens/main/KYCDocumentCaptureScreen';
+import { ConsumerDiscoveryScreen } from '../screens/main/ConsumerDiscoveryScreen';
 
 // Insider Threat screens
 import { InsiderThreatScreen } from '../screens/main/InsiderThreatScreen';
@@ -42,6 +43,7 @@ export type MainTabParamList = {
   Investigations: undefined;
   Alerts: undefined;
   QuickCheck: undefined;
+  ConsumerDiscovery: undefined;
   InsiderThreat: undefined;
   Profile: undefined;
 };
@@ -162,6 +164,7 @@ function MainNavigator() {
       <MainTab.Screen name="Investigations" component={InvestigationsNavigator} />
       <MainTab.Screen name="Alerts" component={AlertsScreen} />
       <MainTab.Screen name="QuickCheck" component={QuickCheckNavigator} />
+      <MainTab.Screen name="ConsumerDiscovery" component={ConsumerDiscoveryScreen} options={{ title: 'Discovery' }} />
       <MainTab.Screen
         name="InsiderThreat"
         component={InsiderThreatNavigator}

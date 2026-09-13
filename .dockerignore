@@ -1,0 +1,34 @@
+# Local dependencies and generated outputs
+**/node_modules
+dist
+**/dist
+**/android/.gradle
+**/android/app/build
+**/ios/build
+
+# Repository metadata and local development files
+.git
+.github
+.devcontainer
+.vscode
+.idea
+*.log
+*.tmp
+*.swp
+
+# Evidence and local environment material
+artifacts
+coverage
+bis-evidence
+.env
+.env.*
+!.env.example
+
+# Dependency-specific caches
+.pnpm-store
+.npm
+.yarn
+__pycache__
+*.pyc
+.target
+target

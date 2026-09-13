@@ -38,7 +38,7 @@ interface NetInfoModule {
 
 function getNetInfo(): NetInfoModule {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+
     return require('@react-native-community/netinfo').default as NetInfoModule;
   } catch {
     // Fallback shim — assumes online

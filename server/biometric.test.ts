@@ -39,6 +39,23 @@ vi.mock("./db", () => ({
   updateScreeningRequest: vi.fn(),
 }));
 
+// ─── Mock Permify authorization for administrative unit-test calls ───────────
+vi.mock("./permify", () => ({
+  permifyCheck: vi.fn().mockResolvedValue(true),
+}));
+
+// ─── Mock biometric governance ───────────────────────────────────────────────
+// Engine response tests do not exercise PostgreSQL; production routes still call
+// the real tenant-scoped consent and review service.
+vi.mock("./biometricGovernance", () => ({
+  grantBiometricConsent: vi.fn(),
+  withdrawBiometricConsent: vi.fn(),
+  requireBiometricConsent: vi.fn().mockResolvedValue({ tenantId: 1, userId: 1 }),
+  createBiometricReviewCase: vi.fn().mockResolvedValue({ reviewCaseId: "11111111-1111-4111-8111-111111111111", status: "pending_human_review" }),
+  resolveBiometricReview: vi.fn(),
+  biometricGovernance: {},
+}));
+
 // ─── Mock LLM ─────────────────────────────────────────────────────────────────
 
 vi.mock("./_core/llm", () => ({
@@ -152,6 +169,7 @@ describe("biometricRouter", () => {
       const caller = makeCaller();
       const result = await caller.checkLiveness({
         imageBase64: "base64data",
+        subjectRef: "TEST-001",
         challenge: "turn_left",
       });
 
@@ -167,6 +185,7 @@ describe("biometricRouter", () => {
         mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ passed: true, score: 0.88, live: true, sandbox: false }) });
         const result = await caller.checkLiveness({
           imageBase64: "base64data",
+          subjectRef: "TEST-001",
           challenge,
         });
         expect(result).toHaveProperty("passed");
@@ -194,6 +213,7 @@ describe("biometricRouter", () => {
           face_id: "face:NIN-12345678901",
           subject_ref: "NIN-12345678901",
           using_arcface: true,
+          model_version: "arcface-test-v1",
         }),
       });
 
@@ -209,7 +229,7 @@ describe("biometricRouter", () => {
     });
 
     it("does not throw when kycRecordId is provided but DB is unavailable", async () => {
-      mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ enrolled: true, face_id: "face:NIN-12345678901", subject_ref: "NIN-12345678901" }) });
+      mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ enrolled: true, face_id: "face:NIN-12345678901", subject_ref: "NIN-12345678901", model_version: "arcface-test-v1" }) });
       const caller = makeCaller();
       await expect(
         caller.enroll({
@@ -242,6 +262,7 @@ describe("biometricRouter", () => {
           lastName: "Nwosu",
           nin: "98765432101",
           confidence: 0.94,
+          model_version: "paddleocr-test-v1",
         }),
       });
 
@@ -249,18 +270,20 @@ describe("biometricRouter", () => {
       const result = await caller.ocrDocument({
         imageBase64: "base64documentimage",
         documentType: "NIN_SLIP",
+        subjectRef: "TEST-002",
       });
 
-      expect(result.firstName).toBe("Chukwuemeka");
-      expect(result.nin).toBe("98765432101");
+      expect(result.confidence).toBe(0.94);
+      expect(result.reviewStatus).toBe("pending_human_review");
     });
 
     it("handles PASSPORT document type with engine available", async () => {
-      mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ documentType: "PASSPORT", firstName: "Test", confidence: 0.9 }) });
+      mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ documentType: "PASSPORT", firstName: "Test", confidence: 0.9, model_version: "paddleocr-test-v1" }) });
       const caller = makeCaller();
       const result = await caller.ocrDocument({
         imageBase64: "base64passportimage",
         documentType: "PASSPORT",
+        subjectRef: "TEST-002",
       });
       expect(result).toHaveProperty("confidence");
     });
@@ -270,8 +293,9 @@ describe("biometricRouter", () => {
 
   describe("fullEnrollment", () => {
     it("chains liveness + enroll and returns success when engine is available", async () => {
-      mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ passed: true, score: 0.92, live: true }) });
-      mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ enrolled: true, face_id: "face:test", subject_ref: "test" }) });
+      mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ passed: true, score: 0.92, live: true, model_version: "liveness-test-v1" }) });
+      mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ passed: true, is_spoof: false, score: 0.98, model_version: "antispoof-test-v1" }) });
+      mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ enrolled: true, face_id: "face:test", subject_ref: "test", model_version: "arcface-test-v1" }) });
       const caller = makeCaller();
       const result = await caller.fullEnrollment({
         livenessImageBase64: "base64liveness",
@@ -289,9 +313,10 @@ describe("biometricRouter", () => {
     });
 
     it("includes OCR data when document image is provided", async () => {
-      mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ passed: true, score: 0.92, live: true }) });
-      mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ enrolled: true, face_id: "face:test", subject_ref: "test" }) });
-      mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ documentType: "NIN_SLIP", firstName: "Test", confidence: 0.9 }) });
+      mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ passed: true, score: 0.92, live: true, model_version: "liveness-test-v1" }) });
+      mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ passed: true, is_spoof: false, score: 0.98, model_version: "antispoof-test-v1" }) });
+      mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ enrolled: true, face_id: "face:test", subject_ref: "test", model_version: "arcface-test-v1" }) });
+      mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ documentType: "NIN_SLIP", firstName: "Test", confidence: 0.9, model_version: "paddleocr-test-v1" }) });
       const caller = makeCaller();
       const result = await caller.fullEnrollment({
         livenessImageBase64: "base64liveness",
@@ -307,8 +332,9 @@ describe("biometricRouter", () => {
     });
 
     it("returns faceId from enrollment step", async () => {
-      mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ passed: true, score: 0.92, live: true }) });
-      mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ enrolled: true, face_id: "face:test", subject_ref: "test" }) });
+      mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ passed: true, score: 0.92, live: true, model_version: "liveness-test-v1" }) });
+      mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ passed: true, is_spoof: false, score: 0.98, model_version: "antispoof-test-v1" }) });
+      mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ enrolled: true, face_id: "face:test", subject_ref: "test", model_version: "arcface-test-v1" }) });
       const caller = makeCaller();
       const result = await caller.fullEnrollment({
         livenessImageBase64: "base64liveness",
@@ -336,7 +362,7 @@ describe("biometricRouter", () => {
 
   describe("getStatus", () => {
     it("returns not_enrolled when DB is unavailable", async () => {
-      const caller = makeCaller();
+      const caller = makeCaller(makeCtx(1, "admin"));
       const result = await caller.getStatus({ subjectRef: "NIN-99999999999" });
 
       expect(result).toHaveProperty("enrolled");
@@ -358,7 +384,7 @@ describe("biometricRouter", () => {
         }]),
       } as any);
 
-      const caller = makeCaller();
+      const caller = makeCaller(makeCtx(1, "admin"));
       const result = await caller.getStatus({ subjectRef: "NIN-12345678901" });
 
       expect(result.enrolled).toBe(true);
@@ -375,7 +401,7 @@ describe("biometricRouter", () => {
         limit: vi.fn().mockResolvedValue([]),
       } as any);
 
-      const caller = makeCaller();
+      const caller = makeCaller(makeCtx(1, "admin"));
       const result = await caller.getStatus({ subjectRef: "UNKNOWN-REF" });
 
       expect(result.enrolled).toBe(false);
@@ -810,7 +836,7 @@ describe("fullVerify", () => {
       }),
     });
     const caller = biometricRouter.createCaller(makeCtx());
-    const result = await caller.fullVerify({ selfieBase64: "data" });
+    const result = await caller.fullVerify({ selfieBase64: "data", referenceBase64: "reference", subjectRef: "TEST-007" });
     expect(result.verified).toBe(false);
     expect(result.failure_reasons).toContain("liveness_failed");
     expect(result.failure_reasons).toContain("spoof_detected");
@@ -825,7 +851,7 @@ describe("fullVerify", () => {
 describe("sessionLogs", () => {
   it("returns empty list when no logs", async () => {
     const caller = biometricRouter.createCaller(makeCtx());
-    const result = await caller.sessionLogs({ page: 1, limit: 10 });
+    const result = await makeCaller(makeCtx(1, "admin")).sessionLogs({ page: 1, limit: 10 });
     expect(result.data).toEqual([]);
     expect(result.total).toBe(0);
   });
@@ -836,7 +862,7 @@ describe("sessionLogs", () => {
       { id: 1, sessionId: "bio-123", subjectRef: "SUBJ-001", overallVerified: true },
     ]);
     const caller = biometricRouter.createCaller(makeCtx());
-    const result = await caller.sessionLogs({ subjectRef: "SUBJ-001" });
+    const result = await makeCaller(makeCtx(1, "admin")).sessionLogs({ subjectRef: "SUBJ-001" });
     expect(result.data).toHaveLength(1);
     expect(result.data[0].subjectRef).toBe("SUBJ-001");
   });

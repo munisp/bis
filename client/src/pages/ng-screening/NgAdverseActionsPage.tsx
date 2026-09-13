@@ -1,254 +1,78 @@
-import { useState } from 'react';
-import { trpc } from '@/lib/trpc';
-import { toast } from 'sonner';
-import { Card, CardContent } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { Textarea } from '@/components/ui/textarea';
-import { Label } from '@/components/ui/label';
-import { Loader2, Gavel, AlertTriangle, CheckCircle, Clock, XCircle } from 'lucide-react';
-import { formatDistanceToNow } from 'date-fns';
+import { useState } from "react";
+import { trpc } from "@/lib/trpc";
+import { toast } from "sonner";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import { AlertTriangle, CheckCircle2, Clock3, Gavel, Loader2, PauseCircle, Send, ShieldCheck, XCircle } from "lucide-react";
+import { formatDistanceToNow } from "date-fns";
 
-const STATUS_CONFIG: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
-  pre_adverse_sent:  { label: 'Pre-Adverse Sent',  color: 'text-amber-400 bg-amber-500/10 border-amber-500/30',   icon: <AlertTriangle size={12} /> },
-  dispute_received:  { label: 'Dispute Received',  color: 'text-blue-400 bg-blue-500/10 border-blue-500/30',     icon: <Clock size={12} /> },
-  final_adverse_sent:{ label: 'Final Adverse Sent',color: 'text-red-400 bg-red-500/10 border-red-500/30',        icon: <XCircle size={12} /> },
-  withdrawn:         { label: 'Withdrawn',          color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30', icon: <CheckCircle size={12} /> },
-  cleared:           { label: 'Cleared',            color: 'text-green-400 bg-green-500/10 border-green-500/30',  icon: <CheckCircle size={12} /> },
+const statusConfig: Record<string, { label: string; className: string; icon: React.ReactNode }> = {
+  pre_notice_queued: { label: "Pre-notice queued", className: "text-amber-700 bg-amber-50 border-amber-200", icon: <Send size={13} /> },
+  pre_notice_delivered: { label: "Pre-notice delivered", className: "text-sky-700 bg-sky-50 border-sky-200", icon: <CheckCircle2 size={13} /> },
+  waiting: { label: "Waiting period", className: "text-blue-700 bg-blue-50 border-blue-200", icon: <Clock3 size={13} /> },
+  paused_for_dispute: { label: "Paused for dispute", className: "text-violet-700 bg-violet-50 border-violet-200", icon: <PauseCircle size={13} /> },
+  final_notice_queued: { label: "Final notice queued", className: "text-orange-700 bg-orange-50 border-orange-200", icon: <Send size={13} /> },
+  completed: { label: "Completed", className: "text-emerald-700 bg-emerald-50 border-emerald-200", icon: <ShieldCheck size={13} /> },
+  undeliverable: { label: "Undeliverable", className: "text-red-700 bg-red-50 border-red-200", icon: <AlertTriangle size={13} /> },
+  manual_delivery: { label: "Manual delivery required", className: "text-red-700 bg-red-50 border-red-200", icon: <AlertTriangle size={13} /> },
+  canceled: { label: "Canceled", className: "text-slate-700 bg-slate-50 border-slate-200", icon: <XCircle size={13} /> },
 };
 
-type ResolveOutcome = 'final_adverse_sent' | 'withdrawn' | 'cleared';
+const statuses = ["all", ...Object.keys(statusConfig)];
 
 export default function NgAdverseActionsPage() {
-  const [statusFilter, setStatusFilter] = useState<string>('all');
-  const [offset, setOffset] = useState(0);
-  const [selected, setSelected] = useState<any | null>(null);
-  const [resolveOutcome, setResolveOutcome] = useState<ResolveOutcome>('cleared');
-  const [resolveNote, setResolveNote] = useState('');
-  const [disputeRef, setDisputeRef] = useState<string | null>(null);
-  const [disputeNote, setDisputeNote] = useState('');
-  const LIMIT = 25;
-
+  const [status, setStatus] = useState("all");
+  const [cancelCaseRef, setCancelCaseRef] = useState<string | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
   const utils = trpc.useUtils();
-
-  const { data, isLoading } = trpc.ngScreening.adverseAction.list.useQuery({
-    status: statusFilter !== 'all' ? statusFilter : undefined,
-    limit: LIMIT,
-    offset,
-  });
-  const actions = data?.items ?? [];
-  const total = data?.total ?? 0;
-
-  const resolveMut = trpc.ngScreening.adverseAction.resolve.useMutation({
+  const cases = trpc.complianceWorkflow.list.useQuery(status === "all" ? undefined : { status });
+  const cancel = trpc.complianceWorkflow.cancel.useMutation({
     onSuccess: () => {
-      toast.success('Adverse action resolved');
-      utils.ngScreening.adverseAction.list.invalidate();
-      setSelected(null);
-      setResolveNote('');
+      toast.success("Adverse-action workflow canceled and queued deliveries invalidated.");
+      setCancelCaseRef(null);
+      setCancelReason("");
+      void utils.complianceWorkflow.list.invalidate();
     },
-    onError: (e: any) => toast.error(e.message),
-  });
-
-  const disputeMut = trpc.ngScreening.adverseAction.dispute.useMutation({
-    onSuccess: () => {
-      toast.success('Dispute recorded');
-      utils.ngScreening.adverseAction.list.invalidate();
-      setDisputeRef(null);
-      setDisputeNote('');
-    },
-    onError: (e: any) => toast.error(e.message),
+    onError: (error) => toast.error(error.message),
   });
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="space-y-6 p-6">
+      <section className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-mono font-bold text-foreground">Adverse Actions</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            NDPR-compliant pre-adverse notice, dispute period, and final adverse action workflow
-          </p>
+          <div className="mb-2 flex items-center gap-2 text-primary"><Gavel size={22} /><span className="font-mono text-xs uppercase tracking-[0.18em]">Compliance operations</span></div>
+          <h1 className="text-2xl font-semibold text-foreground">Adverse-action control queue</h1>
+          <p className="mt-1 max-w-3xl text-sm text-muted-foreground">This queue contains workflow references and statuses only. It deliberately does not display candidate PII, report content, raw provider data, or notice text.</p>
         </div>
-        <Select value={statusFilter} onValueChange={v => { setStatusFilter(v); setOffset(0); }}>
-          <SelectTrigger className="w-52 font-mono text-sm">
-            <SelectValue placeholder="All Statuses" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Statuses</SelectItem>
-            <SelectItem value="pre_adverse_sent">Pre-Adverse Sent</SelectItem>
-            <SelectItem value="dispute_received">Dispute Received</SelectItem>
-            <SelectItem value="final_adverse_sent">Final Adverse Sent</SelectItem>
-            <SelectItem value="withdrawn">Withdrawn</SelectItem>
-            <SelectItem value="cleared">Cleared</SelectItem>
-          </SelectContent>
+        <Select value={status} onValueChange={setStatus}>
+          <SelectTrigger className="w-56"><SelectValue placeholder="Filter status" /></SelectTrigger>
+          <SelectContent>{statuses.map((value) => <SelectItem key={value} value={value}>{value === "all" ? "All statuses" : statusConfig[value]?.label ?? value}</SelectItem>)}</SelectContent>
         </Select>
-      </div>
+      </section>
 
-      {isLoading ? (
-        <div className="flex items-center justify-center py-24">
-          <Loader2 size={24} className="animate-spin text-muted-foreground" />
-        </div>
-      ) : actions.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-24 text-muted-foreground">
-          <Gavel size={40} className="mb-4 opacity-30" />
-          <p className="text-sm font-mono">No adverse actions found</p>
-          <p className="text-xs mt-1">Adverse actions are initiated when a screening result requires follow-up</p>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {actions.map((row: any) => {
-            const action = row.adverse ?? row;
-            const statusKey = action.status ?? 'pre_adverse_sent';
-            const cfg = STATUS_CONFIG[statusKey] ?? STATUS_CONFIG.pre_adverse_sent;
-            const canResolve = !['final_adverse_sent','withdrawn','cleared'].includes(statusKey);
-            return (
-              <Card key={action.adverseRef ?? action.id} className="bg-card/60 border-border/50">
-                <CardContent className="pt-4 pb-3">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2">
-                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs border ${cfg.color}`}>
-                          {cfg.icon}
-                          {cfg.label}
-                        </span>
-                        <span className="text-xs font-mono text-muted-foreground">
-                          {action.adverseRef ?? `#${action.id}`}
-                        </span>
-                      </div>
-                      <p className="font-mono text-sm text-foreground">
-                        Order: <span className="text-primary">{row.orderRef ?? action.orderId}</span>
-                      </p>
-                      {(row.candidateFirstName || row.candidateLastName) && (
-                        <p className="text-xs text-muted-foreground">
-                          {row.candidateFirstName} {row.candidateLastName}
-                          {row.candidateEmail && ` · ${row.candidateEmail}`}
-                        </p>
-                      )}
-                      {action.reason && (
-                        <p className="text-xs text-muted-foreground max-w-lg">{action.reason}</p>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2 text-xs font-mono text-muted-foreground">
-                      {action.preAdverseDeadline && (
-                        <span className="text-amber-400">
-                          Deadline: {new Date(action.preAdverseDeadline).toLocaleDateString('en-NG')}
-                        </span>
-                      )}
-                      <span>{action.createdAt ? formatDistanceToNow(new Date(action.createdAt), { addSuffix: true }) : ''}</span>
-                    </div>
-                  </div>
-                  {canResolve && (
-                    <div className="flex gap-2 mt-3">
-                      <Button size="sm" variant="outline" className="h-7 text-xs"
-                        onClick={() => setSelected(action)}>
-                        Resolve
-                      </Button>
-                      {statusKey === 'pre_adverse_sent' && (
-                        <Button size="sm" variant="ghost" className="h-7 text-xs text-blue-400"
-                          onClick={() => { setDisputeRef(action.adverseRef); setDisputeNote(''); }}>
-                          Record Dispute
-                        </Button>
-                      )}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            );
-          })}
-        </div>
-      )}
+      <Card className="border-primary/20 bg-primary/5"><CardContent className="flex gap-3 pt-5 text-sm text-muted-foreground"><ShieldCheck className="mt-0.5 shrink-0 text-primary" size={18} /><p>Production activation is fail-closed: authorized staff require tenant-scoped policy approval, counsel-approved templates, active encryption keyrings, and a valid signed candidate consent. Notice dispatch remains held until an approved channel adapter is configured.</p></CardContent></Card>
 
-      {/* Pagination */}
-      {total > LIMIT && (
-        <div className="flex items-center justify-between text-sm font-mono text-muted-foreground">
-          <span>Showing {offset + 1}–{Math.min(offset + LIMIT, total)} of {total}</span>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - LIMIT))}>Previous</Button>
-            <Button variant="outline" size="sm" disabled={offset + LIMIT >= total} onClick={() => setOffset(offset + LIMIT)}>Next</Button>
-          </div>
-        </div>
-      )}
-
-      {/* Resolve dialog */}
-      <Dialog open={!!selected} onOpenChange={open => { if (!open) { setSelected(null); setResolveNote(''); } }}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="font-mono">Resolve Adverse Action</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3 py-2">
-            <p className="text-sm text-muted-foreground font-mono">
-              Under NDPR, the candidate has the right to dispute findings before a final adverse decision is issued.
-            </p>
-            <div className="space-y-1">
-              <Label className="text-xs font-mono">Outcome</Label>
-              <Select value={resolveOutcome} onValueChange={v => setResolveOutcome(v as ResolveOutcome)}>
-                <SelectTrigger className="font-mono text-sm"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="cleared">Cleared — no adverse action</SelectItem>
-                  <SelectItem value="final_adverse_sent">Final Adverse Sent</SelectItem>
-                  <SelectItem value="withdrawn">Withdrawn</SelectItem>
-                </SelectContent>
-              </Select>
+      {cases.isLoading ? <div className="flex justify-center py-24"><Loader2 className="animate-spin text-muted-foreground" /></div> : cases.data?.length ? (
+        <div className="space-y-3">{cases.data.map((item) => {
+          const config = statusConfig[item.status] ?? statusConfig.pre_notice_queued;
+          const canCancel = !["completed", "canceled"].includes(item.status);
+          return <Card key={item.case_ref} className="border-border/60"><CardContent className="pt-5">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="space-y-2"><div className="flex flex-wrap items-center gap-2"><span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium ${config.className}`}>{config.icon}{config.label}</span><code className="text-xs text-muted-foreground">{item.case_ref}</code></div>
+                <p className="text-sm text-muted-foreground">Framework: <strong className="font-medium text-foreground uppercase">{item.framework}</strong> · Jurisdiction: <strong className="font-medium text-foreground">{item.jurisdiction_code}</strong> · Wait period: <strong className="font-medium text-foreground">{item.waiting_period_days} days</strong></p>
+                {item.final_notice_eligible_at && <p className="text-xs text-muted-foreground">Final-notice eligibility: {new Date(item.final_notice_eligible_at).toLocaleString("en-NG")}</p>}</div>
+              <div className="flex items-center gap-3"><span className="text-xs text-muted-foreground">Opened {formatDistanceToNow(new Date(item.created_at), { addSuffix: true })}</span>{canCancel && <Button size="sm" variant="outline" onClick={() => setCancelCaseRef(item.case_ref)}>Cancel</Button>}</div>
             </div>
-            <div className="space-y-1">
-              <Label className="text-xs font-mono">Review Note (optional)</Label>
-              <Textarea
-                placeholder="Add a note about this resolution..."
-                value={resolveNote}
-                onChange={e => setResolveNote(e.target.value)}
-                className="font-mono text-sm resize-none"
-                rows={3}
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => { setSelected(null); setResolveNote(''); }}>Cancel</Button>
-            <Button
-              onClick={() => {
-                if (!selected?.adverseRef) return;
-                resolveMut.mutate({ adverseRef: selected.adverseRef, outcome: resolveOutcome, reviewNote: resolveNote || undefined });
-              }}
-              disabled={resolveMut.isPending}
-            >
-              {resolveMut.isPending && <Loader2 size={14} className="mr-2 animate-spin" />}
-              Confirm Resolution
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </CardContent></Card>;
+        })}</div>
+      ) : <div className="flex flex-col items-center justify-center py-24 text-center text-muted-foreground"><Gavel size={40} className="mb-4 opacity-30"/><p className="font-medium">No adverse-action workflows match this filter.</p><p className="mt-1 max-w-md text-sm">New cases are created from completed, consent-valid screening orders by authorized adjudicators.</p></div>}
 
-      {/* Dispute dialog */}
-      <Dialog open={!!disputeRef} onOpenChange={open => { if (!open) { setDisputeRef(null); setDisputeNote(''); } }}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="font-mono">Record Candidate Dispute</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3 py-2">
-            <div className="space-y-1">
-              <Label className="text-xs font-mono">Dispute Note *</Label>
-              <Textarea
-                placeholder="Summarise the candidate's dispute..."
-                value={disputeNote}
-                onChange={e => setDisputeNote(e.target.value)}
-                className="font-mono text-sm resize-none"
-                rows={4}
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => { setDisputeRef(null); setDisputeNote(''); }}>Cancel</Button>
-            <Button
-              disabled={disputeMut.isPending || disputeNote.length < 10}
-              onClick={() => {
-                if (!disputeRef) return;
-                disputeMut.mutate({ adverseRef: disputeRef, disputeNote });
-              }}
-            >
-              {disputeMut.isPending && <Loader2 size={14} className="mr-2 animate-spin" />}
-              Record Dispute
-            </Button>
-          </DialogFooter>
-        </DialogContent>
+      <Dialog open={Boolean(cancelCaseRef)} onOpenChange={(open) => { if (!open) { setCancelCaseRef(null); setCancelReason(""); } }}>
+        <DialogContent><DialogHeader><DialogTitle>Cancel adverse-action workflow</DialogTitle></DialogHeader><div className="space-y-3 py-2"><p className="text-sm text-muted-foreground">Cancellation invalidates only queued delivery work. It does not erase immutable compliance audit evidence.</p><div className="space-y-1"><Label htmlFor="cancel-reason">Reason</Label><Textarea id="cancel-reason" value={cancelReason} onChange={(event) => setCancelReason(event.target.value)} placeholder="Describe the reason for cancellation (minimum 20 characters)." rows={4}/></div></div><DialogFooter><Button variant="outline" onClick={() => setCancelCaseRef(null)}>Keep workflow</Button><Button variant="destructive" disabled={cancelReason.trim().length < 20 || cancel.isPending} onClick={() => { if (cancelCaseRef) cancel.mutate({ caseRef: cancelCaseRef, reason: cancelReason.trim() }); }}>{cancel.isPending && <Loader2 className="mr-2 animate-spin" size={14}/>}Cancel workflow</Button></DialogFooter></DialogContent>
       </Dialog>
     </div>
   );

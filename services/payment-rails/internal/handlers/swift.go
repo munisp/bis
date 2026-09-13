@@ -3,10 +3,12 @@ package handlers
 import (
 	"bytes"
 	"context"
+	cryptorand "crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"math/rand"
 	"net/http"
+	"os"
 	"time"
 
 	"bis/payment-rails/internal/models"
@@ -86,8 +88,8 @@ func (h *SWIFTHandler) HandleMT103(w http.ResponseWriter, r *http.Request) {
 	}
 	screenResp, err := h.screenAML(r.Context(), screenReq)
 	if err != nil {
-		// AML engine unavailable — log and continue with manual review flag
-		screenResp = &models.AMLScreenResponse{RiskScore: 0, RiskLevel: "unknown", Blocked: false}
+		writeError(w, http.StatusServiceUnavailable, "AML screening is unavailable; transaction was not accepted")
+		return
 	}
 
 	if screenResp.Blocked {
@@ -102,7 +104,10 @@ func (h *SWIFTHandler) HandleMT103(w http.ResponseWriter, r *http.Request) {
 			RiskLevel:      screenResp.RiskLevel,
 			Timestamp:      time.Now().UTC(),
 		}
-		h.publishEvent(r.Context(), "payment-events", event)
+		if err := h.publishEvent(r.Context(), "payment-events", event); err != nil {
+			writeError(w, http.StatusServiceUnavailable, "blocked transaction could not be durably recorded")
+			return
+		}
 		writeError(w, http.StatusForbidden, "transaction blocked by AML screening")
 		return
 	}
@@ -123,7 +128,10 @@ func (h *SWIFTHandler) HandleMT103(w http.ResponseWriter, r *http.Request) {
 		RiskLevel:      screenResp.RiskLevel,
 		Timestamp:      time.Now().UTC(),
 	}
-	h.publishEvent(r.Context(), "payment-events", event)
+	if err := h.publishEvent(r.Context(), "payment-events", event); err != nil {
+		writeError(w, http.StatusServiceUnavailable, "payment event could not be durably recorded")
+		return
+	}
 
 	writeJSON(w, http.StatusAccepted, map[string]interface{}{
 		"uetr":           req.UETR,
@@ -165,7 +173,10 @@ func (h *SWIFTHandler) HandleMT202(w http.ResponseWriter, r *http.Request) {
 		Status:         "accepted",
 		Timestamp:      time.Now().UTC(),
 	}
-	h.publishEvent(r.Context(), "payment-events", event)
+	if err := h.publishEvent(r.Context(), "payment-events", event); err != nil {
+		writeError(w, http.StatusServiceUnavailable, "payment event could not be durably recorded")
+		return
+	}
 
 	writeJSON(w, http.StatusAccepted, map[string]interface{}{
 		"uetr":           req.UETR,
@@ -175,162 +186,98 @@ func (h *SWIFTHandler) HandleMT202(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GET /api/swift/gpi/:uetr — GPI tracker
-// Calls the real SWIFT GPI API when SWIFT_GPI_URL is configured; falls back to
-// a synthetic response derived from the UETR checksum for local/sandbox environments.
+// GET /api/swift/gpi/:uetr — GPI tracker.
+// The endpoint returns only a response received from the configured SWIFT GPI provider.
 func (h *SWIFTHandler) HandleGPITrack(w http.ResponseWriter, r *http.Request) {
 	uetr := r.PathValue("uetr")
 	if uetr == "" {
 		writeError(w, http.StatusBadRequest, "uetr is required")
 		return
 	}
-
-	// Attempt live SWIFT GPI API call when configured
-	if h.swiftGPIURL != "" {
-		apiURL := fmt.Sprintf("%s/transactions/%s", h.swiftGPIURL, uetr)
-		req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, apiURL, nil)
-		if err == nil {
-			req.Header.Set("Accept", "application/json")
-			req.Header.Set("X-BIC", h.swiftBIC)
-			resp, err := h.httpClient.Do(req)
-			if err == nil && resp.StatusCode == http.StatusOK {
-				defer resp.Body.Close()
-				var gpiResp map[string]interface{}
-				if err := json.NewDecoder(resp.Body).Decode(&gpiResp); err == nil {
-					writeJSON(w, http.StatusOK, gpiResp)
-					return
-				}
-			}
-		}
+	if h.swiftGPIURL == "" || h.swiftBIC == "" {
+		writeError(w, http.StatusServiceUnavailable, "SWIFT GPI integration is not configured")
+		return
 	}
-
-	// Fallback: derive a deterministic synthetic response from the UETR.
-	// The UETR is a UUID v4; use its last byte to simulate different terminal states
-	// so test environments get varied but reproducible results.
-	var finalStatus string
-	var trackerEvents []map[string]interface{}
-	if len(uetr) >= 2 {
-		lastByte := uetr[len(uetr)-1]
-		switch {
-		case lastByte < '5': // ~31% — completed
-			finalStatus = "ACCC"
-			trackerEvents = []map[string]interface{}{
-				{"timestamp": time.Now().Add(-3 * time.Hour).UTC(), "status": "ACTC", "agent": h.bic()},
-				{"timestamp": time.Now().Add(-2 * time.Hour).UTC(), "status": "ACSP", "agent": "DEUTDEDB"},
-				{"timestamp": time.Now().Add(-30 * time.Minute).UTC(), "status": "ACCC", "agent": "BARCGB22"},
-			}
-		case lastByte < 'a': // ~31% — in-process
-			finalStatus = "ACSP"
-			trackerEvents = []map[string]interface{}{
-				{"timestamp": time.Now().Add(-90 * time.Minute).UTC(), "status": "ACTC", "agent": h.bic()},
-				{"timestamp": time.Now().Add(-45 * time.Minute).UTC(), "status": "ACSP", "agent": "BNPAFRPP"},
-			}
-		default: // ~38% — pending
-			finalStatus = "ACTC"
-			trackerEvents = []map[string]interface{}{
-				{"timestamp": time.Now().Add(-15 * time.Minute).UTC(), "status": "ACTC", "agent": h.bic()},
-			}
-		}
-	} else {
-		finalStatus = "ACCC"
-		trackerEvents = []map[string]interface{}{
-			{"timestamp": time.Now().Add(-1 * time.Hour).UTC(), "status": "ACCC", "agent": h.bic()},
-		}
+	apiURL := fmt.Sprintf("%s/transactions/%s", h.swiftGPIURL, uetr)
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, apiURL, nil)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "unable to create SWIFT GPI request")
+		return
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"uetr":          uetr,
-		"status":        finalStatus,
-		"trackerEvents": trackerEvents,
-		"source":        "synthetic",
-	})
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("X-BIC", h.swiftBIC)
+	resp, err := h.httpClient.Do(req)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "SWIFT GPI service is unavailable")
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		writeError(w, http.StatusBadGateway, fmt.Sprintf("SWIFT GPI returned HTTP %d", resp.StatusCode))
+		return
+	}
+	var gpiResp map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&gpiResp); err != nil {
+		writeError(w, http.StatusBadGateway, "invalid SWIFT GPI response")
+		return
+	}
+	writeJSON(w, http.StatusOK, gpiResp)
 }
 
 func (h *SWIFTHandler) bic() string {
-	if h.swiftBIC != "" {
-		return h.swiftBIC
-	}
-	return "BISNGLA1XXX"
+	return h.swiftBIC
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-// screenAML calls the BIS AML Engine's /screen endpoint.
-// If the engine is unreachable it falls back to conservative inline scoring
-// so that payment processing is not blocked by an AML service outage.
+// screenAML calls the authenticated BIS AML Engine. An unavailable or malformed
+// AML result rejects the payment path rather than producing an unscreened decision.
 func (h *SWIFTHandler) screenAML(ctx context.Context, req models.AMLScreenRequest) (*models.AMLScreenResponse, error) {
+	if h.amlURL == "" {
+		return nil, fmt.Errorf("AML_ENGINE_URL is not configured")
+	}
+	amlKey := os.Getenv("BIS_AML_ENGINE_KEY")
+	if amlKey == "" {
+		return nil, fmt.Errorf("BIS_AML_ENGINE_KEY is not configured")
+	}
 	body, err := json.Marshal(req)
 	if err != nil {
-		return h.screenAMLFallback(req), nil
+		return nil, fmt.Errorf("marshal AML request: %w", err)
 	}
-
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, h.amlURL+"/screen", bytes.NewReader(body))
 	if err != nil {
-		return h.screenAMLFallback(req), nil
+		return nil, fmt.Errorf("create AML request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-
+	httpReq.Header.Set("X-BIS-Key", amlKey)
 	client := &http.Client{Timeout: 5 * time.Second}
 	httpResp, err := client.Do(httpReq)
 	if err != nil {
-		// AML engine unreachable — use fallback to avoid blocking payments
-		return h.screenAMLFallback(req), nil
+		return nil, fmt.Errorf("AML request: %w", err)
 	}
 	defer httpResp.Body.Close()
-
 	if httpResp.StatusCode != http.StatusOK {
-		return h.screenAMLFallback(req), nil
+		return nil, fmt.Errorf("AML returned HTTP %d", httpResp.StatusCode)
 	}
-
 	var resp models.AMLScreenResponse
 	if err := json.NewDecoder(httpResp.Body).Decode(&resp); err != nil {
-		return h.screenAMLFallback(req), nil
+		return nil, fmt.Errorf("decode AML response: %w", err)
 	}
 	return &resp, nil
 }
 
-// screenAMLFallback provides conservative inline scoring when the AML engine is unavailable.
-// This mirrors the Rust engine's core rules to ensure critical checks still run.
-func (h *SWIFTHandler) screenAMLFallback(req models.AMLScreenRequest) *models.AMLScreenResponse {
-	resp := &models.AMLScreenResponse{
-		RiskScore: 0,
-		RiskLevel: "low",
-		Flags:     []string{"aml_engine_fallback"},
-		Blocked:   false,
-	}
-	highRisk := map[string]bool{
-		"KP": true, "IR": true, "SY": true, "RU": true, "MM": true,
-		"AF": true, "BY": true, "CU": true, "VE": true, "YE": true,
-	}
-	if highRisk[req.OriginatorCountry] || highRisk[req.BeneficiaryCountry] {
-		resp.RiskScore = 75
-		resp.RiskLevel = "high"
-		resp.Flags = append(resp.Flags, "high_risk_country")
-	}
-	if req.Amount > 1_000_000 && req.Currency == "USD" {
-		resp.RiskScore += 20
-		resp.Flags = append(resp.Flags, "large_value_transfer")
-	}
-	if req.Amount > 9_000 && req.Amount < 10_000 && req.Currency == "USD" {
-		resp.RiskScore += 25
-		resp.Flags = append(resp.Flags, "potential_structuring")
-	}
-	if resp.RiskScore >= 100 {
-		resp.Blocked = true
-		resp.RiskLevel = "critical"
-	} else if resp.RiskScore >= 75 {
-		resp.RiskLevel = "high"
-	} else if resp.RiskScore >= 50 {
-		resp.RiskLevel = "medium"
-	}
-	return resp
-}
-
-func (h *SWIFTHandler) publishEvent(ctx context.Context, topic string, event models.PaymentEvent) {
+func (h *SWIFTHandler) publishEvent(ctx context.Context, topic string, event models.PaymentEvent) error {
 	if h.kafka == nil {
-		return
+		return fmt.Errorf("Kafka publisher is not configured")
 	}
-	data, _ := json.Marshal(event)
-	_ = h.kafka.Publish(ctx, topic, event.TransactionRef, data)
+	data, err := json.Marshal(event)
+	if err != nil {
+		return fmt.Errorf("marshal payment event: %w", err)
+	}
+	if err := h.kafka.Publish(ctx, topic, event.TransactionRef, data); err != nil {
+		return fmt.Errorf("publish payment event: %w", err)
+	}
+	return nil
 }
 
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
@@ -344,10 +291,9 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 }
 
 func randHex(n int) string {
-	const chars = "0123456789ABCDEF"
 	b := make([]byte, n)
-	for i := range b {
-		b[i] = chars[rand.Intn(len(chars))]
+	if _, err := cryptorand.Read(b); err != nil {
+		panic(fmt.Sprintf("secure random generation failed: %v", err))
 	}
-	return string(b)
+	return hex.EncodeToString(b)
 }

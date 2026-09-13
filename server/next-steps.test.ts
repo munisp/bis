@@ -1505,8 +1505,8 @@ describe("tenants.update", () => {
 });
 
 describe("biometric.list", () => {
-  it("returns data array and total for authenticated user", async () => {
-    const caller = appRouter.createCaller(createUserCtx());
+  it("returns data array and total for an administrative reviewer", async () => {
+    const caller = appRouter.createCaller(createAdminCtx());
     // biometric.list takes page/limit (not limit/offset) and returns { data, total }
     const result = await caller.biometric.list({ page: 1, limit: 10 });
     expect(result).toHaveProperty("data");

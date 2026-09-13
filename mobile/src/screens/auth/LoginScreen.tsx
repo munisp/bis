@@ -17,9 +17,29 @@ import {
 import { useDispatch } from 'react-redux';
 import ReactNativeBiometrics from 'react-native-biometrics';
 import { setCredentials } from '../../store';
-import { authApi, setStoredToken, getStoredToken } from '../../services/api';
+import { authApi, setStoredToken } from '../../services/api';
 
 const rnBiometrics = new ReactNativeBiometrics({ allowDeviceCredentials: true });
+
+const MOBILE_ROLES = ['admin', 'analyst', 'field_agent', 'compliance_officer'] as const;
+type MobileRole = (typeof MOBILE_ROLES)[number];
+type MobileAuthUser = { id: string; name: string; email: string; role: MobileRole; agencyCode?: string };
+
+function normalizeUser(value: Record<string, unknown>): MobileAuthUser {
+  const id = typeof value.id === 'string' || typeof value.id === 'number' ? String(value.id) : '';
+  const name = typeof value.name === 'string' ? value.name.trim() : '';
+  const email = typeof value.email === 'string' ? value.email.trim() : '';
+  const role = typeof value.role === 'string' && (MOBILE_ROLES as readonly string[]).includes(value.role) ? value.role as MobileRole : null;
+  if (!id || !name || !email || !role) {
+    throw new Error('The authentication response did not contain a valid mobile user identity');
+  }
+  const agencyCode = typeof value.agencyCode === 'string' && value.agencyCode.trim() ? value.agencyCode.trim() : undefined;
+  return { id, name, email, role, agencyCode };
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
 
 export function LoginScreen() {
   const dispatch = useDispatch();
@@ -35,10 +55,11 @@ export function LoginScreen() {
     setLoading(true);
     try {
       const result = await authApi.login(email, password);
-      setStoredToken(result.token);
-      dispatch(setCredentials({ user: result.user as any, token: result.token }));
-    } catch (err: any) {
-      Alert.alert('Login Failed', err.message ?? 'Invalid credentials');
+      const user = normalizeUser(result.user);
+      await setStoredToken(result.token);
+      dispatch(setCredentials({ user, token: result.token }));
+    } catch (error: unknown) {
+      Alert.alert('Login Failed', errorMessage(error, 'Invalid credentials'));
     } finally {
       setLoading(false);
     }
@@ -60,11 +81,12 @@ export function LoginScreen() {
       if (success && signature) {
         setLoading(true);
         const result = await authApi.biometricLogin('bis-login-challenge', signature);
-        setStoredToken(result.token);
-        dispatch(setCredentials({ user: result.user as any, token: result.token }));
+        const user = normalizeUser(result.user);
+        await setStoredToken(result.token);
+        dispatch(setCredentials({ user, token: result.token }));
       }
-    } catch (err: any) {
-      Alert.alert('Biometric Error', err.message ?? 'Biometric authentication failed');
+    } catch (error: unknown) {
+      Alert.alert('Biometric Error', errorMessage(error, 'Biometric authentication failed'));
     } finally {
       setLoading(false);
     }

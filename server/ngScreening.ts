@@ -87,12 +87,16 @@ async function publishScreeningEvent(
   }
 }
 
+type ProviderVerificationResult =
+  | { success: true; data: unknown; status: number }
+  | { success: false; code: "provider_not_configured" | "provider_timeout" | "provider_transport_error" | "provider_protocol_error" | "provider_rejected" | "provider_rate_limited" | "provider_unavailable"; retryable: boolean; status?: number; data?: undefined };
+
 async function callVerifyApi(
   url: string | undefined,
   key: string | undefined,
-  body: unknown
-): Promise<{ success: boolean; data?: unknown; error?: string }> {
-  if (!url || !key) return { success: false, error: "API not configured" };
+  body: unknown,
+): Promise<ProviderVerificationResult> {
+  if (!url || !key) return { success: false, code: "provider_not_configured", retryable: false };
   try {
     const res = await fetch(url, {
       method: "POST",
@@ -101,12 +105,22 @@ async function callVerifyApi(
         Authorization: `Bearer ${key}`,
       },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(8_000),
     });
-    const data = await res.json();
-    if (!res.ok) return { success: false, error: data?.message ?? `HTTP ${res.status}` };
-    return { success: true, data };
-  } catch (e: any) {
-    return { success: false, error: e.message };
+    const contentType = res.headers.get("content-type") ?? "";
+    const data = contentType.includes("application/json") ? await res.json().catch(() => undefined) : undefined;
+    if (!res.ok) {
+      if (res.status === 429) return { success: false, code: "provider_rate_limited", retryable: true, status: res.status };
+      if (res.status >= 500) return { success: false, code: "provider_unavailable", retryable: true, status: res.status };
+      return { success: false, code: "provider_rejected", retryable: false, status: res.status };
+    }
+    if (data === undefined) return { success: false, code: "provider_protocol_error", retryable: false, status: res.status };
+    return { success: true, data, status: res.status };
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "TimeoutError") {
+      return { success: false, code: "provider_timeout", retryable: true };
+    }
+    return { success: false, code: "provider_transport_error", retryable: true };
   }
 }
 
@@ -465,34 +479,34 @@ const executeRouter = router({
         .where(and(eq(screeningOrders.orderRef, input.orderRef), eq(screeningOrders.tenantId, ctx.tenantId!))).limit(1);
       if (!order) throw new TRPCError({ code: "NOT_FOUND" });
 
-      // Call NIMC/YouVerify API
+      if (ENV.isProduction) {
+        throw new TRPCError({
+          code: "SERVICE_UNAVAILABLE",
+          message: "NIMC verification requires an approved contract-versioned NINAuth or NVS adapter before production enablement.",
+        });
+      }
       const apiResult = await callVerifyApi(
         ENV.bisVerifyNimcUrl,
         ENV.bisVerifyNimcKey,
-        { nin: input.nin, firstName: input.firstName, lastName: input.lastName, dob: input.dob }
+        { nin: input.nin, firstName: input.firstName, lastName: input.lastName, dob: input.dob },
       );
-
-      const outcome = apiResult.success ? "clear" : "consider";
-      await db.update(screeningResults)
-        .set({
-          status: "completed",
-          outcome: outcome as any,
-          rawResult: apiResult.data as any,
-          summary: apiResult.success
-            ? `NIN verified: ${input.nin.slice(0, 3)}***${input.nin.slice(-3)}`
-            : `NIN verification failed: ${apiResult.error}`,
-          completedAt: new Date(),
+      if (!apiResult.success) {
+        await db.update(screeningResults).set({
+          status: apiResult.retryable ? "processing" : "review",
+          rawResult: { provider: "nimc", code: apiResult.code, retryable: apiResult.retryable } as any,
+          summary: "NIMC verification is pending provider or compliance review; no identity conclusion was made.",
           updatedAt: new Date(),
-        })
-        .where(and(
-          eq(screeningResults.orderId, order.id),
-          eq(screeningResults.screeningType, "nin_trace")
-        ));
-
-      await publishScreeningEvent(input.orderRef, "SCREENING_RESULT_UPDATED", {
-        orderRef: input.orderRef, type: "nin_trace", outcome,
-      });
-      return { outcome, success: apiResult.success };
+        }).where(and(eq(screeningResults.orderId, order.id), eq(screeningResults.screeningType, "nin_trace")));
+        throw new TRPCError({ code: apiResult.retryable ? "SERVICE_UNAVAILABLE" : "PRECONDITION_FAILED", message: "NIMC verification could not be completed; no verification conclusion was recorded." });
+      }
+      await db.update(screeningResults).set({
+        status: "review",
+        outcome: "consider" as any,
+        rawResult: apiResult.data as any,
+        summary: "NIMC response received; contract-specific claim validation and authorised reviewer disposition are required.",
+        updatedAt: new Date(),
+      }).where(and(eq(screeningResults.orderId, order.id), eq(screeningResults.screeningType, "nin_trace")));
+      return { outcome: "consider" as const, success: true, requiresManualReview: true };
     }),
 
   /**
@@ -513,25 +527,34 @@ const executeRouter = router({
         .where(and(eq(screeningOrders.orderRef, input.orderRef), eq(screeningOrders.tenantId, ctx.tenantId!))).limit(1);
       if (!order) throw new TRPCError({ code: "NOT_FOUND" });
 
+      if (ENV.isProduction) {
+        throw new TRPCError({
+          code: "SERVICE_UNAVAILABLE",
+          message: "NIBSS BVN verification requires an approved retrieval-token and contract-versioned adapter before production enablement.",
+        });
+      }
       const apiResult = await callVerifyApi(
         ENV.bisVerifyNibssUrl,
         ENV.bisVerifyNibssKey,
-        { bvn: input.bvn, firstName: input.firstName, lastName: input.lastName }
+        { bvn: input.bvn, firstName: input.firstName, lastName: input.lastName },
       );
-
-      const outcome = apiResult.success ? "clear" : "consider";
-      await db.update(screeningResults)
-        .set({
-          status: "completed",
-          outcome: outcome as any,
-          rawResult: apiResult.data as any,
-          summary: apiResult.success ? "BVN verified with NIBSS" : `BVN check failed: ${apiResult.error}`,
-          completedAt: new Date(),
+      if (!apiResult.success) {
+        await db.update(screeningResults).set({
+          status: apiResult.retryable ? "processing" : "review",
+          rawResult: { provider: "nibss", code: apiResult.code, retryable: apiResult.retryable } as any,
+          summary: "NIBSS BVN verification is pending provider or compliance review; no verification conclusion was made.",
           updatedAt: new Date(),
-        })
-        .where(and(eq(screeningResults.orderId, order.id), eq(screeningResults.screeningType, "bvn_fraud_check")));
-
-      return { outcome, success: apiResult.success };
+        }).where(and(eq(screeningResults.orderId, order.id), eq(screeningResults.screeningType, "bvn_fraud_check")));
+        throw new TRPCError({ code: apiResult.retryable ? "SERVICE_UNAVAILABLE" : "PRECONDITION_FAILED", message: "NIBSS verification could not be completed; no verification conclusion was recorded." });
+      }
+      await db.update(screeningResults).set({
+        status: "review",
+        outcome: "consider" as any,
+        rawResult: apiResult.data as any,
+        summary: "NIBSS response received; retrieval-token, contract, and authorised reviewer validation are required.",
+        updatedAt: new Date(),
+      }).where(and(eq(screeningResults.orderId, order.id), eq(screeningResults.screeningType, "bvn_fraud_check")));
+      return { outcome: "consider" as const, success: true, requiresManualReview: true };
     }),
 
   /**

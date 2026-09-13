@@ -9,37 +9,130 @@
 
 use crate::{AuditEntry, EventType, Severity, Subscription};
 use chrono::{DateTime, Utc};
-use deadpool_postgres::{Config as PoolConfig, Pool, Runtime};
+use deadpool_postgres::{ChannelBinding, Config as PoolConfig, Pool, Runtime, SslMode};
+use rustls::{
+    pki_types::{
+        CertificateDer, PrivateKeyDer, PrivatePkcs1KeyDer, PrivatePkcs8KeyDer, PrivateSec1KeyDer,
+    },
+    ClientConfig, RootCertStore,
+};
 use serde_json;
-use std::env;
-use tokio_postgres::NoTls;
+use std::{env, fs, time::Duration};
+use tokio_postgres_rustls::MakeRustlsConnect;
 use tracing::{error, info, warn};
 
 // ─── Pool bootstrap ───────────────────────────────────────────────────────────
 
-/// Build a connection pool from DATABASE_URL.
-/// Returns None when DATABASE_URL is absent (dev / test mode).
-pub async fn build_pool() -> Option<Pool> {
+/// Build a PostgreSQL pool with mandatory TLS, CA validation, client identity,
+/// and channel binding whenever `DATABASE_URL` is configured.
+///
+/// A development process may omit the database only when
+/// `BIS_EVENT_PROCESSOR_REQUIRE_DATABASE` is not explicitly set to `true`.
+pub async fn build_pool() -> Result<Option<Pool>, String> {
     let dsn = match env::var("DATABASE_URL") {
-        Ok(v) if !v.is_empty() => v,
+        Ok(value) if !value.trim().is_empty() => value,
+        _ if require_database() => {
+            return Err(
+                "DATABASE_URL must be configured when durable persistence is required".to_string(),
+            )
+        }
         _ => {
             warn!("DATABASE_URL not set — event-processor running without DB persistence");
-            return None;
+            return Ok(None);
         }
     };
 
     let mut cfg = PoolConfig::new();
     cfg.url = Some(dsn);
+    cfg.ssl_mode = Some(SslMode::Require);
+    cfg.channel_binding = Some(ChannelBinding::Require);
+    cfg.connect_timeout = Some(Duration::from_secs(5));
 
-    match cfg.create_pool(Some(Runtime::Tokio1), NoTls) {
-        Ok(pool) => {
-            info!("PostgreSQL pool created for event-processor");
-            Some(pool)
-        }
-        Err(e) => {
-            error!("Failed to create PostgreSQL pool: {e}");
-            None
-        }
+    let tls = postgres_tls_connector()?;
+    cfg.create_pool(Some(Runtime::Tokio1), tls)
+        .map(Some)
+        .map_err(|_| "PostgreSQL TLS pool could not be initialized".to_string())
+}
+
+fn require_database() -> bool {
+    matches!(
+        env::var("BIS_EVENT_PROCESSOR_REQUIRE_DATABASE").as_deref(),
+        Ok("true") | Ok("TRUE") | Ok("1")
+    )
+}
+
+fn required_tls_path(variable: &str) -> Result<String, String> {
+    match env::var(variable) {
+        Ok(value) if !value.trim().is_empty() => Ok(value),
+        _ => Err(format!("{variable} must be configured for PostgreSQL TLS")),
+    }
+}
+
+fn postgres_tls_connector() -> Result<MakeRustlsConnect, String> {
+    let ca_path = required_tls_path("BIS_EVENT_POSTGRES_TLS_CA_PEM_FILE")?;
+    let cert_path = required_tls_path("BIS_EVENT_POSTGRES_TLS_CLIENT_CERT_PEM_FILE")?;
+    let key_path = required_tls_path("BIS_EVENT_POSTGRES_TLS_CLIENT_KEY_PEM_FILE")?;
+
+    let ca_pem =
+        fs::read(ca_path).map_err(|_| "PostgreSQL TLS CA file could not be read".to_string())?;
+    let cert_pem = fs::read(cert_path)
+        .map_err(|_| "PostgreSQL TLS client certificate could not be read".to_string())?;
+    let key_pem = fs::read(key_path)
+        .map_err(|_| "PostgreSQL TLS client key could not be read".to_string())?;
+
+    let mut roots = RootCertStore::empty();
+    for certificate in pem_certificates(&ca_pem, "PostgreSQL TLS CA PEM")? {
+        roots
+            .add(certificate)
+            .map_err(|_| "PostgreSQL TLS CA certificate is invalid".to_string())?;
+    }
+    if roots.is_empty() {
+        return Err("PostgreSQL TLS CA PEM contains no certificates".to_string());
+    }
+
+    let client_certificates = pem_certificates(&cert_pem, "PostgreSQL TLS client certificate PEM")?;
+    if client_certificates.is_empty() {
+        return Err("PostgreSQL TLS client certificate PEM contains no certificates".to_string());
+    }
+    let client_key = pem_private_key(&key_pem)?;
+
+    let config = ClientConfig::builder()
+        .with_root_certificates(roots)
+        .with_client_auth_cert(client_certificates, client_key)
+        .map_err(|_| "PostgreSQL TLS client identity is invalid".to_string())?;
+    Ok(MakeRustlsConnect::new(config))
+}
+
+fn pem_certificates(bytes: &[u8], label: &str) -> Result<Vec<CertificateDer<'static>>, String> {
+    let certificates = pem::parse_many(bytes)
+        .map_err(|_| format!("{label} is invalid"))?
+        .into_iter()
+        .filter(|entry| entry.tag() == "CERTIFICATE")
+        .map(|entry| CertificateDer::from(entry.into_contents()))
+        .collect::<Vec<_>>();
+    Ok(certificates)
+}
+
+fn pem_private_key(bytes: &[u8]) -> Result<PrivateKeyDer<'static>, String> {
+    let entry = pem::parse_many(bytes)
+        .map_err(|_| "PostgreSQL TLS client key PEM is invalid".to_string())?
+        .into_iter()
+        .find(|entry| {
+            matches!(
+                entry.tag(),
+                "PRIVATE KEY" | "RSA PRIVATE KEY" | "EC PRIVATE KEY"
+            )
+        })
+        .ok_or_else(|| {
+            "PostgreSQL TLS client key PEM contains no supported private key".to_string()
+        })?;
+    let tag = entry.tag().to_owned();
+    let contents = entry.into_contents();
+    match tag.as_str() {
+        "PRIVATE KEY" => Ok(PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(contents))),
+        "RSA PRIVATE KEY" => Ok(PrivateKeyDer::Pkcs1(PrivatePkcs1KeyDer::from(contents))),
+        "EC PRIVATE KEY" => Ok(PrivateKeyDer::Sec1(PrivateSec1KeyDer::from(contents))),
+        _ => Err("PostgreSQL TLS client key PEM contains no supported private key".to_string()),
     }
 }
 
@@ -172,8 +265,7 @@ pub async fn fetch_recent_audit(pool: &Pool, limit: i64) -> Vec<AuditEntry> {
             let severity_str: String = row.get("severity");
             let event_type: EventType =
                 serde_json::from_str(&format!("\"{}\"", event_type_str)).ok()?;
-            let severity: Severity =
-                serde_json::from_str(&format!("\"{}\"", severity_str)).ok()?;
+            let severity: Severity = serde_json::from_str(&format!("\"{}\"", severity_str)).ok()?;
             let written_at: DateTime<Utc> = row.get("written_at");
             let processing_ns: i64 = row.get("processing_ns");
             Some(AuditEntry {
@@ -294,8 +386,7 @@ pub async fn load_subscriptions(pool: &Pool) -> Vec<Subscription> {
     rows.iter()
         .filter_map(|row| {
             let event_types_json: serde_json::Value = row.get("event_types");
-            let event_types: Vec<EventType> =
-                serde_json::from_value(event_types_json).ok()?;
+            let event_types: Vec<EventType> = serde_json::from_value(event_types_json).ok()?;
             let severity_str: String = row.get("min_severity");
             let min_severity: Severity =
                 serde_json::from_str(&format!("\"{}\"", severity_str)).ok()?;

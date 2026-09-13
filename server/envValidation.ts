@@ -293,6 +293,90 @@ const ENV_SPECS: EnvSpec[] = [
     defaultValue: "redis://redis:6379",
     description: "Redis connection URL for session store, rate limiting, and cache",
   },
+  // ── Compliance / PII envelope encryption ──────────────────────────────────
+  {
+    key: "BIS_COMPLIANCE_ADVERSE_ACTION_ENABLED",
+    required: false,
+    secret: false,
+    defaultValue: "false",
+    description: "Set to 'true' only after counsel approval and compliance delivery readiness have been recorded",
+  },
+  {
+    key: "BIS_PII_KEY_CUSTODY_ENABLED",
+    required: false,
+    secret: false,
+    defaultValue: "false",
+    description: "Set to true only after security approval for Vault Transit key registration, compromise containment, and rotation operations",
+  },
+  {
+    key: "BIS_PII_CRYPTO_PROVIDER",
+    required: false,
+    secret: false,
+    defaultValue: "disabled",
+    description: "Set to vault_transit only after tenant registries and Vault Transit policy have been provisioned",
+  },
+  {
+    key: "BIS_VAULT_TRANSIT_ADDR",
+    required: false,
+    secret: false,
+    description: "HTTPS address of the approved HashiCorp Vault Transit service",
+  },
+  {
+    key: "BIS_VAULT_TRANSIT_TOKEN",
+    required: false,
+    secret: true,
+    description: "Short-lived Vault workload token with only tenant Transit encrypt, decrypt, HMAC, and rewrap capabilities",
+  },
+  {
+    key: "BIS_VAULT_TRANSIT_MOUNT",
+    required: false,
+    secret: false,
+    description: "Approved Vault Transit mount path",
+  },
+  {
+    key: "BIS_VAULT_TRANSIT_NAMESPACE",
+    required: false,
+    secret: false,
+    description: "Optional Vault Enterprise namespace",
+  },
+  {
+    key: "BIS_VAULT_TRANSIT_TIMEOUT_MS",
+    required: false,
+    secret: false,
+    defaultValue: "5000",
+    description: "Fail-closed Vault Transit request timeout in milliseconds",
+  },
+  {
+    key: "BIS_PII_FORENSIC_CURSOR_TTL_SECONDS",
+    required: false,
+    secret: false,
+    defaultValue: "900",
+    description: "Forensic audit cursor lifetime in seconds; must be an integer from 60 through 3600",
+  },
+  {
+    key: "BIS_PII_FORENSIC_CURSOR_KEYRING",
+    required: false,
+    secret: true,
+    description: "Versioned 256-bit Base64URL cursor-signing keyring; retain retiring keys only through the maximum cursor lifetime",
+  },
+  {
+    key: "BIS_PII_FORENSIC_CURSOR_ACTIVE_KEY_VERSION",
+    required: false,
+    secret: false,
+    description: "Version identifier of the active forensic cursor-signing key",
+  },
+  {
+    key: "BIS_PII_FORENSIC_CURSOR_KEY_EXPIRIES_JSON",
+    required: false,
+    secret: false,
+    description: "Optional JSON object mapping retired cursor-signing key versions to bounded ISO-8601 expiry timestamps",
+  },
+  {
+    key: "BIS_PII_LEGACY_CUTOVER_KEYRING",
+    required: false,
+    secret: true,
+    description: "Temporary one-time legacy keyring available only to an explicitly confirmed migration cutover worker",
+  },
   // ── SMTP / Email ──────────────────────────────────────────────────────────
   {
     key: "SMTP_HOST",
@@ -391,6 +475,62 @@ export function validateEnv(): void {
       ? "BUILT_IN_FORGE_API_KEY fallback must be at least 20 characters in production"
       : "BIS_SESSION_SIGNING_SECRET (or JWT_SECRET fallback) must be at least 32 characters in production";
     errors.push(`WEAK SESSION SIGNING SECRET: ${requirement}`);
+  }
+
+  const complianceOrKeyCustodyEnabled = process.env.BIS_COMPLIANCE_ADVERSE_ACTION_ENABLED === "true" || process.env.BIS_PII_KEY_CUSTODY_ENABLED === "true";
+  if (isProduction && complianceOrKeyCustodyEnabled) {
+    const requiredComplianceSettings = [
+      "BIS_PII_CRYPTO_PROVIDER",
+      "BIS_VAULT_TRANSIT_ADDR",
+      "BIS_VAULT_TRANSIT_TOKEN",
+      "BIS_VAULT_TRANSIT_MOUNT",
+      "AUDIT_HMAC_SECRET",
+      "BIS_PII_FORENSIC_CURSOR_KEYRING",
+      "BIS_PII_FORENSIC_CURSOR_ACTIVE_KEY_VERSION",
+      "PERMIFY_URL",
+      "PERMIFY_TENANT_ID",
+      "PERMIFY_API_KEY",
+    ];
+    for (const key of requiredComplianceSettings) {
+      if (!process.env[key]?.trim()) errors.push(`MISSING COMPLIANCE ACTIVATION SETTING: ${key}`);
+    }
+    if (process.env.BIS_PII_CRYPTO_PROVIDER !== "vault_transit") {
+      errors.push("INSECURE PII ACTIVATION: BIS_PII_CRYPTO_PROVIDER must be vault_transit");
+    }
+    if (process.env.BIS_PII_KEYRING || process.env.BIS_PII_BLIND_INDEX_KEYRING) {
+      errors.push("INSECURE PII ACTIVATION: local PII keyring variables must be absent when Vault Transit is enabled");
+    }
+    if (process.env.BIS_VAULT_TRANSIT_ADDR && !process.env.BIS_VAULT_TRANSIT_ADDR.startsWith("https://")) {
+      errors.push("INSECURE PII ACTIVATION: Vault Transit must use HTTPS");
+    }
+    const cursorTtl = process.env.BIS_PII_FORENSIC_CURSOR_TTL_SECONDS ?? "";
+    if (!/^[0-9]+$/.test(cursorTtl) || Number(cursorTtl) < 60 || Number(cursorTtl) > 3600) {
+      errors.push("INSECURE PII ACTIVATION: BIS_PII_FORENSIC_CURSOR_TTL_SECONDS must be a whole number from 60 through 3600");
+    }
+    const cursorKeyVersions = (process.env.BIS_PII_FORENSIC_CURSOR_KEYRING ?? "").split(",").map((entry) => entry.slice(0, entry.indexOf(":")).trim()).filter(Boolean);
+    const cursorActiveKeyVersion = (process.env.BIS_PII_FORENSIC_CURSOR_ACTIVE_KEY_VERSION ?? "").trim();
+    let cursorKeyExpiries: Record<string, unknown> = {};
+    try {
+      const parsed: unknown = JSON.parse(process.env.BIS_PII_FORENSIC_CURSOR_KEY_EXPIRIES_JSON ?? "{}");
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("not an object");
+      cursorKeyExpiries = parsed as Record<string, unknown>;
+    } catch {
+      errors.push("INSECURE PII ACTIVATION: BIS_PII_FORENSIC_CURSOR_KEY_EXPIRIES_JSON must be a JSON object");
+    }
+    if (!cursorKeyVersions.includes(cursorActiveKeyVersion)) {
+      errors.push("INSECURE PII ACTIVATION: active forensic cursor signing key must be present in the configured keyring");
+    }
+    for (const version of cursorKeyVersions) {
+      const expiry = cursorKeyExpiries[version];
+      if (version === cursorActiveKeyVersion) {
+        if (expiry !== undefined) errors.push("INSECURE PII ACTIVATION: active forensic cursor signing key must not have a retirement expiry");
+        continue;
+      }
+      const expiryTime = typeof expiry === "string" ? new Date(expiry).getTime() : Number.NaN;
+      if (!Number.isFinite(expiryTime) || expiryTime <= Date.now() || expiryTime > Date.now() + 3600 * 1000) {
+        errors.push("INSECURE PII ACTIVATION: each retiring forensic cursor signing key requires a future expiry no later than one hour");
+      }
+    }
   }
 
   // Log summary

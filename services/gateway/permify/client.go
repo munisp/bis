@@ -1,19 +1,27 @@
-// Package permify provides a Permify authorization client for the BIS gateway.
-// It calls the Permify REST API to check permissions before forwarding requests.
+// Package permify provides a fail-closed Permify authorization client for the BIS gateway.
 package permify
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 )
 
-// Client is a Permify REST API client.
+var (
+	// ErrUnavailable means a protected request cannot be authorized because the
+	// policy decision point is unavailable or is not correctly configured.
+	ErrUnavailable = errors.New("permify authorization service unavailable")
+	// ErrDenied is returned only when Permify explicitly denies a request.
+	ErrDenied = errors.New("permify permission denied")
+)
+
+// Client is a Permify REST API client. A disabled client never grants access.
 type Client struct {
 	baseURL    string
 	tenantID   string
@@ -48,141 +56,156 @@ type Subject struct {
 }
 
 type CheckResponse struct {
-	Can     string `json:"can"` // "RESULT_ALLOWED" | "RESULT_DENIED"
-	Allowed bool   // derived
+	Can string `json:"can"`
 }
 
-// New creates a Permify client from environment variables.
-// When PERMIFY_URL is not set the client is disabled (fail-open).
+// New creates a client from environment variables. Missing configuration yields
+// a non-authorizing client: all protected checks return ErrUnavailable.
 func New() *Client {
-	url := os.Getenv("PERMIFY_URL")
-	if url == "" {
-		log.Println("[Permify] PERMIFY_URL not set — authorization checks disabled (fail-open)")
+	return NewWithHTTPClient(
+		os.Getenv("PERMIFY_URL"),
+		os.Getenv("PERMIFY_TENANT_ID"),
+		os.Getenv("PERMIFY_API_KEY"),
+		&http.Client{Timeout: 3 * time.Second},
+	)
+}
+
+// NewWithHTTPClient supports narrow test and controlled dependency injection.
+// A valid URL, tenant ID, API key, and client are all mandatory for authorization.
+func NewWithHTTPClient(baseURL, tenantID, apiKey string, httpClient *http.Client) *Client {
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	tenantID = strings.TrimSpace(tenantID)
+	apiKey = strings.TrimSpace(apiKey)
+	if baseURL == "" || tenantID == "" || apiKey == "" || httpClient == nil {
 		return &Client{enabled: false}
 	}
 	return &Client{
-		baseURL:  url,
-		tenantID: getEnvOrDefault("PERMIFY_TENANT_ID", "t1"),
-		apiKey:   os.Getenv("PERMIFY_API_KEY"),
-		httpClient: &http.Client{
-			Timeout: 3 * time.Second,
-		},
-		enabled: true,
+		baseURL:    baseURL,
+		tenantID:   tenantID,
+		apiKey:     apiKey,
+		httpClient: httpClient,
+		enabled:    true,
 	}
 }
 
-// Check returns true if the subject has the given permission on the entity.
-// On error or when Permify is disabled, it returns true (fail-open).
+// IsConfigured reports whether this client has all mandatory policy-decision configuration.
+func (c *Client) IsConfigured() bool {
+	return c != nil && c.enabled && c.httpClient != nil
+}
+
+// Check grants access only for an explicit RESULT_ALLOWED response. All local,
+// transport, HTTP 5xx, decoding, and unknown-decision failures deny access.
 func (c *Client) Check(ctx context.Context, entityType, entityID, permission, subjectID string) (bool, error) {
-	if !c.enabled {
-		return true, nil
+	if c == nil || !c.enabled || c.httpClient == nil {
+		return false, ErrUnavailable
+	}
+	if strings.TrimSpace(entityType) == "" || strings.TrimSpace(entityID) == "" || strings.TrimSpace(permission) == "" || strings.TrimSpace(subjectID) == "" {
+		return false, fmt.Errorf("permify invalid check input")
 	}
 
-	req := CheckRequest{
+	body, err := json.Marshal(CheckRequest{
 		Metadata:   CheckMetadata{Depth: 20},
 		Entity:     Entity{Type: entityType, ID: entityID},
 		Permission: permission,
 		Subject:    Subject{Type: "user", ID: subjectID},
+	})
+	if err != nil {
+		return false, fmt.Errorf("permify marshal: %w", err)
 	}
 
-	body, err := json.Marshal(req)
+	requestURL := fmt.Sprintf("%s/v1/tenants/%s/permissions/check", c.baseURL, c.tenantID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, requestURL, bytes.NewReader(body))
 	if err != nil {
-		return true, fmt.Errorf("permify marshal: %w", err)
+		return false, fmt.Errorf("permify request: %w", err)
 	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 
-	url := fmt.Sprintf("%s/v1/tenants/%s/permissions/check", c.baseURL, c.tenantID)
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return true, fmt.Errorf("permify request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	if c.apiKey != "" {
-		httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
-	}
-
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		log.Printf("[Permify] Check failed (fail-open): %v", err)
-		return true, nil // fail-open
+		return false, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode >= http.StatusInternalServerError {
+		return false, fmt.Errorf("%w: status %d", ErrUnavailable, resp.StatusCode)
+	}
+	if resp.StatusCode >= http.StatusBadRequest {
+		return false, fmt.Errorf("permify check status %d", resp.StatusCode)
+	}
 
 	var result CheckResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return true, fmt.Errorf("permify decode: %w", err)
+		return false, fmt.Errorf("%w: decode response: %v", ErrUnavailable, err)
 	}
-
-	result.Allowed = result.Can == "RESULT_ALLOWED"
-	return result.Allowed, nil
+	switch result.Can {
+	case "RESULT_ALLOWED":
+		return true, nil
+	case "RESULT_DENIED":
+		return false, ErrDenied
+	default:
+		return false, fmt.Errorf("%w: unknown decision %q", ErrUnavailable, result.Can)
+	}
 }
 
-// WriteRelationship creates a relation tuple in Permify.
+// WriteRelationship creates a relation tuple in Permify. It never reports a
+// successful write when the client or authorization service is unavailable.
 func (c *Client) WriteRelationship(ctx context.Context, entityType, entityID, relation, subjectType, subjectID string) error {
-	if !c.enabled {
-		return nil
+	if c == nil || !c.enabled || c.httpClient == nil {
+		return ErrUnavailable
 	}
-
-	payload := map[string]interface{}{
-		"metadata": map[string]interface{}{},
-		"tuples": []map[string]interface{}{
-			{
-				"entity":   map[string]string{"type": entityType, "id": entityID},
-				"relation": relation,
-				"subject":  map[string]string{"type": subjectType, "id": subjectID},
-			},
-		},
+	payload := map[string]any{
+		"metadata": map[string]any{},
+		"tuples": []map[string]any{{
+			"entity":   map[string]string{"type": entityType, "id": entityID},
+			"relation": relation,
+			"subject":  map[string]string{"type": subjectType, "id": subjectID},
+		}},
 	}
-
-	body, _ := json.Marshal(payload)
-	url := fmt.Sprintf("%s/v1/tenants/%s/relationships/write", c.baseURL, c.tenantID)
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	body, err := json.Marshal(payload)
 	if err != nil {
-		return err
+		return fmt.Errorf("permify marshal relationship: %w", err)
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	if c.apiKey != "" {
-		httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
-	}
-
-	resp, err := c.httpClient.Do(httpReq)
+	requestURL := fmt.Sprintf("%s/v1/tenants/%s/relationships/write", c.baseURL, c.tenantID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, requestURL, bytes.NewReader(body))
 	if err != nil {
-		return fmt.Errorf("permify write relationship: %w", err)
+		return fmt.Errorf("permify relationship request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("%w: write relationship: %v", ErrUnavailable, err)
 	}
 	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
+	if resp.StatusCode >= http.StatusInternalServerError {
+		return fmt.Errorf("%w: relationship status %d", ErrUnavailable, resp.StatusCode)
+	}
+	if resp.StatusCode >= http.StatusBadRequest {
 		return fmt.Errorf("permify write relationship: status %d", resp.StatusCode)
 	}
 	return nil
 }
 
-// Middleware returns an HTTP middleware that checks a permission before forwarding.
-// entityIDFn extracts the entity ID from the request (e.g. from path params).
+// Middleware returns an HTTP middleware that denies absent identity, explicit
+// policy denial, and policy-service unavailability without reaching the handler.
 func (c *Client) Middleware(entityType, permission string, entityIDFn func(*http.Request) string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			subjectID := r.Header.Get("X-BIS-User-ID")
+			subjectID := strings.TrimSpace(r.Header.Get("X-BIS-User-ID"))
 			if subjectID == "" {
-				subjectID = "anonymous"
+				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+				return
 			}
-			entityID := entityIDFn(r)
-
-			allowed, err := c.Check(r.Context(), entityType, entityID, permission, subjectID)
-			if err != nil {
-				log.Printf("[Permify] Check error (fail-open): %v", err)
+			allowed, err := c.Check(r.Context(), entityType, entityIDFn(r), permission, subjectID)
+			if errors.Is(err, ErrUnavailable) {
+				http.Error(w, `{"error":"authorization_unavailable"}`, http.StatusServiceUnavailable)
+				return
 			}
-			if !allowed {
+			if err != nil || !allowed {
 				http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
 				return
 			}
 			next.ServeHTTP(w, r)
 		})
 	}
-}
-
-func getEnvOrDefault(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return def
 }

@@ -1,0 +1,229 @@
+name: Protected PR Security Gates
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, reopened, synchronize, ready_for_review, review_requested]
+  pull_request_review:
+    types: [submitted, dismissed]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "Open pull request number to inspect"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: read
+  checks: read
+
+concurrency:
+  group: protected-pr-security-gates-${{ github.event.pull_request.number || inputs.pr_number }}
+  cancel-in-progress: false
+
+jobs:
+  protected-pr-security-gates:
+    name: protected-pr-security-gates
+    runs-on: ubuntu-24.04
+    # All mutations (review request, comment, publication, approval, merge, and
+    # branch protection changes) are deliberately outside this read-only job.
+    env:
+      PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+      REQUIRED_APPROVALS: "1"
+      REQUIRED_CHECKS_JSON: >-
+        ["node-tests","gateway-race","archive-worker","mobile-security",
+        "CodeQL (JavaScript/TypeScript)","CodeQL (Go)","CodeQL (Python)","Analyze rust","CodeQL"]
+    steps:
+      - name: Build a PII-minimized security gate report
+        id: report
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const number = Number(process.env.PR_NUMBER);
+            if (!Number.isInteger(number) || number < 1) {
+              core.setFailed("A positive pull request number is required.");
+              return;
+            }
+
+            const { owner, repo } = context.repo;
+            const query = `query($owner: String!, $repo: String!, $number: Int!) {
+              repository(owner: $owner, name: $repo) {
+                pullRequest(number: $number) {
+                  number url isDraft headRefOid baseRefName mergeable mergeStateStatus reviewDecision
+                }
+              }
+            }`;
+            const graph = await github.graphql(query, { owner, repo, number });
+            const pr = graph.repository.pullRequest;
+            if (!pr) {
+              core.setFailed(`Pull request #${number} was not found.`);
+              return;
+            }
+
+            const checkRuns = await github.paginate(github.rest.checks.listForRef, {
+              owner,
+              repo,
+              ref: pr.headRefOid,
+              per_page: 100,
+            });
+            const latestByName = new Map();
+            for (const check of checkRuns) {
+              const current = latestByName.get(check.name);
+              if (!current || new Date(check.started_at ?? 0) > new Date(current.started_at ?? 0)) {
+                latestByName.set(check.name, check);
+              }
+            }
+
+            const configuredRequiredChecks = JSON.parse(process.env.REQUIRED_CHECKS_JSON ?? "[]");
+            let protection = null;
+            try {
+              protection = await github.rest.repos.getBranchProtection({
+                owner,
+                repo,
+                branch: pr.baseRefName,
+              });
+            } catch {
+              // A read-only token may be denied branch-protection metadata. The
+              // classification below records this as unavailable rather than
+              // presuming the configured fallback matches repository policy.
+            }
+            const requiredChecks = protection?.data.required_status_checks?.contexts?.length
+              ? protection.data.required_status_checks.contexts
+              : configuredRequiredChecks;
+            const pendingChecks = [];
+            const failedChecks = [];
+            for (const requiredName of requiredChecks) {
+              const check = latestByName.get(requiredName);
+              if (!check || check.status !== "completed") {
+                pendingChecks.push(requiredName);
+              } else if (check.conclusion !== "success") {
+                failedChecks.push(`${requiredName}:${check.conclusion ?? "unknown"}`);
+              }
+            }
+
+            const annotations = [];
+            const aggregateCodeQL = latestByName.get("CodeQL");
+            if (aggregateCodeQL?.id) {
+              const result = await github.rest.checks.listAnnotations({
+                owner,
+                repo,
+                check_run_id: aggregateCodeQL.id,
+                per_page: 100,
+              });
+              for (const annotation of result.data) {
+                annotations.push({
+                  title: annotation.title.slice(0, 255),
+                  path: annotation.path,
+                  start_line: annotation.start_line,
+                  end_line: annotation.end_line,
+                  level: annotation.annotation_level,
+                  message_classification: "codeql_annotation",
+                  occurrence_count: 1,
+                });
+              }
+            }
+
+            const reasons = [];
+            const configuredRequiredApprovals = Number(process.env.REQUIRED_APPROVALS ?? "1");
+            const requiredApprovals = protection?.data.required_pull_request_reviews?.required_approving_review_count
+              ?? configuredRequiredApprovals;
+            if (!protection) reasons.push("branch_protection_unavailable");
+            if (pr.isDraft) reasons.push("draft_pull_request");
+            if (pr.mergeable === "CONFLICTING") reasons.push("merge_conflict");
+            if (pr.mergeStateStatus === "BEHIND") reasons.push("branch_behind");
+            if (pr.reviewDecision !== "APPROVED" || requiredApprovals > 0 && pr.reviewDecision !== "APPROVED") {
+              reasons.push(pr.reviewDecision === "CHANGES_REQUESTED" ? "changes_requested" : "review_required");
+            }
+            if (pendingChecks.length > 0) reasons.push("required_check_pending");
+            if (failedChecks.length > 0) reasons.push("required_check_failed");
+            if (aggregateCodeQL?.conclusion === "failure") reasons.push("aggregate_codeql_failure");
+
+            const checkItems = [...latestByName.values()].map((check) => ({
+              name: check.name,
+              status: check.status.toUpperCase(),
+              conclusion: (check.conclusion ?? "NONE").toUpperCase(),
+              required_by_protection: requiredChecks.includes(check.name),
+              web_url: check.details_url,
+            }));
+            const summary = {
+              successful: checkItems.filter((check) => check.conclusion === "SUCCESS").length,
+              failed: checkItems.filter((check) => ["FAILURE", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED"].includes(check.conclusion)).length,
+              pending: checkItems.filter((check) => check.status !== "COMPLETED").length,
+              neutral: checkItems.filter((check) => ["NEUTRAL", "SKIPPED"].includes(check.conclusion)).length,
+              total: checkItems.length,
+            };
+            const aggregateStatus = !aggregateCodeQL || aggregateCodeQL.status !== "completed"
+              ? "PENDING"
+              : aggregateCodeQL.conclusion === "success"
+                ? "SUCCESS"
+                : aggregateCodeQL.conclusion === "failure"
+                  ? "FAILURE"
+                  : "NEUTRAL";
+            const report = {
+              schema_version: "1.0.0",
+              generated_at: new Date().toISOString(),
+              source: {
+                collector: "protected-pr-security-gates/1.0.0",
+                mode: "read_only",
+                snapshot_id: `pr${pr.number}-${pr.headRefOid.slice(0, 12)}`,
+              },
+              repository: {
+                full_name: `${owner}/${repo}`,
+                default_branch: "main",
+                web_url: `https://github.com/${owner}/${repo}`,
+              },
+              pull_request: {
+                number: pr.number,
+                head_sha: pr.headRefOid,
+                base_branch: pr.baseRefName,
+                merge_state: pr.mergeStateStatus ?? "UNKNOWN",
+                mergeable: pr.mergeable ?? "UNKNOWN",
+                review_decision: pr.reviewDecision ?? "NONE",
+                web_url: pr.url,
+              },
+              classification: {
+                overall: reasons.length === 0 ? "eligible" : pendingChecks.length > 0 && failedChecks.length === 0 && pr.reviewDecision === "APPROVED" ? "pending" : "blocked",
+                reasons: [...new Set(reasons)],
+              },
+              branch_protection: {
+                metadata_available: Boolean(protection),
+                required_approvals: requiredApprovals,
+                dismiss_stale_reviews: protection?.data.required_pull_request_reviews?.dismiss_stale_reviews ?? false,
+                strict_status_checks: protection?.data.required_status_checks?.strict ?? false,
+                required_contexts: requiredChecks,
+              },
+              checks: { summary, items: checkItems },
+              codeql: {
+                language_analyses: checkItems
+                  .filter((check) => check.name.startsWith("CodeQL (") || check.name === "Analyze rust")
+                  .map((check) => ({ language: check.name, status: check.status, conclusion: check.conclusion })),
+                aggregate_status: aggregateStatus,
+                annotations,
+              },
+            };
+
+            await require("fs").promises.writeFile("pr-security-gate-report.json", `${JSON.stringify(report, null, 2)}\n`);
+            await core.summary
+              .addHeading("Protected PR Security Gates")
+              .addRaw(`Classification: **${report.classification.overall.toUpperCase()}**\n\n`)
+              .addRaw(`Reasons: ${report.classification.reasons.join(", ") || "none"}\n\n`)
+              .addRaw(`Required check status: ${pendingChecks.length} pending, ${failedChecks.length} failed.\n\n`)
+              .addRaw(`Aggregate CodeQL: ${aggregateStatus}.\n`)
+              .write();
+            core.setOutput("classification", report.classification.overall);
+            core.setOutput("reasons", report.classification.reasons.join(","));
+            core.setOutput("report_path", "pr-security-gate-report.json");
+
+            if (report.classification.overall !== "eligible") {
+              core.setFailed(`Protected PR security gate is ${report.classification.overall}: ${report.classification.reasons.join(", ")}`);
+            }
+
+      - name: Upload read-only gate report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-security-gate-report-${{ github.event.pull_request.number || inputs.pr_number }}
+          path: pr-security-gate-report.json
+          if-no-files-found: error
+          retention-days: 14

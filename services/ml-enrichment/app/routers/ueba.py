@@ -193,8 +193,8 @@ class UserBehaviourProfile:
 class UEBAModelStore:
     """
     Thread-safe in-memory store for user profiles and the global IsolationForest.
-    In production, profiles would be persisted to Redis/TiDB and the model
-    serialised to S3 with versioning.
+    In production, profiles are persisted to PostgreSQL and the model
+    is serialised to S3 with versioning.
     """
 
     # Maximum number of fields in a feature vector (input size guard)
@@ -478,6 +478,7 @@ async def record_event(
 )
 async def score_user(
     req: ScoreRequest,
+    request: Request,
     store: UEBAModelStore = Depends(get_store),
 ) -> AnomalyScoreResponse:
     """

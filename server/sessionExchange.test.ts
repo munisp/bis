@@ -1,31 +1,26 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { ENV } from "./_core/env";
 
+const hasKeycloakIntegrationConfig = Boolean(
+  ENV.keycloakUrl && ENV.keycloakRealm && ENV.keycloakClientId && ENV.keycloakClientSecret,
+);
+
 describe("Session Exchange — Keycloak Configuration", () => {
-  it("KEYCLOAK_URL is set and reachable", async () => {
-    expect(ENV.keycloakUrl).toBeTruthy();
-    expect(ENV.keycloakUrl).not.toContain("keycloak:8080"); // Must not be the Docker internal hostname
-
-    // Verify the OIDC discovery endpoint is reachable
-    const realm = ENV.keycloakRealm;
-    expect(realm).toBeTruthy();
-
-    const discoveryUrl = `${ENV.keycloakUrl}/realms/${realm}/.well-known/openid-configuration`;
-    const res = await fetch(discoveryUrl, { signal: AbortSignal.timeout(5000) }).catch(() => null);
-
-    // In CI without Keycloak running, this will be null — that's acceptable
-    // In local dev with staging Keycloak, it should return 200
-    if (res) {
-      expect(res.status).toBe(200);
-      const data = await res.json();
-      expect(data.issuer).toContain(realm);
-      expect(data.token_endpoint).toBeTruthy();
-      expect(data.jwks_uri).toBeTruthy();
-    }
+  it("does not embed Keycloak endpoint, realm, or client defaults", () => {
+    expect(ENV.keycloakUrl).not.toContain("keycloak:8080");
+    expect(ENV.keycloakRealm).not.toBe("bis-platform");
+    expect(ENV.keycloakClientId).not.toBe("bis-platform");
   });
+});
 
-  it("KEYCLOAK_REALM is set to a valid realm name", () => {
-    expect(ENV.keycloakRealm).toBeTruthy();
-    expect(ENV.keycloakRealm).not.toBe("bis-platform"); // Default placeholder
+describe.runIf(hasKeycloakIntegrationConfig)("Session Exchange — Keycloak Integration", () => {
+  it("publishes a valid OIDC discovery document", async () => {
+    const discoveryUrl = `${ENV.keycloakUrl}/realms/${ENV.keycloakRealm}/.well-known/openid-configuration`;
+    const response = await fetch(discoveryUrl, { signal: AbortSignal.timeout(5_000) });
+    expect(response.status).toBe(200);
+    const discovery = await response.json() as Record<string, unknown>;
+    expect(discovery.issuer).toContain(ENV.keycloakRealm);
+    expect(discovery.token_endpoint).toBeTruthy();
+    expect(discovery.jwks_uri).toBeTruthy();
   });
 });

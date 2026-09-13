@@ -5,13 +5,13 @@
  * "Use a tiered storage strategy: hot (0–90 days), warm (90 days–1 year), cold (1–10 years)."
  *
  * Tier definitions:
- *   HOT  (0–90 days):    TigerBeetle ledger + MySQL (fast reads, full indexes)
+ *   HOT  (0–90 days):    TigerBeetle ledger + PostgreSQL (fast reads, full indexes)
  *   WARM (90d–1 year):   ClickHouse OLAP (analytical queries, compressed columnar)
  *   COLD (1–10 years):   S3 Parquet (regulatory retention, near-zero cost)
  *
  * This module implements:
  *   1. Tiering configuration constants
- *   2. A nightly archival job that moves aged transactions from MySQL → ClickHouse → S3
+ *   2. A nightly archival job that moves aged transactions from PostgreSQL → ClickHouse → S3
  *   3. A tRPC procedure to trigger archival manually (admin-only)
  *   4. Archival status tracking in the DB
  */
@@ -47,7 +47,7 @@ function getClickHouseClient() {
 
 export const TIERS = {
   /**
-   * HOT tier: TigerBeetle + MySQL
+   * HOT tier: TigerBeetle + PostgreSQL
    * Age: 0–90 days
    * Characteristics: O_DIRECT WAL, zero fsyncs, full indexes, sub-ms reads
    * Lesson: TigerBeetle achieves 48K sustained TPS because it never calls fsync —
@@ -56,9 +56,9 @@ export const TIERS = {
   HOT: {
     name: "hot",
     maxAgeDays: 90,
-    storage: ["tigerbeetle", "mysql"],
+    storage: ["tigerbeetle", "postgresql"],
     readLatencyTarget: "< 1ms",
-    description: "TigerBeetle ledger + MySQL (0–90 days)",
+    description: "TigerBeetle ledger + PostgreSQL (0–90 days)",
   },
   /**
    * WARM tier: ClickHouse OLAP
@@ -104,7 +104,7 @@ export interface ArchivalResult {
 }
 
 /**
- * archiveToWarm moves transactions older than 90 days from MySQL to ClickHouse.
+ * archiveToWarm moves transactions older than 90 days from PostgreSQL to ClickHouse.
  * In production, this would use a ClickHouse HTTP client to INSERT SELECT.
  * Here we stub the ClickHouse write and log the operation.
  */
@@ -232,77 +232,18 @@ export async function archiveToWarm(dryRun = false): Promise<ArchivalResult> {
 }
 
 /**
- * archiveToCold moves transactions older than 1 year to S3 Parquet.
- * In production, this would use Apache Arrow/Parquet writer.
- * Here we write a compressed JSON archive to S3.
+ * Cold archival is deliberately not executed in the Node process. The isolated
+ * cold-archive-writer uses PostgreSQL ownership records, Parquet serialization,
+ * immutable manifests, and verified S3-compatible storage before it marks rows
+ * cold. Schedule that worker with the `archive` deployment profile.
  */
-export async function archiveToCold(dryRun = false): Promise<ArchivalResult> {
-  const start = Date.now();
-  const errors: string[] = [];
-  const db = await getDb();
-  if (!db) {
-    return { tier: "cold", rowsArchived: 0, bytesWritten: 0, durationMs: 0, errors: ["DB unavailable"] };
-  }
-
-  const cutoff = new Date(Date.now() - TIERS.WARM.maxAgeDays * 24 * 60 * 60 * 1000);
-
-  const rows = await db.select().from(transactions)
-    .where(
-      and(
-        lt(transactions.createdAt, cutoff),
-        sql`${transactions.status} IN ('completed', 'failed', 'reversed', 'blocked')`,
-        // ── Idempotency: skip rows already archived to cold tier ──
-        sql`${transactions.archivedTier} IS NULL OR ${transactions.archivedTier} = 'warm'`
-      )
-    )
-    .limit(50000); // Larger batch for cold archival
-
-  if (rows.length === 0) {
-    return { tier: "cold", rowsArchived: 0, bytesWritten: 0, durationMs: Date.now() - start, errors };
-  }
-
-  // Write as JSON array (production: Apache Parquet via arrow2 or parquet-wasm)
-  const json = JSON.stringify(rows);
-  const bytes = Buffer.byteLength(json, "utf8");
-
-  let s3Key: string | undefined;
-  if (!dryRun) {
-    try {
-      const date = new Date().toISOString().slice(0, 10);
-      s3Key = `archival/cold/${date}/transactions-${Date.now()}.json`;
-      await storagePut(s3Key, Buffer.from(json), "application/json");
-    } catch (err: any) {
-      errors.push(`S3 write failed: ${err.message}`);
-    }
-
-    // ── Mark rows as cold-archived to prevent double-archival on next run ──
-    if (errors.length === 0) {
-      const { inArray } = await import("drizzle-orm");
-      const ids = rows.map(r => r.id);
-      for (let i = 0; i < ids.length; i += 1000) {
-        await db.update(transactions)
-          .set({ archivedTier: "cold" as any, archivedAt: new Date() })
-          .where(inArray(transactions.id, ids.slice(i, i + 1000)))
-          .catch((e: Error) => errors.push(`archivedTier cold update failed: ${e.message}`));
-      }
-    }
-  }
-
-  return {
-    tier: "cold",
-    rowsArchived: rows.length,
-    bytesWritten: bytes,
-    s3Key,
-    durationMs: Date.now() - start,
-    errors,
-  };
-}
 
 // ─── Standalone job (called by cron scheduler) ──────────────────────────────
 
 /**
  * runArchivalJob — callable directly from the cron scheduler (no tRPC overhead).
- * Runs both warm and cold archival passes sequentially and logs results.
+ * Runs the warm archival pass. Cold archival is delegated to the isolated
+ * PostgreSQL-backed Parquet worker and is never serialized as JSON here.
  */
 export async function runArchivalJob(): Promise<void> {
   const label = "[ArchivalJob]";
@@ -316,16 +257,6 @@ export async function runArchivalJob(): Promise<void> {
     );
   } catch (err) {
     console.error(`${label} Warm archival failed:`, err);
-  }
-  try {
-    const cold = await archiveToCold(false);
-    console.log(
-      `${label} Cold tier: ${cold.rowsArchived} rows archived, ` +
-      `${cold.bytesWritten} bytes written, ${cold.durationMs}ms` +
-      (cold.errors.length ? ` | errors: ${cold.errors.join("; ")}` : "")
-    );
-  } catch (err) {
-    console.error(`${label} Cold archival failed:`, err);
   }
   console.log(`${label} Nightly archival run complete — ${new Date().toISOString()}`);
 }
@@ -377,21 +308,17 @@ export const archivalRouter = router({
    */
   runArchival: adminProcedure
     .input(z.object({
-      tier: z.enum(["warm", "cold", "all"]),
+      tier: z.literal("warm"),
       dryRun: z.boolean().default(true),
     }))
     .mutation(async ({ input }) => {
       const results: ArchivalResult[] = [];
 
-      if (input.tier === "warm" || input.tier === "all") {
-        const result = await archiveToWarm(input.dryRun);
-        results.push(result);
-      }
+      const result = await archiveToWarm(input.dryRun);
+      results.push(result);
 
-      if (input.tier === "cold" || input.tier === "all") {
-        const result = await archiveToCold(input.dryRun);
-        results.push(result);
-      }
+      // Cold archival is intentionally not dispatched from the BFF. Operators
+      // schedule the isolated Parquet worker with the archive deployment profile.
 
       const totalRows = results.reduce((sum, r) => sum + r.rowsArchived, 0);
       const totalBytes = results.reduce((sum, r) => sum + r.bytesWritten, 0);

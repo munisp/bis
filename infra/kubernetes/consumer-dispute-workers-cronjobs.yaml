@@ -1,0 +1,133 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: bis-consumer-dispute-deadlines
+  labels:
+    app.kubernetes.io/name: bis-consumer-dispute-deadlines
+    app.kubernetes.io/component: consumer-rights
+spec:
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 10
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 240
+      ttlSecondsAfterFinished: 604800
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: bis-consumer-dispute-deadlines
+        spec:
+          restartPolicy: OnFailure
+          serviceAccountName: bis-consumer-dispute-worker
+          securityContext:
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: deadline-worker
+              image: registry.example.invalid/bis/bff@sha256:REPLACE_AT_RELEASE
+              imagePullPolicy: IfNotPresent
+              command: ["pnpm", "consumer-disputes:deadlines"]
+              envFrom:
+                - secretRef:
+                    name: bis-consumer-dispute-worker
+              resources:
+                requests:
+                  cpu: "100m"
+                  memory: "256Mi"
+                limits:
+                  cpu: "500m"
+                  memory: "512Mi"
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              volumeMounts:
+                - name: temporary
+                  mountPath: /tmp
+          volumes:
+            - name: temporary
+              emptyDir:
+                sizeLimit: 64Mi
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: bis-consumer-dispute-provider-outbox
+  labels:
+    app.kubernetes.io/name: bis-consumer-dispute-provider-outbox
+    app.kubernetes.io/component: consumer-rights
+spec:
+  schedule: "*/2 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 120
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 10
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 240
+      ttlSecondsAfterFinished: 604800
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: bis-consumer-dispute-provider-outbox
+        spec:
+          restartPolicy: OnFailure
+          serviceAccountName: bis-consumer-dispute-worker
+          securityContext:
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: provider-outbox-worker
+              image: registry.example.invalid/bis/bff@sha256:REPLACE_AT_RELEASE
+              imagePullPolicy: IfNotPresent
+              command: ["pnpm", "consumer-disputes:provider-outbox"]
+              envFrom:
+                - secretRef:
+                    name: bis-consumer-dispute-worker
+              resources:
+                requests:
+                  cpu: "100m"
+                  memory: "256Mi"
+                limits:
+                  cpu: "500m"
+                  memory: "512Mi"
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              volumeMounts:
+                - name: temporary
+                  mountPath: /tmp
+          volumes:
+            - name: temporary
+              emptyDir:
+                sizeLimit: 64Mi
+---
+# The release controller must replace all values through the deployment secret
+# manager. The workers intentionally fail before network I/O if a required key
+# policy, provider authorization, or provider contract is absent.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: bis-consumer-dispute-worker
+  labels:
+    app.kubernetes.io/name: bis-consumer-dispute-worker
+type: Opaque
+stringData:
+  DATABASE_URL: "REPLACE_WITH_POSTGRESQL_URL"
+  AUDIT_HMAC_SECRET: "REPLACE_WITH_ACTIVE_AUDIT_HMAC_KEY"
+  BIS_CONSUMER_DISPUTE_OUTBOX_ACTIVE_KEY_VERSION: "REPLACE_WITH_ACTIVE_KEY_VERSION"
+  BIS_CONSUMER_DISPUTE_OUTBOX_KEYRING: "REPLACE_WITH_VERSIONED_32_BYTE_BASE64_KEYRING"
+  BIS_CONSUMER_DISPUTE_OUTBOX_KEY_EXPIRIES_JSON: "REPLACE_WITH_KEY_EXPIRY_REGISTRY_JSON"
+  BIS_CONSUMER_DISPUTE_OUTBOX_ENFORCE_KEY_EXPIRY: "true"
+  BIS_DEPLOYMENT_ENV: "production"
+  BIS_ENV: "production"

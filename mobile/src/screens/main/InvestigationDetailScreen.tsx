@@ -6,8 +6,8 @@ import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
   TextInput, ActivityIndicator, Alert,
 } from 'react-native';
-import { useRoute, useNavigation } from '@react-navigation/native';
-import type { NativeStackNavigationProp, RouteProp } from '@react-navigation/native-stack';
+import { useRoute, useNavigation, type RouteProp } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { InvestigationsStackParamList } from '../../navigation/RootNavigator';
 import { investigationsApi } from '../../services/api';
 import { colors, typography, spacing } from '../../utils/theme';
@@ -43,7 +43,7 @@ export function InvestigationDetailScreen() {
   useEffect(() => { fetchDetail(); }, [fetchDetail]);
 
   const handleAddNote = async () => {
-    if (!note.trim()) return;
+    if (!note.trim()) {return;}
     setAddingNote(true);
     try {
       await investigationsApi.addNote(id, note.trim());
@@ -54,8 +54,8 @@ export function InvestigationDetailScreen() {
     } finally { setAddingNote(false); }
   };
 
-  if (loading) return <View style={styles.centered}><ActivityIndicator color={colors.primary} size="large" /></View>;
-  if (!inv) return <View style={styles.centered}><Text style={styles.errorText}>Not found</Text></View>;
+  if (loading) {return <View style={styles.centered}><ActivityIndicator color={colors.primary} size="large" /></View>;}
+  if (!inv) {return <View style={styles.centered}><Text style={styles.errorText}>Not found</Text></View>;}
 
   const status = String(inv.status ?? 'open');
   const notes = (inv.notes as unknown[]) ?? [];

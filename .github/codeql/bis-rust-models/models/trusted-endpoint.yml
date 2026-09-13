@@ -1,0 +1,14 @@
+extensions:
+  - addsTo:
+      pack: codeql/rust-all
+      extensible: barrierModel
+    data:
+      # TrustedEndpoint::parse rejects non-HTTPS schemes, non-allow-listed hosts,
+      # userinfo, query strings, and fragments before it returns Ok(endpoint).
+      # This barrier deliberately does not model with_path_segments so future
+      # user-controlled path segments remain visible to request-forgery analysis.
+      - ["<bis_transport_policy::TrustedEndpoint>::parse", "ReturnValue.Field[core::result::Result::Ok(0)]", "request-forgery", "manual"]
+      # BoundedGatewayPayload owns a fixed 16 KiB array and can only be built
+      # after every variable-width field and final serialized length are checked.
+      # Model only its conversion to an HTTP body; do not model the encoder itself.
+      - ["<fluvio_velocity::BoundedGatewayPayload>::into_bytes", "ReturnValue", "resource-exhaustion", "manual"]

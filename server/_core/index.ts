@@ -3,19 +3,6 @@ import { getDb } from '../db';
 
 import "../sentry.server.config";
 
-// BIS platform prefers PostgreSQL. When a non-PostgreSQL URL is injected (e.g. managed TiDB),
-// log a warning and continue — the ORM layer handles both dialects. In local dev, override
-// to the local PostgreSQL instance for full schema fidelity.
-const _dbUrl = process.env.BIS_DATABASE_URL ?? process.env.DATABASE_URL ?? "";
-if (!_dbUrl.startsWith("postgresql") && !_dbUrl.startsWith("postgres")) {
-  if (process.env.NODE_ENV === "production" || process.env.NODE_ENV === "staging") {
-    console.warn("[BIS] DATABASE_URL is not PostgreSQL — some features (PKCE sessions, retry leases) require PostgreSQL and will degrade gracefully.");
-  } else {
-    process.env.DATABASE_URL = "postgresql://bis_user:bis_secure_2026@localhost:5432/bis_db";
-    console.log("[BIS] Overriding DATABASE_URL → local PostgreSQL (bis_db)");
-  }
-}
-
 import express, { type Request, type Response, type NextFunction } from "express";
 import { createServer } from "http";
 import net from "net";
@@ -29,10 +16,13 @@ import { register as promRegister, collectDefaultMetrics, Counter, Histogram, Ga
 import { registerOAuthRoutes } from "./oauth";
 import { registerStorageProxy } from "./storageProxy";
 import { appRouter } from "../routers";
-import { createContext } from "./context";
+import { createContext, createContextFromRequest } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { notifyOwner } from "./notification";
-import { creditTenantAccount } from "../billing";
+import { recordPaystackWebhook } from "../billingSettlement";
+import { registerIntelligenceBillingMetrics } from "../intelligenceBillingMetrics";
+import { registerPaymentReconciliationMetrics } from "../paymentReconciliationMetrics";
+import { traceCorrelationMiddleware, traceLogFields } from "../traceContext";
 import crypto from "crypto";
 import { createOpenClawRouter } from "../openclawEndpoints";
 import swaggerUi from "swagger-ui-express";
@@ -51,10 +41,13 @@ import { startBroadcastScheduler } from "../broadcastScheduler";
 import { validateEnv } from "../envValidation";
 import { ENV } from "./env";
 import { startWebhookRetryScheduler } from "../webhookRetry";
+import { startPaymentIntentOutboxDispatcher } from "../paymentIntentOutbox";
+import { FORENSIC_EXPORT_MAX_EVENTS, iterateVerifiedForensicExport } from "../piiForensicExport";
+import { forensicIncidentReferenceSchema, serializeForensicExportRecord } from "../forensicExportProtocol";
 
 // ── Structured logger ─────────────────────────────────────────────────────────
 function log(level: "info" | "warn" | "error", msg: string, meta?: Record<string, unknown>) {
-  const entry = JSON.stringify({ ts: new Date().toISOString(), level, msg, ...meta });
+  const entry = JSON.stringify({ ts: new Date().toISOString(), level, msg, ...traceLogFields(), ...meta });
   if (level === "error") process.stderr.write(entry + "\n");
   else process.stdout.write(entry + "\n");
 }
@@ -84,6 +77,7 @@ async function startServer() {
 
   const app = express();
   const server = createServer(app);
+  app.use(traceCorrelationMiddleware);
   // Trust the first proxy hop (Manus reverse proxy) for correct IP detection
   app.set("trust proxy", 1);
 
@@ -127,32 +121,44 @@ async function startServer() {
     });
   }
 
+  const contentSecurityPolicy = isDev
+    ? {
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://maps.googleapis.com"],
+          styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+          fontSrc: ["'self'", "https://fonts.gstatic.com"],
+          imgSrc: ["'self'", "data:", "https:", "blob:"],
+          connectSrc: ["'self'", "ws:", "wss:"],
+          frameSrc: ["'none'"],
+          objectSrc: ["'none'"],
+          upgradeInsecureRequests: null,
+        },
+      }
+    : {
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: [
+            "'self'",
+            "https://maps.googleapis.com",
+            (_req: import("http").IncomingMessage, res: import("http").ServerResponse) => {
+              const nonce = (res as import("http").ServerResponse & { locals?: { nonce?: string } }).locals?.nonce;
+              return nonce ? `'nonce-${nonce}'` : "'none'";
+            },
+          ],
+          styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+          fontSrc: ["'self'", "https://fonts.gstatic.com"],
+          imgSrc: ["'self'", "data:", "https:", "blob:"],
+          connectSrc: ["'self'", "wss:"],
+          frameSrc: ["'none'"],
+          objectSrc: ["'none'"],
+          upgradeInsecureRequests: [],
+        },
+      };
+
   app.use(
     helmet({
-      contentSecurityPolicy: isDev
-        ? false // Vite HMR requires inline scripts in dev
-        : {
-            directives: {
-              defaultSrc: ["'self'"],
-              // Use per-request nonce instead of 'unsafe-inline'
-              scriptSrc: [
-                "'self'",
-                "https://maps.googleapis.com",
-                // Helmet CSP directive functions receive IncomingMessage / ServerResponse
-                (_req: import("http").IncomingMessage, res: import("http").ServerResponse) => {
-                  const nonce = (res as import("http").ServerResponse & { locals?: { nonce?: string } }).locals?.nonce;
-                  return nonce ? `'nonce-${nonce}'` : "'unsafe-inline'";
-                },
-              ],
-              styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-              fontSrc: ["'self'", "https://fonts.gstatic.com"],
-              imgSrc: ["'self'", "data:", "https:", "blob:"],
-              connectSrc: ["'self'", "https://api.manus.im", "wss:"],
-              frameSrc: ["'none'"],
-              objectSrc: ["'none'"],
-              upgradeInsecureRequests: [],
-            },
-          },
+      contentSecurityPolicy,
       // HSTS: 1 year, include subdomains
       strictTransportSecurity: {
         maxAge: 31536000,
@@ -286,6 +292,8 @@ async function startServer() {
   // ── Prometheus Metrics ──────────────────────────────────────────────────────
   // Collect default Node.js metrics (heap, GC, event loop lag, etc.)
   collectDefaultMetrics({ prefix: 'bis_' });
+  registerIntelligenceBillingMetrics();
+  registerPaymentReconciliationMetrics();
   const httpRequestDuration = new Histogram({
     name: 'bis_http_request_duration_seconds',
     help: 'Duration of HTTP requests in seconds',
@@ -423,77 +431,48 @@ async function startServer() {
   app.use("/api/oauth", authLimiter);
 
   // ── Body parsers ───────────────────────────────────────────────────────────
-  // Note: Paystack webhook needs raw body — registered BEFORE json parser below
-  app.post("/api/webhooks/paystack", express.raw({ type: "application/json" }), async (req, res) => {
+  // Paystack signs raw bytes. This route precedes the JSON parser and performs
+  // no settlement/network work: it validates HMAC then persists a minimised,
+  // idempotent delivery record. A non-2xx response deliberately causes Paystack
+  // retry rather than accepting a payment event that cannot be reconciled.
+  app.post("/api/webhooks/paystack", express.raw({ type: "application/json", limit: "256kb" }), async (req, res) => {
+    const secret = ENV.paystackSecretKey;
+    if (!secret) {
+      log("error", "Paystack webhook rejected because settlement is not configured", { reqId: (req as Request & { id?: string }).id });
+      res.status(503).json({ error: "Payment settlement is unavailable" });
+      return;
+    }
+    const rawBody = req.body;
+    if (!Buffer.isBuffer(rawBody) || rawBody.length === 0) {
+      res.status(400).json({ error: "A non-empty raw JSON webhook body is required" });
+      return;
+    }
+    const signature = req.headers["x-paystack-signature"];
+    if (typeof signature !== "string" || !/^[0-9a-f]{128}$/i.test(signature)) {
+      res.status(401).json({ error: "A valid x-paystack-signature header is required" });
+      return;
+    }
+    const expected = crypto.createHmac("sha512", secret).update(rawBody).digest();
+    const supplied = Buffer.from(signature, "hex");
+    if (supplied.length !== expected.length || !crypto.timingSafeEqual(expected, supplied)) {
+      log("warn", "Paystack webhook rejected due to invalid signature", { reqId: (req as Request & { id?: string }).id });
+      res.status(401).json({ error: "Invalid webhook signature" });
+      return;
+    }
+    let body: unknown;
     try {
-      const PAYSTACK_SECRET = ENV.paystackSecretKey;
-      const signature = req.headers["x-paystack-signature"] as string | undefined;
-
-      // Validate HMAC-SHA512 signature when secret is configured
-      if (PAYSTACK_SECRET && signature) {
-        const expected = crypto
-          .createHmac("sha512", PAYSTACK_SECRET)
-          .update(req.body as Buffer)
-          .digest("hex");
-        // Use timingSafeEqual to prevent timing attacks
-        const expectedBuf = Buffer.from(expected, "hex");
-        const signatureBuf = Buffer.from(signature, "hex");
-        const isValid =
-          expectedBuf.length === signatureBuf.length &&
-          crypto.timingSafeEqual(expectedBuf, signatureBuf);
-        if (!isValid) {
-          console.warn("[PaystackWebhook] Invalid signature — request rejected");
-          res.status(401).json({ error: "Invalid signature" });
-          return;
-        }
-      } else if (PAYSTACK_SECRET && !signature) {
-        res.status(401).json({ error: "Missing x-paystack-signature header" });
-        return;
-      }
-
-      const body = JSON.parse((req.body as Buffer).toString("utf8")) as {
-        event?: string;
-        data?: {
-          reference?: string;
-          amount?: number;
-          status?: string;
-          metadata?: { tenant_id?: string; [key: string]: unknown };
-          customer?: { email?: string };
-        };
-      };
-
-      console.log(`[PaystackWebhook] event=${body.event} ref=${body.data?.reference}`);
-
-      if (body.event === "charge.success" && body.data?.status === "success") {
-        const reference = body.data.reference ?? "";
-        const amountKobo = body.data.amount ?? 0;
-        const tenantId = String(body.data.metadata?.tenant_id ?? body.data.customer?.email ?? "unknown");
-
-        if (amountKobo > 0 && tenantId !== "unknown") {
-          const result = await creditTenantAccount({ tenantId, amountKobo, reference });
-          console.log(`[PaystackWebhook] Credited tenant=${tenantId} amount=${amountKobo} kobo recorded=${result.recorded} transferId=${result.transferId}`);
-          // If TigerBeetle recording failed, enqueue for retry with exponential backoff
-          if (!result.recorded) {
-            const { enqueueFailedWebhook } = await import("../webhookRetry");
-            await enqueueFailedWebhook({
-              reference,
-              tenantId,
-              amountKobo,
-              error: "Initial credit attempt failed — TB unavailable",
-            });
-            console.warn(`[PaystackWebhook] TB credit failed for ${reference} — enqueued for retry`);
-          }
-          await notifyOwner({
-            title: `Payment Received — ₦${(amountKobo / 100).toLocaleString()}`,
-            content: `Tenant **${tenantId}** topped up ₦${(amountKobo / 100).toLocaleString()} via Paystack.\nReference: \`${reference}\`\nTigerBeetle transfer: \`${result.transferId}\` (recorded=${result.recorded})`,
-          });
-        }
-      }
-
-      res.status(200).json({ received: true });
-    } catch (err) {
-      console.error("[PaystackWebhook] Error:", err);
-      res.status(200).json({ received: true, error: "Processing error" });
+      body = JSON.parse(rawBody.toString("utf8"));
+    } catch {
+      res.status(400).json({ error: "Webhook body is not valid JSON" });
+      return;
+    }
+    try {
+      const stored = await recordPaystackWebhook(rawBody, body);
+      log("info", "Paystack webhook durably accepted", { reqId: (req as Request & { id?: string }).id, duplicate: stored.duplicate, eventHash: stored.eventHash.slice(0, 16) });
+      res.status(200).json({ received: true, duplicate: stored.duplicate });
+    } catch (error) {
+      log("error", "Paystack webhook durable intake failed", { reqId: (req as Request & { id?: string }).id, error: error instanceof Error ? error.message : "unknown" });
+      res.status(503).json({ error: "Webhook intake is temporarily unavailable" });
     }
   });
 
@@ -501,6 +480,521 @@ async function startServer() {
   // Limit to 4mb for normal API calls; file uploads use base64 in JSON which is larger
   app.use(express.json({ limit: "4mb" }));
   app.use(express.urlencoded({ limit: "4mb", extended: true }));
+
+  // Mobile REST adapter for the same purpose-bound synthetic consumer discovery
+  // contract exposed by tRPC. It contains no separate data access logic.
+  const respondConsumerAdapterError = (req: Request, res: Response, error: unknown, operation: string) => {
+    const code = error && typeof error === "object" && "code" in error ? String((error as { code: unknown }).code) : "INTERNAL_SERVER_ERROR";
+    const status = code === "UNAUTHORIZED" ? 401 : code === "FORBIDDEN" ? 403 : code === "BAD_REQUEST" ? 400 : code === "NOT_FOUND" ? 404 : 503;
+    const message = error instanceof Error ? error.message : "Consumer discovery request failed";
+    log(status >= 500 ? "error" : "warn", "consumer discovery request rejected", { status, code, operation, reqId: (req as Request & { id?: string }).id });
+    res.status(status).json({ error: message, code });
+  };
+
+  app.post("/api/consumer-discovery/consent", async (req: Request, res: Response) => {
+    try {
+      const ctx = await createContextFromRequest(req, res);
+      const caller = appRouter.createCaller(ctx);
+      const result = await caller.consumerGovernance.consent.grant(req.body);
+      res.status(201).json(result);
+    } catch (error) {
+      respondConsumerAdapterError(req, res, error, "consent_grant");
+    }
+  });
+
+  app.post("/api/consumer-discovery/search", async (req: Request, res: Response) => {
+    try {
+      const ctx = await createContextFromRequest(req, res);
+      const caller = appRouter.createCaller(ctx);
+      const result = await caller.consumerIntelligence.search(req.body);
+      res.status(200).json(result);
+    } catch (error) {
+      respondConsumerAdapterError(req, res, error, "search");
+    }
+  });
+
+  // Consumer-dispute adapters delegate to the same ownership-bound tRPC procedures.
+  // They never expose source credentials, raw provider responses, or another consumer's data.
+  const consumerDisputeCaseRef = (value: unknown): string | null => {
+    const candidate = Array.isArray(value) ? value[0] : value;
+    return typeof candidate === "string" && /^BIS-DR-[A-Z0-9]{18}$/.test(candidate) ? candidate : null;
+  };
+
+  app.post("/api/consumer-disputes", async (req: Request, res: Response) => {
+    try {
+      const ctx = await createContextFromRequest(req, res);
+      const result = await appRouter.createCaller(ctx).consumerDisputes.open(req.body);
+      res.status(201).json(result);
+    } catch (error) {
+      respondConsumerAdapterError(req, res, error, "consumer_dispute_open");
+    }
+  });
+
+  app.get("/api/consumer-disputes", async (req: Request, res: Response) => {
+    try {
+      const ctx = await createContextFromRequest(req, res);
+      const result = await appRouter.createCaller(ctx).consumerDisputes.mine();
+      res.status(200).json(result);
+    } catch (error) {
+      respondConsumerAdapterError(req, res, error, "consumer_dispute_mine");
+    }
+  });
+
+  app.get("/api/consumer-disputes/:caseRef", async (req: Request, res: Response) => {
+    const caseRef = consumerDisputeCaseRef(req.params.caseRef);
+    if (!caseRef) {
+      res.status(400).json({ error: "A valid consumer dispute case reference is required", code: "BAD_REQUEST" });
+      return;
+    }
+    try {
+      const ctx = await createContextFromRequest(req, res);
+      const result = await appRouter.createCaller(ctx).consumerDisputes.getMine({ caseRef });
+      res.status(200).json(result);
+    } catch (error) {
+      respondConsumerAdapterError(req, res, error, "consumer_dispute_get");
+    }
+  });
+
+  app.post("/api/consumer-disputes/:caseRef/evidence/initiate", async (req: Request, res: Response) => {
+    const caseRef = consumerDisputeCaseRef(req.params.caseRef);
+    if (!caseRef) {
+      res.status(400).json({ error: "A valid consumer dispute case reference is required", code: "BAD_REQUEST" });
+      return;
+    }
+    try {
+      const ctx = await createContextFromRequest(req, res);
+      const result = await appRouter.createCaller(ctx).consumerDisputes.initiateEvidence({ ...req.body, caseRef });
+      res.status(201).json(result);
+    } catch (error) {
+      respondConsumerAdapterError(req, res, error, "consumer_dispute_evidence_initiate");
+    }
+  });
+
+  app.post("/api/consumer-disputes/:caseRef/evidence/:evidenceRef/complete", async (req: Request, res: Response) => {
+    const caseRef = consumerDisputeCaseRef(req.params.caseRef);
+    const rawEvidenceRef = Array.isArray(req.params.evidenceRef) ? req.params.evidenceRef[0] : req.params.evidenceRef;
+    if (!caseRef || typeof rawEvidenceRef !== "string" || !/^BIS-DE-[A-Z0-9]{18}$/.test(rawEvidenceRef)) {
+      res.status(400).json({ error: "A valid consumer dispute and evidence reference are required", code: "BAD_REQUEST" });
+      return;
+    }
+    try {
+      const ctx = await createContextFromRequest(req, res);
+      const result = await appRouter.createCaller(ctx).consumerDisputes.completeEvidence({ caseRef, evidenceRef: rawEvidenceRef });
+      res.status(200).json(result);
+    } catch (error) {
+      respondConsumerAdapterError(req, res, error, "consumer_dispute_evidence_complete");
+    }
+  });
+
+  app.get("/api/consumer-disputes/:caseRef/deadline-escalations", async (req: Request, res: Response) => {
+    const caseRef = consumerDisputeCaseRef(req.params.caseRef);
+    const status = typeof req.query.status === "string" ? req.query.status : undefined;
+    if (!caseRef || (status !== undefined && !["open", "acknowledged", "resolved"].includes(status))) {
+      res.status(400).json({ error: "A valid consumer dispute case reference and escalation status are required", code: "BAD_REQUEST" });
+      return;
+    }
+    try {
+      const ctx = await createContextFromRequest(req, res);
+      const result = await appRouter.createCaller(ctx).consumerDisputes.deadlineEscalations({ caseRef, status: status as "open" | "acknowledged" | "resolved" | undefined });
+      res.status(200).json(result);
+    } catch (error) {
+      respondConsumerAdapterError(req, res, error, "consumer_dispute_deadline_escalations_list");
+    }
+  });
+
+  app.post("/api/consumer-disputes/:caseRef/deadline-escalations/:escalationId/acknowledge", async (req: Request, res: Response) => {
+    const caseRef = consumerDisputeCaseRef(req.params.caseRef);
+    const escalationId = Number(Array.isArray(req.params.escalationId) ? req.params.escalationId[0] : req.params.escalationId);
+    if (!caseRef || !Number.isSafeInteger(escalationId) || escalationId <= 0) {
+      res.status(400).json({ error: "A valid consumer dispute case reference and escalation ID are required", code: "BAD_REQUEST" });
+      return;
+    }
+    try {
+      const ctx = await createContextFromRequest(req, res);
+      const result = await appRouter.createCaller(ctx).consumerDisputes.acknowledgeDeadlineEscalation({ caseRef, escalationId });
+      res.status(200).json(result);
+    } catch (error) {
+      respondConsumerAdapterError(req, res, error, "consumer_dispute_deadline_escalation_acknowledge");
+    }
+  });
+
+  app.post("/api/consumer-disputes/:caseRef/deadline-escalations/:escalationId/resolve", async (req: Request, res: Response) => {
+    const caseRef = consumerDisputeCaseRef(req.params.caseRef);
+    const escalationId = Number(Array.isArray(req.params.escalationId) ? req.params.escalationId[0] : req.params.escalationId);
+    const resolutionNote = req.body?.resolutionNote;
+    if (!caseRef || !Number.isSafeInteger(escalationId) || escalationId <= 0 || typeof resolutionNote !== "string") {
+      res.status(400).json({ error: "A valid consumer dispute case reference, escalation ID, and resolution note are required", code: "BAD_REQUEST" });
+      return;
+    }
+    try {
+      const ctx = await createContextFromRequest(req, res);
+      const result = await appRouter.createCaller(ctx).consumerDisputes.resolveDeadlineEscalation({ caseRef, escalationId, resolutionNote });
+      res.status(200).json(result);
+    } catch (error) {
+      respondConsumerAdapterError(req, res, error, "consumer_dispute_deadline_escalation_resolve");
+    }
+  });
+
+  app.post("/api/consumer-disputes/:caseRef/withdraw", async (req: Request, res: Response) => {
+    const caseRef = consumerDisputeCaseRef(req.params.caseRef);
+    if (!caseRef) {
+      res.status(400).json({ error: "A valid consumer dispute case reference is required", code: "BAD_REQUEST" });
+      return;
+    }
+    try {
+      const ctx = await createContextFromRequest(req, res);
+      const result = await appRouter.createCaller(ctx).consumerDisputes.withdraw({ caseRef });
+      res.status(200).json(result);
+    } catch (error) {
+      respondConsumerAdapterError(req, res, error, "consumer_dispute_withdraw");
+    }
+  });
+
+  app.post("/api/consumer-disputes/:caseRef/method-description-requests", async (req: Request, res: Response) => {
+    const caseRef = consumerDisputeCaseRef(req.params.caseRef);
+    if (!caseRef) {
+      res.status(400).json({ error: "A valid consumer dispute case reference is required", code: "BAD_REQUEST" });
+      return;
+    }
+    try {
+      const ctx = await createContextFromRequest(req, res);
+      const result = await appRouter.createCaller(ctx).consumerDisputes.requestMethodDescription({ caseRef });
+      res.status(202).json(result);
+    } catch (error) {
+      respondConsumerAdapterError(req, res, error, "consumer_dispute_method_description");
+    }
+  });
+
+  // Verified PII forensic export delegates every page to the same tenant-scoped tRPC procedure.
+  // It streams NDJSON and has no separate forensic query or export-state persistence path.
+  app.get("/api/pii-forensics/export.ndjson", async (req: Request, res: Response) => {
+    const rawIncidentRef = typeof req.query.incidentRef === "string" ? req.query.incidentRef : undefined;
+    const rawMaxEvents = typeof req.query.maxEvents === "string" ? Number(req.query.maxEvents) : undefined;
+    if (rawIncidentRef !== undefined && !forensicIncidentReferenceSchema.safeParse(rawIncidentRef).success) {
+      res.status(400).json({ error: "A valid PII incident reference is required", code: "BAD_REQUEST" });
+      return;
+    }
+    if (rawMaxEvents !== undefined && (!Number.isSafeInteger(rawMaxEvents) || rawMaxEvents < 1 || rawMaxEvents > FORENSIC_EXPORT_MAX_EVENTS)) {
+      res.status(400).json({ error: `maxEvents must be an integer from 1 through ${FORENSIC_EXPORT_MAX_EVENTS}`, code: "BAD_REQUEST" });
+      return;
+    }
+    let emitted = 0;
+    try {
+      const caller = appRouter.createCaller(await createContextFromRequest(req, res));
+      res.status(200);
+      res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
+      res.setHeader("Content-Disposition", 'attachment; filename="bis-pii-forensic-audit.ndjson"');
+      res.setHeader("Cache-Control", "no-store, private");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.write(serializeForensicExportRecord({ type: "manifest", format: "bis-pii-forensic-audit-ndjson-v1", generatedAt: new Date().toISOString(), maxEvents: rawMaxEvents ?? FORENSIC_EXPORT_MAX_EVENTS, incidentRef: rawIncidentRef ?? null }));
+      for await (const event of iterateVerifiedForensicExport(
+        (input) => caller.piiKeyCustody.listForensics(input),
+        { incidentRef: rawIncidentRef, maxEvents: rawMaxEvents },
+      )) {
+        if (req.destroyed || res.writableEnded) throw new Error("forensic export client disconnected");
+        emitted += 1;
+        if (!res.write(serializeForensicExportRecord({ type: "event", event }))) {
+          await new Promise<void>((resolve, reject) => { res.once("drain", resolve); res.once("error", reject); });
+        }
+      }
+      res.end(serializeForensicExportRecord({ type: "complete", eventCount: emitted }));
+    } catch (error) {
+      log("warn", "verified forensic export terminated", { reqId: (req as Request & { id?: string }).id, emitted, code: error && typeof error === "object" && "code" in error ? String((error as { code: unknown }).code) : "INTERNAL_SERVER_ERROR" });
+      if (!res.headersSent) {
+        respondConsumerAdapterError(req, res, error, "pii_forensic_export");
+      } else if (!res.writableEnded) {
+        res.destroy();
+      }
+    }
+  });
+
+  // Compliance/adverse-action adapters delegate to the same tenant-scoped tRPC procedures.
+  // They expose workflow references only; no template plaintext, provider payload, or PII is returned.
+  const complianceCaseRef = (value: unknown): string | null => {
+    const candidate = Array.isArray(value) ? value[0] : value;
+    return typeof candidate === "string" && /^BIS-AA-[A-Z0-9]{18}$/.test(candidate) ? candidate : null;
+  };
+
+  app.post("/api/compliance/notice-templates", async (req: Request, res: Response) => {
+    try {
+      const result = await appRouter.createCaller(await createContextFromRequest(req, res)).complianceWorkflow.createNoticeTemplate(req.body);
+      res.status(201).json(result);
+    } catch (error) {
+      respondConsumerAdapterError(req, res, error, "compliance_notice_template_create");
+    }
+  });
+
+  app.post("/api/compliance/notice-templates/:templateId/supersede", async (req: Request, res: Response) => {
+    const templateId = Array.isArray(req.params.templateId) ? req.params.templateId[0] : req.params.templateId;
+    if (typeof templateId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(templateId)) {
+      res.status(400).json({ error: "A valid notice template identifier is required", code: "BAD_REQUEST" });
+      return;
+    }
+    try {
+      const result = await appRouter.createCaller(await createContextFromRequest(req, res)).complianceWorkflow.supersedeNoticeTemplate({ ...req.body, templateId });
+      res.status(200).json(result);
+    } catch (error) {
+      respondConsumerAdapterError(req, res, error, "compliance_notice_template_supersede");
+    }
+  });
+
+  app.post("/api/compliance/adverse-actions", async (req: Request, res: Response) => {
+    try {
+      const result = await appRouter.createCaller(await createContextFromRequest(req, res)).complianceWorkflow.initiatePreAdverse(req.body);
+      res.status(201).json(result);
+    } catch (error) {
+      respondConsumerAdapterError(req, res, error, "compliance_adverse_action_initiate");
+    }
+  });
+
+  app.get("/api/compliance/adverse-actions", async (req: Request, res: Response) => {
+    const status = typeof req.query.status === "string" ? req.query.status : undefined;
+    try {
+      const result = await appRouter.createCaller(await createContextFromRequest(req, res)).complianceWorkflow.list(status ? { status } : undefined);
+      res.status(200).json(result);
+    } catch (error) {
+      respondConsumerAdapterError(req, res, error, "compliance_adverse_action_list");
+    }
+  });
+
+  app.post("/api/compliance/adverse-actions/:caseRef/deliveries/:deliveryId", async (req: Request, res: Response) => {
+    const caseRef = complianceCaseRef(req.params.caseRef);
+    const deliveryId = Array.isArray(req.params.deliveryId) ? req.params.deliveryId[0] : req.params.deliveryId;
+    if (!caseRef || typeof deliveryId !== "string") { res.status(400).json({ error: "A valid adverse-action case and delivery identifier are required", code: "BAD_REQUEST" }); return; }
+    try {
+      const result = await appRouter.createCaller(await createContextFromRequest(req, res)).complianceWorkflow.recordDelivery({ ...req.body, caseRef, deliveryId });
+      res.status(200).json(result);
+    } catch (error) {
+      respondConsumerAdapterError(req, res, error, "compliance_adverse_action_delivery_record");
+    }
+  });
+
+  app.post("/api/compliance/adverse-actions/:caseRef/pause-dispute", async (req: Request, res: Response) => {
+    const caseRef = complianceCaseRef(req.params.caseRef);
+    if (!caseRef) { res.status(400).json({ error: "A valid adverse-action case reference is required", code: "BAD_REQUEST" }); return; }
+    try {
+      const result = await appRouter.createCaller(await createContextFromRequest(req, res)).complianceWorkflow.pauseForDispute({ ...req.body, caseRef });
+      res.status(200).json(result);
+    } catch (error) {
+      respondConsumerAdapterError(req, res, error, "compliance_adverse_action_pause_dispute");
+    }
+  });
+
+  app.post("/api/compliance/adverse-actions/:caseRef/resume", async (req: Request, res: Response) => {
+    const caseRef = complianceCaseRef(req.params.caseRef);
+    if (!caseRef) { res.status(400).json({ error: "A valid adverse-action case reference is required", code: "BAD_REQUEST" }); return; }
+    try {
+      const result = await appRouter.createCaller(await createContextFromRequest(req, res)).complianceWorkflow.resumeAfterDispute({ ...req.body, caseRef });
+      res.status(200).json(result);
+    } catch (error) {
+      respondConsumerAdapterError(req, res, error, "compliance_adverse_action_resume");
+    }
+  });
+
+  app.post("/api/compliance/adverse-actions/:caseRef/final-adverse", async (req: Request, res: Response) => {
+    const caseRef = complianceCaseRef(req.params.caseRef);
+    if (!caseRef) { res.status(400).json({ error: "A valid adverse-action case reference is required", code: "BAD_REQUEST" }); return; }
+    try {
+      const result = await appRouter.createCaller(await createContextFromRequest(req, res)).complianceWorkflow.queueFinalAdverse({ ...req.body, caseRef });
+      res.status(202).json(result);
+    } catch (error) {
+      respondConsumerAdapterError(req, res, error, "compliance_adverse_action_final_queue");
+    }
+  });
+
+  app.post("/api/compliance/adverse-actions/:caseRef/manual-delivery", async (req: Request, res: Response) => {
+    const caseRef = complianceCaseRef(req.params.caseRef);
+    if (!caseRef) { res.status(400).json({ error: "A valid adverse-action case reference is required", code: "BAD_REQUEST" }); return; }
+    try {
+      const result = await appRouter.createCaller(await createContextFromRequest(req, res)).complianceWorkflow.resolveManualDelivery({ ...req.body, caseRef });
+      res.status(202).json(result);
+    } catch (error) {
+      respondConsumerAdapterError(req, res, error, "compliance_adverse_action_manual_delivery");
+    }
+  });
+
+  app.post("/api/compliance/adverse-actions/:caseRef/cancel", async (req: Request, res: Response) => {
+    const caseRef = complianceCaseRef(req.params.caseRef);
+    if (!caseRef) { res.status(400).json({ error: "A valid adverse-action case reference is required", code: "BAD_REQUEST" }); return; }
+    try {
+      const result = await appRouter.createCaller(await createContextFromRequest(req, res)).complianceWorkflow.cancel({ ...req.body, caseRef });
+      res.status(200).json(result);
+    } catch (error) {
+      respondConsumerAdapterError(req, res, error, "compliance_adverse_action_cancel");
+    }
+  });
+
+  // Mobile evidence adapter delegates to the same protected tRPC procedures.
+  // It authorizes direct-to-object-store uploads; evidence bytes do not transit this server.
+  app.post("/api/evidence/initiate", async (req: Request, res: Response) => {
+    try {
+      const ctx = await createContextFromRequest(req, res);
+      const result = await appRouter.createCaller(ctx).fieldEvidence.initiate(req.body);
+      res.status(201).json(result);
+    } catch (error) {
+      respondConsumerAdapterError(req, res, error, "evidence_initiate");
+    }
+  });
+
+  app.post("/api/evidence/:uploadId/complete", async (req: Request, res: Response) => {
+    try {
+      const ctx = await createContextFromRequest(req, res);
+      const rawUploadId = req.params.uploadId;
+      const uploadId = Array.isArray(rawUploadId) ? rawUploadId[0] : rawUploadId;
+      const result = await appRouter.createCaller(ctx).fieldEvidence.complete({ uploadId });
+      res.status(200).json(result);
+    } catch (error) {
+      respondConsumerAdapterError(req, res, error, "evidence_complete");
+    }
+  });
+
+  // Mobile KYC document adapters delegate to the encrypted, tenant-scoped custody router.
+  // Binary content is sent directly to a short-lived SSE-KMS object-store authorization.
+  app.post("/api/kyc/documents/initiate", async (req: Request, res: Response) => {
+    try {
+      const ctx = await createContextFromRequest(req, res);
+      const result = await appRouter.createCaller(ctx).kycDocumentEvidence.initiate(req.body);
+      res.status(201).json(result);
+    } catch (error) {
+      respondConsumerAdapterError(req, res, error, "kyc_document_initiate");
+    }
+  });
+
+  app.post("/api/kyc/documents/:uploadId/complete", async (req: Request, res: Response) => {
+    try {
+      const ctx = await createContextFromRequest(req, res);
+      const rawUploadId = req.params.uploadId;
+      const uploadId = Array.isArray(rawUploadId) ? rawUploadId[0] : rawUploadId;
+      const result = await appRouter.createCaller(ctx).kycDocumentEvidence.complete({ uploadId });
+      res.status(200).json(result);
+    } catch (error) {
+      respondConsumerAdapterError(req, res, error, "kyc_document_complete");
+    }
+  });
+
+  // Mobile field-dispatch adapter delegates to the existing idempotent field-task procedure.
+  app.post("/api/investigations/:investigationId/dispatch", async (req: Request, res: Response) => {
+    try {
+      const rawInvestigationId = req.params.investigationId;
+      const investigationId = Number(Array.isArray(rawInvestigationId) ? rawInvestigationId[0] : rawInvestigationId);
+      if (!Number.isInteger(investigationId) || investigationId <= 0) {
+        res.status(400).json({ error: "A valid investigation ID is required", code: "BAD_REQUEST" });
+        return;
+      }
+      const ctx = await createContextFromRequest(req, res);
+      const result = await appRouter.createCaller(ctx).fieldTasks.dispatch({
+        agentId: req.body?.agentId,
+        agentName: req.body?.agentName,
+        taskType: "address_verification",
+        priority: "medium",
+        address: req.body?.location,
+        investigationId,
+        idempotencyKey: req.body?.idempotencyKey,
+      });
+      res.status(201).json(result);
+    } catch (error) {
+      respondConsumerAdapterError(req, res, error, "field_dispatch");
+    }
+  });
+
+  // Institutional and informal-sector adapters retain the same tRPC tenant, purpose,
+  // consent, approval, and audit enforcement used by the PWA.
+  app.post("/api/biometric/consents", async (req: Request, res: Response) => {
+    try { const ctx = await createContextFromRequest(req, res); const result = await appRouter.createCaller(ctx).biometric.grantConsent(req.body); res.status(201).json(result); }
+    catch (error) { respondConsumerAdapterError(req, res, error, "biometric_consent_grant"); }
+  });
+  app.post("/api/biometric/consents/withdraw", async (req: Request, res: Response) => {
+    try { const ctx = await createContextFromRequest(req, res); const result = await appRouter.createCaller(ctx).biometric.withdrawConsent(req.body); res.status(202).json(result); }
+    catch (error) { respondConsumerAdapterError(req, res, error, "biometric_consent_withdraw"); }
+  });
+  app.post("/api/biometric/reviews/:reviewCaseId/resolve", async (req: Request, res: Response) => {
+    try { const ctx = await createContextFromRequest(req, res); const result = await appRouter.createCaller(ctx).biometric.resolveReview({ reviewCaseId: Array.isArray(req.params.reviewCaseId) ? req.params.reviewCaseId[0] : req.params.reviewCaseId, decision: req.body?.decision, rationale: req.body?.rationale }); res.status(200).json(result); }
+    catch (error) { respondConsumerAdapterError(req, res, error, "biometric_review_resolve"); }
+  });
+
+  app.post("/api/institutional-authorizations", async (req: Request, res: Response) => {
+    try { const ctx = await createContextFromRequest(req, res); const result = await appRouter.createCaller(ctx).institutionalAccess.submitAuthorization(req.body); res.status(201).json(result); }
+    catch (error) { respondConsumerAdapterError(req, res, error, "institution_authorization_submit"); }
+  });
+  app.post("/api/institutional-authorizations/:authorizationId/approve", async (req: Request, res: Response) => {
+    try { const ctx = await createContextFromRequest(req, res); const result = await appRouter.createCaller(ctx).institutionalAccess.approveAuthorization({ authorizationId: Array.isArray(req.params.authorizationId) ? req.params.authorizationId[0] : req.params.authorizationId, rationale: req.body?.rationale }); res.status(200).json(result); }
+    catch (error) { respondConsumerAdapterError(req, res, error, "institution_authorization_approve"); }
+  });
+  app.post("/api/institutional-authorizations/:authorizationId/revoke", async (req: Request, res: Response) => {
+    try { const ctx = await createContextFromRequest(req, res); const result = await appRouter.createCaller(ctx).institutionalAccess.revokeAuthorization({ authorizationId: Array.isArray(req.params.authorizationId) ? req.params.authorizationId[0] : req.params.authorizationId, rationale: req.body?.rationale }); res.status(200).json(result); }
+    catch (error) { respondConsumerAdapterError(req, res, error, "institution_authorization_revoke"); }
+  });
+  app.post("/api/restricted-criminal-requests", async (req: Request, res: Response) => {
+    try { const ctx = await createContextFromRequest(req, res); const result = await appRouter.createCaller(ctx).institutionalAccess.createRestrictedRequest(req.body); res.status(201).json(result); }
+    catch (error) { respondConsumerAdapterError(req, res, error, "restricted_request_create"); }
+  });
+  app.post("/api/restricted-criminal-requests/:requestAuthorizationId/approve", async (req: Request, res: Response) => {
+    try { const ctx = await createContextFromRequest(req, res); const result = await appRouter.createCaller(ctx).institutionalAccess.approveRestrictedRequest({ requestAuthorizationId: Array.isArray(req.params.requestAuthorizationId) ? req.params.requestAuthorizationId[0] : req.params.requestAuthorizationId, approvalNote: req.body?.approvalNote }); res.status(200).json(result); }
+    catch (error) { respondConsumerAdapterError(req, res, error, "restricted_request_approve"); }
+  });
+  app.post("/api/informal-verifications", async (req: Request, res: Response) => {
+    try { const ctx = await createContextFromRequest(req, res); const result = await appRouter.createCaller(ctx).informalVerification.openCase(req.body); res.status(201).json(result); }
+    catch (error) { respondConsumerAdapterError(req, res, error, "informal_verification_open"); }
+  });
+  app.post("/api/informal-verifications/:caseId/references", async (req: Request, res: Response) => {
+    try { const ctx = await createContextFromRequest(req, res); const result = await appRouter.createCaller(ctx).informalVerification.addReference({ ...req.body, caseId: Array.isArray(req.params.caseId) ? req.params.caseId[0] : req.params.caseId }); res.status(201).json(result); }
+    catch (error) { respondConsumerAdapterError(req, res, error, "informal_reference_add"); }
+  });
+  app.post("/api/informal-verifications/:caseId/corroborations", async (req: Request, res: Response) => {
+    try { const ctx = await createContextFromRequest(req, res); const result = await appRouter.createCaller(ctx).informalVerification.recordCorroboration({ ...req.body, caseId: Array.isArray(req.params.caseId) ? req.params.caseId[0] : req.params.caseId }); res.status(201).json(result); }
+    catch (error) { respondConsumerAdapterError(req, res, error, "informal_reference_corroborate"); }
+  });
+  app.post("/api/informal-verifications/:caseId/review", async (req: Request, res: Response) => {
+    try { const ctx = await createContextFromRequest(req, res); const result = await appRouter.createCaller(ctx).informalVerification.submitForReview({ caseId: Array.isArray(req.params.caseId) ? req.params.caseId[0] : req.params.caseId }); res.status(200).json(result); }
+    catch (error) { respondConsumerAdapterError(req, res, error, "informal_verification_review"); }
+  });
+  app.post("/api/informal-verifications/:caseId/complete", async (req: Request, res: Response) => {
+    try { const ctx = await createContextFromRequest(req, res); const result = await appRouter.createCaller(ctx).informalVerification.completeCase({ caseId: Array.isArray(req.params.caseId) ? req.params.caseId[0] : req.params.caseId, rationale: req.body?.rationale }); res.status(200).json(result); }
+    catch (error) { respondConsumerAdapterError(req, res, error, "informal_verification_complete"); }
+  });
+
+  // ── Explainable investigation intelligence. Routes delegate to tenant-scoped tRPC;
+  // they do not invoke providers and never return an automated adverse decision.
+  app.post("/api/investigation-intelligence/policies", async (req: Request, res: Response) => {
+    try { const ctx = await createContextFromRequest(req, res); const result = await appRouter.createCaller(ctx).investigationIntelligence.createScorePolicy(req.body); res.status(201).json(result); }
+    catch (error) { respondConsumerAdapterError(req, res, error, "intelligence_policy_create"); }
+  });
+  app.post("/api/investigation-intelligence/policies/:policyId/activate", async (req: Request, res: Response) => {
+    try { const ctx = await createContextFromRequest(req, res); const policyId = Array.isArray(req.params.policyId) ? req.params.policyId[0] : req.params.policyId; const result = await appRouter.createCaller(ctx).investigationIntelligence.activateScorePolicy({ policyId }); res.status(200).json(result); }
+    catch (error) { respondConsumerAdapterError(req, res, error, "intelligence_policy_activate"); }
+  });
+  app.post("/api/investigation-intelligence/sources", async (req: Request, res: Response) => {
+    try { const ctx = await createContextFromRequest(req, res); const result = await appRouter.createCaller(ctx).investigationIntelligence.registerSource(req.body); res.status(201).json(result); }
+    catch (error) { respondConsumerAdapterError(req, res, error, "intelligence_source_register"); }
+  });
+  app.post("/api/investigation-intelligence/evidence", async (req: Request, res: Response) => {
+    try { const ctx = await createContextFromRequest(req, res); const result = await appRouter.createCaller(ctx).investigationIntelligence.recordEvidence(req.body); res.status(201).json(result); }
+    catch (error) { respondConsumerAdapterError(req, res, error, "intelligence_evidence_record"); }
+  });
+  app.post("/api/investigation-intelligence/scores", async (req: Request, res: Response) => {
+    try { const ctx = await createContextFromRequest(req, res); const result = await appRouter.createCaller(ctx).investigationIntelligence.calculateScore(req.body); res.status(201).json(result); }
+    catch (error) { respondConsumerAdapterError(req, res, error, "intelligence_score_calculate"); }
+  });
+  app.post("/api/investigation-intelligence/conflicts", async (req: Request, res: Response) => {
+    try { const ctx = await createContextFromRequest(req, res); const result = await appRouter.createCaller(ctx).investigationIntelligence.reportConflict(req.body); res.status(201).json(result); }
+    catch (error) { respondConsumerAdapterError(req, res, error, "intelligence_conflict_report"); }
+  });
+  app.post("/api/investigation-intelligence/reviews", async (req: Request, res: Response) => {
+    try { const ctx = await createContextFromRequest(req, res); const result = await appRouter.createCaller(ctx).investigationIntelligence.requestHumanReview(req.body); res.status(201).json(result); }
+    catch (error) { respondConsumerAdapterError(req, res, error, "intelligence_review_request"); }
+  });
+  app.post("/api/investigation-intelligence/reviews/:reviewCaseId/resolve", async (req: Request, res: Response) => {
+    try { const ctx = await createContextFromRequest(req, res); const reviewCaseId = Array.isArray(req.params.reviewCaseId) ? req.params.reviewCaseId[0] : req.params.reviewCaseId; const result = await appRouter.createCaller(ctx).investigationIntelligence.resolveHumanReview({ ...req.body, reviewCaseId }); res.status(200).json(result); }
+    catch (error) { respondConsumerAdapterError(req, res, error, "intelligence_review_resolve"); }
+  });
+  app.post("/api/investigation-intelligence/monitoring", async (req: Request, res: Response) => {
+    try { const ctx = await createContextFromRequest(req, res); const result = await appRouter.createCaller(ctx).investigationIntelligence.registerMonitoring(req.body); res.status(201).json(result); }
+    catch (error) { respondConsumerAdapterError(req, res, error, "intelligence_monitoring_register"); }
+  });
+  app.post("/api/investigation-intelligence/fraud-signals", async (req: Request, res: Response) => {
+    try { const ctx = await createContextFromRequest(req, res); const result = await appRouter.createCaller(ctx).investigationIntelligence.recordFraudSignal(req.body); res.status(201).json(result); }
+    catch (error) { respondConsumerAdapterError(req, res, error, "intelligence_fraud_signal_record"); }
+  });
 
   // ── CSRF token endpoint ────────────────────────────────────────────────────
   // Provides a per-session CSRF token for state-changing requests from the frontend.
@@ -1357,6 +1851,7 @@ startServer()
     startVapidRotationReminderScheduler(); // Daily VAPID key age check — notifies owner after 90 days
     startBroadcastScheduler(); // 1-min poll for overdue scheduled broadcasts
     startWebhookRetryScheduler(); // 10s poll for failed Paystack webhook credits (exponential backoff)
+    startPaymentIntentOutboxDispatcher(); // 5s leased PostgreSQL dispatch for payment workflow starts
     void import("../platform").then(async ({ migrateLegacyTotpSeedsAtRest }) => {
       const migrated = await migrateLegacyTotpSeedsAtRest();
       if (migrated > 0) log("info", "Encrypted legacy TOTP seeds", { migrated });

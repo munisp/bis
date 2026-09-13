@@ -24,7 +24,7 @@
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 /// BIS event envelope matching the Go producer schema.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -42,6 +42,7 @@ pub type AuditLog = Arc<RwLock<Vec<serde_json::Value>>>;
 
 // ─── Kafka topics ─────────────────────────────────────────────────────────────────────────────────
 
+#[cfg(feature = "kafka-native")]
 const TOPICS: &[&str] = &[
     "bis.events",
     "bis.payment.events",
@@ -50,9 +51,27 @@ const TOPICS: &[&str] = &[
     "bis.velocity.breaches",
 ];
 
+#[cfg(feature = "kafka-native")]
 const CONSUMER_GROUP: &str = "bis-event-processor";
 
-// ─── Native rdkafka consumer (feature-gated) ──────────────────────────────────────────────────
+// ─── Native rdkafka consumer (feature-gated) ──────────────────────────────────
+
+#[cfg(any(feature = "kafka-native", test))]
+fn validate_kafka_security_protocol(value: &str) -> Result<&'static str, &'static str> {
+    match value.trim() {
+        "SSL" => Ok("SSL"),
+        "SASL_SSL" => Ok("SASL_SSL"),
+        _ => Err("KAFKA_SECURITY_PROTOCOL must be SSL or SASL_SSL; plaintext and downgrade modes are forbidden"),
+    }
+}
+
+#[cfg(feature = "kafka-native")]
+fn required_kafka_env(variable: &str) -> Result<String, String> {
+    match std::env::var(variable) {
+        Ok(value) if !value.trim().is_empty() => Ok(value),
+        _ => Err(format!("{variable} must be configured")),
+    }
+}
 
 #[cfg(feature = "kafka-native")]
 pub async fn start_consumer(audit_log: AuditLog) {
@@ -60,10 +79,35 @@ pub async fn start_consumer(audit_log: AuditLog) {
     use rdkafka::consumer::{Consumer, StreamConsumer};
     use rdkafka::message::Message;
 
-    let brokers = std::env::var("KAFKA_BROKERS").unwrap_or_else(|_| "localhost:9092".to_string());
-    let security = std::env::var("KAFKA_SECURITY_PROTOCOL").unwrap_or_else(|_| "PLAINTEXT".to_string());
+    let brokers = match required_kafka_env("KAFKA_BROKERS") {
+        Ok(value) => value,
+        Err(error) => {
+            warn!("[Kafka] Native consumer refused insecure configuration: {error}");
+            return;
+        }
+    };
+    let security = match std::env::var("KAFKA_SECURITY_PROTOCOL")
+        .ok()
+        .and_then(|value| validate_kafka_security_protocol(&value).ok())
+    {
+        Some(value) => value,
+        None => {
+            warn!("[Kafka] Native consumer requires KAFKA_SECURITY_PROTOCOL=SSL or SASL_SSL");
+            return;
+        }
+    };
+    let ca_location = match required_kafka_env("KAFKA_SSL_CA_LOCATION") {
+        Ok(value) => value,
+        Err(error) => {
+            warn!("[Kafka] Native consumer refused insecure configuration: {error}");
+            return;
+        }
+    };
 
-    info!("[Kafka] Native rdkafka consumer starting — brokers={} topics={:?}", brokers, TOPICS);
+    info!(
+        "[Kafka] Native rdkafka consumer starting with TLS — brokers={} topics={:?}",
+        brokers, TOPICS
+    );
 
     let mut config = ClientConfig::new();
     config
@@ -74,16 +118,55 @@ pub async fn start_consumer(audit_log: AuditLog) {
         .set("auto.offset.reset", "latest")
         .set("session.timeout.ms", "30000")
         .set("heartbeat.interval.ms", "10000")
-        .set("security.protocol", &security);
+        .set("security.protocol", security)
+        .set("ssl.ca.location", &ca_location)
+        .set("enable.ssl.certificate.verification", "true")
+        .set("ssl.endpoint.identification.algorithm", "https");
 
-    if let Ok(mechanism) = std::env::var("KAFKA_SASL_MECHANISM") {
-        config.set("sasl.mechanism", &mechanism);
-    }
-    if let Ok(username) = std::env::var("KAFKA_SASL_USERNAME") {
-        config.set("sasl.username", &username);
-    }
-    if let Ok(password) = std::env::var("KAFKA_SASL_PASSWORD") {
-        config.set("sasl.password", &password);
+    if security == "SSL" {
+        let certificate = match required_kafka_env("KAFKA_SSL_CERTIFICATE_LOCATION") {
+            Ok(value) => value,
+            Err(error) => {
+                warn!("[Kafka] Native consumer refused insecure configuration: {error}");
+                return;
+            }
+        };
+        let key = match required_kafka_env("KAFKA_SSL_KEY_LOCATION") {
+            Ok(value) => value,
+            Err(error) => {
+                warn!("[Kafka] Native consumer refused insecure configuration: {error}");
+                return;
+            }
+        };
+        config
+            .set("ssl.certificate.location", &certificate)
+            .set("ssl.key.location", &key);
+    } else {
+        let mechanism = match required_kafka_env("KAFKA_SASL_MECHANISM") {
+            Ok(value) => value,
+            Err(error) => {
+                warn!("[Kafka] Native consumer refused insecure configuration: {error}");
+                return;
+            }
+        };
+        let username = match required_kafka_env("KAFKA_SASL_USERNAME") {
+            Ok(value) => value,
+            Err(error) => {
+                warn!("[Kafka] Native consumer refused insecure configuration: {error}");
+                return;
+            }
+        };
+        let password = match required_kafka_env("KAFKA_SASL_PASSWORD") {
+            Ok(value) => value,
+            Err(error) => {
+                warn!("[Kafka] Native consumer refused insecure configuration: {error}");
+                return;
+            }
+        };
+        config
+            .set("sasl.mechanism", &mechanism)
+            .set("sasl.username", &username)
+            .set("sasl.password", &password);
     }
 
     let consumer: StreamConsumer = match config.create() {
@@ -115,8 +198,11 @@ pub async fn start_consumer(audit_log: AuditLog) {
                             process_event(event, log.clone()).await;
                         }
                         Err(e) => {
-                            warn!("[Kafka] Failed to deserialize event: {} — raw: {:?}", e,
-                                  String::from_utf8_lossy(payload));
+                            warn!(
+                                "[Kafka] Failed to deserialize event: {} — raw: {:?}",
+                                e,
+                                String::from_utf8_lossy(payload)
+                            );
                         }
                     }
                 }
@@ -215,23 +301,51 @@ pub async fn process_event(event: BisEvent, audit_log: AuditLog) {
 // ─── BFF webhook fan-out ───────────────────────────────────────────────────────────────────────────────
 
 async fn forward_to_bff(entry: serde_json::Value) {
-    let bff_url = std::env::var("BFF_WEBHOOK_URL")
-        .unwrap_or_else(|_| "http://localhost:8080/api/internal/events".to_string());
-    let gateway_key = std::env::var("BIS_GATEWAY_KEY")
-        .unwrap_or_else(|_| "dev-gateway-key-change-in-prod".to_string());
-
-    let client = match reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .build() {
-        Ok(c) => c,
-        Err(e) => {
-            warn!("[BFF] Failed to build HTTP client: {}", e);
+    let allowed_hosts =
+        match bis_transport_policy::required_allowed_hosts("BIS_EVENT_BFF_ALLOWED_HOSTS") {
+            Ok(hosts) => hosts,
+            Err(_) => {
+                warn!("[BFF] Outbound transport policy is not configured");
+                return;
+            }
+        };
+    let bff_url = match std::env::var("BFF_WEBHOOK_URL")
+        .ok()
+        .and_then(|raw| {
+            bis_transport_policy::TrustedEndpoint::parse("BFF_WEBHOOK_URL", &raw, &allowed_hosts)
+                .ok()
+        })
+        .and_then(|endpoint| {
+            endpoint
+                .with_path_segments(&["api", "internal", "events"])
+                .ok()
+        }) {
+        Some(endpoint) => endpoint,
+        None => {
+            warn!("[BFF] Outbound webhook endpoint is not configured");
+            return;
+        }
+    };
+    let gateway_key = match std::env::var("BIS_GATEWAY_KEY") {
+        Ok(key) if !key.trim().is_empty() => key,
+        _ => {
+            warn!("[BFF] Gateway credential is not configured");
+            return;
+        }
+    };
+    let client = match bis_transport_policy::https_client(
+        std::time::Duration::from_secs(10),
+        std::time::Duration::from_secs(5),
+    ) {
+        Ok(client) => client,
+        Err(_) => {
+            warn!("[BFF] TLS client cannot be initialized");
             return;
         }
     };
 
     match client
-        .post(&bff_url)
+        .post(bff_url)
         .header("X-BIS-Key", &gateway_key)
         .header("Content-Type", "application/json")
         .json(&entry)
@@ -247,5 +361,23 @@ async fn forward_to_bff(entry: serde_json::Value) {
         Err(e) => {
             warn!("[BFF] Webhook forward failed: {}", e);
         }
+    }
+}
+
+#[cfg(test)]
+mod transport_policy_tests {
+    use super::validate_kafka_security_protocol;
+
+    #[test]
+    fn kafka_transport_refuses_plaintext_and_downgrade_protocols() {
+        for protocol in ["PLAINTEXT", "SASL_PLAINTEXT", "", "ssl"] {
+            assert!(validate_kafka_security_protocol(protocol).is_err());
+        }
+    }
+
+    #[test]
+    fn kafka_transport_accepts_only_explicit_tls_protocols() {
+        assert_eq!(validate_kafka_security_protocol("SSL"), Ok("SSL"));
+        assert_eq!(validate_kafka_security_protocol("SASL_SSL"), Ok("SASL_SSL"));
     }
 }

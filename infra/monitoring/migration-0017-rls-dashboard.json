@@ -1,0 +1,104 @@
+{
+  "annotations": { "list": [{ "builtIn": 1, "enable": true, "hide": true, "iconColor": "rgba(0, 211, 255, 1)", "name": "Annotations & Alerts", "type": "dashboard" }] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "type": "stat",
+      "title": "RLS Context Setup Failures (5m)",
+      "id": 1,
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [{ "refId": "A", "expr": "sum(increase(bis_rls_tenant_context_setup_total{outcome=~\"reset_failed|residual_detected|set_failed|verify_failed\"}[5m]))", "legendFormat": "failures" }],
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "mappings": [], "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] }, "unit": "short" }, "overrides": [] },
+      "options": { "colorMode": "background", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" }
+    },
+    {
+      "type": "timeseries",
+      "title": "Tenant Context Setup Rate by Outcome",
+      "id": 2,
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [{ "refId": "A", "expr": "sum by (outcome, component) (rate(bis_rls_tenant_context_setup_total[5m]))", "legendFormat": "{{component}} / {{outcome}}" }],
+      "fieldConfig": { "defaults": { "unit": "ops", "custom": { "drawStyle": "line", "lineInterpolation": "linear", "lineWidth": 1, "fillOpacity": 10, "showPoints": "auto", "spanNulls": false } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    },
+    {
+      "type": "stat",
+      "title": "Residual Pooled Tenant Contexts (5m)",
+      "id": 3,
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [{ "refId": "A", "expr": "sum(increase(bis_rls_pool_context_residual_total[5m]))", "legendFormat": "residuals" }],
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] }, "unit": "short" }, "overrides": [] },
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"], "values": false }, "orientation": "auto", "textMode": "auto" }
+    },
+    {
+      "type": "timeseries",
+      "title": "RLS / Permission Denials by Operation",
+      "id": 4,
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [{ "refId": "A", "expr": "sum by (component, operation, sqlstate_class) (rate(bis_rls_policy_denial_total[5m]))", "legendFormat": "{{component}} / {{operation}} / {{sqlstate_class}}" }],
+      "fieldConfig": { "defaults": { "unit": "ops", "custom": { "drawStyle": "bars", "lineWidth": 1, "fillOpacity": 25, "showPoints": "never" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Rotation Dispatch Outcomes",
+      "id": 5,
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [{ "refId": "A", "expr": "sum by (outcome, component) (rate(bis_pii_rotation_dispatch_total[5m]))", "legendFormat": "{{component}} / {{outcome}}" }],
+      "fieldConfig": { "defaults": { "unit": "ops", "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10, "showPoints": "auto" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    },
+    {
+      "type": "gauge",
+      "title": "Oldest Queued Dispatch Age",
+      "id": 6,
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [{ "refId": "A", "expr": "max(bis_pii_rotation_dispatch_queue_age_seconds)", "legendFormat": "oldest queued dispatch" }],
+      "fieldConfig": { "defaults": { "max": 600, "min": 0, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 180 }, { "color": "red", "value": 300 }] }, "unit": "s" }, "overrides": [] },
+      "options": { "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "values": false }, "showThresholdLabels": false, "showThresholdMarkers": true }
+    },
+    {
+      "type": "timeseries",
+      "title": "Rotation Worker Failures and Tenant-Scope Mismatches",
+      "id": 7,
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        { "refId": "A", "expr": "sum by (reason_code, component) (increase(bis_pii_rotation_worker_failures_total[5m]))", "legendFormat": "failure: {{component}} / {{reason_code}}" },
+        { "refId": "B", "expr": "sum by (component) (increase(bis_pii_rotation_tenant_scope_mismatch_total[5m]))", "legendFormat": "scope mismatch: {{component}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "bars", "lineWidth": 1, "fillOpacity": 20, "showPoints": "never" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Forensic Audit Append Outcomes",
+      "id": 8,
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [{ "refId": "A", "expr": "sum by (event_type, outcome) (rate(bis_pii_forensic_append_total[5m]))", "legendFormat": "{{event_type}} / {{outcome}}" }],
+      "fieldConfig": { "defaults": { "unit": "ops", "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10, "showPoints": "auto" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "HTTP 5xx Correlation",
+      "id": 9,
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [{ "refId": "A", "expr": "sum(rate(bis_http_requests_total{status_code=~\"5..\"}[5m]))", "legendFormat": "HTTP 5xx/s" }],
+      "fieldConfig": { "defaults": { "unit": "ops", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10, "showPoints": "auto" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "single", "sort": "none" } }
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["bis", "pii", "rls", "migration-0017", "vault-transit"],
+  "templating": { "list": [{ "name": "datasource", "type": "datasource", "query": "prometheus", "current": { "selected": false, "text": "Prometheus", "value": "Prometheus" }, "label": "Prometheus datasource", "hide": 0 }] },
+  "time": { "from": "now-6h", "to": "now" },
+  "timezone": "browser",
+  "title": "BIS Migration 0017 — Tenant RLS and Rotation Dispatch",
+  "uid": "bis-migration-0017-rls",
+  "version": 1,
+  "weekStart": ""
+}

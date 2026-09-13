@@ -1,0 +1,31 @@
+# Usage: docker compose -f docker-compose.yml -f docker-compose.onprem.yml --env-file /run/secrets/bis-onprem.env up -d
+# This overlay contains no credential values. Deploy MinIO/AIStor + KES/HSM/Vault, Permify,
+# PostgreSQL, and the secret manager under the operator's private network/security boundary.
+services:
+  bff:
+    environment:
+      NODE_ENV: production
+      BIS_DEPLOYMENT_ENV: ${BIS_DEPLOYMENT_ENV:?BIS_DEPLOYMENT_ENV is required and must be production or staging}
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      PERMIFY_URL: ${PERMIFY_URL:?PERMIFY_URL is required}
+      PERMIFY_TENANT_ID: ${PERMIFY_TENANT_ID:?PERMIFY_TENANT_ID is required}
+      NODE_EXTRA_CA_CERTS: /etc/ssl/certs/bis-onprem-ca.pem
+      PERMIFY_API_KEY: ${PERMIFY_API_KEY:?PERMIFY_API_KEY is required}
+      BIS_EVIDENCE_S3_ENDPOINT: ${BIS_EVIDENCE_S3_ENDPOINT:?BIS_EVIDENCE_S3_ENDPOINT is required}
+      BIS_EVIDENCE_S3_REGION: ${BIS_EVIDENCE_S3_REGION:?BIS_EVIDENCE_S3_REGION is required}
+      BIS_EVIDENCE_S3_BUCKET: ${BIS_EVIDENCE_S3_BUCKET:?BIS_EVIDENCE_S3_BUCKET is required}
+      BIS_EVIDENCE_S3_FORCE_PATH_STYLE: ${BIS_EVIDENCE_S3_FORCE_PATH_STYLE:-true}
+      BIS_EVIDENCE_S3_SSE_ALGORITHM: aws:kms
+      BIS_EVIDENCE_S3_KMS_KEY_ID: ${BIS_EVIDENCE_S3_KMS_KEY_ID:?BIS_EVIDENCE_S3_KMS_KEY_ID is required}
+      # Both are optional only when the container receives workload credentials through the
+      # secret platform/default provider chain. Otherwise inject both as an opaque service pair.
+      BIS_EVIDENCE_S3_ACCESS_KEY: ${BIS_EVIDENCE_S3_ACCESS_KEY:-}
+      BIS_EVIDENCE_S3_SECRET_KEY: ${BIS_EVIDENCE_S3_SECRET_KEY:-}
+      BIS_EVIDENCE_ACTIVE_KEY_VERSION: ${BIS_EVIDENCE_ACTIVE_KEY_VERSION:?BIS_EVIDENCE_ACTIVE_KEY_VERSION is required}
+      BIS_EVIDENCE_KEYRING: ${BIS_EVIDENCE_KEYRING:?BIS_EVIDENCE_KEYRING is required}
+    volumes:
+      # Optional private-CA trust bundle for on-premises TLS. Do not mount a writable host path.
+      - ${BIS_ONPREM_CA_BUNDLE_PATH:-/dev/null}:/etc/ssl/certs/bis-onprem-ca.pem:ro
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777,size=64m

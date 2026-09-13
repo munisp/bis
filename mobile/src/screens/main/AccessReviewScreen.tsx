@@ -44,7 +44,7 @@ const REVIEW_TYPE_LABEL: Record<string, string> = {
 };
 
 function isOverdue(dueAt?: string): boolean {
-  if (!dueAt) return false;
+  if (!dueAt) {return false;}
   return new Date(dueAt) < new Date();
 }
 
@@ -56,15 +56,15 @@ export function AccessReviewScreen() {
   const [filter, setFilter] = useState<'all' | 'pending' | 'completed'>('pending');
 
   const filtered = reviews.filter(r => {
-    if (filter === 'pending') return r.status === 'pending' || r.status === 'in_progress';
-    if (filter === 'completed') return r.status === 'approved' || r.status === 'revoked';
+    if (filter === 'pending') {return r.status === 'pending' || r.status === 'in_progress';}
+    if (filter === 'completed') {return r.status === 'approved' || r.status === 'revoked';}
     return true;
   });
 
   const pendingCount = reviews.filter(r => r.status === 'pending' || r.status === 'in_progress').length;
 
   const handleDecision = async (decision: 'approve' | 'revoke') => {
-    if (!selected) return;
+    if (!selected) {return;}
     if (!notes.trim()) {
       Alert.alert('Notes Required', 'Please add notes before completing this review.');
       return;
@@ -218,7 +218,7 @@ export function AccessReviewScreen() {
                   <Text style={[
                     styles.detailValue,
                     isOverdue(selected.dueAt) && (selected.status === 'pending' || selected.status === 'in_progress')
-                      ? { color: colors.error } : {}
+                      ? { color: colors.error } : {},
                   ]}>
                     {new Date(selected.dueAt).toLocaleString()}
                     {isOverdue(selected.dueAt) && (selected.status === 'pending' || selected.status === 'in_progress')
@@ -237,7 +237,7 @@ export function AccessReviewScreen() {
                   <Text style={styles.detailLabel}>Decision</Text>
                   <Text style={[
                     styles.detailValue,
-                    { color: selected.decision === 'approve' ? colors.success : colors.error }
+                    { color: selected.decision === 'approve' ? colors.success : colors.error },
                   ]}>
                     {selected.decision.toUpperCase()}
                   </Text>
@@ -281,7 +281,7 @@ export function AccessReviewScreen() {
             {(selected.status === 'pending' || selected.status === 'in_progress') && (
               <View style={styles.modalActions}>
                 <TouchableOpacity
-                  style={[styles.actionButton, { backgroundColor: '#22c55e' }]}
+                  style={[styles.actionButton, styles.approveActionButton]}
                   onPress={() => handleDecision('approve')}
                   disabled={actionLoading}
                 >
@@ -290,7 +290,7 @@ export function AccessReviewScreen() {
                     : <Text style={styles.actionButtonText}>✓ Approve Access</Text>}
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={[styles.actionButton, { backgroundColor: '#ef4444' }]}
+                  style={[styles.actionButton, styles.revokeActionButton]}
                   onPress={() => handleDecision('revoke')}
                   disabled={actionLoading}
                 >
@@ -399,5 +399,7 @@ const styles = StyleSheet.create({
     borderTopColor: colors.border,
   },
   actionButton: { flex: 1, borderRadius: radius.md, paddingVertical: 14, alignItems: 'center' },
+  approveActionButton: { backgroundColor: '#22c55e' },
+  revokeActionButton: { backgroundColor: '#ef4444' },
   actionButtonText: { color: '#fff', fontWeight: '700', fontSize: 14 },
 });

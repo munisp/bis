@@ -1,0 +1,152 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "name": "OBS-001 Alerts",
+        "datasource": { "type": "datasource", "uid": "-- Grafana --" },
+        "enable": true,
+        "iconColor": "red",
+        "tags": ["obs-001"],
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Gateway Metrics Scrape",
+      "targets": [{ "expr": "up{job=\"go-gateway-control-plane\"}", "refId": "A" }],
+      "fieldConfig": { "defaults": { "mappings": [{ "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }], "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] } }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 4, "x": 0, "y": 0 }
+    },
+    {
+      "type": "stat",
+      "title": "Archive Pushgateway Scrape",
+      "targets": [{ "expr": "up{job=\"cold-archive-pushgateway\"}", "refId": "A" }],
+      "fieldConfig": { "defaults": { "mappings": [{ "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }], "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] } }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 4, "x": 4, "y": 0 }
+    },
+    {
+      "type": "stat",
+      "title": "Control-Plane Dependencies Healthy",
+      "targets": [{ "expr": "sum(bis_gateway_control_plane_dependency_healthy)", "refId": "A" }],
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "orange", "value": 3 }, { "color": "green", "value": 4 }] }, "unit": "none" }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 4, "x": 8, "y": 0 }
+    },
+    {
+      "type": "stat",
+      "title": "Archive Dependency Health",
+      "targets": [{ "expr": "sum(bis_cold_archive_dependency_healthy)", "refId": "A" }],
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "orange", "value": 1 }, { "color": "green", "value": 2 }] }, "unit": "none" }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 4, "x": 12, "y": 0 }
+    },
+    {
+      "type": "stat",
+      "title": "Outbox Key Expires In",
+      "targets": [{ "expr": "bis_gateway_transactional_outbox_active_key_expiry_seconds", "refId": "A" }],
+      "fieldConfig": { "defaults": { "unit": "s", "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "orange", "value": 604800 }, { "color": "green", "value": 2592000 }] } }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 4, "x": 16, "y": 0 }
+    },
+    {
+      "type": "stat",
+      "title": "Archive KMS Key Expires In",
+      "targets": [{ "expr": "bis_cold_archive_active_kms_key_expiry_seconds", "refId": "A" }],
+      "fieldConfig": { "defaults": { "unit": "s", "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "orange", "value": 604800 }, { "color": "green", "value": 2592000 }] } }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 4, "x": 20, "y": 0 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Gateway Dependency State and Fail-Closed Events",
+      "targets": [
+        { "expr": "bis_gateway_control_plane_dependency_healthy", "legendFormat": "health {{dependency}}", "refId": "A" },
+        { "expr": "sum(rate(bis_gateway_control_plane_dependency_fail_closed_total[5m])) by (dependency)", "legendFormat": "fail-closed {{dependency}}", "refId": "B" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 7 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Permify Decisions by Outcome",
+      "targets": [{ "expr": "sum(rate(bis_gateway_permify_checks_total[5m])) by (outcome)", "legendFormat": "{{outcome}}", "refId": "A" }],
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 7 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Transactional Outbox States",
+      "targets": [{ "expr": "bis_gateway_transactional_outbox_events", "legendFormat": "{{state}}", "refId": "A" }],
+      "fieldConfig": { "defaults": { "unit": "none", "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 50 }, { "color": "red", "value": 100 }] } }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 15 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Outbox Pending, Lease, and Dispatch Latency",
+      "targets": [
+        { "expr": "bis_gateway_transactional_outbox_oldest_pending_age_seconds", "legendFormat": "oldest pending", "refId": "A" },
+        { "expr": "bis_gateway_transactional_outbox_oldest_dispatching_age_seconds", "legendFormat": "oldest dispatching", "refId": "B" },
+        { "expr": "histogram_quantile(0.95, sum(rate(bis_gateway_transactional_outbox_dispatch_cycle_duration_seconds_bucket[5m])) by (le))", "legendFormat": "dispatch p95", "refId": "C" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 15 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Archive Batch Lifecycle",
+      "targets": [{ "expr": "bis_cold_archive_batches", "legendFormat": "{{state}}", "refId": "A" }],
+      "fieldConfig": { "defaults": { "unit": "none" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 23 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Archive Runs, KMS Uploads, and Duration",
+      "targets": [
+        { "expr": "increase(bis_cold_archive_runs_total[7d])", "legendFormat": "run {{outcome}}", "refId": "A" },
+        { "expr": "increase(bis_cold_archive_kms_uploads_total[7d])", "legendFormat": "KMS upload {{outcome}}", "refId": "B" },
+        { "expr": "histogram_quantile(0.95, sum(rate(bis_cold_archive_run_duration_seconds_bucket[7d])) by (le))", "legendFormat": "run p95", "refId": "C" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 23 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Intelligence Billing Event States",
+      "targets": [{ "expr": "bis_intelligence_billing_events", "legendFormat": "{{state}}", "refId": "A" }],
+      "fieldConfig": { "defaults": { "unit": "none", "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 1 }, { "color": "red", "value": 5 }] } }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 31 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Intelligence Billing Stale Leases and Reconciliation Age",
+      "targets": [
+        { "expr": "bis_intelligence_billing_stale_leases", "legendFormat": "stale leases", "refId": "A" },
+        { "expr": "bis_intelligence_billing_open_reconciliations", "legendFormat": "open reconciliations", "refId": "B" },
+        { "expr": "bis_intelligence_billing_oldest_open_reconciliation_age_seconds", "legendFormat": "oldest reconciliation age", "refId": "C" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 31 }
+    },
+    {
+      "type": "stat",
+      "title": "Intelligence Billing Metrics Collector",
+      "targets": [{ "expr": "bis_intelligence_billing_metrics_collection_healthy", "refId": "A" }],
+      "fieldConfig": { "defaults": { "mappings": [{ "type": "value", "options": { "0": { "text": "UNHEALTHY", "color": "red" }, "1": { "text": "HEALTHY", "color": "green" } } }], "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] } }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 6, "x": 0, "y": 39 }
+    },
+    {
+      "type": "stat",
+      "title": "Legacy Billing Dead-Letter Events",
+      "targets": [{ "expr": "bis_intelligence_billing_events{state=\"dead_letter\"}", "refId": "A" }],
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] } }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 6, "x": 6, "y": 39 }
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["bis", "gateway", "cold-archive", "billing", "obs-001", "production-release"],
+  "templating": { "list": [] },
+  "time": { "from": "now-6h", "to": "now" },
+  "timezone": "utc",
+  "title": "BIS OBS-001 Gateway, Archive & Billing Reconciliation Operations",
+  "uid": "bis-gateway-archive-ops",
+  "version": 2
+}

@@ -114,11 +114,21 @@ client/public/__manus__/version.json
 e2e/auth.json
 playwright-report/
 test-results/
-services/*/target/
-services/event-emitter/target/
-services/aml-engine/target/
-services/event-processor/target/
+# Rust compiler outputs for every service
+**/target/
+# Local audit and validation output
+audit/
 .project-config.json
 __pycache__/
 *.pyc
-.project-config.json
+
+# Rendered on-premises secrets, private PKI, and local storage state
+infra/onprem/bis-onprem.env
+infra/onprem/runtime/
+infra/onprem/pki/
+infra/onprem/secrets/
+infra/onprem/*.key
+infra/onprem/*.crt
+infra/onprem/*.pem
+!infra/onprem/templates/
+!infra/onprem/bis-onprem.env.example

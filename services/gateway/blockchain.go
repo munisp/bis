@@ -1,6 +1,6 @@
 package main
 
-// blockchain.go — On-chain stablecoin settlement for BIS API Gateway
+// blockchain.go — Read-only stablecoin balance queries for the BIS API Gateway
 //
 // Implements direct RPC calls to:
 //   - Celo Alfajores / Mainnet (cUSD, ERC-20 compatible)
@@ -9,29 +9,18 @@ package main
 //   - Stellar Testnet / Mainnet (USDC, Stellar asset)
 //
 // Architecture:
-//   - All wallet private keys are loaded from env vars (never from the request).
-//   - Transfers are signed server-side; the BFF never touches private keys.
-//   - AML screening is performed BEFORE signing (calls the AML engine).
-//   - Confirmation polling runs in a background goroutine; the initial response
-//     returns status="pending" with the txHash for the caller to track.
+//   - This module performs read-only balance lookups against configured public RPC endpoints.
+//   - Settlement is delegated exclusively to the configured custody/settlement bridge.
 //
 // EVM networks (Celo, Ethereum, Polygon) use raw JSON-RPC over HTTPS.
 // Stellar uses the Horizon REST API.
-//
-// No external Go blockchain libraries are required — all RPC is done via
-// standard net/http + JSON encoding, keeping the binary small and auditable.
 
 import (
 	"bytes"
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"math/big"
 	"net/http"
 	"os"
@@ -186,138 +175,6 @@ func erc20BalanceOf(ctx context.Context, network, contractAddr, walletAddr strin
 	return n.String(), nil
 }
 
-// ─── ERC-20 Transfer ─────────────────────────────────────────────────────────
-
-// erc20Transfer signs and broadcasts an ERC-20 transfer transaction.
-// Private key is loaded from env var: BIS_WALLET_KEY_<NETWORK> (hex, no 0x prefix).
-// Returns the transaction hash.
-func erc20Transfer(ctx context.Context, network, contractAddr, toAddr, amountUnits string) (string, error) {
-	net, ok := evmNetworks[network]
-	if !ok {
-		return "", fmt.Errorf("unsupported network: %s", network)
-	}
-
-	// Load private key from env
-	privKeyHex := os.Getenv("BIS_WALLET_KEY_" + strings.ToUpper(network))
-	if privKeyHex == "" {
-		return "", fmt.Errorf("direct %s settlement is not configured", network)
-	}
-	// This repository does not include a production-grade secp256k1 signer or
-	// canonical EVM transaction encoder. Refuse settlement rather than emitting
-	// a hash for a structurally invalid transaction.
-	return "", fmt.Errorf("direct %s settlement is unavailable until a production EVM signer is configured", network)
-
-	privKeyBytes, err := hex.DecodeString(privKeyHex)
-	if err != nil {
-		return "", fmt.Errorf("invalid private key: %w", err)
-	}
-
-	// Derive the sender address from the private key
-	privKey, err := loadECDSAPrivKey(privKeyBytes)
-	if err != nil {
-		return "", fmt.Errorf("load private key: %w", err)
-	}
-	fromAddr := ecdsaToAddress(privKey)
-
-	// Get nonce
-	nonceResult, err := evmCall(ctx, net.RPCURL, "eth_getTransactionCount", []interface{}{fromAddr, "pending"})
-	if err != nil {
-		return "", fmt.Errorf("get nonce: %w", err)
-	}
-	var nonceHex string
-	json.Unmarshal(nonceResult, &nonceHex)
-	nonce := hexToInt64(nonceHex)
-
-	// Get gas price
-	gasPriceResult, err := evmCall(ctx, net.RPCURL, "eth_gasPrice", []interface{}{})
-	if err != nil {
-		return "", fmt.Errorf("get gas price: %w", err)
-	}
-	var gasPriceHex string
-	json.Unmarshal(gasPriceResult, &gasPriceHex)
-
-	// ABI-encode transfer(address,uint256) = 0xa9059cbb
-	toAddrPadded := fmt.Sprintf("%064s", strings.TrimPrefix(toAddr, "0x"))
-	amount := new(big.Int)
-	amount.SetString(amountUnits, 10)
-	amountHex := fmt.Sprintf("%064x", amount)
-	data := "0xa9059cbb" + toAddrPadded + amountHex
-
-	// Build and sign the transaction (EIP-155 signing)
-	rawTx := buildEVMTransaction(nonce, gasPriceHex, 100000, contractAddr, "0", data, net.ChainID)
-	signedTx, err := signEVMTransaction(rawTx, privKeyBytes, net.ChainID)
-	if err != nil {
-		return "", fmt.Errorf("sign transaction: %w", err)
-	}
-
-	// Broadcast
-	txHashResult, err := evmCall(ctx, net.RPCURL, "eth_sendRawTransaction", []interface{}{"0x" + signedTx})
-	if err != nil {
-		return "", fmt.Errorf("broadcast transaction: %w", err)
-	}
-	var txHash string
-	json.Unmarshal(txHashResult, &txHash)
-
-	log.Printf("[Blockchain] ERC-20 transfer sent: network=%s txHash=%s", network, txHash)
-	return txHash, nil
-}
-
-// ─── Stellar USDC Transfer ────────────────────────────────────────────────────
-
-// stellarUSDCTransfer submits a Stellar payment operation for USDC.
-// Secret key is loaded from env var: BIS_WALLET_KEY_STELLAR (Stellar secret key, S...).
-// Returns the transaction hash.
-func stellarUSDCTransfer(ctx context.Context, toAddr, amountUnits string) (string, error) {
-	secretKey := os.Getenv("BIS_WALLET_KEY_STELLAR")
-	if secretKey == "" {
-		return "", fmt.Errorf("direct Stellar settlement is not configured")
-	}
-	// A canonical signed XDR builder is required before this route can settle
-	// funds. Never substitute a fabricated Stellar hash for an unbuilt transfer.
-	return "", fmt.Errorf("direct Stellar settlement is unavailable until a production XDR signer is configured")
-
-	// Convert amountUnits (6 decimal places) to Stellar amount (7 decimal places)
-	amount := new(big.Int)
-	amount.SetString(amountUnits, 10)
-	// Stellar uses 7 decimal places (stroops), USDC uses 6 → multiply by 10
-	stellarAmount := new(big.Int).Mul(amount, big.NewInt(10))
-	amountStr := formatStellarAmount(stellarAmount)
-
-	// Fetch account sequence number
-	fromAddr := stellarSecretToPublic(secretKey)
-	accountURL := fmt.Sprintf("%s/accounts/%s", stellarHorizonURL, fromAddr)
-	accountResp, err := httpGet(ctx, accountURL)
-	if err != nil {
-		return "", fmt.Errorf("fetch Stellar account: %w", err)
-	}
-	var account struct {
-		Sequence string `json:"sequence"`
-	}
-	json.Unmarshal(accountResp, &account)
-
-	// Build and submit the transaction via Horizon
-	// In production this would use the Stellar SDK (go-stellar-base or txnbuild)
-	// Here we call Horizon's /transactions endpoint with a pre-built XDR envelope
-	txXDR := buildStellarPaymentXDR(fromAddr, toAddr, amountStr, stellarUSDCIssuer, secretKey, account.Sequence)
-	if txXDR == "" {
-		return fmt.Sprintf("stellar_sandbox_%d", time.Now().UnixNano()), nil
-	}
-
-	submitURL := fmt.Sprintf("%s/transactions", stellarHorizonURL)
-	body := fmt.Sprintf("tx=%s", txXDR)
-	respBody, err := httpPost(ctx, submitURL, "application/x-www-form-urlencoded", []byte(body))
-	if err != nil {
-		return "", fmt.Errorf("submit Stellar transaction: %w", err)
-	}
-
-	var result struct {
-		Hash string `json:"hash"`
-	}
-	json.Unmarshal(respBody, &result)
-	log.Printf("[Blockchain] Stellar USDC transfer sent: txHash=%s", result.Hash)
-	return result.Hash, nil
-}
-
 // ─── On-chain Balance Query (public entry point) ──────────────────────────────
 
 // QueryOnChainBalance returns the stablecoin balance for a wallet address.
@@ -366,134 +223,25 @@ func QueryOnChainBalance(ctx context.Context, network, currency, address string)
 	return balance, false, nil
 }
 
-// ─── On-chain Transfer (public entry point) ───────────────────────────────────
-
-// ExecuteOnChainTransfer signs and broadcasts a stablecoin transfer.
-// Returns (txHash, isSandbox, error). isSandbox is retained for response
-// compatibility and is always false because sandbox transfers are prohibited.
-func ExecuteOnChainTransfer(ctx context.Context, network, currency, toAddr, amountUnits string) (string, bool, error) {
-	if network == "stellar" {
-		txHash, err := stellarUSDCTransfer(ctx, toAddr, amountUnits)
-		if err != nil {
-			return "", false, err
-		}
-		return txHash, false, nil
-	}
-
-	net, ok := evmNetworks[network]
-	if !ok {
-		return "", false, fmt.Errorf("unsupported network: %s", network)
-	}
-	contractAddr, ok := net.Contracts[currency]
-	if !ok {
-		return "", false, fmt.Errorf("unsupported currency %s on %s", currency, network)
-	}
-
-	txHash, err := erc20Transfer(ctx, network, contractAddr, toAddr, amountUnits)
-	if err != nil {
-		return "", false, err
-	}
-	return txHash, false, nil
-}
-
-// ─── EVM Transaction Helpers ──────────────────────────────────────────────────
-
-// loadECDSAPrivKey loads an ECDSA private key from raw bytes (secp256k1).
-func loadECDSAPrivKey(privKeyBytes []byte) (*ecdsa.PrivateKey, error) {
-	curve := elliptic.P256() // Note: real secp256k1 requires a library; using P256 as structural placeholder
-	privKey := new(ecdsa.PrivateKey)
-	privKey.Curve = curve
-	privKey.D = new(big.Int).SetBytes(privKeyBytes)
-	privKey.PublicKey.X, privKey.PublicKey.Y = curve.ScalarBaseMult(privKeyBytes)
-	return privKey, nil
-}
-
-// ecdsaToAddress derives an Ethereum address from an ECDSA public key.
-func ecdsaToAddress(privKey *ecdsa.PrivateKey) string {
-	// In production: keccak256(pubkey[1:])[12:] — requires golang.org/x/crypto
-	// Here we return a deterministic placeholder derived from the key
-	pubBytes := privKey.PublicKey.X.Bytes()
-	if len(pubBytes) < 20 {
-		return "0x0000000000000000000000000000000000000000"
-	}
-	return "0x" + hex.EncodeToString(pubBytes[len(pubBytes)-20:])
-}
-
-// buildEVMTransaction builds a raw EVM transaction (RLP-encoded placeholder).
-// In production this would use go-ethereum's types.NewTransaction + RLP encoding.
-func buildEVMTransaction(nonce int64, gasPrice string, gasLimit int64, to, value, data string, chainID int64) string {
-	return fmt.Sprintf("nonce=%d gasPrice=%s gasLimit=%d to=%s value=%s data=%s chainID=%d",
-		nonce, gasPrice, gasLimit, to, value, data, chainID)
-}
-
-// signEVMTransaction signs a raw EVM transaction with EIP-155.
-// In production this would use go-ethereum's crypto.Sign + RLP encoding.
-func signEVMTransaction(rawTx string, privKeyBytes []byte, chainID int64) (string, error) {
-	// Structural placeholder: in production, use go-ethereum's types.SignTx
-	// This returns a hex-encoded signed transaction
-	sig, err := ecdsa.SignASN1(rand.Reader, &ecdsa.PrivateKey{
-		D:         new(big.Int).SetBytes(privKeyBytes),
-		PublicKey: ecdsa.PublicKey{Curve: elliptic.P256()},
-	}, privKeyBytes[:32])
-	if err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(sig), nil
-}
-
-func hexToInt64(hexStr string) int64 {
-	hexStr = strings.TrimPrefix(hexStr, "0x")
-	n := new(big.Int)
-	n.SetString(hexStr, 16)
-	return n.Int64()
-}
-
-// ─── Stellar Helpers ──────────────────────────────────────────────────────────
-
-// stellarSecretToPublic derives the Stellar public key from a secret key.
-// In production this would use stellar/go SDK's keypair.Parse.
-func stellarSecretToPublic(secretKey string) string {
-	// Structural placeholder: Stellar public keys start with G
-	if len(secretKey) > 10 {
-		return "G" + secretKey[1:57]
-	}
-	return "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"
-}
-
-// buildStellarPaymentXDR builds a Stellar XDR transaction envelope.
-// In production this would use stellar/go/txnbuild.
-func buildStellarPaymentXDR(from, to, amount, issuer, secretKey, sequence string) string {
-	// Structural placeholder: returns empty string to trigger sandbox mode
-	// In production: use stellar/go txnbuild.Transaction + keypair signing
-	return ""
-}
-
-// formatStellarAmount formats a big.Int amount in Stellar stroops to a decimal string.
-func formatStellarAmount(stroops *big.Int) string {
-	divisor := big.NewInt(10_000_000) // 7 decimal places
-	quotient := new(big.Int).Div(stroops, divisor)
-	remainder := new(big.Int).Mod(stroops, divisor)
-	return fmt.Sprintf("%d.%07d", quotient, remainder)
-}
-
-// convertStellarToUSDCUnits converts a Stellar balance string (7 decimals) to USDC units (6 decimals).
+// convertStellarToUSDCUnits converts a Stellar decimal balance with seven fractional
+// digits into integer USDC units with six fractional digits.
 func convertStellarToUSDCUnits(stellarBalance string) string {
 	parts := strings.Split(stellarBalance, ".")
-	if len(parts) != 2 {
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 		return "0"
 	}
-	// Truncate from 7 to 6 decimal places
-	dec := parts[1]
-	if len(dec) > 6 {
-		dec = dec[:6]
-	} else {
-		for len(dec) < 6 {
-			dec += "0"
-		}
+	fraction := parts[1]
+	if len(fraction) > 6 {
+		fraction = fraction[:6]
 	}
-	n := new(big.Int)
-	n.SetString(parts[0]+dec, 10)
-	return n.String()
+	for len(fraction) < 6 {
+		fraction += "0"
+	}
+	units := new(big.Int)
+	if _, ok := units.SetString(parts[0]+fraction, 10); !ok {
+		return "0"
+	}
+	return units.String()
 }
 
 // ─── HTTP Helpers ─────────────────────────────────────────────────────────────
@@ -504,21 +252,6 @@ func httpGet(ctx context.Context, url string) ([]byte, error) {
 		return nil, err
 	}
 	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	return io.ReadAll(resp.Body)
-}
-
-func httpPost(ctx context.Context, url, contentType string, body []byte) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", contentType)
-	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err

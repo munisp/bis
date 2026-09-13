@@ -3,7 +3,7 @@
  *
  * Usage:
  *   const { lastEvent, connected } = useEventStream({
- *     onEvent: (e) => console.log(e),
+ *     onEvent: (e) => logger.info(e),
  *     eventTypes: ["ALERT_TRIGGERED", "KYC_COMPLETED"],
  *   });
  *

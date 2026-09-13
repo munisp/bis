@@ -1,0 +1,126 @@
+# Isolated on-premises profile. Invoke with:
+# docker compose \
+#   -f docker-compose.yml \
+#   -f docker-compose.onprem.yml \
+#   -f infra/onprem/docker-compose.minio-kes-vault.yml \
+#   --env-file /run/secrets/bis-onprem.env up -d vault kes minio permify bff
+#
+# This file contains no secrets and does not start Vault in development mode.
+# Build or obtain the images through the operator's signed-image process.
+services:
+  vault:
+    image: ${VAULT_IMAGE:?VAULT_IMAGE is required}
+    command: ["vault", "server", "-config=/vault/config/vault.hcl"]
+    restart: unless-stopped
+    cap_add: ["IPC_LOCK"]
+    environment:
+      VAULT_API_ADDR: https://vault:8200
+      VAULT_CLUSTER_ADDR: https://vault:8201
+    volumes:
+      - ${BIS_ONPREM_CONFIG_DIR:?BIS_ONPREM_CONFIG_DIR is required}/vault.hcl:/vault/config/vault.hcl:ro
+      - ${BIS_ONPREM_PKI_DIR:?BIS_ONPREM_PKI_DIR is required}/vault:/vault/tls:ro
+      - vault_data:/vault/data
+    networks: [bis-net]
+    ports:
+      - "127.0.0.1:${BIS_ONPREM_VAULT_PORT:-8200}:8200"
+
+  kes:
+    image: ${KES_IMAGE:?KES_IMAGE is required}
+    command: ["server", "--config=/etc/kes/kes.yaml"]
+    restart: unless-stopped
+    depends_on:
+      vault:
+        condition: service_started
+    cap_add: ["IPC_LOCK"]
+    environment:
+      ROOT_IDENTITY: ${KES_ROOT_IDENTITY:?KES_ROOT_IDENTITY is required}
+      MINIO_IDENTITY: ${MINIO_KES_IDENTITY:?MINIO_KES_IDENTITY is required}
+      VAULT_KES_ROLE_ID: ${VAULT_KES_ROLE_ID:?VAULT_KES_ROLE_ID is required}
+      VAULT_KES_SECRET_ID: ${VAULT_KES_SECRET_ID:?VAULT_KES_SECRET_ID is required}
+      BIS_EVIDENCE_S3_KMS_KEY_ID: ${BIS_EVIDENCE_S3_KMS_KEY_ID:?BIS_EVIDENCE_S3_KMS_KEY_ID is required}
+    volumes:
+      - ${BIS_ONPREM_CONFIG_DIR:?BIS_ONPREM_CONFIG_DIR is required}/kes.yaml:/etc/kes/kes.yaml:ro
+      - ${BIS_ONPREM_PKI_DIR:?BIS_ONPREM_PKI_DIR is required}/kes:/etc/kes/tls:ro
+    networks: [bis-net]
+    ports:
+      - "127.0.0.1:${BIS_ONPREM_KES_PORT:-7373}:7373"
+
+  minio:
+    image: ${MINIO_IMAGE:?MINIO_IMAGE is required}
+    command: ["server", "/data", "--console-address", ":9001"]
+    restart: unless-stopped
+    depends_on:
+      kes:
+        condition: service_started
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER is required}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}
+      MINIO_KMS_KES_ENDPOINT: https://kes:7373
+      MINIO_KMS_KES_API_KEY: ${MINIO_KES_API_KEY:?MINIO_KES_API_KEY is required}
+      MINIO_KMS_KES_CAPATH: /etc/minio/kes-ca/ca.crt
+      MINIO_KMS_KES_KEY_NAME: ${BIS_EVIDENCE_S3_KMS_KEY_ID:?BIS_EVIDENCE_S3_KMS_KEY_ID is required}
+    volumes:
+      - minio_data:/data
+      - ${BIS_ONPREM_PKI_DIR:?BIS_ONPREM_PKI_DIR is required}/minio:/root/.minio/certs:ro
+      - ${BIS_ONPREM_PKI_DIR:?BIS_ONPREM_PKI_DIR is required}/kes/ca.crt:/etc/minio/kes-ca/ca.crt:ro
+    networks: [bis-net]
+    ports:
+      - "${BIS_ONPREM_MINIO_BIND_ADDRESS:-127.0.0.1}:${BIS_ONPREM_MINIO_PORT:-9000}:9000"
+      - "127.0.0.1:${BIS_ONPREM_MINIO_CONSOLE_PORT:-9001}:9001"
+
+  minio-bootstrap:
+    image: ${MINIO_MC_IMAGE:?MINIO_MC_IMAGE is required}
+    restart: "no"
+    depends_on:
+      minio:
+        condition: service_started
+    environment:
+      BIS_ENV: ${BIS_DEPLOYMENT_ENV:?BIS_DEPLOYMENT_ENV is required}
+      BIS_ONPREM_MINIO_BOOTSTRAP_CONFIRMATION: ${BIS_ONPREM_MINIO_BOOTSTRAP_CONFIRMATION:?BIS_ONPREM_MINIO_BOOTSTRAP_CONFIRMATION is required}
+      MINIO_ENDPOINT: https://minio:9000
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER is required}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}
+      BIS_EVIDENCE_S3_BUCKET: ${BIS_EVIDENCE_S3_BUCKET:?BIS_EVIDENCE_S3_BUCKET is required}
+      BIS_EVIDENCE_S3_KMS_KEY_ID: ${BIS_EVIDENCE_S3_KMS_KEY_ID:?BIS_EVIDENCE_S3_KMS_KEY_ID is required}
+      MINIO_SYNTHETIC_RETENTION_DAYS: ${MINIO_SYNTHETIC_RETENTION_DAYS:?MINIO_SYNTHETIC_RETENTION_DAYS is required}
+    entrypoint: ["/bin/sh", "/bootstrap/minio-bootstrap.sh"]
+    volumes:
+      - ./infra/onprem/minio-bootstrap.sh:/bootstrap/minio-bootstrap.sh:ro
+      - ${BIS_ONPREM_PKI_DIR:?BIS_ONPREM_PKI_DIR is required}/minio/ca.crt:/root/.mc/certs/CAs/bis-onprem-ca.crt:ro
+    networks: [bis-net]
+
+  permify-tls:
+    image: ${CADDY_IMAGE:?CADDY_IMAGE is required}
+    restart: unless-stopped
+    depends_on:
+      permify:
+        condition: service_started
+    command: ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
+    volumes:
+      - ${BIS_ONPREM_CONFIG_DIR:?BIS_ONPREM_CONFIG_DIR is required}/permify.Caddyfile:/etc/caddy/Caddyfile:ro
+      - ${BIS_ONPREM_PKI_DIR:?BIS_ONPREM_PKI_DIR is required}/permify:/etc/caddy/tls:ro
+    networks:
+      bis-net:
+        aliases: ["permify-tls"]
+
+  permify:
+    image: ${PERMIFY_IMAGE:?PERMIFY_IMAGE is required}
+    command: serve
+    environment:
+      PERMIFY_DATABASE_ENGINE: postgres
+      PERMIFY_DATABASE_URI: ${PERMIFY_DATABASE_URI:?PERMIFY_DATABASE_URI is required}
+      PERMIFY_DATABASE_MAX_OPEN_CONNECTIONS: "20"
+      PERMIFY_SERVER_PORT: "3476"
+      PERMIFY_SERVER_GRPC_PORT: "3478"
+      PERMIFY_LOG_LEVEL: info
+      PERMIFY_AUTHN_ENABLED: "true"
+      PERMIFY_AUTHN_METHOD: preshared
+      PERMIFY_AUTHN_PRESHARED_KEYS: ${PERMIFY_API_KEY:?PERMIFY_API_KEY is required}
+    ports: []
+    networks: [bis-net]
+    volumes:
+      - permify_data:/var/lib/permify
+
+volumes:
+  vault_data:
+  minio_data:

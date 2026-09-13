@@ -3,22 +3,24 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 )
 
 // Config holds all runtime configuration for the payment-rails service.
 type Config struct {
-	Port         string
-	DatabaseURL  string
-	RedisURL     string
-	KafkaBroker  string
-	LogLevel     string
-	AMLEngineURL string
+	Port          string
+	DatabaseURL   string
+	RedisURL      string
+	KafkaBroker   string
+	LogLevel      string
+	AMLEngineURL  string
+	ServiceAPIKey string
 
-	// SWIFT GPI endpoint (stub — replace with real SWIFT API in production)
+	// SWIFT GPI endpoint.
 	SwiftGPIURL string
 	SwiftBIC    string
 
-	// SEPA endpoint (stub — replace with real SEPA clearing house in production)
+	// SEPA clearing-house endpoint.
 	SEPAEndpoint string
 
 	// TigerBeetle ledger (hot tier — 0–90 days, O_DIRECT + circular WAL, zero fsyncs)
@@ -41,15 +43,16 @@ type Config struct {
 
 func Load() *Config {
 	return &Config{
-		Port:         getEnv("PORT", "8087"),
-		DatabaseURL:  getEnv("DATABASE_URL", "postgresql://bis_user:bis_secure_2026@localhost:5432/bis_db"),
-		RedisURL:     getEnv("REDIS_URL", "redis://localhost:6379"),
-		KafkaBroker:  getEnv("KAFKA_BROKER", "localhost:9092"),
-		LogLevel:     getEnv("LOG_LEVEL", "info"),
-		AMLEngineURL: getEnv("AML_ENGINE_URL", "http://localhost:8085"),
-		SwiftGPIURL:  getEnv("SWIFT_GPI_URL", "https://api.swift.com/v1/gpi"),
-		SwiftBIC:     getEnv("SWIFT_BIC", "BISNGLA1XXX"),
-		SEPAEndpoint: getEnv("SEPA_ENDPOINT", "https://sepa.bis-platform.local/v1"),
+		Port:          getEnv("PORT", "8087"),
+		DatabaseURL:   getEnv("DATABASE_URL", ""),
+		RedisURL:      getEnv("REDIS_URL", ""),
+		KafkaBroker:   getEnv("KAFKA_BROKERS", ""),
+		LogLevel:      getEnv("LOG_LEVEL", "info"),
+		AMLEngineURL:  getEnv("AML_ENGINE_URL", ""),
+		ServiceAPIKey: getEnv("BIS_PAYMENT_RAILS_KEY", ""),
+		SwiftGPIURL:   getEnv("SWIFT_GPI_URL", ""),
+		SwiftBIC:      getEnv("SWIFT_BIC", ""),
+		SEPAEndpoint:  getEnv("SEPA_ENDPOINT", ""),
 
 		// TigerBeetle hot tier
 		TigerBeetleURL: getEnv("TIGERBEETLE_URL", ""),
@@ -64,6 +67,33 @@ func Load() *Config {
 		// Backpressure
 		MaxInflightTransfers: getEnvInt("MAX_INFLIGHT_TRANSFERS", 10000),
 	}
+}
+
+// ValidateProduction verifies that the service cannot start with insecure defaults
+// or absent dependencies in a production deployment.
+func (c *Config) ValidateProduction() error {
+	if !strings.EqualFold(os.Getenv("BIS_ENV"), "production") {
+		return nil
+	}
+	missing := make([]string, 0)
+	for key, value := range map[string]string{
+		"BIS_PAYMENT_RAILS_KEY": c.ServiceAPIKey,
+		"DATABASE_URL":          c.DatabaseURL,
+		"KAFKA_BROKERS":         c.KafkaBroker,
+		"TIGERBEETLE_URL":       c.TigerBeetleURL,
+		"AML_ENGINE_URL":        c.AMLEngineURL,
+		"SWIFT_GPI_URL":         c.SwiftGPIURL,
+		"SWIFT_BIC":             c.SwiftBIC,
+		"SEPA_ENDPOINT":         c.SEPAEndpoint,
+	} {
+		if strings.TrimSpace(value) == "" {
+			missing = append(missing, key)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("missing mandatory production configuration: %s", strings.Join(missing, ", "))
+	}
+	return nil
 }
 
 func getEnv(key, def string) string {

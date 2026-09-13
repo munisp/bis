@@ -16,7 +16,9 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import { useSelector } from 'react-redux';
 import { useNavigation } from '@react-navigation/native';
+import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { RootState } from '../../store';
+import type { MainTabParamList } from '../../navigation/RootNavigator';
 import { alertsApi, investigationsApi, insiderThreatApi } from '../../services/api';
 
 interface StatCardProps {
@@ -36,7 +38,7 @@ function StatCard({ label, value, color }: StatCardProps) {
 
 export function DashboardScreen() {
   const user = useSelector((state: RootState) => state.auth.user);
-  const navigation = useNavigation<any>();
+  const navigation = useNavigation<BottomTabNavigationProp<MainTabParamList, 'Dashboard'>>();
 
   const {
     data: investigations,
@@ -104,16 +106,16 @@ export function DashboardScreen() {
           </Text>
         </View>
         {insiderLoading ? (
-          <ActivityIndicator color="#f59e0b" size="small" style={{ marginTop: 8 }} />
+          <ActivityIndicator color="#f59e0b" size="small" style={styles.insiderLoader} />
         ) : (
-          (insiderData?.rows ?? []).slice(0, 3).map((evt: any) => (
+          (insiderData?.data ?? []).slice(0, 3).map((evt) => (
             <View key={evt.id} style={styles.insiderRow}>
               <View style={[styles.insiderDot, { backgroundColor: getSeverityColor(evt.severity) }]} />
               <Text style={styles.insiderRowText} numberOfLines={1}>
-                {evt.category?.replace(/_/g, ' ')} — {evt.subjectId}
+                {evt.eventType.replace(/_/g, ' ')} — {evt.userName}
               </Text>
               <Text style={styles.insiderRowTime}>
-                {new Date(evt.createdAt).toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit' })}
+                {new Date(evt.detectedAt).toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit' })}
               </Text>
             </View>
           ))
@@ -126,12 +128,12 @@ export function DashboardScreen() {
         {alertsLoading ? (
           <ActivityIndicator color="#3b82f6" />
         ) : (
-          (alerts?.data ?? []).slice(0, 5).map((alert: any) => (
+          (alerts?.data ?? []).slice(0, 5).map((alert) => (
             <View key={alert.id} style={styles.alertItem}>
               <View style={[styles.alertDot, { backgroundColor: getSeverityColor(alert.severity) }]} />
               <View style={styles.alertContent}>
-                <Text style={styles.alertTitle}>{alert.title}</Text>
-                <Text style={styles.alertTime}>{new Date(alert.createdAt).toLocaleString('en-NG')}</Text>
+                <Text style={styles.alertTitle}>{alert.ruleName}</Text>
+                <Text style={styles.alertTime}>{new Date(alert.triggeredAt).toLocaleString('en-NG')}</Text>
               </View>
             </View>
           ))
@@ -159,8 +161,8 @@ export function DashboardScreen() {
 
 function getTimeOfDay(): string {
   const h = new Date().getHours();
-  if (h < 12) return 'morning';
-  if (h < 17) return 'afternoon';
+  if (h < 12) {return 'morning';}
+  if (h < 17) {return 'afternoon';}
   return 'evening';
 }
 
@@ -215,4 +217,5 @@ const styles = StyleSheet.create({
   insiderRowText: { flex: 1, fontSize: 13, color: '#cbd5e1', textTransform: 'capitalize' },
   insiderRowTime: { fontSize: 11, color: '#64748b', marginLeft: 8 },
   insiderViewAll: { fontSize: 12, color: '#3b82f6', marginTop: 8, textAlign: 'right' },
+  insiderLoader: { marginTop: 8 },
 });

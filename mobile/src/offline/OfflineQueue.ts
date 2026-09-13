@@ -37,6 +37,8 @@
  * ```
  */
 
+import { randomBytes } from 'react-native-quick-crypto';
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export type OperationType =
@@ -128,20 +130,21 @@ export function backoffMs(attempt: number): number {
   return Math.min(delay, BACKOFF_MAX_MS);
 }
 
-/** Generate a UUID v4 (RFC 4122). */
+/** Generate a UUID v4 (RFC 4122) using the platform cryptographic RNG. */
 export function uuidv4(): string {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0;
-    const v = c === 'x' ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
+  const bytes = new Uint8Array(randomBytes(16));
+  // RFC 4122 version 4 and variant 1 without bitwise coercion.
+  bytes[6] = 64 + (bytes[6] % 16);
+  bytes[8] = (bytes[8] % 64) + 128;
+  const hex = Array.from(bytes, (byte: number) => byte.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 /** Sort operations by priority then by enqueuedAt (FIFO within same priority). */
 export function sortByPriority(ops: QueuedOperation[]): QueuedOperation[] {
   return [...ops].sort((a, b) => {
     const pDiff = PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority];
-    if (pDiff !== 0) return pDiff;
+    if (pDiff !== 0) {return pDiff;}
     return a.enqueuedAt.localeCompare(b.enqueuedAt);
   });
 }
@@ -303,7 +306,7 @@ export class OfflineQueue {
     const queue = await this.loadQueue();
     const before = queue.length;
     const filtered = queue.filter((op) => op.id !== id);
-    if (filtered.length === before) return false;
+    if (filtered.length === before) {return false;}
     await this.saveQueue(filtered);
     return true;
   }
@@ -320,7 +323,7 @@ export class OfflineQueue {
    */
   async getDeadLettered(): Promise<QueuedOperation[]> {
     const raw = await this.storage.getItem(DEAD_LETTER_KEY);
-    if (!raw) return [];
+    if (!raw) {return [];}
     try {
       return JSON.parse(raw) as QueuedOperation[];
     } catch {
@@ -341,7 +344,7 @@ export class OfflineQueue {
   async retryDeadLettered(id: string): Promise<boolean> {
     const deadLettered = await this.getDeadLettered();
     const op = deadLettered.find((o) => o.id === id);
-    if (!op) return false;
+    if (!op) {return false;}
 
     // Reset attempt count and re-enqueue
     const retried: QueuedOperation = {
@@ -367,7 +370,7 @@ export class OfflineQueue {
 
   private async loadQueue(): Promise<QueuedOperation[]> {
     const raw = await this.storage.getItem(STORAGE_KEY);
-    if (!raw) return [];
+    if (!raw) {return [];}
     try {
       return JSON.parse(raw) as QueuedOperation[];
     } catch {

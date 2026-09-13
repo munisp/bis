@@ -33,40 +33,18 @@ function riskColor(score: number) {
   return COLORS.low;
 }
 
-function InvestigationCard({ item, onPress }: { item: any; onPress: () => void }) {
-  const rc = riskColor(item.riskScore ?? 0);
-  return (
-    <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.7}>
-      <View style={styles.cardHeader}>
-        <Text style={styles.cardRef}>{item.ref}</Text>
-        <View style={[styles.riskBadge, { backgroundColor: rc + "20", borderColor: rc + "40" }]}>
-          <Text style={[styles.riskText, { color: rc }]}>{(item.riskScore ?? 0).toFixed(0)}</Text>
-        </View>
-      </View>
-      <Text style={styles.cardName}>{item.subjectName}</Text>
-      <View style={styles.cardMeta}>
-        <Text style={styles.metaText}>{item.status?.toUpperCase()}</Text>
-        <Text style={styles.metaDot}>·</Text>
-        <Text style={styles.metaText}>{item.priority}</Text>
-        <Text style={styles.metaDot}>·</Text>
-        <Text style={styles.metaText}>{item.country}</Text>
-      </View>
-    </TouchableOpacity>
-  );
-}
-
 export default function InvestigationsScreen() {
   const router = useRouter();
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
 
   const { data, isLoading, refetch, isRefetching } = trpc.investigations.list.useQuery(
-    { page, limit: 20, search: search || undefined },
+    { offset: (page - 1) * 20, limit: 20, search: search || undefined },
     { staleTime: 30_000 }
   );
 
-  const investigations = (data as any)?.investigations ?? [];
-  const total = (data as any)?.total ?? 0;
+  const investigations = data?.items ?? [];
+  const total = data?.total ?? 0;
 
   return (
     <View style={styles.container}>
@@ -93,13 +71,32 @@ export default function InvestigationsScreen() {
       ) : (
         <FlatList
           data={investigations}
-          keyExtractor={(item: any) => String(item.id)}
-          renderItem={({ item }) => (
-            <InvestigationCard
-              item={item}
-              onPress={() => router.push(`/investigation/${item.id}`)}
-            />
-          )}
+          keyExtractor={(item) => String(item.id)}
+          renderItem={({ item }) => {
+            const risk = riskColor(item.riskScore ?? 0);
+            return (
+              <TouchableOpacity
+                style={styles.card}
+                onPress={() => router.push(`/investigation/${item.id}`)}
+                activeOpacity={0.7}
+              >
+                <View style={styles.cardHeader}>
+                  <Text style={styles.cardRef}>{item.ref}</Text>
+                  <View style={[styles.riskBadge, { backgroundColor: risk + "20", borderColor: risk + "40" }]}>
+                    <Text style={[styles.riskText, { color: risk }]}>{(item.riskScore ?? 0).toFixed(0)}</Text>
+                  </View>
+                </View>
+                <Text style={styles.cardName}>{item.subjectName}</Text>
+                <View style={styles.cardMeta}>
+                  <Text style={styles.metaText}>{item.status?.toUpperCase()}</Text>
+                  <Text style={styles.metaDot}>·</Text>
+                  <Text style={styles.metaText}>{item.priority}</Text>
+                  <Text style={styles.metaDot}>·</Text>
+                  <Text style={styles.metaText}>{item.country}</Text>
+                </View>
+              </TouchableOpacity>
+            );
+          }}
           contentContainerStyle={styles.list}
           refreshControl={
             <RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={COLORS.primary} />

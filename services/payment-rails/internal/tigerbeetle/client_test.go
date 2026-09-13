@@ -106,21 +106,11 @@ func TestPendingBatch_MaxSizeClamp(t *testing.T) {
 
 // ─── HTTP client tests ────────────────────────────────────────────────────────
 
-func TestClient_Disabled(t *testing.T) {
-	// When TIGERBEETLE_URL is not set, client should be a no-op
+func TestClient_RequiresConfiguredLedger(t *testing.T) {
 	t.Setenv("TIGERBEETLE_URL", "")
-	c := New()
-	if c.enabled {
-		t.Error("expected client to be disabled when TIGERBEETLE_URL is empty")
-	}
-
-	// All operations should succeed silently
-	if err := c.EnsureAccount(context.Background(), Account{ID: "test"}); err != nil {
-		t.Errorf("EnsureAccount on disabled client: %v", err)
-	}
-	results, err := c.SubmitTransfer(context.Background(), Transfer{ID: "t1"})
-	if err != nil || results != nil {
-		t.Errorf("SubmitTransfer on disabled client: results=%v err=%v", results, err)
+	client, err := New()
+	if err == nil || client != nil {
+		t.Fatal("expected a missing TIGERBEETLE_URL to prevent client construction")
 	}
 }
 
@@ -143,9 +133,9 @@ func TestClient_CommitBatch_HTTP(t *testing.T) {
 	defer server.Close()
 
 	t.Setenv("TIGERBEETLE_URL", server.URL)
-	c := New()
-	if !c.enabled {
-		t.Fatal("expected client to be enabled")
+	c, err := New()
+	if err != nil {
+		t.Fatalf("expected configured client: %v", err)
 	}
 
 	transfers := []Transfer{
@@ -171,11 +161,15 @@ func TestClient_SubmitBatch_Chunking(t *testing.T) {
 			t.Errorf("batch size %d exceeds MaxBatchSize %d", len(transfers), MaxBatchSize)
 		}
 		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode([]TransferResult{})
 	}))
 	defer server.Close()
 
 	t.Setenv("TIGERBEETLE_URL", server.URL)
-	c := New()
+	c, err := New()
+	if err != nil {
+		t.Fatalf("expected configured client: %v", err)
+	}
 
 	// Create MaxBatchSize + 1 transfers to force a split
 	transfers := make([]Transfer, MaxBatchSize+1)
@@ -183,7 +177,7 @@ func TestClient_SubmitBatch_Chunking(t *testing.T) {
 		transfers[i] = Transfer{ID: fmt.Sprintf("t%d", i), Amount: uint64(i + 1)}
 	}
 
-	_, err := c.SubmitBatch(context.Background(), transfers)
+	_, err = c.SubmitBatch(context.Background(), transfers)
 	if err != nil {
 		t.Fatalf("SubmitBatch error: %v", err)
 	}
@@ -282,5 +276,3 @@ func TestBatchFillTime(t *testing.T) {
 		t.Errorf("expected fill time ~273ms at 30K TPS, got %v", fillTime)
 	}
 }
-
-

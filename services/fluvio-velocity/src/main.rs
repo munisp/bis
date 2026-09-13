@@ -1,21 +1,28 @@
 mod mtls_cert_inspect;
-use mtls_cert_inspect::{inspect_peer_cert, peer_cn_from_header};
+use mtls_cert_inspect::inspect_peer_cert;
 
+use axum::{
+    extract::{Json, State},
+    http::{HeaderMap, StatusCode},
+    middleware::{self, Next},
+    response::{IntoResponse, Response},
+    routing::{get, post},
+    Router,
+};
+use bis_transport_policy::{required_allowed_hosts, TrustedEndpoint, TrustedHttpsClient};
+use bytes::Bytes;
+use reqwest::header::CONTENT_TYPE;
+use serde::Deserialize;
+use std::fmt::Write as _;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::time;
 use tracing::{error, info, warn};
-use velocity_lib::{default_rules, VelocityBreach, VelocityEngine, PaymentEvent as LibPaymentEvent};
-use axum::{
-    extract::{Json, State},
-    http::{HeaderMap, StatusCode},
-    response::IntoResponse,
-    routing::{get, post},
-    Router,
+use velocity_lib::{
+    default_rules, PaymentEvent as LibPaymentEvent, VelocityBreach, VelocityEngine,
 };
-use serde::Deserialize;
 
 // ─── Prometheus counters ──────────────────────────────────────────────────────
 
@@ -54,8 +61,9 @@ fn render_metrics() -> String {
 
 #[derive(Clone)]
 struct Config {
-    gateway_url: String,
+    gateway_url: TrustedEndpoint,
     gateway_key: String,
+    service_key: String,
     webhook_port: u16,
     gc_interval_secs: u64,
     redis_url: String,
@@ -64,27 +72,36 @@ struct Config {
 }
 
 impl Config {
-    fn from_env() -> Self {
+    fn from_env() -> Result<Self, String> {
         let mtls_cns = std::env::var("MTLS_ALLOWED_CNS")
             .unwrap_or_else(|_| "bis-gateway,bis-event-processor".to_string())
             .split(',')
             .map(|s| s.trim().to_string())
             .collect();
-        Self {
-            gateway_url: std::env::var("GATEWAY_URL")
-                .unwrap_or_else(|_| "http://localhost:8080".to_string()),
-            gateway_key: std::env::var("BIS_GATEWAY_KEY")
-                .unwrap_or_else(|_| "dev-gateway-key-change-in-prod".to_string()),
+        let gateway_url = std::env::var("GATEWAY_URL")
+            .map_err(|_| "GATEWAY_URL must be configured".to_string())?;
+        let allowed_hosts = required_allowed_hosts("BIS_VELOCITY_GATEWAY_ALLOWED_HOSTS")
+            .map_err(|_| "BIS_VELOCITY_GATEWAY_ALLOWED_HOSTS must be configured".to_string())?;
+        let gateway_url = TrustedEndpoint::parse("GATEWAY_URL", &gateway_url, &allowed_hosts)
+            .map_err(|_| "GATEWAY_URL must be an approved HTTPS endpoint".to_string())?;
+        Ok(Self {
+            gateway_url,
+            gateway_key: std::env::var("BIS_GATEWAY_KEY").unwrap_or_default(),
+            service_key: std::env::var("BIS_FLUVIO_VELOCITY_KEY").unwrap_or_default(),
             webhook_port: std::env::var("WEBHOOK_PORT")
-                .ok().and_then(|v| v.parse().ok()).unwrap_or(9090),
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(9090),
             gc_interval_secs: std::env::var("GC_INTERVAL_SECS")
-                .ok().and_then(|v| v.parse().ok()).unwrap_or(300),
-            redis_url: std::env::var("REDIS_URL")
-                .unwrap_or_else(|_| "redis://localhost:6379".to_string()),
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(300),
+            redis_url: std::env::var("REDIS_URL").unwrap_or_default(),
             mtls_enabled: std::env::var("MTLS_ENABLED")
-                .map(|v| v.to_lowercase() == "true").unwrap_or(false),
+                .map(|v| v.eq_ignore_ascii_case("true"))
+                .unwrap_or(false),
             mtls_allowed_cns: mtls_cns,
-        }
+        })
     }
 }
 
@@ -92,17 +109,34 @@ impl Config {
 
 fn redis_addr(url: &str) -> Option<String> {
     let s = url.strip_prefix("redis://").unwrap_or(url);
-    let s = if let Some(at) = s.rfind('@') { &s[at+1..] } else { s };
-    if s.contains(':') { Some(s.to_string()) } else { Some(format!("{}:6379", s)) }
+    let s = if let Some(at) = s.rfind('@') {
+        &s[at + 1..]
+    } else {
+        s
+    };
+    if s.contains(':') {
+        Some(s.to_string())
+    } else {
+        Some(format!("{}:6379", s))
+    }
 }
 
 async fn redis_set_ex(url: &str, key: &str, value: &str, ex: u64) {
     use tokio::io::AsyncWriteExt;
     use tokio::net::TcpStream;
     let Some(addr) = redis_addr(url) else { return };
-    let Ok(mut s) = TcpStream::connect(&addr).await else { return };
-    let cmd = format!("*5\r\n$3\r\nSET\r\n${}\r\n{}\r\n${}\r\n{}\r\n$2\r\nEX\r\n${}\r\n{}\r\n",
-        key.len(), key, value.len(), value, ex.to_string().len(), ex);
+    let Ok(mut s) = TcpStream::connect(&addr).await else {
+        return;
+    };
+    let cmd = format!(
+        "*5\r\n$3\r\nSET\r\n${}\r\n{}\r\n${}\r\n{}\r\n$2\r\nEX\r\n${}\r\n{}\r\n",
+        key.len(),
+        key,
+        value.len(),
+        value,
+        ex.to_string().len(),
+        ex
+    );
     let _ = s.write_all(cmd.as_bytes()).await;
 }
 
@@ -110,7 +144,9 @@ async fn redis_del(url: &str, key: &str) {
     use tokio::io::AsyncWriteExt;
     use tokio::net::TcpStream;
     let Some(addr) = redis_addr(url) else { return };
-    let Ok(mut s) = TcpStream::connect(&addr).await else { return };
+    let Ok(mut s) = TcpStream::connect(&addr).await else {
+        return;
+    };
     let cmd = format!("*2\r\n$3\r\nDEL\r\n${}\r\n{}\r\n", key.len(), key);
     let _ = s.write_all(cmd.as_bytes()).await;
 }
@@ -126,13 +162,17 @@ async fn redis_get(url: &str, key: &str) -> Option<String> {
     let n = s.read(&mut buf).await.ok()?;
     let resp = std::str::from_utf8(&buf[..n]).ok()?;
     if resp.starts_with('$') {
-        resp.splitn(3, "\r\n").nth(1).map(|s| s.to_string())
-    } else { None }
+        resp.split("\r\n").nth(1).map(|s| s.to_string())
+    } else {
+        None
+    }
 }
 
 async fn is_circuit_open(redis_url: &str) -> bool {
-    redis_get(redis_url, "bis:velocity:circuit_breaker").await
-        .map(|v| v == "open").unwrap_or(false)
+    redis_get(redis_url, "bis:velocity:circuit_breaker")
+        .await
+        .map(|v| v == "open")
+        .unwrap_or(false)
 }
 
 async fn open_circuit(redis_url: &str) {
@@ -146,18 +186,160 @@ async fn close_circuit(redis_url: &str) {
 
 // ─── Gateway dispatch ─────────────────────────────────────────────────────────
 
-async fn dispatch_breach(client: &reqwest::Client, config: &Config, breach: &VelocityBreach) {
+const MAX_GATEWAY_BREACH_FIELD_BYTES: usize = 256;
+const MAX_GATEWAY_BREACH_PAYLOAD_BYTES: usize = 16 * 1024;
+
+/// The fixed JSON punctuation, numeric values, and timestamp are substantially
+/// smaller than this reserve. Each of the six request-derived fields is capped
+/// at 256 UTF-8 bytes and any byte can expand to at most a six-byte `\\u00XX`
+/// escape. Keeping this upper bound below the fixed reserve prevents `String`
+/// from growing beyond its constant allocation during serialization.
+const GATEWAY_VARIABLE_FIELD_COUNT: usize = 6;
+const MAX_GATEWAY_FIXED_JSON_BYTES: usize = 512;
+const MAX_BOUND_GATEWAY_JSON_BYTES: usize = MAX_GATEWAY_FIXED_JSON_BYTES
+    + (GATEWAY_VARIABLE_FIELD_COUNT * MAX_GATEWAY_BREACH_FIELD_BYTES * 6);
+
+/// Write a JSON string without invoking a serializer that could allocate from
+/// request-derived content. The caller has already bounded all dynamic fields.
+struct FixedGatewayBuffer(Box<[u8; MAX_GATEWAY_BREACH_PAYLOAD_BYTES]>);
+
+impl AsRef<[u8]> for FixedGatewayBuffer {
+    fn as_ref(&self) -> &[u8] {
+        &self.0[..]
+    }
+}
+
+struct BoundedGatewayPayload {
+    bytes: Box<[u8; MAX_GATEWAY_BREACH_PAYLOAD_BYTES]>,
+    len: usize,
+}
+
+impl BoundedGatewayPayload {
+    #[cfg(test)]
+    fn as_bytes(&self) -> &[u8] {
+        &self.bytes[..self.len]
+    }
+
+    fn into_bytes(self) -> Bytes {
+        Bytes::from_owner(FixedGatewayBuffer(self.bytes)).slice(0..self.len)
+    }
+}
+
+fn push_json_string(output: &mut String, value: &str) {
+    output.push('"');
+    for character in value.chars() {
+        match character {
+            '"' => output.push_str("\\\""),
+            '\\' => output.push_str("\\\\"),
+            '\u{08}' => output.push_str("\\b"),
+            '\u{0C}' => output.push_str("\\f"),
+            '\n' => output.push_str("\\n"),
+            '\r' => output.push_str("\\r"),
+            '\t' => output.push_str("\\t"),
+            control if control.is_control() => {
+                // Writing into String cannot fail. The format is always four
+                // hexadecimal digits because JSON control code points are <= 0x1F.
+                write!(output, "\\u{:04x}", control as u32).expect("write to String");
+            }
+            safe => output.push(safe),
+        }
+    }
+    output.push('"');
+}
+
+fn push_json_field(output: &mut String, name: &str, value: &str) {
+    output.push('"');
+    output.push_str(name);
+    output.push_str("\":");
+    push_json_string(output, value);
+}
+
+/// Encode one gateway alert after bounding every variable-width input. The
+/// resulting byte buffer has a constant, checked allocation ceiling and is
+/// passed directly to Reqwest so the HTTP sink never serializes request data.
+fn encode_gateway_breach(breach: &VelocityBreach) -> Option<BoundedGatewayPayload> {
+    let fields = [
+        breach.alert_id.as_str(),
+        breach.account_id.as_str(),
+        breach.tenant_id.as_str(),
+        breach.rule_name.as_str(),
+        breach.risk_level.as_str(),
+        breach.triggering_tx_ref.as_str(),
+    ];
+    if fields
+        .iter()
+        .any(|field| field.len() > MAX_GATEWAY_BREACH_FIELD_BYTES)
+        || MAX_BOUND_GATEWAY_JSON_BYTES > MAX_GATEWAY_BREACH_PAYLOAD_BYTES
+    {
+        return None;
+    }
+
+    let detected_at = breach
+        .detected_at
+        .to_rfc3339_opts(chrono::SecondsFormat::Micros, true);
+    let mut encoded = String::with_capacity(MAX_GATEWAY_BREACH_PAYLOAD_BYTES);
+    encoded.push('{');
+    push_json_field(&mut encoded, "alertId", &breach.alert_id);
+    encoded.push(',');
+    push_json_field(&mut encoded, "accountId", &breach.account_id);
+    encoded.push(',');
+    push_json_field(&mut encoded, "tenantId", &breach.tenant_id);
+    encoded.push(',');
+    push_json_field(&mut encoded, "ruleName", &breach.rule_name);
+    encoded.push(',');
+    push_json_field(&mut encoded, "riskLevel", &breach.risk_level);
+    encoded.push(',');
+    write!(
+        encoded,
+        "\"windowSecs\":{},\"txCount\":{},\"totalAmountKobo\":{}",
+        breach.window_secs, breach.tx_count, breach.total_amount_kobo
+    )
+    .expect("write to String");
+    encoded.push(',');
+    push_json_field(&mut encoded, "triggeringTxRef", &breach.triggering_tx_ref);
+    encoded.push(',');
+    push_json_field(&mut encoded, "detectedAt", &detected_at);
+    encoded.push('}');
+
+    if encoded.len() > MAX_GATEWAY_BREACH_PAYLOAD_BYTES {
+        return None;
+    }
+
+    let len = encoded.len();
+    let mut bytes = Box::new([0_u8; MAX_GATEWAY_BREACH_PAYLOAD_BYTES]);
+    bytes[..len].copy_from_slice(encoded.as_bytes());
+    Some(BoundedGatewayPayload { bytes, len })
+}
+
+async fn dispatch_breach(client: &TrustedHttpsClient, config: &Config, breach: &VelocityBreach) {
     if is_circuit_open(&config.redis_url).await {
         warn!(alert_id = %breach.alert_id, "Circuit breaker OPEN — skipping dispatch");
         DISPATCH_ERRORS_TOTAL.fetch_add(1, Ordering::Relaxed);
         return;
     }
-    let url = format!("{}/v1/velocity/alert", config.gateway_url);
-    match client.post(&url)
-        .header("X-Gateway-Key", &config.gateway_key)
-        .json(breach)
+    let encoded_breach = match encode_gateway_breach(breach) {
+        Some(payload) => payload,
+        None => {
+            error!(alert_id = %breach.alert_id, "Refusing oversized gateway breach payload");
+            DISPATCH_ERRORS_TOTAL.fetch_add(1, Ordering::Relaxed);
+            return;
+        }
+    };
+
+    let request = match client.post(&["v1", "velocity", "alert"]) {
+        Ok(request) => request,
+        Err(_) => {
+            error!("Gateway endpoint path cannot be constructed");
+            return;
+        }
+    };
+    match request
+        .header("X-BIS-Key", &config.gateway_key)
+        .header(CONTENT_TYPE, "application/json")
+        .body(encoded_breach.into_bytes())
         .timeout(Duration::from_secs(10))
-        .send().await
+        .send()
+        .await
     {
         Ok(r) if r.status().is_success() => {
             DISPATCH_SUCCESS_TOTAL.fetch_add(1, Ordering::Relaxed);
@@ -191,12 +373,47 @@ async fn run_gc(engine: Arc<Mutex<VelocityEngine>>, interval_secs: u64) {
     }
 }
 
+// ─── Service authentication ────────────────────────────────────────────────────
+
+fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+    let mut difference = 0u8;
+    for (a, b) in left.iter().zip(right.iter()) {
+        difference |= a ^ b;
+    }
+    difference == 0
+}
+
+async fn service_auth(headers: HeaderMap, request: axum::extract::Request, next: Next) -> Response {
+    let expected = std::env::var("BIS_FLUVIO_VELOCITY_KEY").unwrap_or_default();
+    let supplied = headers
+        .get("x-bis-key")
+        .and_then(|v| v.to_str().ok())
+        .or_else(|| {
+            headers
+                .get("authorization")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.strip_prefix("Bearer "))
+        })
+        .unwrap_or("");
+    if expected.is_empty() || !constant_time_eq(supplied.as_bytes(), expected.as_bytes()) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error":"unauthorized"})),
+        )
+            .into_response();
+    }
+    next.run(request).await
+}
+
 // ─── HTTP handlers ────────────────────────────────────────────────────────────
 
 #[derive(Clone)]
 struct AppState {
     engine: Arc<Mutex<VelocityEngine>>,
-    client: Arc<reqwest::Client>,
+    client: Arc<TrustedHttpsClient>,
     config: Arc<Config>,
 }
 
@@ -211,22 +428,29 @@ struct PaymentEventReq {
     rail: Option<String>,
     is_cross_border: Option<bool>,
     tenant_id: Option<String>,
-    peer_cn: Option<String>,
 }
 
 async fn handle_health() -> impl IntoResponse {
-    (StatusCode::OK, Json(serde_json::json!({
-        "status": "ok",
-        "service": "fluvio-velocity",
-        "events_total": EVENTS_TOTAL.load(Ordering::Relaxed),
-        "breaches_total": BREACHES_TOTAL.load(Ordering::Relaxed),
-    })))
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "status": "ok",
+            "service": "fluvio-velocity",
+            "events_total": EVENTS_TOTAL.load(Ordering::Relaxed),
+            "breaches_total": BREACHES_TOTAL.load(Ordering::Relaxed),
+        })),
+    )
 }
 
 async fn handle_metrics() -> impl IntoResponse {
-    (StatusCode::OK,
-     [(axum::http::header::CONTENT_TYPE, "text/plain; version=0.0.4")],
-     render_metrics())
+    (
+        StatusCode::OK,
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "text/plain; version=0.0.4",
+        )],
+        render_metrics(),
+    )
 }
 
 async fn handle_event(
@@ -237,47 +461,46 @@ async fn handle_event(
     // mTLS peer certificate inspection.
     // Production: reads X-Peer-Cert-DER (base64 DER) injected by TLS terminator,
     // parses the real certificate CN/SANs, and validates against the allow-list.
-    // Dev/test fallback: trusts X-Peer-CN header when X-Peer-Cert-DER is absent.
+    // Missing or malformed certificate data is rejected when mTLS is enabled.
     if state.config.mtls_enabled {
-        let allowed = if let Some(der_b64) = headers.get("X-Peer-Cert-DER")
-            .and_then(|v| v.to_str().ok())
-        {
-            use base64::Engine as _;
-            match base64::engine::general_purpose::STANDARD.decode(der_b64) {
-                Ok(der) => {
-                    let (info, ok) = inspect_peer_cert(&der, &state.config.mtls_allowed_cns);
-                    if ok {
-                        info!(identity = %info.identity(), "mTLS peer cert accepted");
-                    } else {
-                        warn!(identity = %info.identity(), "mTLS peer cert rejected");
+        let allowed =
+            if let Some(der_b64) = headers.get("X-Peer-Cert-DER").and_then(|v| v.to_str().ok()) {
+                use base64::Engine as _;
+                match base64::engine::general_purpose::STANDARD.decode(der_b64) {
+                    Ok(der) => {
+                        let (info, ok) = inspect_peer_cert(&der, &state.config.mtls_allowed_cns);
+                        if ok {
+                            info!(identity = %info.identity(), "mTLS peer cert accepted");
+                        } else {
+                            warn!(identity = %info.identity(), "mTLS peer cert rejected");
+                        }
+                        ok
                     }
-                    ok
+                    Err(_) => {
+                        warn!("X-Peer-Cert-DER header present but not valid base64 — rejecting");
+                        false
+                    }
                 }
-                Err(_) => {
-                    warn!("X-Peer-Cert-DER header present but not valid base64 — rejecting");
-                    false
-                }
-            }
-        } else {
-            // Header-based fallback (dev/test only — not for production)
-            let cn = peer_cn_from_header(&headers).unwrap_or_default();
-            let ok = state.config.mtls_allowed_cns.iter().any(|a| a.as_str() == cn.as_str());
-            if !ok {
-                warn!(peer_cn = %cn, "mTLS peer CN (header fallback) not allowed");
-            }
-            ok
-        };
+            } else {
+                warn!("mTLS peer certificate is required");
+                false
+            };
         if !allowed {
-            return (StatusCode::FORBIDDEN,
-                Json(serde_json::json!({"error": "peer certificate not allowed"})));
+            return (
+                StatusCode::FORBIDDEN,
+                Json(serde_json::json!({"error": "peer certificate not allowed"})),
+            );
         }
     }
     EVENTS_TOTAL.fetch_add(1, Ordering::Relaxed);
-    let amount_kobo = req.amount_kobo
+    let amount_kobo = req
+        .amount_kobo
         .unwrap_or_else(|| (req.amount.unwrap_or(0.0) * 100.0) as i64);
     let event = LibPaymentEvent {
         event_type: req.event_type.unwrap_or_else(|| "payment".to_string()),
-        tx_ref: req.tx_ref.unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+        tx_ref: req
+            .tx_ref
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
         account_id: req.account_id.clone(),
         amount_kobo,
         currency: req.currency,
@@ -295,10 +518,13 @@ async fn handle_event(
             dispatch_breach(&state.client, &state.config, breach).await;
         }
     }
-    (StatusCode::OK, Json(serde_json::json!({
-        "breaches": breaches,
-        "events_total": EVENTS_TOTAL.load(Ordering::Relaxed),
-    })))
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "breaches": breaches,
+            "events_total": EVENTS_TOTAL.load(Ordering::Relaxed),
+        })),
+    )
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
@@ -311,25 +537,112 @@ async fn main() {
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(&log_level)),
-        ).init();
-    let config = Arc::new(Config::from_env());
+        )
+        .init();
+    let config = match Config::from_env() {
+        Ok(config) => Arc::new(config),
+        Err(message) => {
+            error!("{}", message);
+            return;
+        }
+    };
+    if config.gateway_key.is_empty() || config.service_key.is_empty() || config.redis_url.is_empty()
+    {
+        error!("GATEWAY_URL, BIS_GATEWAY_KEY, BIS_FLUVIO_VELOCITY_KEY, and REDIS_URL must be configured");
+        return;
+    }
+    if std::env::var("BIS_ENV")
+        .map(|v| v.eq_ignore_ascii_case("production"))
+        .unwrap_or(false)
+        && (!config.mtls_enabled || config.mtls_allowed_cns.is_empty())
+    {
+        error!("production requires MTLS_ENABLED=true and MTLS_ALLOWED_CNS");
+        return;
+    }
     let engine = Arc::new(Mutex::new(VelocityEngine::new(default_rules())));
-    let client = Arc::new(reqwest::Client::new());
+    let client = match TrustedHttpsClient::new(
+        config.gateway_url.clone(),
+        Duration::from_secs(10),
+        Duration::from_secs(5),
+    ) {
+        Ok(client) => Arc::new(client),
+        Err(_) => {
+            error!("Trusted HTTPS gateway client could not be initialized");
+            return;
+        }
+    };
     info!("BIS Fluvio Velocity Processor starting...");
-    info!("Gateway URL: {}", config.gateway_url);
+    info!("Gateway endpoint configured");
     info!("mTLS enabled: {}", config.mtls_enabled);
     info!("Redis circuit breaker: {}", config.redis_url);
     let gc_engine = engine.clone();
     let gc_interval = config.gc_interval_secs;
-    tokio::spawn(async move { run_gc(gc_engine, gc_interval).await; });
-    let state = AppState { engine, client, config: config.clone() };
-    let app = Router::new()
-        .route("/health", get(handle_health))
+    tokio::spawn(async move {
+        run_gc(gc_engine, gc_interval).await;
+    });
+    let state = AppState {
+        engine,
+        client,
+        config: config.clone(),
+    };
+    let protected = Router::new()
         .route("/metrics", get(handle_metrics))
         .route("/event", post(handle_event))
+        .layer(middleware::from_fn(service_auth));
+    let app = Router::new()
+        .route("/health", get(handle_health))
+        .merge(protected)
         .with_state(state);
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], config.webhook_port));
     info!("Listening on {}", addr);
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
+}
+
+#[cfg(test)]
+mod gateway_payload_tests {
+    use super::*;
+
+    fn breach() -> VelocityBreach {
+        VelocityBreach {
+            alert_id: "alert-1".to_string(),
+            account_id: "account-1".to_string(),
+            tenant_id: "tenant-1".to_string(),
+            rule_name: "COUNT_1MIN".to_string(),
+            risk_level: "high".to_string(),
+            window_secs: 60,
+            tx_count: 6,
+            total_amount_kobo: 60_000,
+            triggering_tx_ref: "tx-1".to_string(),
+            detected_at: chrono::Utc::now(),
+        }
+    }
+
+    #[test]
+    fn gateway_payload_encodes_protocol_sized_breach_once_within_bound() {
+        let encoded = encode_gateway_breach(&breach()).expect("protocol-sized breach accepted");
+        assert!(encoded.as_bytes().len() <= MAX_GATEWAY_BREACH_PAYLOAD_BYTES);
+        assert!(std::str::from_utf8(encoded.as_bytes())
+            .expect("JSON is UTF-8")
+            .contains("\"alertId\""));
+    }
+
+    #[test]
+    fn gateway_payload_escapes_request_derived_strings_as_valid_json() {
+        let mut encoded_breach = breach();
+        encoded_breach.account_id = "account-\\\"quoted\\\"\nline".to_owned();
+
+        let encoded = encode_gateway_breach(&encoded_breach).expect("bounded breach accepted");
+        let decoded: serde_json::Value =
+            serde_json::from_slice(encoded.as_bytes()).expect("valid JSON");
+        assert_eq!(decoded["accountId"], encoded_breach.account_id);
+        assert_eq!(decoded["alertId"], encoded_breach.alert_id);
+    }
+
+    #[test]
+    fn gateway_payload_rejects_oversized_request_derived_field() {
+        let mut oversized = breach();
+        oversized.account_id = "a".repeat(MAX_GATEWAY_BREACH_FIELD_BYTES + 1);
+        assert!(encode_gateway_breach(&oversized).is_none());
+    }
 }

@@ -3,14 +3,17 @@
  * Provides offline capability for LEX field agents with low bandwidth
  * Features: Cache-first for static assets, network-first for API, IndexedDB queue for mutations
  *
- * Cache-busting: On each deployment the server injects a new BUILD_VERSION meta tag.
- * The SW reads this on activate and clears all old caches when the version changes.
+ * Cache-busting: The client registers this worker through a versioned script URL.
+ * Activation clears prior BIS caches for a new build and navigation responses are
+ * never stored, so every online page load obtains a current HTML shell.
  */
 
 // ─── Version tracking ─────────────────────────────────────────────────────────
-// This constant is updated on each deployment by the CI pipeline or manually.
-// Changing it forces all old caches to be cleared on the next SW activation.
-const SW_VERSION = '2.0.0';
+const SAFE_BUILD_VERSION = /^[A-Za-z0-9._-]{7,128}$/;
+const requestedBuildVersion = new URL(self.location.href).searchParams.get('build')?.trim();
+const SW_VERSION = SAFE_BUILD_VERSION.test(requestedBuildVersion ?? '')
+  ? requestedBuildVersion
+  : 'development';
 const CACHE_VERSION = `bis-v${SW_VERSION}`;
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const API_CACHE = `${CACHE_VERSION}-api`;
@@ -19,9 +22,6 @@ const OFFLINE_QUEUE_STORE = 'pending-submissions';
 
 // Static assets to pre-cache
 const PRECACHE_URLS = [
-  '/',
-  '/lex/submit',
-  '/quickcheck',
   '/manifest.json',
 ];
 
@@ -33,12 +33,9 @@ const API_CACHE_ROUTES = [
 
 // ─── Install ────────────────────────────────────────────────────────────────
 self.addEventListener('install', (event) => {
-  console.log(`[SW] Installing version ${SW_VERSION}`);
   event.waitUntil(
     caches.open(STATIC_CACHE).then((cache) => {
-      return cache.addAll(PRECACHE_URLS).catch((err) => {
-        console.warn('[SW] Pre-cache failed for some URLs:', err);
-      });
+      return cache.addAll(PRECACHE_URLS).catch(() => undefined);
     }).then(() => {
       // Force immediate activation — don't wait for old SW to be unloaded
       return self.skipWaiting();
@@ -48,17 +45,13 @@ self.addEventListener('install', (event) => {
 
 // ─── Activate ────────────────────────────────────────────────────────────────
 self.addEventListener('activate', (event) => {
-  console.log(`[SW] Activating version ${SW_VERSION} — clearing old caches`);
   event.waitUntil(
     caches.keys().then((cacheNames) => {
       return Promise.all(
         cacheNames
           // Delete any BIS cache that doesn't match the current version
           .filter((name) => name.startsWith('bis-') && name !== STATIC_CACHE && name !== API_CACHE)
-          .map((name) => {
-            console.log(`[SW] Deleting stale cache: ${name}`);
-            return caches.delete(name);
-          })
+          .map((name) => caches.delete(name))
       );
     }).then(() => {
       // Take control of all open pages immediately
@@ -91,10 +84,14 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // HTML navigation: ALWAYS network-first, no caching — must get fresh index.html
+  // HTML navigation: always network-only. The authenticated entry shell must
+  // never be retained in Cache Storage or replayed after a deployment.
   if (request.mode === 'navigate' || url.pathname === '/') {
     event.respondWith(
-      fetch(request, { cache: 'no-store' }).catch(() => caches.match('/'))
+      fetch(request, { cache: 'no-store' }).catch(() => new Response(
+        '<!doctype html><title>Offline</title><h1>Connection unavailable</h1><p>Please reconnect and reload.</p>',
+        { status: 503, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } },
+      ))
     );
     return;
   }

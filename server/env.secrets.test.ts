@@ -11,10 +11,6 @@ const REQUIRED_VARS = ["DATABASE_URL", "JWT_SECRET"];
 const OPTIONAL_WITH_DEFAULTS = [
   // Gateway / Verification
   { key: "GATEWAY_SANDBOX", default: "true" },
-  { key: "BIS_VERIFY_NIMC_URL", default: "https://api.nimc.gov.ng/v1" },
-  { key: "BIS_VERIFY_NIMC_KEY", default: "bis-nimc-key-default" },
-  { key: "BIS_VERIFY_NIBSS_URL", default: "https://api.nibss-plc.com.ng/v1" },
-  { key: "BIS_VERIFY_NIBSS_KEY", default: "bis-nibss-key-default" },
   { key: "BIS_VERIFY_CAC_URL", default: "https://search.cac.gov.ng/api/v1" },
   { key: "BIS_VERIFY_CAC_KEY", default: "bis-cac-key-default" },
   { key: "YOUVERIFY_BASE_URL", default: "https://api.youverify.co/v2" },
@@ -72,9 +68,15 @@ describe("BIS Environment Secrets", () => {
     expect(port).toBeLessThanOrEqual(65535);
   });
 
-  it("BIS_VERIFY_NIMC_URL is a valid URL", () => {
-    const value = process.env.BIS_VERIFY_NIMC_URL ?? "https://api.nimc.gov.ng/v1";
-    expect(() => new URL(value)).not.toThrow();
+  it("NIMC and NIBSS endpoints are valid only when explicitly supplied by an approved provider contract", () => {
+    for (const key of ["BIS_VERIFY_NIMC_URL", "BIS_VERIFY_NIBSS_URL"] as const) {
+      const value = process.env[key];
+      if (value !== undefined) {
+        expect(value, `${key} must not be empty when configured`).toBeTruthy();
+        expect(() => new URL(value)).not.toThrow();
+        expect(new URL(value).protocol).toBe("https:");
+      }
+    }
   });
 
   it("YOUVERIFY_BASE_URL is a valid URL", () => {

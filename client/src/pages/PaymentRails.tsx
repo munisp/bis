@@ -1114,7 +1114,7 @@ export default function PaymentRailsPage() {
               Dry Run
             </Label>
           </div>
-          {/* Run Archival Now */}
+          {/* Run warm archival now. Cold archival is executed only by the scheduled Parquet worker. */}
           <Button
             variant="outline"
             size="sm"
@@ -1124,12 +1124,12 @@ export default function PaymentRailsPage() {
                 : "border-orange-700/50 bg-orange-900/10 text-orange-300 hover:bg-orange-900/20 hover:text-orange-200"
             }`}
             disabled={runArchival.isPending}
-            onClick={() => runArchival.mutate({ tier: "all", dryRun: isDryRun })}
+            onClick={() => runArchival.mutate({ tier: "warm", dryRun: isDryRun })}
           >
             {runArchival.isPending
               ? <RefreshCw size={11} className="animate-spin" />
               : <Play size={11} />}
-            {runArchival.isPending ? "Running…" : isDryRun ? "Preview Archival" : "Run Archival Now"}
+            {runArchival.isPending ? "Running…" : isDryRun ? "Preview Warm Archive" : "Run Warm Archive"}
           </Button>
 
           <Badge variant="outline" className="text-[10px] font-mono bg-indigo-500/10 text-indigo-400 border-indigo-500/30">
@@ -1175,6 +1175,16 @@ export default function PaymentRailsPage() {
                   className="bg-slate-800 border-slate-700 text-slate-100 text-xs h-8"
                 />
               </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-slate-400">Beneficiary Bank Code</Label>
+              <Input
+                inputMode="numeric"
+                placeholder="3–6 digit bank code"
+                value={lookupBankCode}
+                onChange={e => setLookupBankCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                className="bg-slate-800 border-slate-700 text-slate-100 text-xs h-8"
+              />
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs text-slate-400">Beneficiary Account (NUBAN)</Label>
@@ -1253,10 +1263,11 @@ export default function PaymentRailsPage() {
             <Button
               size="sm"
               className="bg-indigo-600 hover:bg-indigo-700 text-white gap-1.5"
-              disabled={initiateTransfer.isPending || !transferForm.debitAccountId || !transferForm.creditAccountId || !transferForm.amountNgn || !transferForm.beneficiaryName}
+              disabled={initiateTransfer.isPending || !transferForm.debitAccountId || !transferForm.creditAccountId || !/^\d{3,6}$/.test(lookupBankCode) || !transferForm.amountNgn || !transferForm.beneficiaryName}
               onClick={() => initiateTransfer.mutate({
                 originatorAccountId: transferForm.debitAccountId,
                 beneficiaryAccountId: transferForm.creditAccountId,
+                beneficiaryBankCode: lookupBankCode,
                 beneficiaryName: transferForm.beneficiaryName || transferForm.creditAccountId,
                 amount: parseFloat(transferForm.amountNgn),
                 narration: transferForm.narration || undefined,
@@ -1277,7 +1288,7 @@ export default function PaymentRailsPage() {
           <strong className="text-slate-300">1B payments lessons applied:</strong>{" "}
           Transfers are batched at 8,190 (TigerBeetle limit), partitioned by account via murmur2 hash across 32 Kafka partitions,
           and protected by idempotency keys. Backpressure returns HTTP 503 when the queue exceeds capacity.
-          Data is tiered: hot (MySQL, 0–90d), warm (S3 JSONL, 90d–1yr), cold (S3 archive, 1yr+).
+          Data is tiered: hot (PostgreSQL, 0–90d), warm (S3 JSONL, 90d–1yr), cold (S3 archive, 1yr+).
           Archival runs nightly at 02:00 UTC or on demand via the button above.
         </AlertDescription>
       </Alert>

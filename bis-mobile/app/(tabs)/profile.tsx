@@ -55,11 +55,7 @@ export default function ProfileScreen() {
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Account Details</Text>
         <ProfileRow icon="person-outline" label="Name" value={user?.name ?? "—"} />
-        <ProfileRow icon="mail-outline" label="Email" value={(user as any)?.email ?? "—"} />
         <ProfileRow icon="shield-outline" label="Role" value={user?.role ?? "analyst"} />
-        <ProfileRow icon="time-outline" label="Member since" value={
-          (user as any)?.createdAt ? new Date((user as any).createdAt).toLocaleDateString() : "—"
-        } />
       </View>
 
       {/* App info */}

@@ -1,7 +1,7 @@
 // FieldAgentsPage — live tRPC-backed field agent management
 // Design: Dark forensic intelligence theme, JetBrains Mono typography
 
-import { useState, useRef, useMemo } from 'react';
+import { useEffect, useState, useRef, useMemo } from 'react';
 import BISLayout from '@/components/BISLayout';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -14,6 +14,7 @@ import { MapView } from '@/components/Map';
 import { trpc } from '@/lib/trpc';
 import { FieldTaskDetailDrawer } from '@/components/FieldTaskDetailDrawer';
 import { toast } from 'sonner';
+import { encryptedFieldOfflineQueue, type FieldDispatchInput } from '@/lib/fieldOfflineQueue';
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -98,22 +99,45 @@ function DispatchTaskSheet({
 
   const set = (k: string, v: string) => setForm(prev => ({ ...prev, [k]: v }));
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    dispatchMutation.mutate({
-      agentId: agent.agentCode,
-      agentName: agent.name,
-      taskType: form.taskType as any,
-      priority: form.priority as any,
-      subjectName: form.subjectName || undefined,
-      address: form.address || undefined,
-      state: form.state || undefined,
-      lga: form.lga || undefined,
-      gpsLat: form.gpsLat ? parseFloat(form.gpsLat) : undefined,
-      gpsLng: form.gpsLng ? parseFloat(form.gpsLng) : undefined,
-      deadline: form.deadline || undefined,
-      instructions: form.instructions || undefined,
+  const payload = (): Omit<FieldDispatchInput, 'idempotencyKey'> => ({
+    agentId: agent.agentCode,
+    agentName: agent.name,
+    taskType: form.taskType as FieldDispatchInput['taskType'],
+    priority: form.priority as FieldDispatchInput['priority'],
+    subjectName: form.subjectName || undefined,
+    address: form.address || undefined,
+    state: form.state || undefined,
+    lga: form.lga || undefined,
+    gpsLat: form.gpsLat ? parseFloat(form.gpsLat) : undefined,
+    gpsLng: form.gpsLng ? parseFloat(form.gpsLng) : undefined,
+    deadline: form.deadline || undefined,
+    instructions: form.instructions || undefined,
+  });
+
+  useEffect(() => {
+    const replay = () => void encryptedFieldOfflineQueue.drain(async operation => {
+      await dispatchMutation.mutateAsync(operation);
+      await utils.fieldAgents.list.invalidate();
+      await utils.fieldTasks.list.invalidate();
     });
+    replay();
+    window.addEventListener('online', replay);
+    return () => window.removeEventListener('online', replay);
+  }, [dispatchMutation, utils]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const input = payload();
+    try {
+      const result = await dispatchMutation.mutateAsync({ ...input, idempotencyKey: crypto.randomUUID() });
+      setTaskRef(result.taskRef);
+      setDispatched(true);
+    } catch {
+      const operationId = await encryptedFieldOfflineQueue.enqueue(input);
+      setTaskRef(`Securely queued operation ${operationId.slice(0, 8)}`);
+      setDispatched(true);
+      toast.info('Dispatch queued securely', { description: 'It will be delivered automatically when connectivity returns.' });
+    }
   };
 
   const inputCls = "h-8 text-xs font-mono bg-background border-border text-foreground placeholder:text-muted-foreground";

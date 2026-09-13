@@ -13,8 +13,13 @@ export default defineConfig({
       'react-native': path.resolve(__dirname, 'src/__mocks__/react-native.ts'),
       '@react-navigation/native': path.resolve(__dirname, 'src/__mocks__/@react-navigation/native.ts'),
       '@react-navigation/native-stack': path.resolve(__dirname, 'src/__mocks__/@react-navigation/native-stack.ts'),
-      // react-native-mmkv is a native module — stub it for tests
+      // Native modules are replaced by audited deterministic test doubles.
       'react-native-mmkv': path.resolve(__dirname, 'src/__mocks__/react-native-mmkv.ts'),
+      'react-native-quick-crypto': path.resolve(__dirname, 'src/__mocks__/react-native-quick-crypto.ts'),
+      'react-native-keychain': path.resolve(__dirname, 'src/__mocks__/react-native-keychain.ts'),
+      '@react-native-community/netinfo': path.resolve(__dirname, 'src/__mocks__/react-native-netinfo.ts'),
+      'react-native-fs': path.resolve(__dirname, 'src/__mocks__/react-native-fs.ts'),
+      'react-native-document-picker': path.resolve(__dirname, 'src/__mocks__/react-native-document-picker.ts'),
     },
   },
   test: {

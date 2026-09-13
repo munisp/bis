@@ -9,6 +9,7 @@ import { useState, useRef } from "react";
 import {
   View,
   Text,
+  TextInput,
   StyleSheet,
   TouchableOpacity,
   Alert,
@@ -36,6 +37,11 @@ const COLORS = {
 
 type DocType = "nin" | "passport" | "drivers_licence";
 
+type OcrResult = {
+  confidence: number | null;
+  reviewStatus: "pending_human_review";
+};
+
 const DOC_TYPES: { value: DocType; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
   { value: "nin", label: "NIN Slip", icon: "card-outline" },
   { value: "passport", label: "Passport", icon: "book-outline" },
@@ -48,13 +54,15 @@ export default function DocumentCameraScreen() {
   const [permission, requestPermission] = useCameraPermissions();
   const [docType, setDocType] = useState<DocType>("nin");
   const [capturedUri, setCapturedUri] = useState<string | null>(null);
+  const [capturedBase64, setCapturedBase64] = useState<string | null>(null);
+  const [subjectRef, setSubjectRef] = useState("");
   const [capturing, setCapturing] = useState(false);
-  const [ocrResult, setOcrResult] = useState<Record<string, string> | null>(null);
+  const [ocrResult, setOcrResult] = useState<OcrResult | null>(null);
 
   const ocrMutation = trpc.biometric.ocrDocument.useMutation({
-    onSuccess: (data: any) => {
+    onSuccess: (data) => {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      setOcrResult(data?.fields ?? {});
+      setOcrResult({ confidence: data.confidence, reviewStatus: data.reviewStatus });
     },
     onError: (err) => {
       Alert.alert("OCR Failed", err.message);
@@ -79,9 +87,10 @@ export default function DocumentCameraScreen() {
     setCapturing(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
-      const photo = await cameraRef.current.takePictureAsync({ quality: 0.9 });
-      if (photo?.uri) {
+      const photo = await cameraRef.current.takePictureAsync({ quality: 0.9, base64: true });
+      if (photo?.uri && photo.base64) {
         setCapturedUri(photo.uri);
+        setCapturedBase64(photo.base64);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       }
     } catch {
@@ -95,22 +104,29 @@ export default function DocumentCameraScreen() {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       quality: 0.9,
+      base64: true,
     });
-    if (!result.canceled && result.assets[0]) {
+    if (!result.canceled && result.assets[0]?.base64) {
       setCapturedUri(result.assets[0].uri);
+      setCapturedBase64(result.assets[0].base64);
     }
   };
 
   const handleRunOCR = () => {
-    if (!capturedUri) return;
+    if (!capturedUri || !capturedBase64 || !subjectRef.trim()) {
+      Alert.alert("Subject reference required", "Enter the authorised subject reference before OCR.");
+      return;
+    }
     ocrMutation.mutate({
-      imageBase64: capturedUri,
-      documentType: docType,
+      imageBase64: capturedBase64,
+      subjectRef: subjectRef.trim(),
+      documentType: docType === "nin" ? "NIN_SLIP" : docType === "passport" ? "PASSPORT" : "DRIVERS_LICENSE",
     });
   };
 
   const handleRetake = () => {
     setCapturedUri(null);
+    setCapturedBase64(null);
     setOcrResult(null);
   };
 
@@ -177,15 +193,29 @@ export default function DocumentCameraScreen() {
           {/* OCR result */}
           {ocrResult && (
             <View style={styles.ocrCard}>
-              <Text style={styles.ocrTitle}>Extracted Fields</Text>
-              {Object.entries(ocrResult).map(([key, value]) => (
-                <View key={key} style={styles.ocrRow}>
-                  <Text style={styles.ocrKey}>{key.replace(/_/g, " ").toUpperCase()}</Text>
-                  <Text style={styles.ocrValue}>{String(value)}</Text>
-                </View>
-              ))}
+              <Text style={styles.ocrTitle}>OCR Review Submitted</Text>
+              <View style={styles.ocrRow}>
+                <Text style={styles.ocrKey}>CONFIDENCE</Text>
+                <Text style={styles.ocrValue}>
+                  {ocrResult.confidence === null ? "Unavailable" : `${Math.round(ocrResult.confidence * 100)}%`}
+                </Text>
+              </View>
+              <View style={styles.ocrRow}>
+                <Text style={styles.ocrKey}>STATUS</Text>
+                <Text style={styles.ocrValue}>{ocrResult.reviewStatus.replace(/_/g, " ")}</Text>
+              </View>
             </View>
           )}
+
+          <TextInput
+            style={styles.subjectRefInput}
+            value={subjectRef}
+            onChangeText={setSubjectRef}
+            placeholder="Authorised subject reference"
+            placeholderTextColor={COLORS.muted}
+            autoCapitalize="characters"
+            accessibilityLabel="Authorised subject reference"
+          />
 
           {/* Actions */}
           <View style={styles.actionRow}>
@@ -332,5 +362,15 @@ const styles = StyleSheet.create({
   ocrRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: COLORS.border },
   ocrKey: { fontSize: 11, color: COLORS.muted, fontWeight: "600" },
   ocrValue: { fontSize: 12, color: COLORS.text, fontWeight: "500", maxWidth: "60%", textAlign: "right" },
+  subjectRefInput: {
+    backgroundColor: COLORS.card,
+    borderColor: COLORS.border,
+    borderWidth: 1,
+    borderRadius: 10,
+    color: COLORS.text,
+    marginBottom: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
   actionRow: { flexDirection: "row", gap: 12, justifyContent: "center" },
 });

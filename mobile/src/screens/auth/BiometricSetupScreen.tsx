@@ -6,7 +6,13 @@ import { setBiometricEnabled } from '../../store';
 
 const rnBiometrics = new ReactNativeBiometrics();
 
-export function BiometricSetupScreen({ navigation }: any) {
+type BiometricSetupNavigation = { goBack: () => void };
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
+
+export function BiometricSetupScreen({ navigation }: { navigation: BiometricSetupNavigation }) {
   const dispatch = useDispatch();
 
   async function setup() {
@@ -19,8 +25,8 @@ export function BiometricSetupScreen({ navigation }: any) {
       Alert.alert('Success', 'Biometric login enabled', [
         { text: 'OK', onPress: () => navigation.goBack() },
       ]);
-    } catch (err: any) {
-      Alert.alert('Error', err.message ?? 'Failed to set up biometrics');
+    } catch (error: unknown) {
+      Alert.alert('Error', errorMessage(error, 'Failed to set up biometrics'));
     }
   }
 

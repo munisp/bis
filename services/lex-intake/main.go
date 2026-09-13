@@ -21,7 +21,11 @@ package main
 import (
 	"compress/gzip"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"crypto/subtle"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -42,6 +46,9 @@ type Config struct {
 	Port         string
 	BisURL       string
 	BisAPIKey    string
+	AdminAPIKey  string
+	PINPepper    string
+	WebhookKey   string
 	DBPath       string
 	SyncInterval time.Duration
 }
@@ -59,9 +66,31 @@ func loadConfig() Config {
 		Port:         port,
 		BisURL:       bisURL,
 		BisAPIKey:    bisAPIKey,
+		AdminAPIKey:  getEnv("LEX_ADMIN_API_KEY", ""),
+		PINPepper:    getEnv("LEX_PIN_PEPPER", ""),
+		WebhookKey:   getEnv("LEX_WEBHOOK_KEY", ""),
 		DBPath:       dbPath,
 		SyncInterval: time.Duration(syncSecs) * time.Second,
 	}
+}
+
+func (c Config) validate() error {
+	missing := make([]string, 0)
+	for key, value := range map[string]string{
+		"LEX_BIS_URL":       c.BisURL,
+		"LEX_BIS_API_KEY":   c.BisAPIKey,
+		"LEX_ADMIN_API_KEY": c.AdminAPIKey,
+		"LEX_PIN_PEPPER":    c.PINPepper,
+		"LEX_WEBHOOK_KEY":   c.WebhookKey,
+	} {
+		if strings.TrimSpace(value) == "" {
+			missing = append(missing, key)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("missing mandatory LEX configuration: %s", strings.Join(missing, ", "))
+	}
+	return nil
 }
 
 func getEnv(key, fallback string) string {
@@ -249,8 +278,8 @@ func (s *Store) VerifyPIN(phone, pinHash string) VerifyPINResult {
 		return VerifyPINResult{Used: true}
 	}
 
-	// Verify hash
-	if storedHash != pinHash {
+	// Verify the HMAC-derived hash in constant time.
+	if len(storedHash) != len(pinHash) || subtle.ConstantTimeCompare([]byte(storedHash), []byte(pinHash)) != 1 {
 		// Increment failed attempts
 		newAttempts := attempts + 1
 		remaining := PINMaxAttempts - newAttempts
@@ -525,6 +554,38 @@ type Server struct {
 	config Config
 }
 
+func secureEqual(provided, expected string) bool {
+	return expected != "" && len(provided) == len(expected) && subtle.ConstantTimeCompare([]byte(provided), []byte(expected)) == 1
+}
+
+func (s *Server) pinHash(subject, pin string) string {
+	mac := hmac.New(sha256.New, []byte(s.config.PINPepper))
+	_, _ = mac.Write([]byte(subject))
+	_, _ = mac.Write([]byte{0})
+	_, _ = mac.Write([]byte(pin))
+	return "hmac-sha256:" + hex.EncodeToString(mac.Sum(nil))
+}
+
+func (s *Server) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !secureEqual(r.Header.Get("X-LEX-Admin-Key"), s.config.AdminAPIKey) {
+			jsonResponse(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			return
+		}
+		next(w, r)
+	}
+}
+
+func (s *Server) requireWebhook(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !secureEqual(r.Header.Get("X-LEX-Webhook-Key"), s.config.WebhookKey) {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next(w, r)
+	}
+}
+
 // gzipWriter wraps ResponseWriter with gzip compression
 type gzipWriter struct {
 	http.ResponseWriter
@@ -573,6 +634,11 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "submitterId, agencyCode, and pin are required"})
 		return
 	}
+	pinResult := s.store.VerifyPIN(submitterID, s.pinHash(submitterID, pin))
+	if !pinResult.Valid {
+		jsonResponse(w, http.StatusUnauthorized, map[string]string{"error": "invalid, expired, used, or locked PIN"})
+		return
+	}
 
 	// Rate limit check
 	allowed, count, err := s.store.CheckRateLimit(submitterID, 5)
@@ -590,8 +656,8 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 	// Generate local reference
 	localRef := fmt.Sprintf("LEX-LOCAL-%s-%d", strings.ToUpper(agencyCode), time.Now().UnixMilli())
 
-	// Hash PIN for storage (SHA-256 would be done in production; simplified here)
-	pinHash := fmt.Sprintf("sha256:%s:%s", submitterID, pin)
+	// Store only the peppered HMAC-derived PIN value, never the plaintext PIN.
+	pinHash := s.pinHash(submitterID, pin)
 
 	// Serialize payload
 	payload, _ := json.Marshal(body)
@@ -650,6 +716,10 @@ func (s *Server) handleSMS(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "MISSING_FIELDS", http.StatusBadRequest)
 		return
 	}
+	if result := s.store.VerifyPIN(submitterID, s.pinHash(submitterID, pin)); !result.Valid {
+		http.Error(w, "UNAUTHORIZED", http.StatusUnauthorized)
+		return
+	}
 
 	allowed, _, _ := s.store.CheckRateLimit(submitterID, 5)
 	if !allowed {
@@ -658,17 +728,17 @@ func (s *Server) handleSMS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	payload, _ := json.Marshal(map[string]any{
-		"submitterId":  submitterID,
-		"agencyCode":   agencyCode,
-		"pin":          pin,
-		"incidentType": incidentType,
+		"submitterId":   submitterID,
+		"agencyCode":    agencyCode,
+		"pin":           pin,
+		"incidentType":  incidentType,
 		"incidentState": state,
-		"narrative":    narrative,
-		"channel":      "sms",
+		"narrative":     narrative,
+		"channel":       "sms",
 	})
 
 	localRef := fmt.Sprintf("LEX-SMS-%s-%d", strings.ToUpper(agencyCode), time.Now().UnixMilli())
-	pinHash := fmt.Sprintf("sha256:%s:%s", submitterID, pin)
+	pinHash := s.pinHash(submitterID, pin)
 
 	if err := s.store.Enqueue(localRef, submitterID, agencyCode, pinHash, string(payload)); err != nil {
 		w.Write([]byte("ERROR"))
@@ -718,59 +788,59 @@ func (s *Server) handleQueue(w http.ResponseWriter, r *http.Request) {
 
 // ─── PIN HTTP Handlers ───────────────────────────────────────────────────────
 
-// POST /pin/issue — issue a PIN for a phone number (used by BIS server or admin tools)
-// Body: {"phone":"+2348012345678","agencyCode":"NPF-LA-001","pinHash":"sha256:..."}
+// POST /pin/issue — issue a one-time PIN for an authenticated officer identity.
+// Body: {"submitterId":"NPF-LA-001:+2348012345678","agencyCode":"NPF-LA-001","pin":"123456"}
 func (s *Server) handlePINIssue(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		jsonResponse(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 		return
 	}
 	var body struct {
-		Phone      string `json:"phone"`
-		AgencyCode string `json:"agencyCode"`
-		PINHash    string `json:"pinHash"`
+		SubmitterID string `json:"submitterId"`
+		AgencyCode  string `json:"agencyCode"`
+		PIN         string `json:"pin"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
 		return
 	}
-	if body.Phone == "" || body.AgencyCode == "" || body.PINHash == "" {
-		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "phone, agencyCode, and pinHash are required"})
+	if body.SubmitterID == "" || body.AgencyCode == "" || body.PIN == "" {
+		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "submitterId, agencyCode, and pin are required"})
 		return
 	}
-	if err := s.store.IssuePIN(body.Phone, body.PINHash, body.AgencyCode); err != nil {
+	if err := s.store.IssuePIN(body.SubmitterID, s.pinHash(body.SubmitterID, body.PIN), body.AgencyCode); err != nil {
 		log.Printf("[pin/issue] error: %v", err)
 		jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": "failed to issue PIN"})
 		return
 	}
 	jsonResponse(w, http.StatusOK, map[string]any{
-		"ok":        true,
-		"ttlMinutes": PINTTLMinutes,
+		"ok":          true,
+		"ttlMinutes":  PINTTLMinutes,
 		"maxAttempts": PINMaxAttempts,
-		"message":   fmt.Sprintf("PIN issued for %s. Expires in %d minutes.", body.Phone, PINTTLMinutes),
+		"message":     fmt.Sprintf("PIN issued for %s. Expires in %d minutes.", body.SubmitterID, PINTTLMinutes),
 	})
 }
 
-// POST /pin/verify — verify a PIN for a phone number
-// Body: {"phone":"+2348012345678","pinHash":"sha256:..."}
+// POST /pin/verify — verify a one-time PIN for an officer identity.
+// Body: {"submitterId":"NPF-LA-001:+2348012345678","pin":"123456"}
 func (s *Server) handlePINVerify(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		jsonResponse(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 		return
 	}
 	var body struct {
-		Phone   string `json:"phone"`
-		PINHash string `json:"pinHash"`
+		SubmitterID string `json:"submitterId"`
+		PIN         string `json:"pin"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
 		return
 	}
-	if body.Phone == "" || body.PINHash == "" {
-		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "phone and pinHash are required"})
+	if body.SubmitterID == "" || body.PIN == "" {
+		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "submitterId and pin are required"})
 		return
 	}
-	result := s.store.VerifyPIN(body.Phone, body.PINHash)
+	result := s.store.VerifyPIN(body.SubmitterID, s.pinHash(body.SubmitterID, body.PIN))
 	switch {
 	case result.Locked:
 		jsonResponse(w, http.StatusTooManyRequests, map[string]any{
@@ -787,8 +857,8 @@ func (s *Server) handlePINVerify(w http.ResponseWriter, r *http.Request) {
 		})
 	case result.Used:
 		jsonResponse(w, http.StatusUnauthorized, map[string]any{
-			"ok":   false,
-			"used": true,
+			"ok":    false,
+			"used":  true,
 			"error": "PIN has already been used. Please request a new PIN.",
 		})
 	case result.Valid:
@@ -812,6 +882,9 @@ func (s *Server) handlePINVerify(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 	cfg := loadConfig()
+	if err := cfg.validate(); err != nil {
+		log.Fatalf("Invalid LEX configuration: %v", err)
+	}
 
 	store, err := NewStore(cfg.DBPath)
 	if err != nil {
@@ -837,14 +910,17 @@ func main() {
 	}()
 
 	mux := http.NewServeMux()
+	// Officer submissions are authenticated by a one-time PIN in their handler.
 	mux.HandleFunc("/submit", srv.handleSubmit)
 	mux.HandleFunc("/sms", srv.handleSMS)
-	mux.HandleFunc("/sms/at", srv.handleATWebhook)       // Africa's Talking webhook
-	mux.HandleFunc("/sms/termii", srv.handleTermiiWebhook) // Termii webhook
-	mux.HandleFunc("/status", srv.handleStatus)
-	mux.HandleFunc("/queue", srv.handleQueue)
-	mux.HandleFunc("/pin/issue", srv.handlePINIssue)   // Issue a PIN for a phone number
-	mux.HandleFunc("/pin/verify", srv.handlePINVerify) // Verify a PIN
+	// Provider callbacks must present a separately configured webhook key.
+	mux.HandleFunc("/sms/at", srv.requireWebhook(srv.handleATWebhook))
+	mux.HandleFunc("/sms/termii", srv.requireWebhook(srv.handleTermiiWebhook))
+	// Administrative operational routes require an explicit service credential.
+	mux.HandleFunc("/status", srv.requireAdmin(srv.handleStatus))
+	mux.HandleFunc("/queue", srv.requireAdmin(srv.handleQueue))
+	mux.HandleFunc("/pin/issue", srv.requireAdmin(srv.handlePINIssue))
+	mux.HandleFunc("/pin/verify", srv.requireAdmin(srv.handlePINVerify))
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
 	})
