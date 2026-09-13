@@ -1,23 +1,13 @@
 /**
- * BIS — Temporal Worker Process
+ * BIS — Temporal activity helpers (Node.js)
  *
- * Registers and runs activities for two task queues:
- *   1. "bis-investigation" — InvestigationWorkflow activities
- *      (NIN check, BVN check, risk scoring, field task dispatch)
- *   2. "bis-payment"       — PaymentTransferWorkflow activities
- *      (rail submission, status polling, timeout escalation, compensation)
- *
- * Run with: `node -r tsx/cjs server/temporalWorker.ts`
- * Or via docker-compose service `bis-temporal-worker`.
- *
- * When TEMPORAL_HOST is not set the worker exits gracefully (dev mode).
+ * Plain HTTP activity helpers for the investigation and payment domains.
+ * These are imported directly by the BFF and exercised by unit tests. They are
+ * NOT a Temporal worker: real workflow execution is owned by the Go workers
+ * (services/gateway, services/compliance-worker). See the note at the bottom
+ * of this file and server/temporal.manifest.json (WP6 FIX B).
  */
 import { ENV } from "./_core/env";
-
-const TEMPORAL_HOST = ENV.temporalHost;
-const TEMPORAL_NAMESPACE = ENV.temporalNamespace ?? "default";
-const TEMPORAL_TASK_QUEUE = "bis-investigation";
-const PAYMENT_TASK_QUEUE = "bis-payment";
 
 // ── Activity definitions ────────────────────────────────────────────────────
 
@@ -263,165 +253,20 @@ export async function compensateTransfer(input: CompensateTransferInput): Promis
   }
 }
 
-// ── Worker bootstrap ────────────────────────────────────────────────────────
-
-/**
- * Start the Temporal worker.
- * Uses the Temporal HTTP API via the Go gateway when TEMPORAL_HOST is set.
- * In dev mode (no TEMPORAL_HOST) the worker exits immediately.
- */
-async function startWorker(): Promise<void> {
-  if (!TEMPORAL_HOST) {
-    console.log("[TemporalWorker] TEMPORAL_HOST not set — worker running in dev/stub mode.");
-    console.log("[TemporalWorker] Activities are available for direct import by the BFF.");
-    return;
-  }
-
-  console.log(`[TemporalWorker] Starting worker on task queues '${TEMPORAL_TASK_QUEUE}', '${PAYMENT_TASK_QUEUE}' (namespace: ${TEMPORAL_NAMESPACE})`);
-  console.log(`[TemporalWorker] Temporal host: ${TEMPORAL_HOST}`);
-
-  const gatewayUrl = ENV.gatewayUrl;
-
-  // ── Investigation task queue heartbeat + poll ──────────────────────────────────
-
-  const heartbeat = async () => {
-    try {
-      await fetch(`${gatewayUrl}/v1/worker/heartbeat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-BIS-Key": ENV.bisGatewayKey },
-        body: JSON.stringify({
-          task_queue: TEMPORAL_TASK_QUEUE,
-          namespace: TEMPORAL_NAMESPACE,
-          activities: ["checkNin", "checkBvn", "scoreRisk", "dispatchFieldTask"],
-          timestamp: new Date().toISOString(),
-        }),
-        signal: AbortSignal.timeout(5_000),
-      });
-    } catch (err) {
-      console.warn("[TemporalWorker] Investigation heartbeat failed:", err);
-    }
-  };
-  await heartbeat();
-  const heartbeatInterval = setInterval(heartbeat, 30_000);
-
-  const pollInterval = setInterval(async () => {
-    try {
-      const resp = await fetch(`${gatewayUrl}/v1/worker/poll`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-BIS-Key": ENV.bisGatewayKey },
-        body: JSON.stringify({ task_queue: TEMPORAL_TASK_QUEUE, namespace: TEMPORAL_NAMESPACE }),
-        signal: AbortSignal.timeout(5_000),
-      });
-      if (!resp.ok) return;
-      const tasks = (await resp.json()) as Array<{ task_id: string; activity: string; input: Record<string, unknown> }>;
-      for (const task of tasks) {
-        try {
-          let result: unknown;
-          switch (task.activity) {
-            case "checkNin":       result = await checkNin(task.input as unknown as NinCheckInput); break;
-            case "checkBvn":       result = await checkBvn(task.input as unknown as BvnCheckInput); break;
-            case "scoreRisk":      result = await scoreRisk(task.input as unknown as RiskScoringInput); break;
-            case "dispatchFieldTask": result = await dispatchFieldTask(task.input as unknown as FieldTaskDispatchInput); break;
-            default: console.warn(`[TemporalWorker] Unknown investigation activity: ${task.activity}`); continue;
-          }
-          await fetch(`${gatewayUrl}/v1/worker/complete`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "X-BIS-Key": ENV.bisGatewayKey },
-            body: JSON.stringify({ task_id: task.task_id, result }),
-            signal: AbortSignal.timeout(5_000),
-          });
-        } catch (err) {
-          console.error(`[TemporalWorker] Investigation activity ${task.activity} failed:`, err);
-          await fetch(`${gatewayUrl}/v1/worker/fail`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "X-BIS-Key": ENV.bisGatewayKey },
-            body: JSON.stringify({ task_id: task.task_id, error: err instanceof Error ? err.message : String(err) }),
-            signal: AbortSignal.timeout(5_000),
-          }).catch(() => {});
-        }
-      }
-    } catch { /* transient */ }
-  }, 2_000);
-
-  // ── Payment task queue heartbeat + poll ──────────────────────────────────────
-
-  const paymentHeartbeat = async () => {
-    try {
-      await fetch(`${gatewayUrl}/v1/worker/heartbeat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-BIS-Key": ENV.bisGatewayKey },
-        body: JSON.stringify({
-          task_queue: PAYMENT_TASK_QUEUE,
-          namespace: TEMPORAL_NAMESPACE,
-          activities: ["submitToRail", "pollRailStatus", "escalateToReview", "compensateTransfer"],
-          timestamp: new Date().toISOString(),
-        }),
-        signal: AbortSignal.timeout(5_000),
-      });
-    } catch (err) {
-      console.warn("[TemporalWorker] Payment heartbeat failed:", err);
-    }
-  };
-  await paymentHeartbeat();
-  const paymentHeartbeatInterval = setInterval(paymentHeartbeat, 30_000);
-
-  const paymentPollInterval = setInterval(async () => {
-    try {
-      const resp = await fetch(`${gatewayUrl}/v1/worker/poll`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-BIS-Key": ENV.bisGatewayKey },
-        body: JSON.stringify({ task_queue: PAYMENT_TASK_QUEUE, namespace: TEMPORAL_NAMESPACE }),
-        signal: AbortSignal.timeout(5_000),
-      });
-      if (!resp.ok) return;
-      const tasks = (await resp.json()) as Array<{ task_id: string; activity: string; input: Record<string, unknown> }>;
-      for (const task of tasks) {
-        try {
-          let result: unknown;
-          switch (task.activity) {
-            case "submitToRail":       result = await submitToRail(task.input as unknown as SubmitToRailInput); break;
-            case "pollRailStatus":     result = await pollRailStatus(task.input as unknown as PollRailStatusInput); break;
-            case "escalateToReview":   await escalateToReview(task.input as unknown as EscalateToReviewInput); result = null; break;
-            case "compensateTransfer": await compensateTransfer(task.input as unknown as CompensateTransferInput); result = null; break;
-            default: console.warn(`[TemporalWorker] Unknown payment activity: ${task.activity}`); continue;
-          }
-          await fetch(`${gatewayUrl}/v1/worker/complete`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "X-BIS-Key": ENV.bisGatewayKey },
-            body: JSON.stringify({ task_id: task.task_id, result }),
-            signal: AbortSignal.timeout(5_000),
-          });
-        } catch (err) {
-          console.error(`[TemporalWorker] Payment activity ${task.activity} failed:`, err);
-          await fetch(`${gatewayUrl}/v1/worker/fail`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "X-BIS-Key": ENV.bisGatewayKey },
-            body: JSON.stringify({ task_id: task.task_id, error: err instanceof Error ? err.message : String(err) }),
-            signal: AbortSignal.timeout(5_000),
-          }).catch(() => {});
-        }
-      }
-    } catch { /* transient */ }
-  }, 2_000);
-
-  // Graceful shutdown
-  const shutdown = () => {
-    console.log("[TemporalWorker] Shutting down...");
-    clearInterval(heartbeatInterval);
-    clearInterval(pollInterval);
-    clearInterval(paymentHeartbeatInterval);
-    clearInterval(paymentPollInterval);
-    process.exit(0);
-  };
-
-  process.on("SIGTERM", shutdown);
-  process.on("SIGINT", shutdown);
-
-  console.log("[TemporalWorker] Worker running. Press Ctrl+C to stop.");
-}
-
-// Run if executed directly
-startWorker().catch((err) => {
-  console.error("[TemporalWorker] Fatal startup error:", err);
-  process.exit(1);
-});
+// ── Worker execution model (WP6 FIX B) ─────────────────────────────────────
+//
+// The fake HTTP poll-loop worker that used to live here was REMOVED. It polled
+// gateway endpoints (/v1/worker/poll, /v1/worker/heartbeat, /v1/worker/complete,
+// /v1/worker/fail) that never existed in services/gateway, so it could never
+// execute a single task — phantom code, not a worker.
+//
+// Real Temporal workflow execution is owned by the Go workers:
+//   - services/gateway (temporal.StartWorker / StartScreeningWorker) serves
+//     task queues 'bis-investigation' and 'bis-screening'
+//   - services/compliance-worker serves task queue 'bis-compliance'
+// See server/temporal.manifest.json for the full both-sides contract.
+//
+// The exported functions above are plain activity helpers used directly by the
+// BFF and by unit tests. They are intentionally NOT registered with any
+// Temporal worker from Node. If a Node-side worker is ever needed, build it on
+// @temporalio/worker with real workflow bundles — never on an HTTP poll loop.
