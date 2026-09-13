@@ -31,7 +31,7 @@ func envOr(key, fallback string) string {
 
 func main() {
 	temporalHost := envOr("TEMPORAL_HOST", "localhost:7233")
-	temporalNS := envOr("TEMPORAL_NAMESPACE", "bis-platform")
+	temporalNS := envOr("TEMPORAL_NAMESPACE", "bis")
 	taskQueue := envOr("TEMPORAL_TASK_QUEUE", "bis-compliance")
 	healthPort := envOr("COMPLIANCE_WORKER_PORT", "8096")
 
