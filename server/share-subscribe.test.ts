@@ -126,11 +126,13 @@ function fakeQuery(state: State) {
 
     // ── plan_signups ────────────────────────────────────────────────────────
     if (sql.startsWith("SELECT id, plan_code, status, billing_ref FROM plan_signups")) {
-      return rows(state.signups.filter((s) => s.idempotency_key === values[0]));
+      // Tenant-scoped replay lookup: WHERE tenant_id = $1 AND idempotency_key = $2
+      return rows(state.signups.filter((s) => s.tenant_id === values[0] && s.idempotency_key === values[1]));
     }
     if (sql.startsWith("INSERT INTO plan_signups")) {
       const [id, tenantId, planCode, billingRef, idempotencyKey, createdBy] = values as any[];
-      if (state.signups.some((s) => s.idempotency_key === idempotencyKey)) {
+      // UNIQUE (tenant_id, idempotency_key)
+      if (state.signups.some((s) => s.tenant_id === tenantId && s.idempotency_key === idempotencyKey)) {
         if (sql.includes("ON CONFLICT")) return rows([]); // ON CONFLICT DO NOTHING
         const err = new Error("duplicate key value violates unique constraint") as any;
         err.code = "23505";
@@ -224,7 +226,7 @@ function fakeQuery(state: State) {
 
 const mocks = vi.hoisted(() => {
   const state = makeState();
-  const query = fakeQuery(state);
+  const query = vi.fn(fakeQuery(state));
   const connect = vi.fn(async () => ({ query, release: vi.fn() }));
   const getPgPool = vi.fn(async () => ({ query, connect }));
   return { state, query, connect, getPgPool };
@@ -543,6 +545,21 @@ function seedPaidPlanAndIntent(overrides: Partial<Row> = {}) {
   });
 }
 
+const TENANT2_REF = "BIS-TOP-ZYXWVU9876543210DCBA9876";
+
+function seedTenant2Intent() {
+  mocks.state.intents.set(TENANT2_REF, {
+    id: "intent-2",
+    tenant_id: 2,
+    provider_reference: TENANT2_REF,
+    amount_kobo: PLAN_PRO.price_kobo,
+    currency: "NGN",
+    purpose: "subscription_invoice",
+    status: "pending",
+    expires_at: new Date(Date.now() + 30 * 60 * 1000),
+  });
+}
+
 describe("selfServiceBilling — plans and signup", () => {
   it("lists the public plan catalogue from billing_plans", async () => {
     mocks.state.plans.set("pro_monthly", { ...PLAN_PRO });
@@ -687,5 +704,73 @@ describe("selfServiceBilling — plans and signup", () => {
     const usage = await other.usageSummary();
     expect(usage.includedChecks).toBe(0);
     expect(usage.remainingChecks).toBe(0);
+  });
+
+  it("never leaks another tenant's signup on a cross-tenant idempotency-key replay", async () => {
+    seedPaidPlanAndIntent();
+    seedTenant2Intent();
+    const SHARED_KEY = "shared-key-cross-tenant";
+
+    // Tenant 1 signs up with the key.
+    const first = await selfServiceBillingRouter.createCaller(makeCtx(1)).signup({
+      planCode: "pro_monthly",
+      idempotencyKey: SHARED_KEY,
+      paymentReference: "BIS-TOP-ABCDEF0123456789WXYZ0123",
+    });
+    expect(first.status).toBe("active");
+
+    // Tenant 2 presents the SAME key: it must behave as a brand-new key for
+    // tenant 2 — never returning tenant 1's signupId, subscription, or
+    // billing reference.
+    const foreign = await selfServiceBillingRouter.createCaller(makeCtx(2)).signup({
+      planCode: "pro_monthly",
+      idempotencyKey: SHARED_KEY,
+      paymentReference: TENANT2_REF,
+    });
+    expect(foreign.idempotent).toBe(false);
+    expect(foreign.signupId).not.toBe(first.signupId);
+    expect(foreign.subscriptionId).not.toBe(first.subscriptionId);
+    expect(foreign.billingRef).toBe(TENANT2_REF);
+    expect(foreign.billingRef).not.toBe(first.billingRef);
+    expect(JSON.stringify(foreign)).not.toContain("BIS-TOP-ABCDEF0123456789WXYZ0123");
+    expect(JSON.stringify(foreign)).not.toContain(first.signupId);
+
+    // Both tenants now hold their own row under the same key value.
+    expect(mocks.state.signups).toHaveLength(2);
+    expect(mocks.state.signups.map((s) => s.tenant_id).sort()).toEqual([1, 2]);
+
+    // Same-tenant replay still returns the original result, untouched.
+    const replay1 = await selfServiceBillingRouter.createCaller(makeCtx(1)).signup({
+      planCode: "pro_monthly",
+      idempotencyKey: SHARED_KEY,
+      paymentReference: "BIS-TOP-ABCDEF0123456789WXYZ0123",
+    });
+    expect(replay1.idempotent).toBe(true);
+    expect(replay1.signupId).toBe(first.signupId);
+    expect(replay1.subscriptionId).toBe(first.subscriptionId);
+    expect(replay1.billingRef).toBe(first.billingRef);
+
+    const replay2 = await selfServiceBillingRouter.createCaller(makeCtx(2)).signup({
+      planCode: "pro_monthly",
+      idempotencyKey: SHARED_KEY,
+      paymentReference: TENANT2_REF,
+    });
+    expect(replay2.idempotent).toBe(true);
+    expect(replay2.signupId).toBe(foreign.signupId);
+    expect(replay2.billingRef).toBe(TENANT2_REF);
+
+    // Each tenant settled exactly once; no replay triggered a re-settlement.
+    expect(mocks.state.subscriptions).toHaveLength(2);
+    expect(mocks.state.topups).toHaveLength(2);
+
+    // Lock the fix in at the SQL level: every plan_signups lookup must be
+    // tenant-scoped (regression guard against the original global-key bug).
+    const replaySelects = mocks.query.mock.calls
+      .map((c) => String(c[0]).replace(/\s+/g, " "))
+      .filter((s) => s.startsWith("SELECT id, plan_code, status, billing_ref FROM plan_signups"));
+    expect(replaySelects.length).toBeGreaterThan(0);
+    for (const s of replaySelects) {
+      expect(s).toContain("tenant_id = $1 AND idempotency_key = $2");
+    }
   });
 });
