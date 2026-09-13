@@ -96,7 +96,7 @@ function makeDb(options?: { existing?: Record<string, unknown> }) {
   }));
   const update = vi.fn(() => ({
     set: vi.fn(() => ({
-      where: vi.fn(() => ({ returning: vi.fn(async () => [{ transferId: "reconciled" }] ) })),
+      where: vi.fn(() => ({ returning: vi.fn(async () => [{ transferId: "reconciled" }]) })),
     })),
   }));
   const del = vi.fn(() => ({
