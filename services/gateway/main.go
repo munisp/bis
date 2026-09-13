@@ -158,6 +158,12 @@ func initMiddleware() {
 		} else {
 			temporalClient = c
 			log.Printf("[INFO] Temporal client initialized: %s", temporalHost)
+			// WP6 FIX B: actually run the registered workflow workers. Previously
+			// the gateway initialised a Temporal client but never started a
+			// worker, so registered workflows on bis-investigation/bis-screening
+			// had no executor.
+			temporalpkg.StartWorker()
+			temporalpkg.StartScreeningWorker()
 		}
 	}
 
@@ -766,26 +772,83 @@ func handleWorkflowStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Wire contract (WP6 FIX B): camelCase JSON. The BIS TypeScript client
+	// (server/temporal.ts) was aligned to this convention; see
+	// server/temporal.manifest.json for the full both-sides contract.
 	var req struct {
 		WorkflowType string         `json:"workflowType"`
+		TaskQueue    string         `json:"taskQueue"`
+		WorkflowID   string         `json:"workflowId"`
 		Input        map[string]any `json:"input"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "Invalid request body")
 		return
 	}
+	if req.WorkflowType == "" {
+		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "workflowType is required")
+		return
+	}
+	// Fail closed: only workflow types with a registered worker may be started.
+	if _, ok := temporalpkg.RegisteredWorkflowTaskQueue(req.WorkflowType); !ok {
+		writeError(w, http.StatusBadRequest, "WORKFLOW_NOT_REGISTERED",
+			fmt.Sprintf("workflow type %q has no registered worker; refusing to start a phantom execution", req.WorkflowType))
+		return
+	}
 
-	runID, err := temporalClient.StartWorkflow(r.Context(), req.WorkflowType, req.Input)
+	workflowID, runID, err := temporalClient.StartWorkflowWithOptions(r.Context(), req.WorkflowType, req.TaskQueue, req.WorkflowID, req.Input)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "WORKFLOW_ERROR", err.Error())
 		return
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"workflowId": runID,
+		"workflowId": workflowID,
+		"runId":      runID,
 		"status":     "started",
 		"mode":       "temporal",
 	})
+}
+
+// GET /v1/workflow/status/{workflowID} — Query a Temporal workflow status
+func handleWorkflowStatus(w http.ResponseWriter, r *http.Request) {
+	if temporalClient == nil {
+		writeError(w, http.StatusServiceUnavailable, "TEMPORAL_UNAVAILABLE", "Workflow orchestration is unavailable")
+		return
+	}
+	workflowID := strings.TrimPrefix(r.URL.Path, "/v1/workflow/status/")
+	if workflowID == "" || strings.Contains(workflowID, "/") {
+		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "A workflow ID path segment is required")
+		return
+	}
+	status, err := temporalClient.WorkflowStatus(r.Context(), workflowID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "WORKFLOW_NOT_FOUND", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"workflow_id": workflowID, "status": status})
+}
+
+// POST /v1/workflow/cancel/{workflowID} — Signal a Temporal workflow to cancel
+func handleWorkflowCancel(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "POST required")
+		return
+	}
+	if temporalClient == nil {
+		writeError(w, http.StatusServiceUnavailable, "TEMPORAL_UNAVAILABLE", "Workflow orchestration is unavailable")
+		return
+	}
+	workflowID := strings.TrimPrefix(r.URL.Path, "/v1/workflow/cancel/")
+	if workflowID == "" || strings.Contains(workflowID, "/") {
+		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "A workflow ID path segment is required")
+		return
+	}
+	if err := temporalClient.CancelWorkflow(r.Context(), workflowID); err != nil {
+		writeError(w, http.StatusNotFound, "WORKFLOW_NOT_FOUND", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"workflow_id": workflowID, "status": "cancel_requested"})
 }
 
 // POST /v1/biometric/liveness — proxy to biometric engine liveness check
@@ -1314,6 +1377,8 @@ func newRouter() http.Handler {
 	mux.HandleFunc("/v1/credit/", protected(handleCreditCheck))
 	mux.HandleFunc("/v1/risk-score", protected(handleRiskScore))
 	mux.HandleFunc("/v1/workflow/start", protected(handleWorkflowStart))
+	mux.HandleFunc("/v1/workflow/status/", protected(handleWorkflowStatus))
+	mux.HandleFunc("/v1/workflow/cancel/", protected(handleWorkflowCancel))
 	mux.HandleFunc("/v1/biometric/liveness", protected(handleBiometricLiveness))
 	mux.HandleFunc("/v1/biometric/liveness/active", protected(handleBiometricActiveLiveness))
 	mux.HandleFunc("/v1/biometric/antispoofing", protected(handleBiometricAntispoofing))
