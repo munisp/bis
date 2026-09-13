@@ -1309,6 +1309,7 @@ func newRouter() http.Handler {
 	mux.HandleFunc("/v1/nin/", protected(handleNINLookup))
 	mux.HandleFunc("/v1/bvn/", protected(handleBVNLookup))
 	mux.HandleFunc("/v1/cac/", protected(handleCACLookup))
+	mux.HandleFunc("/v1/phone/", protected(handlePhoneLookup))
 	mux.HandleFunc("/v1/sanctions/", protected(handleSanctionsCheck))
 	mux.HandleFunc("/v1/pep/", protected(handlePEPCheck))
 	mux.HandleFunc("/v1/credit/", protected(handleCreditCheck))
