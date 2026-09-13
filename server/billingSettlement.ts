@@ -87,6 +87,9 @@ export async function debitTenantForIntelligenceAssessment(input: { tenantId: nu
   }
   const transferId = intelligenceAssessmentTransferId(input.billingEventId);
   await ensureLedgerAccounts(input.tenantId);
+  // Flow-of-funds: reject the debit before any transfer is created when the
+  // tenant's available balance cannot cover it (WP6 FIX C).
+  await assertSufficientLedgerBalance({ tenantId: input.tenantId, amountKobo: input.amountKobo });
   await tigerBeetlePost("/transfers/create", [{
     id: transferId,
     debit_account_id: `${ACCOUNT_TENANT_PREFIX}${input.tenantId}`,
@@ -160,6 +163,98 @@ async function tigerBeetlePost(path: string, payload: unknown): Promise<void> {
   if (!response.ok) {
     throw serviceUnavailable("TigerBeetle rejected the settlement request; reconciliation is required");
   }
+}
+
+async function tigerBeetleGet(path: string): Promise<unknown> {
+  const baseUrl = tigerBeetleUrl();
+  let response: Response;
+  try {
+    response = await withCircuitBreaker("tigerbeetle", () => fetch(`${baseUrl}${path}`, {
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(5_000),
+    }));
+  } catch {
+    throw serviceUnavailable("TigerBeetle is unavailable; no ledger balance can be represented");
+  }
+  if (!response.ok) {
+    throw serviceUnavailable("TigerBeetle rejected the ledger balance query; the debit was not attempted");
+  }
+  try {
+    return await response.json();
+  } catch {
+    throw serviceUnavailable("TigerBeetle returned an invalid ledger balance response");
+  }
+}
+
+/**
+ * Typed flow-of-funds rejection (WP6 FIX C). Thrown when a debit exceeds the
+ * tenant's available TigerBeetle balance. Distinct from SERVICE_UNAVAILABLE:
+ * the ledger answered and the funds simply are not there.
+ */
+export class InsufficientFundsError extends TRPCError {
+  readonly reason = "INSUFFICIENT_FUNDS" as const;
+  readonly availableKobo: number;
+  readonly requestedKobo: number;
+  constructor(input: { tenantId: string; requestedKobo: number; availableKobo: number }) {
+    super({
+      code: "PRECONDITION_FAILED",
+      message:
+        `INSUFFICIENT_FUNDS: requested ${input.requestedKobo} kobo exceeds the available ` +
+        `balance of ${input.availableKobo} kobo for tenant ${input.tenantId}`,
+    });
+    this.name = "InsufficientFundsError";
+    this.availableKobo = input.availableKobo;
+    this.requestedKobo = input.requestedKobo;
+  }
+}
+
+export function isInsufficientFundsError(error: unknown): error is InsufficientFundsError {
+  return error instanceof InsufficientFundsError;
+}
+
+/**
+ * Available balance for a tenant ledger account in kobo.
+ *
+ * Matches services/tigerbeetle-ledger (src/lib.rs): available =
+ * credits_posted - debits_posted - debits_pending. Pending debits (holds) are
+ * subtracted; pending credits are NOT counted until they post. Fail-closed:
+ * any ledger read problem raises SERVICE_UNAVAILABLE instead of treating the
+ * balance as unknown-but-sufficient.
+ */
+export async function getTenantAvailableBalanceKobo(tenantId: number | string): Promise<number> {
+  const account = (await tigerBeetleGet(`/accounts/${ACCOUNT_TENANT_PREFIX}${tenantId}`)) as {
+    credits_posted?: number;
+    debits_posted?: number;
+    debits_pending?: number;
+  } | null;
+  const creditsPosted = Number(account?.credits_posted ?? 0);
+  const debitsPosted = Number(account?.debits_posted ?? 0);
+  const debitsPending = Number(account?.debits_pending ?? 0);
+  const available = creditsPosted - debitsPosted - debitsPending;
+  if (!Number.isSafeInteger(available) || available < 0) {
+    throw serviceUnavailable("TigerBeetle returned an invalid available balance; the debit was not attempted");
+  }
+  return available;
+}
+
+/**
+ * Flow-of-funds precondition for every tenant-funds debit. MUST be called
+ * after the idempotency claim is resolved and BEFORE the TigerBeetle transfer
+ * is created. Returns the available balance when sufficient.
+ */
+export async function assertSufficientLedgerBalance(input: {
+  tenantId: number | string;
+  amountKobo: number;
+}): Promise<number> {
+  const available = await getTenantAvailableBalanceKobo(input.tenantId);
+  if (input.amountKobo > available) {
+    throw new InsufficientFundsError({
+      tenantId: String(input.tenantId),
+      requestedKobo: input.amountKobo,
+      availableKobo: available,
+    });
+  }
+  return available;
 }
 
 async function ensureLedgerAccounts(tenantId: number): Promise<void> {
