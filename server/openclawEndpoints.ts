@@ -4,10 +4,12 @@
  * Mounted into the Express app in server/_core/index.ts.
  */
 import { Router } from "express";
+import type { NextFunction, Request, Response } from "express";
 import swaggerUi from "swagger-ui-express";
 import yaml from "js-yaml";
 import fs from "fs";
 import path from "path";
+import crypto from "crypto";
 import { fileURLToPath } from "url";
 import { invokeLLM } from "./_core/llm";
 import { getDb } from "./db";
@@ -45,13 +47,81 @@ try {
   console.warn("[OpenClaw] Could not load openapi.yaml — Swagger UI will be empty");
 }
 
-// ── Token validation helper ──────────────────────────────────────────────────
-function validateBearerToken(req: { headers: Record<string, string | string[] | undefined> }): string | null {
+// ── Token validation helpers ─────────────────────────────────────────────────
+// Tokens are issued by server/apiTokens.ts and stored as SHA-256 hex hashes in
+// apiTokens.tokenHash — never as plaintext. Validation must reuse that exact
+// hashing scheme.
+
+function hashToken(token: string): string {
+  return crypto.createHash("sha256").update(token).digest("hex");
+}
+
+type BearerAuthResult =
+  | { ok: true; token: string; record: typeof apiTokens.$inferSelect }
+  | { ok: false; status: number; code: string; message: string };
+
+function bearerAuthFailure(status: number, code: string, message: string): BearerAuthResult {
+  return { ok: false, status, code, message };
+}
+
+/**
+ * Validate the `Authorization: Bearer <token>` header against the apiTokens
+ * table: hash the presented token with SHA-256 (hex) and look up
+ * apiTokens.tokenHash, then enforce `active` and `expiresAt`.
+ *
+ * Fails CLOSED: when the database is unavailable the request is rejected with
+ * 503 rather than being allowed through.
+ */
+async function authenticateBearerToken(
+  req: { headers: Record<string, string | string[] | undefined> },
+): Promise<BearerAuthResult> {
   const auth = req.headers["authorization"] as string | undefined;
-  if (!auth?.startsWith("Bearer ")) return null;
+  if (!auth?.startsWith("Bearer ")) {
+    return bearerAuthFailure(401, "UNAUTHORIZED", "Invalid or missing Bearer token");
+  }
   const token = auth.slice(7);
-  if (!token.startsWith("bis_")) return null;
-  return token;
+  // Fast reject before hitting the DB — issued BIS API tokens carry a bis_/bisk_ prefix
+  if (!token.startsWith("bis_") && !token.startsWith("bisk_")) {
+    return bearerAuthFailure(401, "UNAUTHORIZED", "Invalid or missing Bearer token");
+  }
+  const db = await getDb();
+  if (!db) {
+    return bearerAuthFailure(503, "DB_UNAVAILABLE", "Authentication service unavailable");
+  }
+  let record: typeof apiTokens.$inferSelect | undefined;
+  try {
+    const [row] = await db.select().from(apiTokens)
+      .where(eq(apiTokens.tokenHash, hashToken(token)))
+      .limit(1);
+    record = row;
+  } catch (err) {
+    console.error("[OpenClaw] Token lookup failed (failing closed):", err);
+    return bearerAuthFailure(503, "DB_UNAVAILABLE", "Authentication service unavailable");
+  }
+  if (!record) {
+    return bearerAuthFailure(401, "UNAUTHORIZED", "Token not found");
+  }
+  if (!record.active) {
+    return bearerAuthFailure(401, "TOKEN_REVOKED", "Token has been revoked or deactivated");
+  }
+  if (record.expiresAt && record.expiresAt < new Date()) {
+    return bearerAuthFailure(401, "TOKEN_EXPIRED", "Token has expired");
+  }
+  return { ok: true, token, record };
+}
+
+/**
+ * In production the API docs expose the full attack surface, so they require
+ * the same bearer-token validation as the OpenClaw endpoints. In development
+ * the docs remain open for local convenience.
+ */
+async function requireDocsAuth(req: Request, res: Response, next: NextFunction) {
+  if (!ENV.isProduction) return next();
+  const auth = await authenticateBearerToken(req);
+  if (!auth.ok) {
+    return res.status(auth.status).json({ code: auth.code, message: auth.message });
+  }
+  next();
 }
 
 // ── OpenClaw action executor (LLM-powered, no Math.random) ──────────────────
@@ -146,9 +216,10 @@ For risk scores, use a deterministic score based on the subject name and checks 
 export function createOpenClawRouter(): Router {
   const router = Router();
 
-  // Swagger UI at /api/docs
+  // Swagger UI at /api/docs (auth-required in production)
   router.use(
     "/api/docs",
+    requireDocsAuth,
     swaggerUi.serve,
     swaggerUi.setup(openApiSpec, {
       customSiteTitle: "BIS Platform API",
@@ -166,23 +237,24 @@ export function createOpenClawRouter(): Router {
     })
   );
 
-  // OpenAPI spec as JSON at /api/docs.json
-  router.get("/api/docs.json", (_req, res) => {
+  // OpenAPI spec as JSON at /api/docs.json (auth-required in production)
+  router.get("/api/docs.json", requireDocsAuth, (_req, res) => {
     res.json(openApiSpec);
   });
 
-  // OpenAPI spec as YAML at /api/docs.yaml
-  router.get("/api/docs.yaml", (_req, res) => {
+  // OpenAPI spec as YAML at /api/docs.yaml (auth-required in production)
+  router.get("/api/docs.yaml", requireDocsAuth, (_req, res) => {
     res.setHeader("Content-Type", "text/yaml");
     res.send(yaml.dump(openApiSpec));
   });
 
   // OpenClaw execute endpoint
   router.post("/api/v1/openclaw/execute", async (req, res) => {
-    const token = validateBearerToken(req as Parameters<typeof validateBearerToken>[0]);
-    if (!token) {
-      return res.status(401).json({ code: "UNAUTHORIZED", message: "Invalid or missing Bearer token" });
+    const auth = await authenticateBearerToken(req as Parameters<typeof authenticateBearerToken>[0]);
+    if (!auth.ok) {
+      return res.status(auth.status).json({ code: auth.code, message: auth.message });
     }
+    const tokenRecord = auth.record;
 
     const { action, prompt, context: _ctx } = req.body as { action: string; prompt: string; context?: unknown };
 
@@ -207,30 +279,17 @@ export function createOpenClawRouter(): Router {
         list_alerts: 1, full_due_diligence: 30, social_monitor: 8, channel_monitor: 10,
       };
       const estimatedCost = tokenCostPrecheck[action] ?? 1;
-      try {
-        const db = await getDb();
-        if (db) {
-          const tokenPrefix = token.slice(0, 20);
-          const [tokenRecord] = await db
-            .select({ id: apiTokens.id, tokenQuota: (apiTokens as any).tokenQuota, tokensConsumed: apiTokens.tokensConsumed })
-            .from(apiTokens)
-            .where(eq(apiTokens.prefix, tokenPrefix))
-            .limit(1);
-          if (tokenRecord) {
-            const quota = (tokenRecord as any).tokenQuota as number | null;
-            const consumed = tokenRecord.tokensConsumed ?? 0;
-            if (quota !== null && quota !== undefined && consumed + estimatedCost > quota) {
-              return res.status(429).json({
-                code: "QUOTA_EXCEEDED",
-                message: `Token quota exceeded. Consumed: ${consumed}, Quota: ${quota}, Required: ${estimatedCost}. Please top up your token balance.`,
-                tokens_consumed: consumed,
-                token_quota: quota,
-              });
-            }
-          }
-        }
-      } catch (quotaErr) {
-        console.warn("[OpenClaw] Quota check failed (non-fatal):", quotaErr);
+      // Quota enforcement uses the authenticated token record loaded during
+      // bearer validation — no secondary prefix-based lookup.
+      const quota = tokenRecord.tokenQuota as number | null;
+      const consumed = tokenRecord.tokensConsumed ?? 0;
+      if (quota !== null && quota !== undefined && consumed + estimatedCost > quota) {
+        return res.status(429).json({
+          code: "QUOTA_EXCEEDED",
+          message: `Token quota exceeded. Consumed: ${consumed}, Quota: ${quota}, Required: ${estimatedCost}. Please top up your token balance.`,
+          tokens_consumed: consumed,
+          token_quota: quota,
+        });
       }
 
       const { result, tokens_consumed } = await executeOpenClawAction(action, prompt);
@@ -239,19 +298,11 @@ export function createOpenClawRouter(): Router {
       try {
         const db = await getDb();
         if (db) {
-          const tokenPrefix = token.slice(0, 20);
-          const [tokenRecord] = await db
-            .select({ id: apiTokens.id, tenantId: apiTokens.tenantId, tokensConsumed: apiTokens.tokensConsumed })
-            .from(apiTokens)
-            .where(eq(apiTokens.prefix, tokenPrefix))
-            .limit(1);
-          if (tokenRecord) {
-            await db
-              .update(apiTokens)
-              .set({ tokensConsumed: (tokenRecord.tokensConsumed ?? 0) + tokens_consumed })
-              .where(eq(apiTokens.id, tokenRecord.id));
-            console.log(`[OpenClaw] Billed ${tokens_consumed} tokens to tenant=${tokenRecord.tenantId} action=${action}`);
-          }
+          await db
+            .update(apiTokens)
+            .set({ tokensConsumed: consumed + tokens_consumed })
+            .where(eq(apiTokens.id, tokenRecord.id));
+          console.log(`[OpenClaw] Billed ${tokens_consumed} tokens to tenant=${tokenRecord.tenantId} action=${action}`);
         }
       } catch (billingErr) {
         console.warn("[OpenClaw] Token billing failed (non-fatal):", billingErr);
@@ -265,10 +316,10 @@ export function createOpenClawRouter(): Router {
   });
 
   // OpenClaw webhook receiver — requires Bearer token authentication
-  router.post("/api/v1/openclaw/webhook", (req, res) => {
-    const token = validateBearerToken(req as Parameters<typeof validateBearerToken>[0]);
-    if (!token) {
-      return res.status(401).json({ code: "UNAUTHORIZED", message: "Invalid or missing Bearer token" });
+  router.post("/api/v1/openclaw/webhook", async (req, res) => {
+    const auth = await authenticateBearerToken(req as Parameters<typeof authenticateBearerToken>[0]);
+    if (!auth.ok) {
+      return res.status(auth.status).json({ code: auth.code, message: auth.message });
     }
     const body = req.body as Record<string, unknown>;
     const event = typeof body.event === "string" ? body.event : null;
@@ -381,9 +432,9 @@ export function createOpenClawRouter(): Router {
    * Returns { replayed: true, event, targetRef, actions } on success.
    */
   router.post("/api/v1/openclaw/replay/:auditLogId", async (req, res) => {
-    const token = validateBearerToken(req as Parameters<typeof validateBearerToken>[0]);
-    if (!token) {
-      return res.status(401).json({ code: "UNAUTHORIZED", message: "Invalid or missing Bearer token" });
+    const auth = await authenticateBearerToken(req as Parameters<typeof authenticateBearerToken>[0]);
+    if (!auth.ok) {
+      return res.status(auth.status).json({ code: auth.code, message: auth.message });
     }
     const auditLogId = parseInt(req.params.auditLogId, 10);
     if (!Number.isFinite(auditLogId) || auditLogId <= 0) {
@@ -392,18 +443,6 @@ export function createOpenClawRouter(): Router {
     try {
       const db = await getDb();
       if (!db) return res.status(503).json({ code: "DB_UNAVAILABLE", message: "Database unavailable" });
-      // Validate token against apiTokens table
-      const [tokenRow] = await db.select().from(apiTokens)
-        .where(eq(apiTokens.tokenHash, token)).limit(1);
-      if (!tokenRow) {
-        return res.status(401).json({ code: "UNAUTHORIZED", message: "Token not found" });
-      }
-      if (!tokenRow.active) {
-        return res.status(401).json({ code: "TOKEN_REVOKED", message: "Token has been revoked or deactivated" });
-      }
-      if (tokenRow.expiresAt && tokenRow.expiresAt < new Date()) {
-        return res.status(401).json({ code: "TOKEN_EXPIRED", message: "Token has expired" });
-      }
       // Fetch the stored audit log entry
       const [entry] = await db.select().from(auditLog)
         .where(eq(auditLog.id, auditLogId)).limit(1);

@@ -12,9 +12,38 @@ import { z } from "zod";
 import { router, protectedProcedure, adminProcedure, writeProcedure } from "./_core/trpc";
 import { getDb } from "./db";
 import { caseDocuments, auditLog, investigations, cases } from "../drizzle/schema";
-import { desc, eq, sql, and, ilike, or, gte, lt } from "drizzle-orm";
+import { desc, eq, sql, and, ilike, or, gte, lt, inArray } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { storagePut } from "./storage";
+
+// ─── Tenant isolation helpers ────────────────────────────────────────────────
+// caseDocuments has no tenantId column, so tenant scoping is enforced through
+// the parent case. Platform admins (tenantId === null) retain cross-tenant
+// visibility.
+
+/**
+ * Resolve the case IDs owned by a tenant. Returns null for platform admins
+ * (tenantId === null → no restriction). An empty array means the tenant owns
+ * no cases, so callers must match nothing.
+ */
+async function tenantCaseIds(db: any, tenantId: number | null): Promise<number[] | null> {
+  if (tenantId === null) return null;
+  const rows = await db.select({ id: cases.id }).from(cases).where(eq(cases.tenantId, tenantId));
+  return rows.map((r: { id: number }) => r.id);
+}
+
+/** Verify the document's parent case belongs to the caller's tenant. */
+async function assertDocumentTenantAccess(db: any, doc: { caseId: number }, tenantId: number | null): Promise<void> {
+  if (tenantId === null) return;
+  const [parentCase] = await db.select({ id: cases.id, tenantId: cases.tenantId })
+    .from(cases)
+    .where(and(eq(cases.id, doc.caseId), eq(cases.tenantId, tenantId)))
+    .limit(1);
+  if (!parentCase) {
+    // NOT_FOUND (not FORBIDDEN) to avoid leaking the existence of the document
+    throw new TRPCError({ code: "NOT_FOUND", message: "Document not found" });
+  }
+}
 
 // Document categories for the vault
 export const DOCUMENT_CATEGORIES = [
@@ -47,11 +76,18 @@ export const documentVaultRouter = router({
       limit: z.number().min(1).max(100).default(20),
       offset: z.number().min(0).default(0),
     }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
 
-      const conditions: ReturnType<typeof eq>[] = [];
+      const conditions: (ReturnType<typeof eq> | ReturnType<typeof inArray> | undefined)[] = [];
+
+      // Tenant isolation: only documents attached to the caller's tenant's cases
+      const caseIds = await tenantCaseIds(db, ctx.tenantId);
+      if (caseIds !== null) {
+        // inArray requires at least one value; the -1 sentinel matches nothing
+        conditions.push(inArray(caseDocuments.caseId, caseIds.length > 0 ? caseIds : [-1]));
+      }
 
       if (input.caseId) {
         conditions.push(eq(caseDocuments.caseId, input.caseId));
@@ -101,7 +137,7 @@ export const documentVaultRouter = router({
    */
   get: protectedProcedure
     .input(z.object({ id: z.number() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
 
@@ -110,6 +146,8 @@ export const documentVaultRouter = router({
         .limit(1);
 
       if (!doc) throw new TRPCError({ code: "NOT_FOUND", message: "Document not found" });
+      // Tenant isolation: the parent case must belong to the caller's tenant
+      await assertDocumentTenantAccess(db, doc, ctx.tenantId);
 
       // Get custody chain from audit log
       const custodyChain = await db.select().from(auditLog)
@@ -137,12 +175,24 @@ export const documentVaultRouter = router({
       category: z.enum(DOCUMENT_CATEGORIES).default("other"),
       description: z.string().max(2000).optional(),
       confidential: z.boolean().default(false),
-      caseId: z.number().optional(),
+      // Explicit target case is REQUIRED — documents are never silently
+      // attached to an arbitrary "first available" case.
+      caseId: z.number(),
       investigationId: z.number().optional(),
     }))
     .mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
+
+      // Tenant isolation: the target case must exist and belong to the caller's
+      // tenant (admins with tenantId === null may attach to any case).
+      const caseConditions = [eq(cases.id, input.caseId)];
+      if (ctx.tenantId !== null) caseConditions.push(eq(cases.tenantId, ctx.tenantId));
+      const [targetCase] = await db.select({ id: cases.id }).from(cases)
+        .where(and(...caseConditions)).limit(1);
+      if (!targetCase) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Case not found or not accessible" });
+      }
 
       // Decode base64 and upload to S3
       const buffer = Buffer.from(input.base64Content, "base64");
@@ -178,27 +228,7 @@ export const documentVaultRouter = router({
 
       const { url } = await storagePut(fileKey, buffer, input.mimeType);
 
-      // Resolve caseId — if investigationId provided but no caseId, try to find linked case
-      let resolvedCaseId = input.caseId;
-      if (!resolvedCaseId && input.investigationId) {
-        // cases.investigationRefs is a JSON array of investigation ID strings
-        const allCasesForInv = await db.select({ id: cases.id, investigationRefs: cases.investigationRefs }).from(cases);
-        const linkedCase = allCasesForInv.find(c =>
-          Array.isArray(c.investigationRefs) &&
-          c.investigationRefs.some((ref: string) => ref === String(input.investigationId))
-        );
-        resolvedCaseId = linkedCase?.id;
-      }
-
-      // If still no caseId, use a default "vault" case (id=1) or create a placeholder
-      if (!resolvedCaseId) {
-        // Use the first available case as a container, or throw
-        const [firstCase] = await db.select({ id: cases.id }).from(cases).limit(1);
-        if (!firstCase) {
-          throw new TRPCError({ code: "BAD_REQUEST", message: "Please link document to a case or investigation" });
-        }
-        resolvedCaseId = firstCase.id;
-      }
+      const resolvedCaseId = input.caseId;
 
       const [doc] = await db.insert(caseDocuments).values({
         caseId: resolvedCaseId,
@@ -248,6 +278,8 @@ export const documentVaultRouter = router({
       const [doc] = await db.select().from(caseDocuments)
         .where(eq(caseDocuments.id, input.id)).limit(1);
       if (!doc) throw new TRPCError({ code: "NOT_FOUND", message: "Document not found" });
+      // Tenant isolation: the parent case must belong to the caller's tenant
+      await assertDocumentTenantAccess(db, doc, ctx.tenantId);
 
       const updates: Partial<typeof doc> = {};
       if (input.description !== undefined) updates.description = input.description;

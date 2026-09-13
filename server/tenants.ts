@@ -1,14 +1,17 @@
 // server/tenants.ts — tRPC router for Tenants, API Keys, and Webhooks
 import { z } from "zod";
+import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure, writeProcedure } from "./_core/trpc";
 import { getDb } from "./db";
 import {
   tenants, apiKeys, webhooks,
   type InsertTenant,
+  type Webhook,
 } from "../drizzle/schema";
 import { eq, desc, and, count } from "drizzle-orm";
 import crypto from "crypto";
 import { storagePut } from "./storage";
+import { ENV } from "./_core/env";
 
 // ─── Webhook Retry Helper ──────────────────────────────────────────────────────
 async function deliverWithRetry(
@@ -49,6 +52,142 @@ function generateApiKey(): { raw: string; prefix: string; hash: string } {
   const prefix = raw.slice(0, 12);
   const hash = crypto.createHash("sha256").update(raw).digest("hex");
   return { raw, prefix, hash };
+}
+
+// ─── Webhook SSRF Guard ───────────────────────────────────────────────────────
+// Webhook URLs are fetched server-side, so they must never point at loopback,
+// link-local, or private network addresses, nor at internal service hostnames
+// (cloud metadata endpoints, docker-compose service names, etc.).
+
+const BLOCKED_WEBHOOK_HOSTNAMES = new Set([
+  "localhost",
+  "localhost.localdomain",
+  "metadata.google.internal",
+  // Internal docker-compose / cluster service names
+  "caddy",
+  "permify",
+  "kafka",
+  "redis",
+  "postgres",
+  "postgresql",
+  "temporal",
+  "ollama",
+  "gateway",
+  "risk-engine",
+  "opensearch",
+  "minio",
+  "vault",
+  "consul",
+]);
+
+const BLOCKED_WEBHOOK_HOST_SUFFIXES = [
+  ".internal",
+  ".localhost",
+  ".local",
+  ".lan",
+  ".corp",
+  ".home.arpa",
+];
+
+/** Parse an IPv4 literal (dotted-quad only) into octets, or null. */
+function parseIpv4(host: string): number[] | null {
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+  if (!m) return null;
+  const octets = m.slice(1).map(Number);
+  return octets.every(o => o <= 255) ? octets : null;
+}
+
+function isPrivateIpv4(octets: number[]): boolean {
+  const [a, b] = octets;
+  return (
+    a === 0 ||                       // 0.0.0.0/8 "this host"
+    a === 10 ||                      // 10.0.0.0/8 private
+    a === 127 ||                     // 127.0.0.0/8 loopback
+    (a === 172 && b >= 16 && b <= 31) || // 172.16.0.0/12 private
+    (a === 192 && b === 168) ||      // 192.168.0.0/16 private
+    (a === 169 && b === 254) ||      // 169.254.0.0/16 link-local (incl. 169.254.169.254 metadata)
+    (a === 100 && b >= 64 && b <= 127) || // 100.64.0.0/10 CGNAT
+    a >= 224                         // multicast + reserved
+  );
+}
+
+function isPrivateIpv6(host: string): boolean {
+  const h = host.replace(/^\[|\]$/g, "").toLowerCase();
+  return (
+    h === "::1" ||        // loopback
+    h === "::" ||         // unspecified
+    h.startsWith("fc") || // fc00::/7 unique-local
+    h.startsWith("fd") ||
+    h.startsWith("fe80")  // fe80::/10 link-local
+  );
+}
+
+/**
+ * Assert that a webhook URL is safe to fetch server-side (SSRF guard).
+ * - Requires https:// in production (http:// is tolerated in dev only).
+ * - Blocks loopback, link-local, private and CGNAT IP literals.
+ * - Blocks internal hostnames and internal DNS suffixes.
+ * Throws TRPCError(BAD_REQUEST) on any violation.
+ */
+export function assertSafeWebhookUrl(rawUrl: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid webhook URL" });
+  }
+  if (parsed.protocol !== "https:" && !(parsed.protocol === "http:" && !ENV.isProduction)) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: ENV.isProduction
+        ? "Webhook URL must use https://"
+        : "Webhook URL must use http:// or https://",
+    });
+  }
+  const host = parsed.hostname.toLowerCase();
+  if (!host) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Webhook URL must include a hostname" });
+  }
+  if (BLOCKED_WEBHOOK_HOSTNAMES.has(host)) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Webhook URL targets an internal hostname and is not allowed" });
+  }
+  if (BLOCKED_WEBHOOK_HOST_SUFFIXES.some(suffix => host.endsWith(suffix))) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Webhook URL targets an internal hostname and is not allowed" });
+  }
+  const ipv4 = parseIpv4(host);
+  if (ipv4) {
+    if (isPrivateIpv4(ipv4)) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "Webhook URL targets a private, loopback, or link-local address and is not allowed" });
+    }
+  } else if (host.includes(":") || host.startsWith("[")) {
+    if (isPrivateIpv6(host)) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "Webhook URL targets a private, loopback, or link-local address and is not allowed" });
+    }
+  }
+}
+
+/**
+ * Resolve the tenant a webhook operation is allowed to target.
+ * Admins may manage any tenant's webhooks; everyone else is pinned to their
+ * own tenant (input.tenantId is validated, never trusted).
+ */
+function resolveWebhookTenant(ctxUser: { role: string; tenantId: number | null }, requestedTenantId: number): number {
+  if (ctxUser.role === "admin") return requestedTenantId;
+  if (ctxUser.tenantId == null) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "A tenant assignment is required to manage webhooks" });
+  }
+  if (requestedTenantId !== ctxUser.tenantId) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "You cannot manage webhooks for another tenant" });
+  }
+  return ctxUser.tenantId;
+}
+
+/** Verify an existing webhook row belongs to the caller's tenant (admins exempt). */
+function assertWebhookTenantAccess(webhook: Pick<Webhook, "tenantId">, ctxUser: { role: string; tenantId: number | null }): void {
+  if (ctxUser.role === "admin") return;
+  if (ctxUser.tenantId == null || webhook.tenantId !== ctxUser.tenantId) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "You cannot manage webhooks for another tenant" });
+  }
 }
 
 // ─── Tenants Router ───────────────────────────────────────────────────────────
@@ -237,11 +376,13 @@ export const tenantsRouter = router({
 
   listWebhooks: protectedProcedure
     .input(z.object({ tenantId: z.number() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) return [];
+      // IDOR guard: non-admins may only list their own tenant's webhooks
+      const tenantId = resolveWebhookTenant(ctx.user!, input.tenantId);
       return db.select().from(webhooks)
-        .where(eq(webhooks.tenantId, input.tenantId))
+        .where(eq(webhooks.tenantId, tenantId))
         .orderBy(desc(webhooks.createdAt));
     }),
 
@@ -251,12 +392,16 @@ export const tenantsRouter = router({
       url: z.string().url(),
       events: z.array(z.string()).default([]),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new Error("Database unavailable");
+      // IDOR guard: non-admins are pinned to their own tenant
+      const tenantId = resolveWebhookTenant(ctx.user!, input.tenantId);
+      // SSRF guard: webhook URLs are fetched server-side
+      assertSafeWebhookUrl(input.url);
       const secret = crypto.randomBytes(20).toString("hex");
       const [row] = await db.insert(webhooks).values({
-        tenantId: input.tenantId,
+        tenantId,
         url: input.url,
         events: input.events,
         secret,
@@ -273,10 +418,14 @@ export const tenantsRouter = router({
       events: z.array(z.string()).optional(),
       status: z.enum(["active", "paused", "failed"]).optional(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new Error("Database unavailable");
       const { id, ...data } = input;
+      const [existing] = await db.select().from(webhooks).where(eq(webhooks.id, id)).limit(1);
+      if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "Webhook not found" });
+      assertWebhookTenantAccess(existing, ctx.user!);
+      if (data.url !== undefined) assertSafeWebhookUrl(data.url);
       const [row] = await db.update(webhooks)
         .set(data)
         .where(eq(webhooks.id, id))
@@ -286,20 +435,25 @@ export const tenantsRouter = router({
 
   deleteWebhook: writeProcedure
     .input(z.object({ id: z.number() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new Error("Database unavailable");
+      const [existing] = await db.select().from(webhooks).where(eq(webhooks.id, input.id)).limit(1);
+      if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "Webhook not found" });
+      assertWebhookTenantAccess(existing, ctx.user!);
       await db.delete(webhooks).where(eq(webhooks.id, input.id));
       return { success: true };
     }),
 
   testWebhook: writeProcedure
     .input(z.object({ id: z.number() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new Error("Database unavailable");
       const [wh] = await db.select().from(webhooks).where(eq(webhooks.id, input.id));
-      if (!wh) throw new Error("Webhook not found");
+      if (!wh) throw new TRPCError({ code: "NOT_FOUND", message: "Webhook not found" });
+      assertWebhookTenantAccess(wh, ctx.user!);
+      assertSafeWebhookUrl(wh.url);
       const body = JSON.stringify({ event: "ping", timestamp: new Date().toISOString() });
       const sig = `sha256=${crypto.createHmac("sha256", wh.secret ?? "").update(body).digest("hex")}`;
       const result = await deliverWithRetry(
