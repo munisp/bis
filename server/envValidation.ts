@@ -122,7 +122,7 @@ const ENV_SPECS: EnvSpec[] = [
     key: "OLLAMA_ADAPTER_URL",
     required: false,
     secret: false,
-    defaultValue: "http://localhost:8086",
+    defaultValue: "http://localhost:18090",
     description: "Ollama adapter service URL",
   },
   {
