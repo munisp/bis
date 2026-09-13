@@ -1,0 +1,87 @@
+{
+  "antispoofing_decision_summary": {
+    "genuine": {
+      "max": 0.998127339170327,
+      "mean": 0.8004245601245377,
+      "min": 0.29655156345273065,
+      "n": 5000,
+      "p05": 0.5725964643722944,
+      "p50": 0.8197472295386765,
+      "p95": 0.9597525297902306,
+      "pass_rate_at_threshold": 0.9314,
+      "std": 0.12004768213849419
+    },
+    "model": "MiniFASNetV2 score model (Beta(8,2) genuine / Beta(2,8) spoof) \u2014 classifier weights NOT loaded",
+    "note": "Decision-layer behaviour only; production PAD performance requires the real classifier and attack-instrument datasets.",
+    "spoof": {
+      "max": 0.7296393264747192,
+      "mean": 0.20125941429438696,
+      "min": 0.0014049231654741908,
+      "n": 5000,
+      "p05": 0.04088317499015958,
+      "p50": 0.1806916889584838,
+      "p95": 0.4319896540370375,
+      "pass_rate_at_threshold": 0.003,
+      "std": 0.12093182648610243
+    },
+    "threshold": 0.6
+  },
+  "benchmark": "biometric-engine decision-layer (similarity + thresholds)",
+  "environment": {
+    "cpu_count": 2,
+    "model_weights_loaded": false,
+    "network_required": false,
+    "numpy": "2.2.5",
+    "platform": "Linux-5.10.134-18.0.12.lifsea8.x86_64-x86_64-with-glibc2.36",
+    "python": "3.12.12"
+  },
+  "label": "SYNTHETIC-COHORT",
+  "latency": {
+    "max_us": 1034.9660001338634,
+    "mean_us": 8.7105111125412,
+    "n_calls": 18000,
+    "p50_us": 8.489999800076475,
+    "p95_us": 12.835800202992674,
+    "p99_us": 20.30808987910858,
+    "unit": "microseconds per cosine-similarity call (512-d, CPU)"
+  },
+  "liveness_threshold_note": "LIVENESS_THRESHOLD=0.72 governs landmark-video liveness composite scores; embedding-pair FAR/FRR does not exercise it. Recorded here for provenance only.",
+  "match_metrics": {
+    "eer": 0.0,
+    "eer_threshold": 0.5445313831985429,
+    "operating_point": {
+      "far": 0.0,
+      "frr": 0.0,
+      "genuine_mean": 0.6493054845127151,
+      "genuine_std": 0.021458777571238246,
+      "impostor_mean": -0.0007732291753746427,
+      "impostor_std": 0.043776815492409,
+      "threshold": 0.4
+    },
+    "roc_auc": 1.0,
+    "roc_points": 18002
+  },
+  "params": {
+    "cohort_model": "centres uniform on unit sphere (impostor cosine ~ N(0, 1/dim)); samples = normalise(centre + intra_std * N(0, I)) with intra_std = sqrt((1/target_genuine_cosine - 1)/dim), so genuine cosine is centred near target_genuine_cosine",
+    "embedding_dim": 512,
+    "impostor_ratio": 1.0,
+    "intra_std": 0.03242965760392317,
+    "n_genuine_pairs": 9000,
+    "n_identities": 200,
+    "n_impostor_pairs": 9000,
+    "samples_per_identity": 10,
+    "target_genuine_cosine": 0.65
+  },
+  "seed": 20260114,
+  "similarity_implementation": "local-identical-math (engine import unavailable: ModuleNotFoundError)",
+  "threshold_provenance": {
+    "ANTISPOOFING_THRESHOLD": "source:main.py",
+    "LIVENESS_THRESHOLD": "source:main.py",
+    "MATCH_THRESHOLD": "source:main.py"
+  },
+  "thresholds": {
+    "ANTISPOOFING_THRESHOLD": 0.6,
+    "LIVENESS_THRESHOLD": 0.72,
+    "MATCH_THRESHOLD": 0.4
+  }
+}
