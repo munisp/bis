@@ -190,6 +190,12 @@ function fakeQuery(state: State) {
     }
     if (sql.startsWith("INSERT INTO tenant_subscriptions")) {
       const [id, tenantId, planId, provider, providerRef, periodStart, periodEnd, createdBy] = values as any[];
+      // Real schema: GLOBAL UNIQUE(provider, provider_subscription_ref)
+      if (state.subscriptions.some((s) => s.provider === provider && s.provider_subscription_ref === providerRef)) {
+        const err = new Error("duplicate key value violates unique constraint \"tenant_subscriptions_provider_ref_unique\"") as any;
+        err.code = "23505";
+        throw err;
+      }
       state.subscriptions.push({ id, tenant_id: tenantId, plan_id: planId, provider, provider_subscription_ref: providerRef, status: "active", current_period_start: periodStart, current_period_end: periodEnd, cancel_at_period_end: false, created_by: createdBy, created_at: new Date() });
       return rows([]);
     }
@@ -205,6 +211,12 @@ function fakeQuery(state: State) {
     // ── billing_entitlements / usage ────────────────────────────────────────
     if (sql.startsWith("INSERT INTO billing_entitlements")) {
       const [id, tenantId, subscriptionId, totalUnits, periodStart, periodEnd, sourceReference] = values as any[];
+      // Real schema: GLOBAL UNIQUE(source_reference)
+      if (state.entitlements.some((e) => e.source_reference === sourceReference)) {
+        const err = new Error("duplicate key value violates unique constraint \"billing_entitlements_source_reference_key\"") as any;
+        err.code = "23505";
+        throw err;
+      }
       state.entitlements.push({ id, tenant_id: tenantId, subscription_id: subscriptionId, total_units: totalUnits, consumed_units: 0, reserved_units: 0, period_start: periodStart, period_end: periodEnd, status: "active", source_reference: sourceReference });
       return rows([]);
     }
@@ -772,5 +784,58 @@ describe("selfServiceBilling — plans and signup", () => {
     for (const s of replaySelects) {
       expect(s).toContain("tenant_id = $1 AND idempotency_key = $2");
     }
+  });
+
+  it("allows two tenants to use the same idempotency key on a FREE plan (tenant-namespaced refs)", async () => {
+    mocks.state.plans.set("free_monthly", {
+      id: "1", plan_code: "free_monthly", display_name: "Free",
+      billing_interval: "monthly", price_kobo: 0, included_completed_checks: 3,
+      overage_price_kobo: 0, active: true, version: 1,
+    });
+    const SHARED_KEY = "free-key-shared";
+
+    // Tenant 1 free signup: no payment reference needed or accepted.
+    const first = await selfServiceBillingRouter.createCaller(makeCtx(1)).signup({
+      planCode: "free_monthly",
+      idempotencyKey: SHARED_KEY,
+    });
+    expect(first.status).toBe("active");
+    expect(first.billingRef).toBe(`self-serve-free:1:${SHARED_KEY}`);
+    expect(fetchCalls.paystackVerify).toBe(0);
+    expect(fetchCalls.tigerBeetleTransfer).toBe(0);
+
+    // Tenant 2 with the SAME key must succeed with its own subscription —
+    // the global UNIQUE(provider, provider_subscription_ref) must not collide.
+    const second = await selfServiceBillingRouter.createCaller(makeCtx(2)).signup({
+      planCode: "free_monthly",
+      idempotencyKey: SHARED_KEY,
+    });
+    expect(second.status).toBe("active");
+    expect(second.idempotent).toBe(false);
+    expect(second.signupId).not.toBe(first.signupId);
+    expect(second.subscriptionId).not.toBe(first.subscriptionId);
+    expect(second.billingRef).toBe(`self-serve-free:2:${SHARED_KEY}`);
+    expect(JSON.stringify(second)).not.toContain(first.billingRef!);
+
+    expect(mocks.state.subscriptions).toHaveLength(2);
+    expect(new Set(mocks.state.subscriptions.map((s) => s.provider_subscription_ref)).size).toBe(2);
+    expect(mocks.state.entitlements).toHaveLength(2);
+
+    // Same-tenant replays return each tenant's original result.
+    const replay1 = await selfServiceBillingRouter.createCaller(makeCtx(1)).signup({
+      planCode: "free_monthly",
+      idempotencyKey: SHARED_KEY,
+    });
+    expect(replay1.idempotent).toBe(true);
+    expect(replay1.signupId).toBe(first.signupId);
+    expect(replay1.subscriptionId).toBe(first.subscriptionId);
+
+    const replay2 = await selfServiceBillingRouter.createCaller(makeCtx(2)).signup({
+      planCode: "free_monthly",
+      idempotencyKey: SHARED_KEY,
+    });
+    expect(replay2.idempotent).toBe(true);
+    expect(replay2.signupId).toBe(second.signupId);
+    expect(replay2.subscriptionId).toBe(second.subscriptionId);
   });
 });
