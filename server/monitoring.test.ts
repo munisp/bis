@@ -1,534 +1,678 @@
 /**
- * WP2 — Ongoing monitoring tests.
+ * Ongoing-monitoring engine tests.
  *
- * Covers: snapshot diff detection (new / removed / changed / no-change),
- * frequency → next_run_at math, authZ on acknowledgeAlert (admin/supervisor
- * only), enrollment tenant isolation, and scheduler alert fan-out
- * (monitoring_runs + monitoring_alerts + MONITORING_ALERT event + audit).
- *
- * The DB is faked at the pg-pool boundary (getPgPool) with SQL-pattern
- * routing — no screening matching is mocked: runListScreening is exercised
- * against gateway-shaped payloads via a stubbed fetch.
+ * Covers: snapshot diff detection (new/removed/changed/no-change), next_run_at
+ * cadence math, acknowledge authorization (admin/supervisor only), tenant
+ * isolation on every read/write path, and scheduler alert fan-out including
+ * fail-closed error runs. The pg pool and the gateway/provider network
+ * boundary are replaced with in-memory fakes; all engine logic (normalization,
+ * diffing, cadence math, transactions, alert fan-out) under test is real.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { TrpcContext } from "./_core/context";
 
-// ─── Fake pg pool ─────────────────────────────────────────────────────────────
-
-type QueryResult = { rows: any[]; rowCount: number | null };
-
-interface FakeState {
-  investigations: Record<string, any | undefined>; // keyed by `${tenantId}:${ref}`
-  enrollment: any | null; // row returned by scheduler/pause SELECT ... FOR UPDATE
-  dueIds: Array<{ id: string }>;
-  ackRowCount: number; // rowCount for UPDATE monitoring_alerts ... acknowledged
-  existingEnrollmentCount: number; // active/paused enrollment conflict check
-  listRows: any[]; // rows for the tenant-scoped enrollment list query
-  alertRows: any[]; // rows for the tenant-scoped alerts query
-}
-
-class FakeClient {
-  queries: Array<{ text: string; params: unknown[] }> = [];
-  constructor(private state: FakeState) {}
-
-  async query(text: string, params: unknown[] = []): Promise<QueryResult> {
-    this.queries.push({ text, params });
-    const t = text.replace(/\s+/g, " ").trim();
-
-    if (/^(BEGIN|COMMIT|ROLLBACK)/.test(t)) return { rows: [], rowCount: 0 };
-    if (/FROM investigations WHERE ref = \$1/.test(t)) {
-      const row = this.state.investigations[`${params[1]}:${params[0]}`];
-      return { rows: row ? [row] : [], rowCount: row ? 1 : 0 };
-    }
-    if (/SELECT id FROM monitoring_enrollments WHERE tenant_id = \$1 AND investigation_ref/.test(t)) {
-      return { rows: [], rowCount: this.state.existingEnrollmentCount };
-    }
-    if (/FROM monitoring_enrollments WHERE id = \$1 AND status = 'active' FOR UPDATE/.test(t)) {
-      return this.state.enrollment ? { rows: [this.state.enrollment], rowCount: 1 } : { rows: [], rowCount: 0 };
-    }
-    if (/FROM monitoring_enrollments WHERE id = \$1 AND tenant_id = \$2 FOR UPDATE/.test(t)) {
-      const row = this.state.enrollment && this.state.enrollment.tenant_id === params[1] ? this.state.enrollment : null;
-      return { rows: row ? [row] : [], rowCount: row ? 1 : 0 };
-    }
-    if (/FROM monitoring_enrollments WHERE status = 'active' AND next_run_at IS NOT NULL/.test(t)) {
-      return { rows: this.state.dueIds, rowCount: this.state.dueIds.length };
-    }
-    if (/INSERT INTO monitoring_enrollments/.test(t)) return { rows: [], rowCount: 1 };
-    if (/INSERT INTO monitoring_runs/.test(t)) return { rows: [], rowCount: 1 };
-    if (/INSERT INTO monitoring_alerts/.test(t)) return { rows: [], rowCount: 1 };
-    if (/INSERT INTO audit_log/.test(t)) return { rows: [], rowCount: 1 };
-    if (/UPDATE monitoring_alerts SET acknowledged_at/.test(t)) {
-      const ok = this.state.ackRowCount === 1;
-      return { rows: ok ? [{ id: params[1], enrollment_id: "enr-1", alert_type: "new_hit" }] : [], rowCount: this.state.ackRowCount };
-    }
-    if (/UPDATE monitoring_enrollments/.test(t)) return { rows: [], rowCount: 1 };
-    if (/FROM monitoring_enrollments WHERE tenant_id = \$1/.test(t)) {
-      return { rows: this.state.listRows, rowCount: this.state.listRows.length };
-    }
-    if (/FROM monitoring_alerts WHERE tenant_id = \$1/.test(t)) {
-      return { rows: this.state.alertRows, rowCount: this.state.alertRows.length };
-    }
-    throw new Error(`FakeClient: unmatched SQL: ${t}`);
-  }
-  release() {}
-}
-
-class FakePool {
-  clients: FakeClient[] = [];
-  constructor(private state: FakeState) {}
-  async connect() {
-    const c = new FakeClient(this.state);
-    this.clients.push(c);
-    return c;
-  }
-  async query(text: string, params: unknown[] = []) {
-    const c = new FakeClient(this.state);
-    this.clients.push(c);
-    return c.query(text, params);
-  }
-  allQueries() {
-    return this.clients.flatMap((c) => c.queries);
-  }
-}
-
-const dbHolder = vi.hoisted(() => ({ pool: null as unknown as FakePool }));
+const holder = vi.hoisted(() => ({
+  pool: null as unknown as FakePg,
+  gatewayPayloads: {
+    sanctions: { clear: true, hits: [] as unknown[] } as unknown,
+    pep: { isPEP: false } as unknown,
+  },
+  gatewayFail: { sanctions: false, pep: false },
+}));
 
 vi.mock("./db", () => ({
-  getPgPool: vi.fn(async () => dbHolder.pool),
+  getPgPool: vi.fn(async () => holder.pool),
   getDb: vi.fn(async () => null),
 }));
 
 import {
-  alertSeverity,
-  buildSnapshot,
   computeNextRunAt,
   diffSnapshots,
-  hasDelta,
   monitoringRouter,
-  runListScreening,
+  normalizeGatewayHits,
+  processDueMonitoringEnrollments,
   type MonitoringSnapshot,
 } from "./monitoring";
-import { processDueEnrollment, runDueEnrollments, type MonitoringSchedulerDeps } from "./monitoringScheduler";
 
-// ─── Fixtures ─────────────────────────────────────────────────────────────────
+// ─── In-memory PostgreSQL fake ────────────────────────────────────────────────
 
-function ctxFor(tenantId: number | null, role = "analyst"): TrpcContext {
+interface FakeEnrollment {
+  id: string;
+  tenant_id: number;
+  investigation_ref: string;
+  subject_name: string;
+  subject_identifiers: Record<string, unknown>;
+  list_set: string[];
+  frequency: "daily" | "weekly" | "monthly";
+  status: "active" | "paused" | "cancelled";
+  last_run_at: Date | null;
+  next_run_at: Date | null;
+  baseline_snapshot: MonitoringSnapshot | null;
+  created_by: number;
+  created_at: Date;
+  updated_at: Date;
+}
+
+interface FakeStore {
+  investigations: Array<{ ref: string; subjectName: string; nin: string | null; bvn: string | null; tenantId: number; deletedAt: Date | null }>;
+  enrollments: FakeEnrollment[];
+  runs: Array<{ id: number; tenant_id: number; enrollment_id: string; started_at: Date; result: string; snapshot: MonitoringSnapshot | null; error: string | null; created_at: Date }>;
+  alerts: Array<{ id: string; tenant_id: number; enrollment_id: string; run_id: number | null; alert_type: string; severity: string; delta: unknown; acknowledged_at: Date | null; acknowledged_by: number | null; created_at: Date }>;
+  runIdSeq: number;
+}
+
+function norm(q: string): string {
+  return q.replace(/\s+/g, " ").trim();
+}
+
+class FakePg {
+  store: FakeStore;
+
+  constructor(seed?: Partial<FakeStore>) {
+    this.store = {
+      investigations: [],
+      enrollments: [],
+      runs: [],
+      alerts: [],
+      runIdSeq: 1,
+      ...seed,
+    };
+  }
+
+  connect() {
+    return { query: (text: string, params?: unknown[]) => this.query(text, params), release: vi.fn() };
+  }
+
+  async query(raw: string, params: unknown[] = []): Promise<{ rows: any[]; rowCount: number }> {
+    const q = norm(raw);
+    if (q === "BEGIN" || q === "COMMIT" || q === "ROLLBACK") return { rows: [], rowCount: 0 };
+    const now = new Date();
+
+    // enroll: tenant-scoped investigation ownership lookup
+    if (q.startsWith('SELECT ref, "subjectName", nin, bvn FROM investigations')) {
+      const rows = this.store.investigations
+        .filter(i => i.ref === params[0] && i.tenantId === params[1] && i.deletedAt === null)
+        .map(i => ({ ref: i.ref, subjectName: i.subjectName, nin: i.nin, bvn: i.bvn }));
+      return { rows, rowCount: rows.length };
+    }
+    // enroll: live duplicate check
+    if (q.startsWith("SELECT id FROM monitoring_enrollments WHERE tenant_id = $1 AND investigation_ref = $2")) {
+      const rows = this.store.enrollments.filter(e => e.tenant_id === params[0] && e.investigation_ref === params[1] && e.status !== "cancelled");
+      return { rows: rows.map(e => ({ id: e.id })), rowCount: rows.length };
+    }
+    // enroll: insert
+    if (q.startsWith("INSERT INTO monitoring_enrollments")) {
+      this.store.enrollments.push({
+        id: params[0] as string,
+        tenant_id: params[1] as number,
+        investigation_ref: params[2] as string,
+        subject_name: params[3] as string,
+        subject_identifiers: JSON.parse(params[4] as string),
+        list_set: params[5] as string[],
+        frequency: params[6] as FakeEnrollment["frequency"],
+        status: "active",
+        last_run_at: null,
+        next_run_at: params[7] as Date,
+        baseline_snapshot: JSON.parse(params[8] as string),
+        created_by: params[9] as number,
+        created_at: now,
+        updated_at: now,
+      });
+      return { rows: [], rowCount: 1 };
+    }
+    // pause
+    if (q.startsWith("UPDATE monitoring_enrollments SET status = 'paused'")) {
+      const row = this.store.enrollments.find(e => e.id === params[0] && e.tenant_id === params[1] && e.status === "active");
+      if (!row) return { rows: [], rowCount: 0 };
+      row.status = "paused";
+      row.next_run_at = null;
+      return { rows: [{ id: row.id, investigation_ref: row.investigation_ref }], rowCount: 1 };
+    }
+    // resume: read then update
+    if (q.startsWith("SELECT frequency, investigation_ref FROM monitoring_enrollments")) {
+      const row = this.store.enrollments.find(e => e.id === params[0] && e.tenant_id === params[1] && e.status === "paused");
+      return { rows: row ? [{ frequency: row.frequency, investigation_ref: row.investigation_ref }] : [], rowCount: row ? 1 : 0 };
+    }
+    if (q.startsWith("UPDATE monitoring_enrollments SET status = 'active', next_run_at = $3")) {
+      const row = this.store.enrollments.find(e => e.id === params[0] && e.tenant_id === params[1] && e.status === "paused");
+      if (!row) return { rows: [], rowCount: 0 };
+      row.status = "active";
+      row.next_run_at = params[2] as Date;
+      return { rows: [], rowCount: 1 };
+    }
+    // cancel
+    if (q.startsWith("UPDATE monitoring_enrollments SET status = 'cancelled'")) {
+      const row = this.store.enrollments.find(e => e.id === params[0] && e.tenant_id === params[1] && (e.status === "active" || e.status === "paused"));
+      if (!row) return { rows: [], rowCount: 0 };
+      row.status = "cancelled";
+      row.next_run_at = null;
+      return { rows: [{ investigation_ref: row.investigation_ref }], rowCount: 1 };
+    }
+    // list
+    if (q.startsWith("SELECT id, investigation_ref, subject_name, list_set, frequency, status,")) {
+      const [tenantId, status, limit, offset] = params as [number, string | null, number, number];
+      const filtered = this.store.enrollments
+        .filter(e => e.tenant_id === tenantId && (status === null || e.status === status))
+        .sort((a, b) => b.created_at.getTime() - a.created_at.getTime() || a.id.localeCompare(b.id));
+      return { rows: filtered.slice(offset, offset + limit), rowCount: filtered.length };
+    }
+    if (q.startsWith("SELECT count(*)::int AS total FROM monitoring_enrollments")) {
+      const [tenantId, status] = params as [number, string | null];
+      const total = this.store.enrollments.filter(e => e.tenant_id === tenantId && (status === null || e.status === status)).length;
+      return { rows: [{ total }], rowCount: 1 };
+    }
+    // getEnrollment
+    if (q.startsWith("SELECT id, investigation_ref, subject_name, subject_identifiers")) {
+      const row = this.store.enrollments.find(e => e.id === params[0] && e.tenant_id === params[1]);
+      return { rows: row ? [row] : [], rowCount: row ? 1 : 0 };
+    }
+    if (q.startsWith("SELECT id, started_at, finished_at, result, error, created_at FROM monitoring_runs")) {
+      const rows = this.store.runs
+        .filter(r => r.enrollment_id === params[0] && r.tenant_id === params[1])
+        .sort((a, b) => b.created_at.getTime() - a.created_at.getTime() || b.id - a.id)
+        .slice(0, 20);
+      return { rows, rowCount: rows.length };
+    }
+    if (q.startsWith("SELECT count(*) FILTER")) {
+      const rows = this.store.alerts.filter(a => a.enrollment_id === params[0] && a.tenant_id === params[1]);
+      return { rows: [{ unacknowledged: rows.filter(a => a.acknowledged_at === null).length, total: rows.length }], rowCount: 1 };
+    }
+    // getAlerts
+    if (q.startsWith("SELECT a.id, a.enrollment_id")) {
+      const [tenantId, enrollmentId, unackOnly, limit, offset] = params as [number, string | null, boolean, number, number];
+      const rows = this.store.alerts
+        .filter(a => a.tenant_id === tenantId)
+        .filter(a => enrollmentId === null || a.enrollment_id === enrollmentId)
+        .filter(a => !unackOnly || a.acknowledged_at === null)
+        .sort((a, b) =>
+          Number(b.acknowledged_at === null) - Number(a.acknowledged_at === null) ||
+          b.created_at.getTime() - a.created_at.getTime() ||
+          a.id.localeCompare(b.id),
+        )
+        .slice(offset, offset + limit)
+        .map(a => {
+          const e = this.store.enrollments.find(en => en.id === a.enrollment_id)!;
+          return { ...a, investigation_ref: e.investigation_ref, subject_name: e.subject_name };
+        });
+      return { rows, rowCount: rows.length };
+    }
+    // acknowledgeAlert
+    if (q.startsWith("UPDATE monitoring_alerts SET acknowledged_at = NOW()")) {
+      const row = this.store.alerts.find(a => a.id === params[0] && a.tenant_id === params[1] && a.acknowledged_at === null);
+      if (!row) return { rows: [], rowCount: 0 };
+      row.acknowledged_at = now;
+      row.acknowledged_by = params[2] as number;
+      return { rows: [{ id: row.id, enrollment_id: row.enrollment_id, alert_type: row.alert_type }], rowCount: 1 };
+    }
+    // scheduler: candidate listing
+    if (q.startsWith("SELECT id FROM monitoring_enrollments WHERE status = 'active' AND next_run_at IS NOT NULL AND next_run_at <= NOW()")) {
+      const rows = this.store.enrollments
+        .filter(e => e.status === "active" && e.next_run_at !== null && e.next_run_at <= now)
+        .sort((a, b) => a.next_run_at!.getTime() - b.next_run_at!.getTime() || a.id.localeCompare(b.id))
+        .slice(0, params[0] as number)
+        .map(e => ({ id: e.id }));
+      return { rows, rowCount: rows.length };
+    }
+    // scheduler: locked claim
+    if (q.startsWith("SELECT id, tenant_id, investigation_ref, subject_name, subject_identifiers,") && q.includes("FOR UPDATE SKIP LOCKED")) {
+      const row = this.store.enrollments.find(e => e.id === params[0] && e.status === "active" && e.next_run_at !== null && e.next_run_at <= now);
+      return { rows: row ? [row] : [], rowCount: row ? 1 : 0 };
+    }
+    // scheduler: run insert (error and success variants)
+    if (q.startsWith("INSERT INTO monitoring_runs")) {
+      const isReturning = q.includes("RETURNING id");
+      const run = {
+        id: this.store.runIdSeq++,
+        tenant_id: params[0] as number,
+        enrollment_id: params[1] as string,
+        started_at: params[2] as Date,
+        result: isReturning ? (params[3] as string) : "error",
+        snapshot: isReturning ? JSON.parse(params[4] as string) : null,
+        error: isReturning ? null : (params[3] as string),
+        created_at: now,
+      };
+      this.store.runs.push(run);
+      return { rows: isReturning ? [{ id: run.id }] : [], rowCount: 1 };
+    }
+    // scheduler: enrollment updates
+    if (q.startsWith("UPDATE monitoring_enrollments SET last_run_at = NOW(), next_run_at = $2, baseline_snapshot = $3::jsonb")) {
+      const row = this.store.enrollments.find(e => e.id === params[0])!;
+      row.last_run_at = now;
+      row.next_run_at = params[1] as Date;
+      row.baseline_snapshot = JSON.parse(params[2] as string);
+      return { rows: [], rowCount: 1 };
+    }
+    if (q.startsWith("UPDATE monitoring_enrollments SET last_run_at = NOW(), next_run_at = $2 WHERE")) {
+      const row = this.store.enrollments.find(e => e.id === params[0])!;
+      row.last_run_at = now;
+      row.next_run_at = params[1] as Date;
+      return { rows: [], rowCount: 1 };
+    }
+    // scheduler: alert insert
+    if (q.startsWith("INSERT INTO monitoring_alerts")) {
+      this.store.alerts.push({
+        id: params[0] as string,
+        tenant_id: params[1] as number,
+        enrollment_id: params[2] as string,
+        run_id: params[3] as number | null,
+        alert_type: params[4] as string,
+        severity: params[5] as string,
+        delta: JSON.parse(params[6] as string),
+        acknowledged_at: null,
+        acknowledged_by: null,
+        created_at: now,
+      });
+      return { rows: [], rowCount: 1 };
+    }
+
+    throw new Error(`FakePg: unmatched SQL: ${q}`);
+  }
+}
+
+// ─── Gateway fetch stub (network boundary only) ───────────────────────────────
+
+function stubGatewayFetch() {
+  vi.stubGlobal("fetch", vi.fn(async (url: unknown, init?: unknown) => {
+    const u = String(url);
+    if (u.includes("/v1/events")) {
+      return { ok: true, status: 200, json: async () => ({}) } as Response;
+    }
+    if (u.includes("/v1/sanctions/")) {
+      if (holder.gatewayFail.sanctions) return { ok: false, status: 503, json: async () => ({}) } as Response;
+      return { ok: true, status: 200, json: async () => holder.gatewayPayloads.sanctions } as Response;
+    }
+    if (u.includes("/v1/pep/")) {
+      if (holder.gatewayFail.pep) return { ok: false, status: 503, json: async () => ({}) } as Response;
+      return { ok: true, status: 200, json: async () => holder.gatewayPayloads.pep } as Response;
+    }
+    throw new Error(`unexpected fetch: ${u} ${JSON.stringify(init)}`);
+  }));
+}
+
+function eventsPublished(): Array<Record<string, any>> {
+  return vi.mocked(fetch).mock.calls
+    .filter(c => String(c[0]).includes("/v1/events"))
+    .map(c => JSON.parse(String((c[1] as RequestInit).body)));
+}
+
+// ─── Test fixtures ────────────────────────────────────────────────────────────
+
+function ctxFor(user: { id: number; role: string; tenantId: number | null }): TrpcContext {
   return {
-    user: { id: 42, tenantId, role, name: "Op", email: "op@t.test" } as TrpcContext["user"],
-    tenantId,
+    user: { name: "Test User", email: "user@test.dev", ...user } as TrpcContext["user"],
+    tenantId: user.tenantId,
     isDemo: false,
     req: { protocol: "https", headers: {} } as TrpcContext["req"],
     res: { clearCookie: vi.fn() } as unknown as TrpcContext["res"],
   };
 }
 
-const SANCTIONS_HIT_PAYLOAD = {
-  queried: "Jane Doe",
-  hits: [{ list: "OFAC_SDN", name: "Jane Doe", score: 0.97, entityType: "individual", programs: ["SDGT"], reason: "Exact name match" }],
-  clear: false,
-  checkedAt: "2026-01-01T00:00:00Z",
+function seedEnrollment(overrides: Partial<FakeEnrollment> = {}): FakeEnrollment {
+  return {
+    id: "11111111-1111-4111-8111-111111111111",
+    tenant_id: 7,
+    investigation_ref: "INV-2026-AAAA",
+    subject_name: "Adaeze Okafor",
+    subject_identifiers: { dob: "1990-05-01" },
+    list_set: ["sanctions", "pep"],
+    frequency: "daily",
+    status: "active",
+    last_run_at: null,
+    next_run_at: new Date(Date.now() - 60_000), // due
+    baseline_snapshot: { screenedAt: new Date().toISOString(), lists: ["pep", "sanctions"], hits: [] },
+    created_by: 11,
+    created_at: new Date(),
+    updated_at: new Date(),
+    ...overrides,
+  };
+}
+
+/** What normalizeGatewayHits produces from the gateway payload below. */
+const sanctionsHit = {
+  hitKey: "sanctions:adaeze okafor",
+  listName: "sanctions",
+  matchedName: "Adaeze Okafor",
+  matchScore: 0.97,
+  status: "active",
+  severity: "critical" as const,
 };
-const SANCTIONS_CLEAR_PAYLOAD = { queried: "Jane Doe", hits: [], clear: true, checkedAt: "2026-01-01T00:00:00Z" };
 
-function stubGatewayFetch(payloads: Record<string, any>, status = 200) {
-  const calls: string[] = [];
-  vi.stubGlobal("fetch", vi.fn(async (url: any) => {
-    calls.push(String(url));
-    const path = String(url).replace(/^https?:\/\/[^/]+/, "");
-    const key = Object.keys(payloads).find((k) => path.startsWith(k));
-    if (key === undefined || status !== 200) return { ok: false, status, json: async () => ({}) } as any;
-    return { ok: true, status: 200, json: async () => payloads[key] } as any;
-  }));
-  return calls;
-}
+const SANCTIONS_PAYLOAD_WITH_HIT = { clear: false, hits: [{ list: "sanctions", name: "Adaeze Okafor", score: 0.97 }] };
 
-function baselineWithHit(): MonitoringSnapshot {
-  return buildSnapshot("Jane Doe", { sanctions: SANCTIONS_HIT_PAYLOAD });
-}
+beforeEach(() => {
+  holder.pool = new FakePg();
+  holder.gatewayPayloads = { sanctions: { clear: true, hits: [] }, pep: { isPEP: false } };
+  holder.gatewayFail = { sanctions: false, pep: false };
+  stubGatewayFetch();
+});
 
-// ─── Pure helpers ─────────────────────────────────────────────────────────────
+// ─── Gateway payload normalization ────────────────────────────────────────────
 
-describe("computeNextRunAt", () => {
-  const from = new Date("2026-03-10T12:00:00Z");
-  it("daily → +1 day", () => {
-    expect(computeNextRunAt("daily", from).toISOString()).toBe("2026-03-11T12:00:00.000Z");
+describe("normalizeGatewayHits", () => {
+  it("normalizes sanctions hits with critical severity", () => {
+    expect(normalizeGatewayHits("sanctions", "Adaeze Okafor", SANCTIONS_PAYLOAD_WITH_HIT)).toEqual([sanctionsHit]);
   });
-  it("weekly → +7 days", () => {
-    expect(computeNextRunAt("weekly", from).toISOString()).toBe("2026-03-17T12:00:00.000Z");
+
+  it("normalizes a positive PEP payload into one warning hit", () => {
+    const hits = normalizeGatewayHits("pep", "Adaeze Okafor", { isPEP: true, roles: ["Senator"] });
+    expect(hits).toEqual([{
+      hitKey: "pep:adaeze okafor",
+      listName: "pep",
+      matchedName: "Adaeze Okafor",
+      matchScore: null,
+      status: "PEP: Senator",
+      severity: "warning",
+    }]);
   });
-  it("monthly → +1 calendar month (UTC)", () => {
-    expect(computeNextRunAt("monthly", from).toISOString()).toBe("2026-04-10T12:00:00.000Z");
-  });
-  it("does not mutate the input date", () => {
-    computeNextRunAt("weekly", from);
-    expect(from.toISOString()).toBe("2026-03-10T12:00:00.000Z");
+
+  it("returns no hits for clear or malformed payloads", () => {
+    expect(normalizeGatewayHits("sanctions", "Adaeze Okafor", { clear: true, hits: [] })).toEqual([]);
+    expect(normalizeGatewayHits("pep", "Adaeze Okafor", { isPEP: false })).toEqual([]);
+    expect(normalizeGatewayHits("sanctions", "Adaeze Okafor", null)).toEqual([]);
   });
 });
 
-describe("buildSnapshot / diffSnapshots", () => {
-  it("normalizes gateway sanctions payloads into stable hits", () => {
-    const snap = buildSnapshot("Jane Doe", { sanctions: SANCTIONS_HIT_PAYLOAD });
-    expect(snap.lists.sanctions.clear).toBe(false);
-    expect(snap.lists.sanctions.hits).toHaveLength(1);
-    expect(snap.lists.sanctions.hits[0].list).toBe("OFAC_SDN");
-    expect(snap.lists.sanctions.hits[0].hitId).toMatch(/^[0-9a-f]{24}$/);
-  });
+// ─── Pure diff + cadence math ─────────────────────────────────────────────────
 
-  it("treats a positive PEP result as a hit", () => {
-    const snap = buildSnapshot("Jane Doe", { pep: { queried: "Jane Doe", isPEP: true, roles: ["Senator"], party: "APC", country: "NG" } });
-    expect(snap.lists.pep.hits).toHaveLength(1);
-    expect(snap.lists.pep.hits[0].reason).toContain("Senator");
-  });
+describe("diffSnapshots", () => {
+  const base: MonitoringSnapshot = { screenedAt: "2026-01-01T00:00:00.000Z", lists: ["sanctions"], hits: [sanctionsHit] };
 
-  it("detects no change between identical snapshots", () => {
-    const base = baselineWithHit();
-    const current = baselineWithHit();
-    const delta = diffSnapshots(base, current);
-    expect(hasDelta(delta)).toBe(false);
+  it("detects no change for identical snapshots", () => {
+    const delta = diffSnapshots(base, { ...base, screenedAt: "2026-01-02T00:00:00.000Z" });
+    expect(delta.newHits).toHaveLength(0);
+    expect(delta.removedHits).toHaveLength(0);
+    expect(delta.changedHits).toHaveLength(0);
   });
 
   it("detects a new hit", () => {
-    const base = buildSnapshot("Jane Doe", { sanctions: SANCTIONS_CLEAR_PAYLOAD });
-    const current = baselineWithHit();
-    const delta = diffSnapshots(base, current);
-    expect(delta.newHits).toHaveLength(1);
+    const pep = { hitKey: "pep:adaeze okafor", listName: "pep", matchedName: "Adaeze Okafor", matchScore: null, status: "active", severity: "warning" as const };
+    const delta = diffSnapshots({ ...base, hits: [] }, { ...base, hits: [pep] });
+    expect(delta.newHits).toEqual([pep]);
     expect(delta.removedHits).toHaveLength(0);
-    expect(hasDelta(delta)).toBe(true);
   });
 
   it("detects a removed hit", () => {
-    const delta = diffSnapshots(baselineWithHit(), buildSnapshot("Jane Doe", { sanctions: SANCTIONS_CLEAR_PAYLOAD }));
-    expect(delta.removedHits).toHaveLength(1);
+    const delta = diffSnapshots(base, { ...base, hits: [] });
+    expect(delta.removedHits).toEqual([sanctionsHit]);
     expect(delta.newHits).toHaveLength(0);
   });
 
-  it("detects a status change (score changed on the same hit)", () => {
-    const changed = { ...SANCTIONS_HIT_PAYLOAD, hits: [{ ...SANCTIONS_HIT_PAYLOAD.hits[0], score: 0.81 }] };
-    const delta = diffSnapshots(baselineWithHit(), buildSnapshot("Jane Doe", { sanctions: changed }));
-    expect(delta.statusChanges).toHaveLength(1);
-    expect(delta.statusChanges[0].before.score).toBe(0.97);
-    expect(delta.statusChanges[0].after.score).toBe(0.81);
+  it("detects a changed hit when severity or status moves", () => {
+    const escalated = { ...sanctionsHit, status: "confirmed" };
+    const delta = diffSnapshots(base, { ...base, hits: [escalated] });
+    expect(delta.changedHits).toEqual([{ before: sanctionsHit, after: escalated }]);
     expect(delta.newHits).toHaveLength(0);
-  });
-
-  it("detects change from a null baseline (first run after legacy enrollment)", () => {
-    const delta = diffSnapshots(null, baselineWithHit());
-    expect(delta.newHits).toHaveLength(1);
-  });
-
-  it("severity: new sanctions hit is critical, PEP is high, removal is info", () => {
-    const hit = baselineWithHit().lists.sanctions.hits[0];
-    expect(alertSeverity("new_hit", hit)).toBe("critical");
-    expect(alertSeverity("new_hit", { ...hit, list: "pep" })).toBe("high");
-    expect(alertSeverity("status_change", hit)).toBe("warning");
-    expect(alertSeverity("removed_hit", hit)).toBe("info");
+    expect(delta.removedHits).toHaveLength(0);
   });
 });
 
-describe("runListScreening (existing gateway entry points, fail-closed)", () => {
-  beforeEach(() => vi.unstubAllGlobals());
+describe("computeNextRunAt", () => {
+  const from = new Date("2026-01-15T10:30:00.000Z");
 
-  it("calls /v1/sanctions and /v1/pep on the gateway with the BIS key", async () => {
-    stubGatewayFetch({ "/v1/sanctions/": SANCTIONS_CLEAR_PAYLOAD, "/v1/pep/": { isPEP: false, roles: [] } });
-    const out = await runListScreening("Jane Doe", ["sanctions", "pep"]);
-    expect(out.sanctions.clear).toBe(true);
-    expect(out.pep.isPEP).toBe(false);
-    const calls = (fetch as any).mock.calls.map((c: any[]) => String(c[0]));
-    expect(calls.some((u: string) => u.includes("/v1/sanctions/Jane%20Doe"))).toBe(true);
-    expect(calls.some((u: string) => u.includes("/v1/pep/Jane%20Doe"))).toBe(true);
+  it("adds one day for daily frequency", () => {
+    expect(computeNextRunAt("daily", from).toISOString()).toBe("2026-01-16T10:30:00.000Z");
   });
 
-  it("dedupes the shared sanctions/watchlist endpoint", async () => {
-    stubGatewayFetch({ "/v1/sanctions/": SANCTIONS_CLEAR_PAYLOAD });
-    const out = await runListScreening("Jane Doe", ["sanctions", "watchlist"]);
-    expect(out.sanctions).toBeDefined();
-    expect(out.watchlist).toBeDefined();
-    expect((fetch as any).mock.calls).toHaveLength(1);
+  it("adds seven days for weekly frequency", () => {
+    expect(computeNextRunAt("weekly", from).toISOString()).toBe("2026-01-22T10:30:00.000Z");
   });
 
-  it("fails closed when a provider is unavailable", async () => {
-    stubGatewayFetch({}, 503);
-    await expect(runListScreening("Jane Doe", ["sanctions"])).rejects.toThrow(/HTTP 503/);
+  it("adds one calendar month for monthly frequency", () => {
+    expect(computeNextRunAt("monthly", from).toISOString()).toBe("2026-02-15T10:30:00.000Z");
+  });
+
+  it("clamps monthly rollover to the last day of the target month (Jan 31 → Feb 28)", () => {
+    const jan31 = new Date("2026-01-31T09:00:00.000Z");
+    expect(computeNextRunAt("monthly", jan31).toISOString()).toBe("2026-02-28T09:00:00.000Z");
   });
 });
 
-// ─── Router: enroll / state machine / authZ / tenant isolation ───────────────
+// ─── Router: enroll + lifecycle + tenant isolation ────────────────────────────
 
-describe("monitoringRouter", () => {
+describe("monitoring.enroll", () => {
   beforeEach(() => {
-    vi.unstubAllGlobals();
-    vi.restoreAllMocks();
+    holder.pool.store.investigations.push({
+      ref: "INV-2026-AAAA", subjectName: "Adaeze Okafor", nin: "12345678901", bvn: null, tenantId: 7, deletedAt: null,
+    });
   });
 
-  function makeState(): FakeState {
-    return {
-      investigations: { "7:INV-2026-AAAA": { ref: "INV-2026-AAAA", subjectName: "Jane Doe", nin: null, bvn: null, rcNumber: null } },
-      enrollment: null,
-      dueIds: [],
-      ackRowCount: 1,
-      existingEnrollmentCount: 0,
-      listRows: [],
-      alertRows: [],
-    };
-  }
+  it("enrolls with a baseline snapshot and scheduled next run", async () => {
+    holder.gatewayPayloads.sanctions = SANCTIONS_PAYLOAD_WITH_HIT;
+    const caller = monitoringRouter.createCaller(ctxFor({ id: 11, role: "analyst", tenantId: 7 }));
+    const result = await caller.enroll({ investigationRef: "INV-2026-AAAA", frequency: "weekly", listSet: ["sanctions", "pep"] });
+    expect(result.status).toBe("active");
 
-  it("enroll stores a baseline snapshot and schedules next_run_at per frequency", async () => {
-    const state = makeState();
-    dbHolder.pool = new FakePool(state);
-    stubGatewayFetch({ "/v1/sanctions/": SANCTIONS_HIT_PAYLOAD });
-    const caller = monitoringRouter.createCaller(ctxFor(7));
-    const res = await caller.enroll({ investigationRef: "INV-2026-AAAA", listSet: ["sanctions"], frequency: "weekly" });
-    expect(res.status).toBe("active");
-    expect(res.baseline.lists.sanctions.hits).toHaveLength(1);
-    // weekly → next_run_at 7 days out
-    const diffDays = (res.nextRunAt.getTime() - Date.now()) / 86_400_000;
-    expect(diffDays).toBeGreaterThan(6.9);
-    expect(diffDays).toBeLessThan(7.1);
-    // INSERT captured baseline + audit inside one transaction
-    const insert = dbHolder.pool.allQueries().find((q) => /INSERT INTO monitoring_enrollments/.test(q.text));
-    expect(insert).toBeDefined();
-    const snapshotParam = JSON.parse(String(insert!.params[8]));
-    expect(snapshotParam.lists.sanctions.hits[0].list).toBe("OFAC_SDN");
-    expect(insert!.params[1]).toBe(7); // tenant_id
-    expect(dbHolder.pool.allQueries().some((q) => /INSERT INTO audit_log/.test(q.text))).toBe(true);
-    const txOps = dbHolder.pool.clients[0].queries.map((q) => q.text.trim().split(" ")[0]);
-    expect(txOps[0]).toBe("BEGIN");
-    expect(txOps[txOps.length - 1]).toBe("COMMIT");
+    const stored = holder.pool.store.enrollments[0];
+    expect(stored.tenant_id).toBe(7);
+    expect(stored.investigation_ref).toBe("INV-2026-AAAA");
+    expect(stored.baseline_snapshot?.hits).toEqual([sanctionsHit]);
+    expect(stored.next_run_at!.getTime()).toBeGreaterThan(Date.now());
+    expect(stored.next_run_at!.getTime()).toBeLessThanOrEqual(Date.now() + 8 * 24 * 3600 * 1000);
+    // NIN from the investigation is merged into stored identifiers
+    expect(stored.subject_identifiers.nin).toBe("12345678901");
+    // The enrollment event is published
+    expect(eventsPublished().some(e => e.event_type === "MONITORING_ENROLLED")).toBe(true);
   });
 
-  it("enroll is tenant-isolated: another tenant's investigation is NOT_FOUND", async () => {
-    const state = makeState();
-    dbHolder.pool = new FakePool(state);
-    stubGatewayFetch({ "/v1/sanctions/": SANCTIONS_CLEAR_PAYLOAD });
-    const caller = monitoringRouter.createCaller(ctxFor(8)); // investigation belongs to tenant 7
-    await expect(caller.enroll({ investigationRef: "INV-2026-AAAA", listSet: ["sanctions"], frequency: "daily" }))
+  it("fails closed when the baseline screening cannot complete", async () => {
+    holder.gatewayFail.sanctions = true;
+    const caller = monitoringRouter.createCaller(ctxFor({ id: 11, role: "analyst", tenantId: 7 }));
+    await expect(caller.enroll({ investigationRef: "INV-2026-AAAA", frequency: "daily", listSet: ["sanctions"] }))
+      .rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+    expect(holder.pool.store.enrollments).toHaveLength(0);
+  });
+
+  it("rejects investigations owned by another tenant", async () => {
+    const caller = monitoringRouter.createCaller(ctxFor({ id: 11, role: "analyst", tenantId: 8 }));
+    await expect(caller.enroll({ investigationRef: "INV-2026-AAAA", frequency: "daily", listSet: ["sanctions"] }))
       .rejects.toMatchObject({ code: "NOT_FOUND" });
-    expect(dbHolder.pool.allQueries().some((q) => /INSERT INTO monitoring_enrollments/.test(q.text))).toBe(false);
+    expect(holder.pool.store.enrollments).toHaveLength(0);
   });
 
-  it("enroll fails closed when the screening provider is down (no enrollment written)", async () => {
-    const state = makeState();
-    dbHolder.pool = new FakePool(state);
-    stubGatewayFetch({}, 503);
-    const caller = monitoringRouter.createCaller(ctxFor(7));
-    await expect(caller.enroll({ investigationRef: "INV-2026-AAAA", listSet: ["sanctions"], frequency: "daily" }))
-      .rejects.toThrow(/HTTP 503/);
-    expect(dbHolder.pool.allQueries().some((q) => /INSERT INTO monitoring_enrollments/.test(q.text))).toBe(false);
-    expect(dbHolder.pool.clients[0].queries.some((q) => q.text.trim().startsWith("ROLLBACK"))).toBe(true);
-  });
-
-  it("enroll rejects when the investigation already has a live enrollment", async () => {
-    const state = makeState();
-    state.existingEnrollmentCount = 1;
-    dbHolder.pool = new FakePool(state);
-    stubGatewayFetch({ "/v1/sanctions/": SANCTIONS_CLEAR_PAYLOAD });
-    const caller = monitoringRouter.createCaller(ctxFor(7));
-    await expect(caller.enroll({ investigationRef: "INV-2026-AAAA", listSet: ["sanctions"], frequency: "daily" }))
+  it("rejects duplicate live enrollments", async () => {
+    holder.pool.store.enrollments.push(seedEnrollment());
+    const caller = monitoringRouter.createCaller(ctxFor({ id: 11, role: "analyst", tenantId: 7 }));
+    await expect(caller.enroll({ investigationRef: "INV-2026-AAAA", frequency: "daily", listSet: ["sanctions"] }))
       .rejects.toMatchObject({ code: "CONFLICT" });
   });
+});
 
-  it("state machine: pause active→paused, resume paused→active (recomputes next_run_at), cancel terminal", async () => {
-    const state = makeState();
-    state.enrollment = { id: "enr-1", tenant_id: 7, status: "active", frequency: "daily", investigation_ref: "INV-2026-AAAA" };
-    dbHolder.pool = new FakePool(state);
-    const caller = monitoringRouter.createCaller(ctxFor(7));
-    await expect(caller.pause({ enrollmentId: crypto.randomUUID() })).resolves.toMatchObject({ status: "paused" });
+describe("monitoring lifecycle state machine", () => {
+  it("pauses, resumes (rescheduling next_run_at), and cancels", async () => {
+    holder.pool.store.enrollments.push(seedEnrollment());
+    const caller = monitoringRouter.createCaller(ctxFor({ id: 11, role: "analyst", tenantId: 7 }));
+    const id = "11111111-1111-4111-8111-111111111111";
 
-    state.enrollment.status = "paused";
-    await expect(caller.resume({ enrollmentId: crypto.randomUUID() })).resolves.toMatchObject({ status: "active" });
-    const resumeUpdate = dbHolder.pool.allQueries().find((q) => /SET status = 'active', next_run_at/.test(q.text));
-    expect(resumeUpdate).toBeDefined();
+    expect((await caller.pause({ enrollmentId: id })).status).toBe("paused");
+    expect(holder.pool.store.enrollments[0].status).toBe("paused");
+    expect(holder.pool.store.enrollments[0].next_run_at).toBeNull();
 
-    state.enrollment.status = "cancelled";
-    await expect(caller.pause({ enrollmentId: crypto.randomUUID() })).rejects.toMatchObject({ code: "CONFLICT" });
-    // every transition audited
-    expect(dbHolder.pool.allQueries().filter((q) => /INSERT INTO audit_log/.test(q.text)).length).toBeGreaterThanOrEqual(2);
-  });
+    // Cannot pause twice
+    await expect(caller.pause({ enrollmentId: id })).rejects.toMatchObject({ code: "CONFLICT" });
 
-  it("state machine is tenant-isolated: enrollment of another tenant is NOT_FOUND", async () => {
-    const state = makeState();
-    state.enrollment = { id: "enr-1", tenant_id: 8, status: "active", frequency: "daily", investigation_ref: "INV-2026-BBBB" };
-    dbHolder.pool = new FakePool(state);
-    const caller = monitoringRouter.createCaller(ctxFor(7));
-    await expect(caller.pause({ enrollmentId: crypto.randomUUID() })).rejects.toMatchObject({ code: "NOT_FOUND" });
-  });
+    const resumed = await caller.resume({ enrollmentId: id });
+    expect(resumed.status).toBe("active");
+    expect(resumed.nextRunAt.getTime()).toBeGreaterThan(Date.now());
 
-  it("acknowledgeAlert: analyst role is rejected", async () => {
-    dbHolder.pool = new FakePool(makeState());
-    const caller = monitoringRouter.createCaller(ctxFor(7, "analyst"));
-    await expect(caller.acknowledgeAlert({ alertId: crypto.randomUUID() })).rejects.toMatchObject({ code: "FORBIDDEN" });
-  });
-
-  it("acknowledgeAlert: supervisor and admin may acknowledge", async () => {
-    dbHolder.pool = new FakePool(makeState());
-    await expect(monitoringRouter.createCaller(ctxFor(7, "supervisor")).acknowledgeAlert({ alertId: crypto.randomUUID() }))
-      .resolves.toMatchObject({ acknowledged: true });
-    dbHolder.pool = new FakePool(makeState());
-    await expect(monitoringRouter.createCaller(ctxFor(7, "admin")).acknowledgeAlert({ alertId: crypto.randomUUID() }))
-      .resolves.toMatchObject({ acknowledged: true });
-  });
-
-  it("acknowledgeAlert: cross-tenant or already-acked alert is NOT_FOUND", async () => {
-    const state = makeState();
-    state.ackRowCount = 0; // WHERE id=$2 AND tenant_id=$3 AND acknowledged_at IS NULL matched nothing
-    dbHolder.pool = new FakePool(state);
-    const caller = monitoringRouter.createCaller(ctxFor(7, "supervisor"));
-    await expect(caller.acknowledgeAlert({ alertId: crypto.randomUUID() })).rejects.toMatchObject({ code: "NOT_FOUND" });
-  });
-
-  it("unauthenticated callers are rejected", async () => {
-    dbHolder.pool = new FakePool(makeState());
-    const anon = { user: null, tenantId: null, isDemo: false, req: {}, res: {} } as unknown as TrpcContext;
-    await expect(monitoringRouter.createCaller(anon).list({})).rejects.toMatchObject({ code: "UNAUTHORIZED" });
-  });
-
-  it("list is tenant-scoped with filters; getAlerts orders unacknowledged first", async () => {
-    const state = makeState();
-    state.listRows = [{ id: "enr-1", tenant_id: 7, investigation_ref: "INV-2026-AAAA", status: "active" }];
-    state.alertRows = [{ id: "al-1", tenant_id: 7, acknowledged_at: null }, { id: "al-2", tenant_id: 7, acknowledged_at: "2026-03-01" }];
-    dbHolder.pool = new FakePool(state);
-    const caller = monitoringRouter.createCaller(ctxFor(7));
-
-    const list = await caller.list({ status: "active", frequency: "daily" });
-    expect(list.enrollments).toHaveLength(1);
-    const listQuery = dbHolder.pool.allQueries().find((q) => /FROM monitoring_enrollments WHERE tenant_id = \$1/.test(q.text));
-    expect(listQuery!.params[0]).toBe(7);
-    expect(listQuery!.text).toContain("status = $2");
-    expect(listQuery!.text).toContain("frequency = $3");
-
-    const alerts = await caller.getAlerts({});
-    expect(alerts.alerts).toHaveLength(2);
-    const alertQuery = dbHolder.pool.allQueries().find((q) => /FROM monitoring_alerts WHERE tenant_id = \$1/.test(q.text));
-    expect(alertQuery!.params[0]).toBe(7);
-    expect(alertQuery!.text).toContain("ORDER BY (acknowledged_at IS NULL) DESC");
+    expect((await caller.cancel({ enrollmentId: id })).status).toBe("cancelled");
+    await expect(caller.cancel({ enrollmentId: id })).rejects.toMatchObject({ code: "CONFLICT" });
   });
 });
 
-// ─── Scheduler: alert fan-out ─────────────────────────────────────────────────
-
-describe("monitoringScheduler.processDueEnrollment", () => {
-  const ENROLLMENT_ID = "11111111-2222-4333-8444-555555555555";
-
-  function enrollmentWith(baseline: MonitoringSnapshot | null) {
-    return {
-      id: ENROLLMENT_ID,
+describe("tenant isolation", () => {
+  beforeEach(() => {
+    holder.pool.store.enrollments.push(seedEnrollment());
+    holder.pool.store.alerts.push({
+      id: "22222222-2222-4222-8222-222222222222",
       tenant_id: 7,
-      investigation_ref: "INV-2026-AAAA",
-      subject_name: "Jane Doe",
-      list_set: ["sanctions"],
-      frequency: "daily",
-      status: "active",
-      baseline_snapshot: baseline,
-    };
-  }
-
-  function deps(screenPayload: any): { deps: MonitoringSchedulerDeps; published: any[] } {
-    const published: any[] = [];
-    return {
-      deps: {
-        screen: vi.fn(async () => ({ sanctions: screenPayload })),
-        publish: vi.fn(async (_t: string, _r: string, _s: string, p: unknown) => { published.push(p); }),
-        now: () => new Date("2026-03-10T00:00:00Z"),
-      },
-      published,
-    };
-  }
-
-  it("no-change run: writes run row, advances schedule, no alerts, no events", async () => {
-    const state: FakeState = { investigations: {}, enrollment: enrollmentWith(baselineWithHit()), dueIds: [], ackRowCount: 0, existingEnrollmentCount: 0, listRows: [], alertRows: [] };
-    const pool = new FakePool(state);
-    const { deps: d, published } = deps(SANCTIONS_HIT_PAYLOAD);
-    const outcome = await processDueEnrollment(pool as any, ENROLLMENT_ID, d);
-    expect(outcome).toBe("processed");
-    const runInsert = pool.allQueries().find((q) => /INSERT INTO monitoring_runs/.test(q.text));
-    expect(runInsert!.params[4]).toBe("no_change");
-    expect(pool.allQueries().some((q) => /INSERT INTO monitoring_alerts/.test(q.text))).toBe(false);
-    expect(published).toHaveLength(0);
-    const sched = pool.allQueries().find((q) => /SET last_run_at = \$1, next_run_at/.test(q.text));
-    expect(sched).toBeDefined();
-    expect((sched!.params[1] as Date).toISOString()).toBe("2026-03-11T00:00:00.000Z"); // daily +1
+      enrollment_id: "11111111-1111-4111-8111-111111111111",
+      run_id: 1,
+      alert_type: "new_hit",
+      severity: "critical",
+      delta: { hit: sanctionsHit },
+      acknowledged_at: null,
+      acknowledged_by: null,
+      created_at: new Date(),
+    });
   });
 
-  it("new sanctions hit: change_detected + critical alert row + MONITORING_ALERT event + baseline updated", async () => {
-    const state: FakeState = { investigations: {}, enrollment: enrollmentWith(buildSnapshot("Jane Doe", { sanctions: SANCTIONS_CLEAR_PAYLOAD })), dueIds: [], ackRowCount: 0, existingEnrollmentCount: 0, listRows: [], alertRows: [] };
-    const pool = new FakePool(state);
-    const { deps: d, published } = deps(SANCTIONS_HIT_PAYLOAD);
-    const outcome = await processDueEnrollment(pool as any, ENROLLMENT_ID, d);
-    expect(outcome).toBe("processed");
+  it("scopes list and getEnrollment to the caller tenant", async () => {
+    const other = monitoringRouter.createCaller(ctxFor({ id: 99, role: "analyst", tenantId: 8 }));
+    expect((await other.list({})).enrollments).toHaveLength(0);
+    await expect(other.getEnrollment({ enrollmentId: "11111111-1111-4111-8111-111111111111" }))
+      .rejects.toMatchObject({ code: "NOT_FOUND" });
 
-    const runInsert = pool.allQueries().find((q) => /INSERT INTO monitoring_runs/.test(q.text));
-    expect(runInsert!.params[4]).toBe("change_detected");
-
-    const alertInsert = pool.allQueries().find((q) => /INSERT INTO monitoring_alerts/.test(q.text));
-    expect(alertInsert).toBeDefined();
-    expect(alertInsert!.params[1]).toBe(7); // tenant fanned out from enrollment
-    expect(alertInsert!.params[3]).toBe("new_hit");
-    expect(alertInsert!.params[4]).toBe("critical");
-
-    expect(published).toHaveLength(1);
-    expect(published[0].alertType).toBe("new_hit");
-    expect(published[0].severity).toBe("critical");
-    expect((d.publish as any).mock.calls[0][0]).toBe("MONITORING_ALERT");
-    expect((d.publish as any).mock.calls[0][1]).toBe("INV-2026-AAAA");
-
-    const baselineUpdate = pool.allQueries().find((q) => /SET baseline_snapshot = \$1::jsonb/.test(q.text));
-    expect(baselineUpdate).toBeDefined();
-    expect(JSON.parse(String(baselineUpdate!.params[0])).lists.sanctions.hits).toHaveLength(1);
-    expect(pool.allQueries().some((q) => /INSERT INTO audit_log/.test(q.text))).toBe(true);
+    const own = monitoringRouter.createCaller(ctxFor({ id: 11, role: "analyst", tenantId: 7 }));
+    expect((await own.list({})).enrollments).toHaveLength(1);
+    const detail = await own.getEnrollment({ enrollmentId: "11111111-1111-4111-8111-111111111111" });
+    expect(detail.alerts.unacknowledged).toBe(1);
   });
 
-  it("removed hit: removed_hit alert with info severity", async () => {
-    const state: FakeState = { investigations: {}, enrollment: enrollmentWith(baselineWithHit()), dueIds: [], ackRowCount: 0, existingEnrollmentCount: 0, listRows: [], alertRows: [] };
-    const pool = new FakePool(state);
-    const { deps: d, published } = deps(SANCTIONS_CLEAR_PAYLOAD);
-    await processDueEnrollment(pool as any, ENROLLMENT_ID, d);
-    const alertInsert = pool.allQueries().find((q) => /INSERT INTO monitoring_alerts/.test(q.text));
-    expect(alertInsert!.params[3]).toBe("removed_hit");
-    expect(alertInsert!.params[4]).toBe("info");
-    expect(published[0].alertType).toBe("removed_hit");
+  it("scopes getAlerts to the caller tenant with unacknowledged first", async () => {
+    const other = monitoringRouter.createCaller(ctxFor({ id: 99, role: "analyst", tenantId: 8 }));
+    expect((await other.getAlerts({})).alerts).toHaveLength(0);
+
+    const own = monitoringRouter.createCaller(ctxFor({ id: 11, role: "analyst", tenantId: 7 }));
+    const { alerts } = await own.getAlerts({});
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0].acknowledged_at).toBeNull();
+    expect(alerts[0].investigation_ref).toBe("INV-2026-AAAA");
   });
 
-  it("screening failure: result='error' run recorded, baseline untouched, loop never crashes", async () => {
-    const state: FakeState = { investigations: {}, enrollment: enrollmentWith(baselineWithHit()), dueIds: [], ackRowCount: 0, existingEnrollmentCount: 0, listRows: [], alertRows: [] };
-    const pool = new FakePool(state);
-    const published: any[] = [];
-    const d: MonitoringSchedulerDeps = {
-      screen: vi.fn(async () => { throw new Error("provider down"); }),
-      publish: vi.fn(async (_t: string, _r: string, _s: string, p: unknown) => { published.push(p); }),
-      now: () => new Date("2026-03-10T00:00:00Z"),
-    };
-    const outcome = await processDueEnrollment(pool as any, ENROLLMENT_ID, d);
-    expect(outcome).toBe("error");
-    const errRun = pool.allQueries().find((q) => /INSERT INTO monitoring_runs/.test(q.text) && q.text.includes("'error', NULL"));
-    expect(errRun).toBeDefined();
-    expect(String(errRun!.params[4])).toContain("provider down");
-    expect(pool.allQueries().some((q) => /baseline_snapshot = /.test(q.text))).toBe(false);
-    expect(published).toHaveLength(0);
+  it("blocks lifecycle mutations across tenants", async () => {
+    const other = monitoringRouter.createCaller(ctxFor({ id: 99, role: "admin", tenantId: 8 }));
+    const id = "11111111-1111-4111-8111-111111111111";
+    await expect(other.pause({ enrollmentId: id })).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(other.cancel({ enrollmentId: id })).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(holder.pool.store.enrollments[0].status).toBe("active");
+  });
+});
+
+describe("monitoring.acknowledgeAlert authorization", () => {
+  const alertId = "22222222-2222-4222-8222-222222222222";
+
+  beforeEach(() => {
+    holder.pool.store.enrollments.push(seedEnrollment());
+    holder.pool.store.alerts.push({
+      id: alertId,
+      tenant_id: 7,
+      enrollment_id: "11111111-1111-4111-8111-111111111111",
+      run_id: 1,
+      alert_type: "new_hit",
+      severity: "critical",
+      delta: { hit: sanctionsHit },
+      acknowledged_at: null,
+      acknowledged_by: null,
+      created_at: new Date(),
+    });
   });
 
-  it("skips enrollments that are no longer active", async () => {
-    const state: FakeState = { investigations: {}, enrollment: null, dueIds: [], ackRowCount: 0, existingEnrollmentCount: 0, listRows: [], alertRows: [] };
-    const pool = new FakePool(state);
-    const { deps: d } = deps(SANCTIONS_HIT_PAYLOAD);
-    expect(await processDueEnrollment(pool as any, ENROLLMENT_ID, d)).toBe("skipped");
-    expect((d.screen as any).mock.calls).toHaveLength(0);
+  it("rejects non-reviewer roles", async () => {
+    const caller = monitoringRouter.createCaller(ctxFor({ id: 11, role: "analyst", tenantId: 7 }));
+    await expect(caller.acknowledgeAlert({ alertId })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(holder.pool.store.alerts[0].acknowledged_at).toBeNull();
   });
 
-  it("runDueEnrollments claims due rows with FOR UPDATE SKIP LOCKED and processes each", async () => {
-    const state: FakeState = {
-      investigations: {},
-      enrollment: enrollmentWith(baselineWithHit()),
-      dueIds: [{ id: ENROLLMENT_ID }],
-      ackRowCount: 0,
-      existingEnrollmentCount: 0,
-      listRows: [],
-      alertRows: [],
-    };
-    const pool = new FakePool(state);
-    const { deps: d } = deps(SANCTIONS_HIT_PAYLOAD);
-    const summary = await runDueEnrollments(pool as any, d);
-    expect(summary).toEqual({ processed: 1, errors: 0, skipped: 0 });
-    const claim = pool.allQueries().find((q) => /FOR UPDATE SKIP LOCKED/.test(q.text));
-    expect(claim).toBeDefined();
+  it("allows admins and records the acknowledger exactly once", async () => {
+    const admin = monitoringRouter.createCaller(ctxFor({ id: 1, role: "admin", tenantId: 7 }));
+    expect((await admin.acknowledgeAlert({ alertId })).acknowledged).toBe(true);
+    expect(holder.pool.store.alerts[0].acknowledged_by).toBe(1);
+    // Second acknowledgement is a conflict — no silent re-ack
+    await expect(admin.acknowledgeAlert({ alertId })).rejects.toMatchObject({ code: "CONFLICT" });
+  });
+
+  it("blocks acknowledgement from another tenant even for admins", async () => {
+    const foreign = monitoringRouter.createCaller(ctxFor({ id: 2, role: "admin", tenantId: 8 }));
+    await expect(foreign.acknowledgeAlert({ alertId })).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(holder.pool.store.alerts[0].acknowledged_at).toBeNull();
+  });
+});
+
+// ─── Scheduler: alert fan-out, no-change, fail-closed error ───────────────────
+
+describe("processDueMonitoringEnrollments", () => {
+  it("detects a new sanctions hit, records the run, raises a critical alert, and publishes MONITORING_ALERT", async () => {
+    holder.pool.store.enrollments.push(seedEnrollment());
+    holder.gatewayPayloads.sanctions = SANCTIONS_PAYLOAD_WITH_HIT;
+
+    const result = await processDueMonitoringEnrollments();
+    expect(result).toEqual({ claimed: 1, changed: 1, noChange: 0, errors: 0 });
+
+    const run = holder.pool.store.runs[0];
+    expect(run.result).toBe("change_detected");
+    expect(run.snapshot?.hits).toEqual([sanctionsHit]);
+
+    const alert = holder.pool.store.alerts[0];
+    expect(alert.alert_type).toBe("new_hit");
+    expect(alert.severity).toBe("critical");
+    expect(alert.tenant_id).toBe(7);
+
+    // Baseline advances and cadence is rescheduled
+    const enrollment = holder.pool.store.enrollments[0];
+    expect(enrollment.baseline_snapshot?.hits).toEqual([sanctionsHit]);
+    expect(enrollment.next_run_at!.getTime()).toBeGreaterThan(Date.now());
+
+    const alerts = eventsPublished().filter(e => e.event_type === "MONITORING_ALERT");
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0].severity).toBe("critical");
+    expect(alerts[0].subject_ref).toBe("INV-2026-AAAA");
+  });
+
+  it("records no_change without raising alerts when the snapshot is stable", async () => {
+    holder.pool.store.enrollments.push(seedEnrollment({
+      baseline_snapshot: { screenedAt: new Date().toISOString(), lists: ["pep", "sanctions"], hits: [sanctionsHit] },
+    }));
+    holder.gatewayPayloads.sanctions = SANCTIONS_PAYLOAD_WITH_HIT;
+
+    const result = await processDueMonitoringEnrollments();
+    expect(result).toEqual({ claimed: 1, changed: 0, noChange: 1, errors: 0 });
+    expect(holder.pool.store.runs[0].result).toBe("no_change");
+    expect(holder.pool.store.alerts).toHaveLength(0);
+    expect(eventsPublished()).toHaveLength(0);
+  });
+
+  it("fails closed on screening errors: error run row, unchanged baseline, no alerts", async () => {
+    const baseline = { screenedAt: new Date().toISOString(), lists: ["pep", "sanctions"], hits: [sanctionsHit] };
+    holder.pool.store.enrollments.push(seedEnrollment({ baseline_snapshot: baseline }));
+    holder.gatewayFail.sanctions = true;
+
+    const result = await processDueMonitoringEnrollments();
+    expect(result).toEqual({ claimed: 1, changed: 0, noChange: 0, errors: 1 });
+
+    const run = holder.pool.store.runs[0];
+    expect(run.result).toBe("error");
+    expect(run.error).toBe("screening_failed:provider_http_503");
+    expect(holder.pool.store.alerts).toHaveLength(0);
+    // Baseline is preserved — an error must never look like "all clear"
+    expect(holder.pool.store.enrollments[0].baseline_snapshot).toEqual(baseline);
+    expect(holder.pool.store.enrollments[0].status).toBe("active");
+    expect(eventsPublished()).toHaveLength(0);
+  });
+
+  it("raises removed_hit alerts when a previously matched hit disappears", async () => {
+    holder.pool.store.enrollments.push(seedEnrollment({
+      baseline_snapshot: { screenedAt: new Date().toISOString(), lists: ["pep", "sanctions"], hits: [sanctionsHit] },
+    }));
+    // default gateway payloads are clear → the hit disappeared
+
+    const result = await processDueMonitoringEnrollments();
+    expect(result.changed).toBe(1);
+    expect(holder.pool.store.alerts[0].alert_type).toBe("removed_hit");
+    expect(holder.pool.store.alerts[0].severity).toBe("info");
+    // Removed hits are not critical — but the event is still published
+    const alerts = eventsPublished().filter(e => e.event_type === "MONITORING_ALERT");
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0].severity).toBe("warning");
+  });
+
+  it("skips paused, cancelled, and not-yet-due enrollments", async () => {
+    holder.pool.store.enrollments.push(
+      seedEnrollment({ id: "33333333-3333-4333-8333-333333333333", status: "paused", next_run_at: null }),
+      seedEnrollment({ id: "44444444-4444-4444-8444-444444444444", status: "cancelled", next_run_at: null }),
+      seedEnrollment({ id: "55555555-5555-4555-8555-555555555555", next_run_at: new Date(Date.now() + 3_600_000) }),
+    );
+    const result = await processDueMonitoringEnrollments();
+    expect(result).toEqual({ claimed: 0, changed: 0, noChange: 0, errors: 0 });
+    expect(holder.pool.store.runs).toHaveLength(0);
   });
 });
