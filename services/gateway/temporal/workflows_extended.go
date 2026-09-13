@@ -20,6 +20,7 @@ import (
 
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/temporal"
+	"go.temporal.io/sdk/worker"
 	"go.temporal.io/sdk/workflow"
 )
 
@@ -520,7 +521,7 @@ func CloseFieldTaskActivity(ctx context.Context, input FieldVisitInput, findings
 // RegisterExtendedWorkflows adds the three new workflows and their activities
 // to the Temporal worker. Call this from StartWorker() after registering the
 // base InvestigationWorkflow.
-func RegisterExtendedWorkflows(w interface{ RegisterWorkflow(interface{}); RegisterActivity(interface{}, ...interface{}) }) {
+func RegisterExtendedWorkflows(w worker.Worker) {
 	w.RegisterWorkflow(CriminalRecordsWorkflow)
 	w.RegisterWorkflow(CorporateCheckWorkflow)
 	w.RegisterWorkflow(FieldVisitWorkflow)
