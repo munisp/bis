@@ -167,7 +167,14 @@
       "idx": 23,
       "version": "7",
       "when": 1788634800000,
-      "tag": "0023_share_links_and_plan_signups",
+      "tag": "0023_subject_portal",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1788638400000,
+      "tag": "0024_share_links_and_plan_signups",
       "breakpoints": true
     }
   ]
