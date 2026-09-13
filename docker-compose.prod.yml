@@ -191,6 +191,7 @@ services:
     image: ghcr.io/${GITHUB_REPOSITORY:-bis-platform/bis}/event-processor:${IMAGE_TAG:-latest}
     ports: []
     deploy:
+      replicas: 2
       resources:
         limits:
           cpus: "1"
