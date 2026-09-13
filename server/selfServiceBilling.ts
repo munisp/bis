@@ -227,7 +227,12 @@ export const selfServiceBillingRouter = router({
       const subscriptionId = randomUUID();
       const periodStart = new Date();
       const periodEnd = periodEndFor(plan.billing_interval, periodStart);
-      const providerRef = billingRef ?? `self-serve-free:${input.idempotencyKey}`;
+      // tenant_subscriptions enforces a GLOBAL UNIQUE(provider,
+      // provider_subscription_ref) and billing_entitlements a global
+      // UNIQUE(source_reference): both synthetic references are therefore
+      // tenant-namespaced so the same idempotency key in another tenant can
+      // never collide (key squatting) or 500 on a duplicate key.
+      const providerRef = billingRef ?? `self-serve-free:${tenantId}:${input.idempotencyKey}`;
       try {
         await client.query("BEGIN");
         await client.query(
@@ -246,7 +251,7 @@ export const selfServiceBillingRouter = router({
             `INSERT INTO billing_entitlements
               (id, tenant_id, subscription_id, entitlement_kind, total_units, period_start, period_end, status, source_reference)
              VALUES ($1, $2, $3, 'subscription_included_check', $4, $5, $6, 'active', $7)`,
-            [randomUUID(), tenantId, subscriptionId, includedChecks, periodStart, periodEnd, `self-serve-signup:${input.idempotencyKey}`],
+            [randomUUID(), tenantId, subscriptionId, includedChecks, periodStart, periodEnd, `self-serve-signup:${tenantId}:${input.idempotencyKey}`],
           );
         }
         await client.query(
