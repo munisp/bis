@@ -1,0 +1,219 @@
+{
+  "version": 1,
+  "generatedBy": "WP6 fix/infra-gaps — Phase-1 audit Temporal contract alignment",
+  "namespace": "bis",
+  "wireConvention": {
+    "bridge": "POST {gateway}/v1/workflow/start",
+    "casing": "camelCase",
+    "requestFields": ["workflowType", "taskQueue", "workflowId", "input"],
+    "responseFields": ["workflowId", "runId", "status", "mode"],
+    "note": "The gateway is the server of this contract; the Node client was aligned to camelCase. Workflow INPUT payloads follow the registered worker's Go struct JSON tags (source of truth), which are snake_case for InvestigationWorkflow/ScreeningWorkflow and camelCase for the compliance workflows."
+  },
+  "clientInvocations": [
+    {
+      "kind": "workflow",
+      "name": "InvestigationWorkflow",
+      "taskQueue": "bis-investigation",
+      "starter": "startInvestigationWorkflow",
+      "source": "server/temporal.ts",
+      "guarded": false,
+      "inputFields": ["ref", "subject_name", "subject_type", "nin", "bvn", "rc_number", "tier", "gateway_url", "risk_url"]
+    },
+    {
+      "kind": "workflow",
+      "name": "PaymentTransferWorkflow",
+      "taskQueue": "bis-payment",
+      "starter": "startPaymentTransferWorkflow",
+      "source": "server/temporal.ts",
+      "guarded": true,
+      "guard": "TemporalWorkflowUnavailableError",
+      "inputFields": []
+    },
+    {
+      "kind": "workflow",
+      "name": "AMLWorkflow",
+      "taskQueue": "bis-aml",
+      "starter": "startAmlWorkflow",
+      "source": "server/temporal.ts",
+      "guarded": true,
+      "guard": "TemporalWorkflowUnavailableError",
+      "inputFields": []
+    },
+    {
+      "kind": "workflow",
+      "name": "KycExpiryWorkflow",
+      "taskQueue": "bis-compliance",
+      "starter": "startKycExpiryWorkflow",
+      "source": "server/temporal.ts",
+      "guarded": false,
+      "inputFields": ["tenantId", "gatewayUrl"]
+    },
+    {
+      "kind": "workflow",
+      "name": "CaseEscalationWorkflow",
+      "taskQueue": "bis-cases",
+      "starter": "startCaseEscalationWorkflow",
+      "source": "server/temporal.ts",
+      "guarded": true,
+      "guard": "TemporalWorkflowUnavailableError",
+      "inputFields": []
+    },
+    {
+      "kind": "workflow",
+      "name": "ScreeningWorkflow",
+      "taskQueue": "bis-screening",
+      "starter": "startScreeningWorkflow",
+      "source": "server/temporal.ts",
+      "guarded": false,
+      "inputFields": ["order_ref", "candidate_ref", "package_id", "tenant_id", "screening_types", "full_name", "nin", "bvn", "engine_url", "scorer_url", "bff_url", "priority"]
+    },
+    {
+      "kind": "workflow",
+      "name": "SarFilingWorkflow",
+      "taskQueue": "bis-compliance",
+      "starter": "startSarFilingWorkflow",
+      "source": "server/temporal.ts",
+      "guarded": false,
+      "inputFields": ["sarId", "tenantId", "subjectRef", "subjectName", "sarType", "filingOfficer", "gatewayUrl", "complianceUrl", "lakehouseUrl"]
+    },
+    {
+      "kind": "workflow",
+      "name": "GoAmlFilingWorkflow",
+      "taskQueue": "bis-compliance",
+      "starter": "startGoAmlFilingWorkflow",
+      "source": "server/temporal.ts",
+      "guarded": false,
+      "inputFields": ["filingId", "tenantId", "filingType", "subjectRef", "gatewayUrl", "complianceUrl"]
+    },
+    {
+      "kind": "workflow",
+      "name": "RiskProfileWorkflow",
+      "taskQueue": "bis-compliance",
+      "starter": "startRiskProfileWorkflow",
+      "source": "server/temporal.ts",
+      "guarded": false,
+      "inputFields": ["subjectRef", "subjectName", "tenantId", "trigger", "gatewayUrl", "mlServiceUrl", "lakehouseUrl"]
+    },
+    {
+      "kind": "workflow",
+      "name": "AccessReviewWorkflow",
+      "taskQueue": "bis-compliance",
+      "starter": "startAccessReviewWorkflow",
+      "source": "server/temporal.ts",
+      "guarded": true,
+      "guard": "TemporalWorkflowUnavailableError",
+      "inputFields": []
+    },
+    {
+      "kind": "query",
+      "name": "WorkflowStatus",
+      "endpoint": "GET /v1/workflow/status/{workflowId}",
+      "callers": ["getWorkflowStatus", "getPaymentWorkflowStatus"],
+      "source": "server/temporal.ts"
+    },
+    {
+      "kind": "signal",
+      "name": "CancelWorkflow",
+      "endpoint": "POST /v1/workflow/cancel/{workflowId}",
+      "callers": ["cancelPaymentTransferWorkflow"],
+      "source": "server/temporal.ts"
+    }
+  ],
+  "workerRegistrations": [
+    {
+      "kind": "workflow",
+      "name": "InvestigationWorkflow",
+      "taskQueue": "bis-investigation",
+      "namespace": "bis",
+      "source": "services/gateway/temporal/workflow.go",
+      "inputFields": ["ref", "subject_name", "subject_type", "nin", "bvn", "rc_number", "tier", "gateway_url", "risk_url"],
+      "activities": ["VerifyNINActivity", "VerifyBVNActivity", "ScreenSanctionsActivity", "CheckPEPActivity", "ScoreRiskActivity"]
+    },
+    {
+      "kind": "workflow",
+      "name": "CriminalRecordsWorkflow",
+      "taskQueue": "bis-investigation",
+      "namespace": "bis",
+      "source": "services/gateway/temporal/workflows_extended.go",
+      "inputFields": ["requestRef", "subjectRef", "subjectName", "nin", "bvn", "agencies", "gatewayUrl", "riskUrl", "trigger"],
+      "activities": ["PollAgencyActivity", "IngestCriminalRecordsActivity", "SendCriminalAlertActivity"]
+    },
+    {
+      "kind": "workflow",
+      "name": "CorporateCheckWorkflow",
+      "taskQueue": "bis-investigation",
+      "namespace": "bis",
+      "source": "services/gateway/temporal/workflows_extended.go",
+      "inputFields": ["profileRef", "companyName", "rcNumber", "tin", "gatewayUrl", "riskUrl", "trigger"],
+      "activities": ["CACLookupActivity", "FIRSClearanceActivity", "DirectorsPEPActivity", "CorporateSanctionsActivity"]
+    },
+    {
+      "kind": "workflow",
+      "name": "FieldVisitWorkflow",
+      "taskQueue": "bis-investigation",
+      "namespace": "bis",
+      "source": "services/gateway/temporal/workflows_extended.go",
+      "inputFields": ["taskRef", "agentRef", "investigationRef", "subjectRef", "address", "gatewayUrl", "deadlineHours"],
+      "activities": ["DispatchFieldTaskActivity", "EscalateFieldVisitActivity", "CloseFieldTaskActivity"]
+    },
+    {
+      "kind": "workflow",
+      "name": "ScreeningWorkflow",
+      "taskQueue": "bis-screening",
+      "namespace": "bis",
+      "source": "services/gateway/temporal/screening/workflow.go",
+      "inputFields": ["order_ref", "candidate_ref", "package_id", "tenant_id", "screening_types", "nin", "bvn", "full_name", "date_of_birth", "state_of_origin", "engine_url", "scorer_url", "bff_url", "priority"],
+      "activities": ["RunScreeningActivity", "BatchScoreActivity", "TriggerPreAdverseActivity", "PersistOrderResultActivity", "DeliverWebhooksActivity"]
+    },
+    {
+      "kind": "workflow",
+      "name": "SarFilingWorkflow",
+      "taskQueue": "bis-compliance",
+      "namespace": "bis",
+      "source": "services/compliance-worker/internal/workflows/compliance.go",
+      "inputFields": ["sarId", "tenantId", "subjectRef", "subjectName", "sarType", "filingOfficer", "gatewayUrl", "complianceUrl", "lakehouseUrl"],
+      "activities": ["ValidateSarData", "ComputeSubjectRiskScore", "GenerateGoAMLReport", "SubmitToNFIU", "WriteSarToLakehouse", "UpdateSarStatus"]
+    },
+    {
+      "kind": "workflow",
+      "name": "GoAmlFilingWorkflow",
+      "taskQueue": "bis-compliance",
+      "namespace": "bis",
+      "source": "services/compliance-worker/internal/workflows/compliance.go",
+      "inputFields": ["filingId", "tenantId", "filingType", "subjectRef", "complianceUrl", "gatewayUrl"],
+      "activities": ["FetchGoAmlData", "GenerateGoAMLXML", "ValidateGoAMLSchema", "SubmitGoAML"]
+    },
+    {
+      "kind": "workflow",
+      "name": "RiskProfileWorkflow",
+      "taskQueue": "bis-compliance",
+      "namespace": "bis",
+      "source": "services/compliance-worker/internal/workflows/compliance.go",
+      "inputFields": ["subjectRef", "subjectName", "tenantId", "trigger", "gatewayUrl", "mlServiceUrl", "lakehouseUrl"],
+      "activities": ["FetchKycRiskScore", "FetchTransactionRiskScore", "FetchAmlRiskScore", "CheckSanctions", "CheckPEP", "FetchAdverseMedia", "PersistRiskProfile", "WriteRiskProfileToLakehouse"]
+    },
+    {
+      "kind": "workflow",
+      "name": "KycExpiryWorkflow",
+      "taskQueue": "bis-compliance",
+      "namespace": "bis",
+      "source": "services/compliance-worker/internal/workflows/compliance.go",
+      "inputFields": ["tenantId", "gatewayUrl"],
+      "activities": ["FetchExpiringKycRecords", "SendKycRenewalReminder"]
+    },
+    {
+      "kind": "httpHandler",
+      "name": "WorkflowStatus",
+      "endpoint": "GET /v1/workflow/status/{workflowId}",
+      "source": "services/gateway/main.go",
+      "implementation": "Temporal DescribeWorkflowExecution"
+    },
+    {
+      "kind": "httpHandler",
+      "name": "CancelWorkflow",
+      "endpoint": "POST /v1/workflow/cancel/{workflowId}",
+      "source": "services/gateway/main.go",
+      "implementation": "Temporal CancelWorkflow"
+    }
+  ]
+}
