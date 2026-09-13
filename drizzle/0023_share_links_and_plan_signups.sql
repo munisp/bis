@@ -36,12 +36,14 @@ CREATE TABLE IF NOT EXISTS plan_signups (
   created_by integer,
   created_at timestamptz NOT NULL DEFAULT now()
 );
+-- Idempotency keys are tenant-namespaced: per-tenant uniqueness prevents both
+-- cross-tenant replay leaks and cross-tenant key squatting.
 CREATE UNIQUE INDEX IF NOT EXISTS plan_signups_idempotency_key_unique
-  ON plan_signups (idempotency_key);
+  ON plan_signups (tenant_id, idempotency_key);
 CREATE INDEX IF NOT EXISTS plan_signups_tenant_idx
   ON plan_signups (tenant_id, created_at);
 
 COMMENT ON TABLE plan_signups IS
-  'Durable idempotency records for self-service plan signups; a replayed idempotency key returns the original result and never re-settles payment.';
+  'Durable, tenant-scoped idempotency records for self-service plan signups; a replayed idempotency key returns the original result and never re-settles payment.';
 
 COMMIT;

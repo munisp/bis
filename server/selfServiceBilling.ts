@@ -18,9 +18,12 @@
  * plan_signups row with status 'payment_failed' so replays of the same
  * idempotency key return that original failure result.
  *
- * Idempotent: the client-supplied idempotency key is backed by a UNIQUE
- * constraint on plan_signups.idempotency_key; a replay returns the original
- * result without re-settling payment.
+ * Idempotent: the client-supplied idempotency key is backed by a per-tenant
+ * UNIQUE constraint on plan_signups.(tenant_id, idempotency_key); a replay
+ * returns the original result without re-settling payment. Keys are
+ * tenant-namespaced — one tenant's key is never visible to another tenant and
+ * is treated as a new key there, so replays can never leak a foreign signup
+ * or billing reference.
  */
 
 import { createHmac, randomUUID } from "node:crypto";
@@ -119,11 +122,16 @@ export const selfServiceBillingRouter = router({
       const { tenantId, userId } = requireTenant(ctx);
       const pool = await poolOrFail();
 
-      // Idempotency replay: the unique key is the durable record of the first
-      // attempt; a replay returns that original result without touching money.
+      // Idempotency replay, tenant-scoped: the (tenant_id, idempotency_key)
+      // unique pair is the durable record of the first attempt; a replay
+      // returns that original result without touching money. A key created by
+      // ANOTHER tenant is not visible here — it behaves as a brand-new key for
+      // this tenant and can never leak the other tenant's signup or billing
+      // reference.
       const prior = await pool.query(
-        `SELECT id, plan_code, status, billing_ref FROM plan_signups WHERE idempotency_key = $1`,
-        [input.idempotencyKey],
+        `SELECT id, plan_code, status, billing_ref FROM plan_signups
+         WHERE tenant_id = $1 AND idempotency_key = $2`,
+        [tenantId, input.idempotencyKey],
       );
       if ((prior.rowCount ?? 0) === 1) {
         const row = prior.rows[0];
@@ -196,7 +204,7 @@ export const selfServiceBillingRouter = router({
           await pool.query(
             `INSERT INTO plan_signups (id, tenant_id, plan_code, status, billing_ref, idempotency_key, created_by)
              VALUES ($1, $2, $3, 'payment_failed', $4, $5, $6)
-             ON CONFLICT (idempotency_key) DO NOTHING`,
+             ON CONFLICT (tenant_id, idempotency_key) DO NOTHING`,
             [randomUUID(), tenantId, input.planCode, input.paymentReference, input.idempotencyKey, userId],
           ).catch(() => undefined);
           await writeAuditLog(pool, {
@@ -255,10 +263,12 @@ export const selfServiceBillingRouter = router({
       } catch (error) {
         await client.query("ROLLBACK").catch(() => undefined);
         if (isUniqueViolation(error)) {
-          // Lost the idempotency race: return the original committed result.
+          // Lost the same-tenant idempotency race: re-read THIS tenant's row
+          // and return the original committed result.
           const winner = await pool.query(
-            `SELECT id, plan_code, status, billing_ref FROM plan_signups WHERE idempotency_key = $1`,
-            [input.idempotencyKey],
+            `SELECT id, plan_code, status, billing_ref FROM plan_signups
+             WHERE tenant_id = $1 AND idempotency_key = $2`,
+            [tenantId, input.idempotencyKey],
           );
           if ((winner.rowCount ?? 0) === 1) {
             const row = winner.rows[0];
