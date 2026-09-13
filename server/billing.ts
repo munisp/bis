@@ -14,9 +14,9 @@ import { storagePut } from "./storage";
 import { ENV } from "./_core/env";
 import { getDb } from "./db";
 import { billingTopups, tigerbeetleTransfers } from "../drizzle/schema";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { withCircuitBreaker } from "./circuitBreaker";
-import { settlePaystackPayment, startPaystackTopup } from "./billingSettlement";
+import { assertSufficientLedgerBalance, isInsufficientFundsError, settlePaystackPayment, startPaystackTopup } from "./billingSettlement";
 import { commercialBillingRouter } from "./billingCommercial";
 
 const ACCOUNT_REVENUE = "1";
@@ -180,6 +180,25 @@ export const billingRouter = router({
       }
 
       await ensureLedgerAccounts(input.tenantId);
+      // ── Flow-of-funds: available-balance precondition (WP6 FIX C) ─────────
+      // Enforced AFTER the durable idempotency claim above and BEFORE the
+      // TigerBeetle transfer is created. Idempotent replays (claim already
+      // existed) return earlier and never re-enforce, so a replay cannot
+      // double-charge or double-reject.
+      try {
+        await assertSufficientLedgerBalance({ tenantId: input.tenantId, amountKobo: amount });
+      } catch (error) {
+        if (isInsufficientFundsError(error)) {
+          // Release the just-claimed idempotency row: no ledger transfer was
+          // posted, so a retry after a top-up must be able to re-claim the
+          // same deterministic transfer ID instead of being wedged on a
+          // permanently unreconciled claim.
+          await db
+            .delete(tigerbeetleTransfers)
+            .where(and(eq(tigerbeetleTransfers.transferId, transferId), eq(tigerbeetleTransfers.tenantId, ctx.tenantId!)));
+        }
+        throw error;
+      }
       await tbPost("/transfers/create", [{
         id: transferId,
         debit_account_id: `${ACCOUNT_TENANT_PREFIX}${input.tenantId}`,

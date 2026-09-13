@@ -158,9 +158,9 @@ export const ENV = {
   keycloakAdminPassword: process.env.KEYCLOAK_ADMIN_PASSWORD ?? "",
   // Additional BIS service aliases (some files use different env var names)
   bisKycServiceUrl: configuredOrDevelopmentDefault("BIS_KYC_SERVICE_URL", "http://localhost:8089"),
-  bisVerifierUrl: configuredOrDevelopmentDefault("BIS_VERIFIER_URL", "http://localhost:8090"),
+  bisVerifierUrl: configuredOrDevelopmentDefault("BIS_VERIFIER_URL", "http://localhost:18086"),
   bisLexIntakeUrl: configuredOrDevelopmentDefault("BIS_LEX_INTAKE_URL", "http://localhost:8087"),
-  ollamaAdapterUrl: configuredOrDevelopmentDefault("OLLAMA_ADAPTER_URL", "http://localhost:8086"),
+  ollamaAdapterUrl: configuredOrDevelopmentDefault("OLLAMA_ADAPTER_URL", "http://localhost:18090"),
   gatewayUrl: configuredOrDevelopmentDefault("GATEWAY_URL", "http://localhost:8081"),
 
   // Audit HMAC secret (falls back to JWT_SECRET for dev convenience)
@@ -195,7 +195,7 @@ export const ENV = {
 
   // Temporal workflow engine
   temporalHost: process.env.TEMPORAL_HOST ?? "temporal:7233",
-  temporalNamespace: process.env.TEMPORAL_NAMESPACE ?? "default",
+  temporalNamespace: process.env.TEMPORAL_NAMESPACE ?? "bis",
 
   // Redis cache / session store
   // Single-node: REDIS_URL=redis://host:6379

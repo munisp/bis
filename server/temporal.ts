@@ -6,6 +6,31 @@
  */
 import { ENV } from "./_core/env";
 
+/**
+ * Typed fail-closed error (WP6 FIX B): thrown when the TS client is asked to
+ * start a workflow type that has NO registered worker handler anywhere in the
+ * fleet. Starting such a workflow would enqueue a phantom execution that can
+ * never make progress, so the call is rejected instead.
+ */
+export class TemporalWorkflowUnavailableError extends Error {
+  readonly code = "TEMPORAL_WORKFLOW_UNAVAILABLE" as const;
+  readonly workflowType: string;
+  readonly taskQueue: string;
+  constructor(workflowType: string, taskQueue: string) {
+    super(
+      `TEMPORAL_WORKFLOW_UNAVAILABLE: workflow '${workflowType}' has no registered worker ` +
+        `on task queue '${taskQueue}' (see server/temporal.manifest.json); the workflow was NOT started.`,
+    );
+    this.name = "TemporalWorkflowUnavailableError";
+    this.workflowType = workflowType;
+    this.taskQueue = taskQueue;
+  }
+}
+
+export function isTemporalWorkflowUnavailable(error: unknown): error is TemporalWorkflowUnavailableError {
+  return error instanceof TemporalWorkflowUnavailableError;
+}
+
 export interface InvestigationWorkflowInput {
   ref: string;
   subjectName: string;
@@ -25,7 +50,7 @@ export interface WorkflowStartResult {
 }
 
 const TEMPORAL_HOST = ENV.temporalHost;
-const TEMPORAL_NAMESPACE = ENV.temporalNamespace ?? "default";
+const TEMPORAL_NAMESPACE = ENV.temporalNamespace ?? "bis";
 const TEMPORAL_TASK_QUEUE = "bis-investigation";
 
 /**
@@ -50,10 +75,22 @@ export async function startInvestigationWorkflow(
       "X-BIS-Key": ENV.bisGatewayKey,
     },
     body: JSON.stringify({
-      workflow_type: "InvestigationWorkflow",
-      task_queue: TEMPORAL_TASK_QUEUE,
-      workflow_id: `investigation-${input.ref}`,
-      input,
+      workflowType: "InvestigationWorkflow",
+      taskQueue: TEMPORAL_TASK_QUEUE,
+      workflowId: `investigation-${input.ref}`,
+      // Worker source of truth: services/gateway/temporal/workflow.go
+      // InvestigationInput uses snake_case JSON tags — map at the boundary.
+      input: {
+        ref: input.ref,
+        subject_name: input.subjectName,
+        subject_type: input.subjectType,
+        nin: input.nin,
+        bvn: input.bvn,
+        rc_number: input.rcNumber,
+        tier: input.tier,
+        gateway_url: input.gatewayUrl,
+        risk_url: input.riskUrl,
+      },
     }),
   });
 
@@ -62,10 +99,10 @@ export async function startInvestigationWorkflow(
     throw new Error(`Temporal workflow start failed: ${resp.status} ${body}`);
   }
 
-  const result = (await resp.json()) as { workflow_id: string; run_id: string };
+  const result = (await resp.json()) as { workflowId: string; runId?: string };
   return {
-    workflowId: result.workflow_id,
-    runId: result.run_id,
+    workflowId: result.workflowId,
+    runId: result.runId,
     mode: "temporal",
   };
 }
@@ -139,46 +176,20 @@ export interface PaymentTransferWorkflowResult {
  * Requires Temporal to be configured before reporting a payment workflow start.
  */
 export async function startPaymentTransferWorkflow(
-  input: PaymentTransferWorkflowInput
+  _input: PaymentTransferWorkflowInput
 ): Promise<PaymentTransferWorkflowResult> {
-  if (!TEMPORAL_HOST) {
-    throw new Error("Temporal is not configured; payment workflow was not started.");
-  }
-
-  const gatewayUrl = ENV.gatewayUrl;
-
-  const resp = await fetch(`${gatewayUrl}/v1/workflow/start`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-BIS-Key": ENV.bisGatewayKey,
-    },
-    body: JSON.stringify({
-      workflow_type: "PaymentTransferWorkflow",
-      task_queue: PAYMENT_TASK_QUEUE,
-      // Use txRef as the workflow ID so duplicate submissions are idempotent
-      workflow_id: `payment-${input.txRef}`,
-      // Temporal workflow execution timeout: 10 minutes
-      // After this, Temporal cancels the workflow and the worker issues a reversal
-      execution_timeout_seconds: 600,
-      input,
-    }),
-    signal: AbortSignal.timeout(10_000),
-  });
-
-  if (!resp.ok) {
-    const body = await resp.text();
-    throw new Error(
-      `[Temporal] PaymentTransferWorkflow start failed: ${resp.status} ${body}`
-    );
-  }
-
-  const result = (await resp.json()) as { workflow_id: string; run_id: string };
-  return {
-    workflowId: result.workflow_id,
-    runId: result.run_id,
-    mode: "temporal",
-  };
+  // WP6 FIX B — fail closed. No worker in the fleet registers a handler for
+  // PaymentTransferWorkflow on task queue 'bis-payment' (verified against
+  // server/temporal.manifest.json; server/temporalWorker.ts only defined
+  // activity functions plus a fake HTTP poll loop against gateway endpoints
+  // that never existed — removed in this changeset). Starting this workflow
+  // would create a phantom execution that never progresses while the payment
+  // intent appears dispatched, so the start is rejected with a typed error.
+  // paymentIntentOutbox treats this as a dispatch failure: the intent is
+  // retried with backoff and finally dead-lettered for reconciliation — no
+  // money moves on a phantom workflow. Restore this starter only together
+  // with a real registered worker for 'bis-payment'.
+  throw new TemporalWorkflowUnavailableError("PaymentTransferWorkflow", PAYMENT_TASK_QUEUE);
 }
 
 /**
@@ -261,29 +272,13 @@ export interface AmlWorkflowResult {
   status: "started" | "dev_mode";
 }
 
-export async function startAmlWorkflow(input: AmlWorkflowInput): Promise<AmlWorkflowResult> {
-  const workflowId = `aml-${input.investigationRef}-${Date.now()}`;
-  if (!TEMPORAL_HOST) {
-    console.info("[Temporal] AML workflow (dev mode):", workflowId);
-    return { workflowId, status: "dev_mode" };
-  }
-  const resp = await fetch(`${ENV.gatewayUrl}/v1/workflow/start`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-BIS-Key": ENV.bisGatewayKey },
-    body: JSON.stringify({
-      workflow_type: "AMLWorkflow",
-      workflow_id: workflowId,
-      task_queue: "bis-aml",
-      input,
-    }),
-    signal: AbortSignal.timeout(10_000),
-  });
-  if (!resp.ok) {
-    const text = await resp.text();
-    throw new Error(`[Temporal] AML workflow start failed: ${resp.status} ${text}`);
-  }
-  const data = await resp.json() as { run_id?: string };
-  return { workflowId, runId: data.run_id, status: "started" };
+export async function startAmlWorkflow(_input: AmlWorkflowInput): Promise<AmlWorkflowResult> {
+  // WP6 FIX B — fail closed. No worker registers 'AMLWorkflow' on task queue
+  // 'bis-aml' anywhere in the fleet (see server/temporal.manifest.json).
+  // Previously this enqueued a phantom workflow execution that could never
+  // progress. Callers (server/aml.ts, server/temporalRouter.ts) already
+  // handle a rejected start. Restore only with a real registered worker.
+  throw new TemporalWorkflowUnavailableError("AMLWorkflow", "bis-aml");
 }
 
 // ── KYC Expiry Workflow ───────────────────────────────────────────────────────
@@ -300,14 +295,23 @@ export async function startKycExpiryWorkflow(input: KycExpiryWorkflowInput): Pro
     console.info("[Temporal] KYC expiry workflow (dev mode):", workflowId);
     return { workflowId, status: "dev_mode" };
   }
+  // WP6 FIX B — aligned to the registered worker (source of truth):
+  // services/compliance-worker registers 'KycExpiryWorkflow' on task queue
+  // 'bis-compliance' with input KycExpiryInput{tenantId, gatewayUrl}. The
+  // previous client sent 'KYCExpiryWorkflow' on 'bis-kyc' with a per-record
+  // payload that no worker accepts; the registered workflow is a tenant-wide
+  // sweep that locates the expiring records itself.
   const resp = await fetch(`${ENV.gatewayUrl}/v1/workflow/start`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-BIS-Key": ENV.bisGatewayKey },
     body: JSON.stringify({
-      workflow_type: "KYCExpiryWorkflow",
-      workflow_id: workflowId,
-      task_queue: "bis-kyc",
-      input,
+      workflowType: "KycExpiryWorkflow",
+      workflowId,
+      taskQueue: "bis-compliance",
+      input: {
+        tenantId: input.tenantId ?? 0,
+        gatewayUrl: ENV.bisGatewayUrl,
+      },
     }),
     signal: AbortSignal.timeout(10_000),
   });
@@ -328,28 +332,14 @@ export interface CaseEscalationWorkflowInput {
   tenantId?: number;
 }
 
-export async function startCaseEscalationWorkflow(input: CaseEscalationWorkflowInput): Promise<{ workflowId: string; status: string }> {
-  const workflowId = `case-escalation-${input.caseRef}-${Date.now()}`;
-  if (!TEMPORAL_HOST) {
-    console.info("[Temporal] Case escalation workflow (dev mode):", workflowId);
-    return { workflowId, status: "dev_mode" };
-  }
-  const resp = await fetch(`${ENV.gatewayUrl}/v1/workflow/start`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-BIS-Key": ENV.bisGatewayKey },
-    body: JSON.stringify({
-      workflow_type: "CaseEscalationWorkflow",
-      workflow_id: workflowId,
-      task_queue: "bis-cases",
-      input,
-    }),
-    signal: AbortSignal.timeout(10_000),
-  });
-  if (!resp.ok) {
-    const text = await resp.text();
-    throw new Error(`[Temporal] Case escalation workflow start failed: ${resp.status} ${text}`);
-  }
-  return { workflowId, status: "started" };
+export async function startCaseEscalationWorkflow(
+  _input: CaseEscalationWorkflowInput,
+): Promise<{ workflowId: string; status: string }> {
+  // WP6 FIX B — fail closed. No worker registers 'CaseEscalationWorkflow' on
+  // task queue 'bis-cases' (see server/temporal.manifest.json). The tRPC
+  // caller receives a typed TEMPORAL_WORKFLOW_UNAVAILABLE error instead of a
+  // phantom workflow ID. Restore only with a real registered worker.
+  throw new TemporalWorkflowUnavailableError("CaseEscalationWorkflow", "bis-cases");
 }
 
 // ── Screening Workflow ────────────────────────────────────────────────────────
@@ -358,6 +348,10 @@ export interface ScreeningWorkflowInput {
   candidateProfileId: number;
   packageId: number;
   tenantId?: number;
+  /** Worker-required subject attributes (ScreeningOrderInput.full_name). */
+  fullName?: string;
+  nin?: string;
+  bvn?: string;
 }
 
 export async function startScreeningWorkflow(input: ScreeningWorkflowInput): Promise<{ workflowId: string; status: string }> {
@@ -366,14 +360,32 @@ export async function startScreeningWorkflow(input: ScreeningWorkflowInput): Pro
     console.info("[Temporal] Screening workflow (dev mode):", workflowId);
     return { workflowId, status: "dev_mode" };
   }
+  // WP6 FIX B — aligned to the registered worker (source of truth):
+  // services/gateway/temporal/screening/workflow.go registers
+  // 'ScreeningWorkflow' on 'bis-screening' taking ScreeningOrderInput with
+  // snake_case JSON fields. The worker applies its own env defaults for
+  // engine_url/scorer_url/bff_url when they are empty.
   const resp = await fetch(`${ENV.gatewayUrl}/v1/workflow/start`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-BIS-Key": ENV.bisGatewayKey },
     body: JSON.stringify({
-      workflow_type: "ScreeningWorkflow",
-      workflow_id: workflowId,
-      task_queue: "bis-screening",
-      input,
+      workflowType: "ScreeningWorkflow",
+      workflowId,
+      taskQueue: "bis-screening",
+      input: {
+        order_ref: `ORD-${input.orderId}`,
+        candidate_ref: `CAND-${input.candidateProfileId}`,
+        package_id: input.packageId,
+        tenant_id: String(input.tenantId ?? ""),
+        screening_types: ["identity", "sanctions", "pep", "adverse_media"],
+        full_name: input.fullName ?? "",
+        nin: input.nin,
+        bvn: input.bvn,
+        engine_url: process.env.SCREENING_ENGINE_URL ?? "",
+        scorer_url: process.env.SCREENING_SCORER_URL ?? "",
+        bff_url: process.env.BFF_URL ?? "",
+        priority: "standard",
+      },
     }),
     signal: AbortSignal.timeout(10_000),
   });
@@ -403,9 +415,9 @@ export async function startSarFilingWorkflow(input: SarFilingWorkflowInput): Pro
     method: "POST",
     headers: { "Content-Type": "application/json", "X-BIS-Key": ENV.bisGatewayKey },
     body: JSON.stringify({
-      workflow_type: "SarFilingWorkflow",
-      workflow_id: workflowId,
-      task_queue: "bis-compliance",
+      workflowType: "SarFilingWorkflow",
+      workflowId,
+      taskQueue: "bis-compliance",
       input: {
         ...input,
         gatewayUrl: ENV.bisGatewayUrl,
@@ -439,9 +451,9 @@ export async function startGoAmlFilingWorkflow(input: GoAmlFilingWorkflowInput):
     method: "POST",
     headers: { "Content-Type": "application/json", "X-BIS-Key": ENV.bisGatewayKey },
     body: JSON.stringify({
-      workflow_type: "GoAmlFilingWorkflow",
-      workflow_id: workflowId,
-      task_queue: "bis-compliance",
+      workflowType: "GoAmlFilingWorkflow",
+      workflowId,
+      taskQueue: "bis-compliance",
       input: {
         ...input,
         gatewayUrl: ENV.bisGatewayUrl,
@@ -474,9 +486,9 @@ export async function startRiskProfileWorkflow(input: RiskProfileWorkflowInput):
     method: "POST",
     headers: { "Content-Type": "application/json", "X-BIS-Key": ENV.bisGatewayKey },
     body: JSON.stringify({
-      workflow_type: "RiskProfileWorkflow",
-      workflow_id: workflowId,
-      task_queue: "bis-compliance",
+      workflowType: "RiskProfileWorkflow",
+      workflowId,
+      taskQueue: "bis-compliance",
       input: {
         ...input,
         gatewayUrl: ENV.bisGatewayUrl,
@@ -504,43 +516,14 @@ export interface AccessReviewWorkflowInput {
   triggeredBy?: string;
   dueAt?: Date;
 }
-export async function getTemporalClientSafe() {
-  try {
-    if (!TEMPORAL_HOST) {
-      return null; // dev mode — Temporal not running
-    }
-    // Delegate to the Go gateway which proxies to Temporal gRPC
-    return { workflow: { start: async (type: string, opts: Record<string, unknown>) => {
-      const resp = await fetch(`${ENV.gatewayUrl}/v1/workflow/start`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-BIS-Key": ENV.bisGatewayKey },
-        body: JSON.stringify({ workflow_type: type, ...opts }),
-        signal: AbortSignal.timeout(10_000),
-      });
-      if (!resp.ok) throw new Error(`[Temporal] ${resp.status}`);
-      return resp.json() as Promise<{ workflowId: string }>;
-    }}};
-  } catch {
-    return null;
-  }
-}
-export async function startAccessReviewWorkflow(input: AccessReviewWorkflowInput): Promise<{ workflowId: string; status: "started" | "dev_mode" }> {
-  const workflowId = `access-review-${input.reviewRef}-${Date.now()}`;
-  if (!TEMPORAL_HOST) {
-    console.info("[Temporal] AccessReview workflow (dev mode):", workflowId);
-    return { workflowId, status: "dev_mode" };
-  }
-  try {
-    const client = await getTemporalClientSafe();
-    if (!client) return { workflowId, status: "dev_mode" as const };
-    const handle = await client.workflow.start("AccessReviewWorkflow", {
-      taskQueue: "COMPLIANCE_TASK_QUEUE",
-      workflowId,
-      args: [input],
-    });
-    return { workflowId: handle.workflowId, status: "started" };
-  } catch (err) {
-    console.error("[Temporal] startAccessReviewWorkflow error:", err);
-    return { workflowId, status: "dev_mode" };
-  }
+export async function startAccessReviewWorkflow(
+  _input: AccessReviewWorkflowInput,
+): Promise<{ workflowId: string; status: "started" | "dev_mode" }> {
+  // WP6 FIX B — fail closed. No worker registers 'AccessReviewWorkflow'
+  // anywhere; the previous implementation also sent it to a task queue
+  // literally named "COMPLIANCE_TASK_QUEUE" through a fake client proxy
+  // (getTemporalClientSafe — removed). Callers (server/insiderThreat.ts)
+  // already handle a rejected start via .catch(...). Restore only with a
+  // real registered worker and a real task queue.
+  throw new TemporalWorkflowUnavailableError("AccessReviewWorkflow", "bis-compliance");
 }

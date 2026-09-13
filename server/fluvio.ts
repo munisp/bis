@@ -25,7 +25,7 @@
  *
  * Environment variables:
  *   FLUVIO_VELOCITY_URL  — base URL of the fluvio-velocity sidecar
- *                          (default: http://localhost:9090)
+ *                          (default: http://localhost:19090)
  */
 
 import { ENV } from "./_core/env";

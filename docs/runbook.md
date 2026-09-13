@@ -454,10 +454,10 @@ Then restart: `docker compose restart open-appsec`
 docker compose up -d lex-matcher
 
 # Health check
-curl http://localhost:8090/health
+curl http://localhost:18091/health
 
 # Test matching
-curl -X POST http://localhost:8090/match \
+curl -X POST http://localhost:18091/match \
   -H "Content-Type: application/json" \
   -d '{"subject_name":"JOHN DOE","candidates":[{"id":"1","name":"John Doe","type":"individual"}],"threshold":0.6}'
 ```
@@ -471,10 +471,10 @@ curl -X POST http://localhost:8090/match \
 docker compose up -d verifier
 
 # Health check
-curl http://localhost:8086/health
+curl http://localhost:18086/health
 
 # Test NIN verification
-curl -X POST http://localhost:8086/v1/verify \
+curl -X POST http://localhost:18086/v1/verify \
   -H "Content-Type: application/json" \
   -H "X-API-Key: $BIS_GATEWAY_KEY" \
   -d '{"type":"nin","value":"12345678901","first_name":"JOHN","last_name":"DOE"}'

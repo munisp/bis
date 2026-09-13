@@ -354,16 +354,19 @@ describe("Temporal — Workflow Orchestration", () => {
     vi.unstubAllGlobals();
   });
 
-  it("startAmlWorkflow calls gateway when TEMPORAL_HOST is set", async () => {
+  it("startAmlWorkflow fails closed — no worker registers AMLWorkflow (WP6 FIX B)", async () => {
     process.env.TEMPORAL_HOST = "temporal:7233";
     process.env.GATEWAY_URL = "http://gateway:8080";
     process.env.BIS_GATEWAY_KEY = "test-key";
-    const fetchMock = mockFetchOk({ run_id: "run-abc123" });
+    const fetchMock = mockFetchOk({ runId: "run-abc123" });
     vi.stubGlobal("fetch", fetchMock);
-    const { startAmlWorkflow } = await import("./temporal");
-    const result = await startAmlWorkflow({ investigationRef: "INV-002", subjectName: "Jane Doe", subjectType: "individual", triggerReason: "manual" });
-    expect(result.status).toBe("started");
-    expect(result.runId).toBe("run-abc123");
+    const { startAmlWorkflow, isTemporalWorkflowUnavailable } = await import("./temporal");
+    // No worker handler exists for AMLWorkflow on 'bis-aml', so the starter
+    // must reject with a typed error and never contact the gateway.
+    const error = await startAmlWorkflow({ investigationRef: "INV-002", subjectName: "Jane Doe", subjectType: "individual", triggerReason: "manual" }).catch((e: unknown) => e);
+    expect(isTemporalWorkflowUnavailable(error)).toBe(true);
+    expect((error as { code: string }).code).toBe("TEMPORAL_WORKFLOW_UNAVAILABLE");
+    expect(fetchMock).not.toHaveBeenCalled();
     vi.unstubAllGlobals();
   });
 });

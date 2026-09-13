@@ -116,7 +116,7 @@ services:
   apisix:
     <<: [*restart, *logging]
     ports:
-      - "443:9443"   # HTTPS only in production
+      - "9443:9443"  # host port remapped (collided with nginx 443)
     deploy:
       resources:
         limits:
@@ -340,6 +340,15 @@ services:
         limits:
           cpus: "0.5"
           memory: 512M
+
+  # ── Caddy (dev edge proxy) — strip its host-port bindings in production ──
+  # The base file binds caddy to host 80/443; in production nginx owns those
+  # ports, so caddy's bindings are cleared here (same pattern as every other
+  # service in this override file) to avoid a host-port collision.
+
+  caddy:
+    <<: [*restart, *logging]
+    ports: []
 
   # ── Nginx reverse proxy (production entry point) ──────────────────────────
 

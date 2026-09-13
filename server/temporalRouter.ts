@@ -229,6 +229,9 @@ export const temporalRouter = router({
       orderId: z.number().int(),
       candidateProfileId: z.number().int(),
       packageId: z.number().int(),
+      fullName: z.string().max(256).optional(),
+      nin: z.string().max(32).optional(),
+      bvn: z.string().max(32).optional(),
     }))
     .mutation(async ({ input, ctx }) => {
       const wfInput: ScreeningWorkflowInput = { ...input, tenantId: ctx.user?.tenantId ?? undefined };

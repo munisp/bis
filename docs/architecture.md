@@ -294,8 +294,8 @@ See `sdk/` directory for source code and usage examples.
 
 | Service | Technology | Port | Purpose |
 |---------|-----------|------|---------|
-| `verifier` | Go | 8086 | Standalone NIN/BVN/CAC/sanctions verification with Youverify fallback |
-| `lex-matcher` | Python (FastAPI) | 8090 | NLP-based LEX subject name matching (TF-IDF + fuzzy) |
+| `verifier` | Go | 8086 (host: 18086) | Standalone NIN/BVN/CAC/sanctions verification with Youverify fallback |
+| `lex-matcher` | Python (FastAPI) | 8090 (host: 18091) | NLP-based LEX subject name matching (TF-IDF + fuzzy) |
 
 ### open-appsec + APISIX WAF Integration
 

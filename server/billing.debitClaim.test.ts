@@ -98,8 +98,14 @@ describe("billing recordDebit durable claim", () => {
     );
     (getDb as ReturnType<typeof vi.fn>).mockResolvedValue(db);
     (globalThis.fetch as ReturnType<typeof vi.fn>).mockImplementation(
-      async () => {
+      async (url: unknown, init?: RequestInit) => {
         order.push("ledger");
+        // The available-balance precondition (WP6 FIX C) performs a GET on the
+        // tenant ledger account before the transfer is created; report a
+        // funded account so the debit proceeds.
+        if ((!init || !init.method || init.method === "GET") && String(url).includes("/accounts/10000")) {
+          return { ok: true, json: async () => ({ credits_posted: 10_000_000, debits_posted: 0, debits_pending: 0 }) };
+        }
         return { ok: true, json: async () => [] };
       }
     );

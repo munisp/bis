@@ -12,6 +12,8 @@ import (
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/worker"
 	"go.temporal.io/sdk/workflow"
+
+	"bis/gateway/temporal/screening"
 )
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -180,6 +182,35 @@ func InitClient() error {
 	return nil
 }
 
+// ─── Workflow contract registry (WP6 FIX B) ─────────────────────────────────
+//
+// workflowTaskQueues is the single source of truth for which workflow types
+// have a registered worker handler and on which task queue. The TypeScript
+// side of this contract lives in server/temporal.manifest.json; keep both in
+// sync. The HTTP bridge (handleWorkflowStart) fails closed for any workflow
+// type that is not listed here.
+
+var workflowTaskQueues = map[string]string{
+	// gateway workers (this package + screening + extended)
+	"InvestigationWorkflow":   "bis-investigation",
+	"CriminalRecordsWorkflow": "bis-investigation",
+	"CorporateCheckWorkflow":  "bis-investigation",
+	"FieldVisitWorkflow":      "bis-investigation",
+	"ScreeningWorkflow":       "bis-screening",
+	// compliance-worker service (services/compliance-worker)
+	"SarFilingWorkflow":   "bis-compliance",
+	"GoAmlFilingWorkflow": "bis-compliance",
+	"RiskProfileWorkflow": "bis-compliance",
+	"KycExpiryWorkflow":   "bis-compliance",
+}
+
+// RegisteredWorkflowTaskQueue returns the task queue a workflow type is
+// registered on, or false when no worker handles it.
+func RegisteredWorkflowTaskQueue(workflowType string) (string, bool) {
+	q, ok := workflowTaskQueues[workflowType]
+	return q, ok
+}
+
 // StartWorker registers and starts the workflow/activity worker.
 func StartWorker() {
 	if temporalClient == nil {
@@ -192,12 +223,29 @@ func StartWorker() {
 	w.RegisterActivity(ScreenSanctionsActivity)
 	w.RegisterActivity(CheckPEPActivity)
 	w.RegisterActivity(ScoreRiskActivity)
+	// Extended investigation workflows share the bis-investigation task queue.
+	RegisterExtendedWorkflows(w)
 	go func() {
 		if err := w.Run(worker.InterruptCh()); err != nil {
 			log.Printf("[Temporal] Worker error: %v", err)
 		}
 	}()
 	log.Println("[Temporal] Worker started on task queue: bis-investigation")
+}
+
+// StartScreeningWorker registers and starts the screening workflow worker on
+// the bis-screening task queue.
+func StartScreeningWorker() {
+	if temporalClient == nil {
+		return
+	}
+	w := screening.RegisterScreeningWorker(temporalClient)
+	go func() {
+		if err := w.Run(worker.InterruptCh()); err != nil {
+			log.Printf("[Temporal] Screening worker error: %v", err)
+		}
+	}()
+	log.Println("[Temporal] Worker started on task queue: bis-screening")
 }
 
 // TriggerInvestigation starts a new investigation workflow.
@@ -241,18 +289,64 @@ func NewClient(host, namespace string) (*Client, error) {
 	return &Client{}, nil
 }
 
-// StartWorkflow starts a named workflow and returns its run ID.
-func (c *Client) StartWorkflow(ctx context.Context, workflowType string, input interface{}) (string, error) {
+// WorkflowStatus describes a workflow execution and returns its Temporal
+// status string (e.g. "Running", "Completed", "Terminated").
+func (c *Client) WorkflowStatus(ctx context.Context, workflowID string) (string, error) {
 	if temporalClient == nil {
 		return "", fmt.Errorf("Temporal client is unavailable")
 	}
-	opts := client.StartWorkflowOptions{
-		ID:        fmt.Sprintf("%s-%d", workflowType, time.Now().UnixNano()),
-		TaskQueue: "bis-investigation",
-	}
-	run, err := temporalClient.ExecuteWorkflow(ctx, opts, workflowType, input)
+	resp, err := temporalClient.DescribeWorkflowExecution(ctx, workflowID, "")
 	if err != nil {
 		return "", err
 	}
-	return run.GetID(), nil
+	info := resp.GetWorkflowExecutionInfo()
+	if info == nil {
+		return "", fmt.Errorf("workflow %q has no execution info", workflowID)
+	}
+	return info.GetStatus().String(), nil
+}
+
+// CancelWorkflow requests cancellation of a running workflow execution.
+func (c *Client) CancelWorkflow(ctx context.Context, workflowID string) error {
+	if temporalClient == nil {
+		return fmt.Errorf("Temporal client is unavailable")
+	}
+	return temporalClient.CancelWorkflow(ctx, workflowID, "")
+}
+
+// StartWorkflow starts a named workflow and returns its workflow ID.
+// The task queue is resolved from the workflow contract registry; a workflow
+// type with no registered worker is rejected (fail closed).
+func (c *Client) StartWorkflow(ctx context.Context, workflowType string, input interface{}) (string, error) {
+	workflowID, _, err := c.StartWorkflowWithOptions(ctx, workflowType, "", "", input)
+	return workflowID, err
+}
+
+// StartWorkflowWithOptions starts a named workflow, honouring the requested
+// workflow ID (idempotent re-starts reuse the same ID) and validating the
+// requested task queue against the contract registry. It returns the
+// workflow ID and the run ID of the started execution.
+func (c *Client) StartWorkflowWithOptions(ctx context.Context, workflowType, taskQueue, workflowID string, input interface{}) (string, string, error) {
+	if temporalClient == nil {
+		return "", "", fmt.Errorf("Temporal client is unavailable")
+	}
+	registeredQueue, ok := RegisteredWorkflowTaskQueue(workflowType)
+	if !ok {
+		return "", "", fmt.Errorf("workflow type %q has no registered worker; refusing to start a phantom execution", workflowType)
+	}
+	if taskQueue != "" && taskQueue != registeredQueue {
+		return "", "", fmt.Errorf("task queue mismatch for %q: worker is registered on %q, not %q", workflowType, registeredQueue, taskQueue)
+	}
+	if workflowID == "" {
+		workflowID = fmt.Sprintf("%s-%d", workflowType, time.Now().UnixNano())
+	}
+	opts := client.StartWorkflowOptions{
+		ID:        workflowID,
+		TaskQueue: registeredQueue,
+	}
+	run, err := temporalClient.ExecuteWorkflow(ctx, opts, workflowType, input)
+	if err != nil {
+		return "", "", err
+	}
+	return run.GetID(), run.GetRunID(), nil
 }
