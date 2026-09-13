@@ -32,7 +32,7 @@ export function getFallbackSuggestion(source: string): string {
     adverse_media_ng:    'Run manual Google News search with subject name + "fraud" / "court"',
     cac_full_profile:    'Request certified true copy of Certificate of Incorporation',
     firs_tax_clearance:  'Request TCC (Tax Clearance Certificate) from entity directly',
-    beneficial_owner:    'Request CAC Form CO2 (Return of Allotment) from entity directly',
+    beneficial_owner:    'Request CAC Form CO2 (Return of Allotment) from entity',
     corporate_sanctions: 'Cross-check OFAC SDN list and UN consolidated sanctions list',
   };
   return map[source] ?? 'Request supporting documentation from subject directly';
