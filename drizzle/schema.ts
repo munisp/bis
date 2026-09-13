@@ -2231,7 +2231,8 @@ export const adverseActionStatusEnum = pgEnum("adverse_action_status", [
 
 export const consentPurposeEnum = pgEnum("consent_purpose", [
   "pre_employment", "employment", "contractor", "volunteer",
-  "tenancy", "financial_services", "healthcare", "government"
+  "tenancy", "financial_services", "healthcare", "government",
+  "consumer_self_check"
 ]);
 
 export const workPermitTypeEnum = pgEnum("work_permit_type", [
@@ -3692,3 +3693,95 @@ export const forceCreditApprovals = pgTable("force_credit_approvals", {
 }));
 export type ForceCreditApproval = typeof forceCreditApprovals.$inferSelect;
 export type InsertForceCreditApproval = typeof forceCreditApprovals.$inferInsert;
+
+// ─── Subject Portal (consumer self-check / candidate portal) ─────────────────
+// WP3: subject-facing access. Tokens are stored ONLY as SHA-256 hashes
+// (same scheme as apiTokens.tokenHash, PR #151) — plaintext never persists.
+
+export const subjectAccessTokenPurposeEnum = pgEnum("subject_access_token_purpose", [
+  "self_check", "status", "dispute"
+]);
+
+export const subjectAccessTokens = pgTable("subject_access_tokens", {
+  id:          uuid("id").primaryKey(),
+  tenantId:    integer("tenant_id").references(() => tenants.id, { onDelete: "restrict" }).notNull(),
+  candidateId: integer("candidate_id").references(() => candidateProfiles.id, { onDelete: "restrict" }).notNull(),
+  tokenHash:   text("token_hash").notNull().unique(),
+  purpose:     subjectAccessTokenPurposeEnum("purpose").notNull(),
+  expiresAt:   timestamp("expires_at", { withTimezone: true }).notNull(),
+  revokedAt:   timestamp("revoked_at", { withTimezone: true }),
+  createdAt:   timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({
+  sat_candidate_idx: index("sat_candidate_idx").on(t.tenantId, t.candidateId),
+  sat_expiry_idx:    index("sat_expiry_idx").on(t.expiresAt),
+}));
+export type SubjectAccessToken       = typeof subjectAccessTokens.$inferSelect;
+export type InsertSubjectAccessToken = typeof subjectAccessTokens.$inferInsert;
+
+export const subjectDisputeStatusEnum = pgEnum("subject_dispute_status", [
+  "received", "under_review", "resolved"
+]);
+
+export const subjectDisputes = pgTable("subject_disputes", {
+  id:              uuid("id").primaryKey(),
+  tenantId:        integer("tenant_id").references(() => tenants.id, { onDelete: "restrict" }).notNull(),
+  candidateId:     integer("candidate_id").references(() => candidateProfiles.id, { onDelete: "restrict" }).notNull(),
+  caseId:          uuid("case_id"),
+  statementSha256: text("statement_sha256").notNull(),
+  // Vault Transit envelope (JSON: {ciphertext,keyVersion,providerKeyVersion}) via
+  // server/piiEnvelopeCrypto.ts; plaintext statements are never stored.
+  statementEnc:    text("statement_enc"),
+  status:          subjectDisputeStatusEnum("status").notNull().default("received"),
+  resolution:      text("resolution"),
+  createdAt:       timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt:       timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({
+  sd_candidate_idx: index("sd_candidate_idx").on(t.tenantId, t.candidateId),
+  sd_status_idx:    index("sd_status_idx").on(t.tenantId, t.status),
+}));
+export type SubjectDispute       = typeof subjectDisputes.$inferSelect;
+export type InsertSubjectDispute = typeof subjectDisputes.$inferInsert;
+
+// ── report_share_links ─────────────────────────────────────────────────────────
+// Tokenised, expiring share links for redacted investigation one-pagers. The
+// plaintext token is never stored — only its SHA-256 hex digest (same scheme as
+// api_tokens / openclaw bearer validation).
+export const reportShareLinks = pgTable("report_share_links", {
+  id:               uuid("id").primaryKey(),
+  tenantId:         integer("tenant_id").notNull(),
+  investigationRef: text("investigation_ref").notNull(),
+  tokenHash:        text("token_hash").notNull(),
+  createdBy:        integer("created_by"),
+  expiresAt:        timestamp("expires_at", { withTimezone: true }).notNull(),
+  revokedAt:        timestamp("revoked_at", { withTimezone: true }),
+  viewCount:        integer("view_count").notNull().default(0),
+  lastViewedAt:     timestamp("last_viewed_at", { withTimezone: true }),
+  createdAt:        timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  report_share_links_token_hash_idx: uniqueIndex("report_share_links_token_hash_idx").on(t.tokenHash),
+  report_share_links_tenant_idx:     index("report_share_links_tenant_idx").on(t.tenantId, t.createdAt),
+  report_share_links_investigation_idx: index("report_share_links_investigation_idx").on(t.tenantId, t.investigationRef),
+}));
+export type ReportShareLink = typeof reportShareLinks.$inferSelect;
+export type InsertReportShareLink = typeof reportShareLinks.$inferInsert;
+
+// ── plan_signups ───────────────────────────────────────────────────────────────
+// Durable, tenant-scoped idempotency record for self-service plan signups. The
+// per-tenant unique (tenant_id, idempotency_key) pair guarantees a retried
+// signup returns the original result instead of double-charging, and prevents
+// cross-tenant replay leaks / key squatting.
+export const planSignups = pgTable("plan_signups", {
+  id:             uuid("id").primaryKey(),
+  tenantId:       integer("tenant_id").notNull(),
+  planCode:       text("plan_code").notNull(),
+  status:         text("status").notNull(),
+  billingRef:     text("billing_ref"),
+  idempotencyKey: text("idempotency_key").notNull(),
+  createdBy:      integer("created_by"),
+  createdAt:      timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  plan_signups_idempotency_key_unique: uniqueIndex("plan_signups_idempotency_key_unique").on(t.tenantId, t.idempotencyKey),
+  plan_signups_tenant_idx:             index("plan_signups_tenant_idx").on(t.tenantId, t.createdAt),
+}));
+export type PlanSignup = typeof planSignups.$inferSelect;
+export type InsertPlanSignup = typeof planSignups.$inferInsert;
