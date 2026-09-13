@@ -78,6 +78,7 @@ export default function DocumentVaultPage() {
   const [uploadCategory, setUploadCategory] = useState<string>("other");
   const [uploadDescription, setUploadDescription] = useState("");
   const [uploadConfidential, setUploadConfidential] = useState(false);
+  const [uploadCaseId, setUploadCaseId] = useState<string>("");
   const [uploading, setUploading] = useState(false);
 
   // Detail dialog state
@@ -106,12 +107,19 @@ export default function DocumentVaultPage() {
     { enabled: detailDoc !== null }
   );
 
+  // Uploads must be attached to an explicit case owned by the caller's tenant
+  const { data: casesData } = trpc.cases.list.useQuery(
+    { pageSize: 100 },
+    { enabled: uploadOpen }
+  );
+
   const uploadMutation = trpc.documentVault.upload.useMutation({
     onSuccess: () => {
       toast.success("Document uploaded successfully");
       setUploadOpen(false);
       setUploadFile(null);
       setUploadDescription("");
+      setUploadCaseId("");
       utils.documentVault.list.invalidate();
       utils.documentVault.stats.invalidate();
     },
@@ -152,6 +160,10 @@ export default function DocumentVaultPage() {
 
   const handleUpload = async () => {
     if (!uploadFile) return;
+    if (!uploadCaseId) {
+      toast.error("Please select a case to attach this document to");
+      return;
+    }
     setUploading(true);
     try {
       const reader = new FileReader();
@@ -165,6 +177,7 @@ export default function DocumentVaultPage() {
           category: uploadCategory as any,
           description: uploadDescription || undefined,
           confidential: uploadConfidential,
+          caseId: Number(uploadCaseId),
         });
         setUploading(false);
       };
@@ -471,6 +484,19 @@ export default function DocumentVaultPage() {
               </div>
             )}
             <div>
+              <Label className="text-slate-300">Attach to Case (required)</Label>
+              <Select value={uploadCaseId} onValueChange={setUploadCaseId}>
+                <SelectTrigger className="mt-1 bg-slate-700 border-slate-600 text-white">
+                  <SelectValue placeholder="Select a case..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {(casesData?.cases ?? []).map((c: { id: number; ref: string; title: string }) => (
+                    <SelectItem key={c.id} value={String(c.id)}>{c.ref} — {c.title}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
               <Label className="text-slate-300">Category</Label>
               <Select value={uploadCategory} onValueChange={setUploadCategory}>
                 <SelectTrigger className="mt-1 bg-slate-700 border-slate-600 text-white">
@@ -519,7 +545,7 @@ export default function DocumentVaultPage() {
             </Button>
             <Button
               onClick={handleUpload}
-              disabled={!uploadFile || uploading}
+              disabled={!uploadFile || !uploadCaseId || uploading}
               className="bg-blue-600 hover:bg-blue-700"
             >
               {uploading ? "Uploading..." : "Upload"}

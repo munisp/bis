@@ -342,6 +342,9 @@ const investigationsRouter = router({
           address: input.address,
           purpose: input.purpose,
           dataSources: input.dataSources as any,
+          // Tenant isolation: persist the caller's tenant so list/get scoping
+          // (eq(investigations.tenantId, ctx.tenantId)) can see this record
+          tenantId: ctx.user!.tenantId ?? null,
           createdBy: ctx.user!.id,
         });
         await writeAuditLog(tx as any, { userId: ctx.user!.id, userEmail: ctx.user!.email ?? undefined, category: "investigation", action: "Investigation created", targetRef: ref });
@@ -4183,7 +4186,7 @@ const alertRulesRouter = router({
       return rule;
     }),
 
-  update: writeProcedure
+  update: adminProcedure
     .input(z.object({
       id: z.number(),
       name: z.string().optional(),
@@ -4203,7 +4206,7 @@ const alertRulesRouter = router({
       return { success: true };
     }),
 
-  delete: writeProcedure
+  delete: adminProcedure
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input, ctx }) => {
       const db = await getDb();
@@ -4763,6 +4766,28 @@ const hostedLinkRouter = router({
 });
 
 // ─── Case Management Router ──────────────────────────────────────────────────
+// ─── Cases: tenant isolation helpers ─────────────────────────────────────────
+// Mirror the investigationsRouter pattern: when the caller has a tenantId,
+// every case-table query is restricted to that tenant. Platform admins
+// (ctx.tenantId === null) retain cross-tenant visibility.
+function caseTenantCondition(tenantId: number | null | undefined) {
+  return tenantId != null ? eq(cases.tenantId, tenantId) : undefined;
+}
+
+async function findCaseForTenant(db: any, ref: string, tenantId: number | null | undefined) {
+  const conditions = [eq(cases.ref, ref)];
+  if (tenantId != null) conditions.push(eq(cases.tenantId, tenantId));
+  const [c] = await db.select().from(cases).where(and(...conditions)).limit(1);
+  return c as typeof cases.$inferSelect | undefined;
+}
+
+async function findCaseByIdForTenant(db: any, id: number, tenantId: number | null | undefined) {
+  const conditions = [eq(cases.id, id)];
+  if (tenantId != null) conditions.push(eq(cases.tenantId, tenantId));
+  const [c] = await db.select().from(cases).where(and(...conditions)).limit(1);
+  return c as typeof cases.$inferSelect | undefined;
+}
+
 const casesRouter = router({
   list: protectedProcedure
     .input(z.object({
@@ -4784,6 +4809,8 @@ const casesRouter = router({
       const cacheKey = `cases:list:${ctx.user?.tenantId ?? 0}:${JSON.stringify(input ?? {})}`;
       return withCache(cacheKey, TTL.CASES_LIST, async () => {
       const filters: any[] = [];
+      // Tenant isolation: non-admin users only see their own tenant's cases
+      if (ctx.tenantId !== null) filters.push(eq(cases.tenantId, ctx.tenantId));
       if (input?.status) filters.push(eq(cases.status, input.status as any));
       if (input?.type) filters.push(eq(cases.type, input.type as any));
       if (input?.priority) filters.push(eq(cases.priority, input.priority as any));
@@ -4814,10 +4841,10 @@ const casesRouter = router({
 
   get: protectedProcedure
     .input(z.object({ ref: z.string() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
-      const [c] = await db.select().from(cases).where(eq(cases.ref, input.ref)).limit(1);
+      const c = await findCaseForTenant(db, input.ref, ctx.tenantId);
       if (!c) throw new TRPCError({ code: 'NOT_FOUND', message: 'Case not found' });
       const parties = await db.select().from(caseParties).where(eq(caseParties.caseId, c.id)).orderBy(asc(caseParties.createdAt));
       const documents = await db.select().from(caseDocuments).where(eq(caseDocuments.caseId, c.id)).orderBy(desc(caseDocuments.createdAt));
@@ -4855,6 +4882,7 @@ const casesRouter = router({
         investigationRefs: input.investigationRefs,
         tags: input.tags,
         dueAt: input.dueAt,
+        tenantId: ctx.user?.tenantId ?? null,
         createdBy: ctx.user?.id,
         leadAnalystId: ctx.user?.id,
       }).returning();
@@ -4892,7 +4920,7 @@ const casesRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
       const { ref, ...updates } = input;
-      const [c] = await db.select().from(cases).where(eq(cases.ref, ref)).limit(1);
+      const c = await findCaseForTenant(db, ref, ctx.tenantId);
       if (!c) throw new TRPCError({ code: 'NOT_FOUND' });
       // PBAC: closing/archiving a case requires 'close' permission
       if (updates.status === 'closed' || updates.status === 'archived') {
@@ -4936,7 +4964,7 @@ const casesRouter = router({
     .mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
-      const [c] = await db.select().from(cases).where(eq(cases.ref, input.caseRef)).limit(1);
+      const c = await findCaseForTenant(db, input.caseRef, ctx.tenantId);
       if (!c) throw new TRPCError({ code: 'NOT_FOUND' });
       const { caseRef, ...partyData } = input;
       const [party] = await db.insert(caseParties).values({ ...partyData, caseId: c.id, addedBy: ctx.user?.id }).returning();
@@ -4964,7 +4992,7 @@ const casesRouter = router({
     .mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
-      const [c] = await db.select().from(cases).where(eq(cases.ref, input.caseRef)).limit(1);
+      const c = await findCaseForTenant(db, input.caseRef, ctx.tenantId);
       if (!c) throw new TRPCError({ code: 'NOT_FOUND' });
       const crypto = await import('crypto');
       const accessToken = crypto.randomBytes(32).toString('hex');
@@ -5031,7 +5059,7 @@ const casesRouter = router({
     .mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
-      const [c] = await db.select().from(cases).where(eq(cases.ref, input.caseRef)).limit(1);
+      const c = await findCaseForTenant(db, input.caseRef, ctx.tenantId);
       if (!c) throw new TRPCError({ code: 'NOT_FOUND' });
       const [event] = await db.insert(caseTimeline).values({
         caseId: c.id,
@@ -5045,12 +5073,13 @@ const casesRouter = router({
       return event;
     }),
 
-  stats: protectedProcedure.query(async () => {
+  stats: protectedProcedure.query(async ({ ctx }) => {
     const db = await getDb();
     if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
-    const statusCounts = await db.select({ status: cases.status, count: count() }).from(cases).groupBy(cases.status);
-    const typeCounts = await db.select({ type: cases.type, count: count() }).from(cases).groupBy(cases.type);
-    const [{ total }] = await db.select({ total: count() }).from(cases);
+    const tenantCond = caseTenantCondition(ctx.tenantId);
+    const statusCounts = await db.select({ status: cases.status, count: count() }).from(cases).where(tenantCond).groupBy(cases.status);
+    const typeCounts = await db.select({ type: cases.type, count: count() }).from(cases).where(tenantCond).groupBy(cases.type);
+    const [{ total }] = await db.select({ total: count() }).from(cases).where(tenantCond);
     return { total, statusCounts, typeCounts };
   }),
 
@@ -5067,7 +5096,7 @@ const casesRouter = router({
     .mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
-      const [c] = await db.select().from(cases).where(eq(cases.ref, input.caseRef)).limit(1);
+      const c = await findCaseForTenant(db, input.caseRef, ctx.tenantId);
       if (!c) throw new TRPCError({ code: 'NOT_FOUND', message: 'Case not found' });
       // Validate file type
       const allowedTypes = ['application/pdf','application/msword','application/vnd.openxmlformats-officedocument.wordprocessingml.document','application/vnd.ms-excel','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','image/png','image/jpeg','image/jpg','text/plain'];
@@ -5132,10 +5161,10 @@ const casesRouter = router({
 
   listDocuments: protectedProcedure
     .input(z.object({ caseRef: z.string() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
-      const [c] = await db.select().from(cases).where(eq(cases.ref, input.caseRef)).limit(1);
+      const c = await findCaseForTenant(db, input.caseRef, ctx.tenantId);
       if (!c) throw new TRPCError({ code: 'NOT_FOUND' });
       return db.select().from(caseDocuments)
         .where(eq(caseDocuments.caseId, c.id))
@@ -5153,7 +5182,7 @@ const casesRouter = router({
       const [sh] = await db.select().from(caseStakeholders)
         .where(eq(caseStakeholders.id, input.stakeholderId)).limit(1);
       if (!sh) throw new TRPCError({ code: 'NOT_FOUND', message: 'Stakeholder not found' });
-      const [c] = await db.select().from(cases).where(eq(cases.id, sh.caseId)).limit(1);
+      const c = await findCaseByIdForTenant(db, sh.caseId, ctx.tenantId);
       if (!c) throw new TRPCError({ code: 'NOT_FOUND', message: 'Case not found' });
       const portalUrl = `${input.origin}/stakeholder-portal?token=${sh.accessToken}`;
       await notifyOwner({
@@ -5168,7 +5197,7 @@ const casesRouter = router({
 
   recentActivity: protectedProcedure
     .input(z.object({ limit: z.number().min(1).max(50).default(10) }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
       // Fetch recent timeline events joined with case info
@@ -5187,7 +5216,10 @@ const casesRouter = router({
         })
         .from(caseTimeline)
         .innerJoin(cases, eq(caseTimeline.caseId, cases.id))
-        .where(sql`${cases.status} NOT IN ('closed', 'archived')`)
+        .where(and(
+          sql`${cases.status} NOT IN ('closed', 'archived')`,
+          caseTenantCondition(ctx.tenantId),
+        ))
         .orderBy(desc(caseTimeline.createdAt))
         .limit(input.limit);
       return events;
@@ -5201,7 +5233,7 @@ const casesRouter = router({
     .mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
-      const [c] = await db.select().from(cases).where(eq(cases.ref, input.caseRef)).limit(1);
+      const c = await findCaseForTenant(db, input.caseRef, ctx.tenantId);
       if (!c) throw new TRPCError({ code: 'NOT_FOUND', message: 'Case not found' });
       const [doc] = await db.select().from(caseDocuments)
         .where(and(eq(caseDocuments.id, input.documentId), eq(caseDocuments.caseId, c.id))).limit(1);
@@ -5226,7 +5258,7 @@ const casesRouter = router({
     .mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
-      const [c] = await db.select().from(cases).where(eq(cases.ref, input.caseRef)).limit(1);
+      const c = await findCaseForTenant(db, input.caseRef, ctx.tenantId);
       if (!c) throw new TRPCError({ code: 'NOT_FOUND', message: 'Case not found' });
       const parties = await db.select().from(caseParties).where(eq(caseParties.caseId, c.id)).orderBy(asc(caseParties.createdAt));
       const documents = await db.select().from(caseDocuments).where(eq(caseDocuments.caseId, c.id)).orderBy(desc(caseDocuments.createdAt));
@@ -5361,6 +5393,8 @@ ${timeline.map(e => `<tr><td>${new Date(e.createdAt).toLocaleDateString()}</td><
       const db = await getDb();
       if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'DB unavailable' });
       const filters: any[] = [];
+      // Tenant isolation: non-admin users only export their own tenant's cases
+      if (ctx.tenantId !== null) filters.push(eq(cases.tenantId, ctx.tenantId));
       if (input?.status) filters.push(eq(cases.status, input.status as any));
       if (input?.type) filters.push(eq(cases.type, input.type as any));
       if (input?.priority) filters.push(eq(cases.priority, input.priority as any));
@@ -5394,7 +5428,7 @@ ${timeline.map(e => `<tr><td>${new Date(e.createdAt).toLocaleDateString()}</td><
     .mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Database unavailable' });
-      const [c] = await db.select().from(cases).where(eq(cases.ref, input.caseRef)).limit(1);
+      const c = await findCaseForTenant(db, input.caseRef, ctx.tenantId);
       if (!c) throw new TRPCError({ code: 'NOT_FOUND', message: 'Case not found' });
       const parties = await db.select().from(caseParties).where(eq(caseParties.caseId, c.id));
       const documents = await db.select().from(caseDocuments).where(eq(caseDocuments.caseId, c.id));
@@ -5453,7 +5487,7 @@ ${timeline.map(e => `<tr><td>${new Date(e.createdAt).toLocaleDateString()}</td><
     .mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Database unavailable' });
-      const [c] = await db.select().from(cases).where(eq(cases.ref, input.caseRef)).limit(1);
+      const c = await findCaseForTenant(db, input.caseRef, ctx.tenantId);
       if (!c) throw new TRPCError({ code: 'NOT_FOUND', message: 'Case not found' });
       await db.update(cases).set({ leadAnalystId: input.analystId, updatedAt: new Date() }).where(eq(cases.id, c.id));
       const label = input.analystId ? `Assigned to ${input.analystName ?? 'Analyst #' + input.analystId}` : 'Lead analyst unassigned';
@@ -5474,7 +5508,7 @@ ${timeline.map(e => `<tr><td>${new Date(e.createdAt).toLocaleDateString()}</td><
     .query(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) return [];
-      const [c] = await db.select().from(cases).where(eq(cases.ref, input.caseRef)).limit(1);
+      const c = await findCaseForTenant(db, input.caseRef, ctx.tenantId);
       if (!c) return [];
       const rows = await db.select().from(caseComments)
         .where(and(eq(caseComments.caseId, c.id), eq(caseComments.deletedAt, null as any)))
@@ -5494,7 +5528,7 @@ ${timeline.map(e => `<tr><td>${new Date(e.createdAt).toLocaleDateString()}</td><
     .mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Database unavailable' });
-      const [c] = await db.select().from(cases).where(eq(cases.ref, input.caseRef)).limit(1);
+      const c = await findCaseForTenant(db, input.caseRef, ctx.tenantId);
       if (!c) throw new TRPCError({ code: 'NOT_FOUND', message: 'Case not found' });
       const [comment] = await db.insert(caseComments).values({
         caseId: c.id,
@@ -5524,6 +5558,9 @@ ${timeline.map(e => `<tr><td>${new Date(e.createdAt).toLocaleDateString()}</td><
       if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Database unavailable' });
       const [comment] = await db.select().from(caseComments).where(eq(caseComments.id, input.commentId)).limit(1);
       if (!comment) throw new TRPCError({ code: 'NOT_FOUND', message: 'Comment not found' });
+      // Tenant isolation: the parent case must belong to the caller's tenant
+      const commentCase = await findCaseByIdForTenant(db, comment.caseId, ctx.tenantId);
+      if (!commentCase) throw new TRPCError({ code: 'NOT_FOUND', message: 'Comment not found' });
       // Only the author or an admin can edit
       if (comment.authorId !== ctx.user?.id && ctx.user?.role !== 'admin') {
         throw new TRPCError({ code: 'FORBIDDEN', message: 'You can only edit your own comments' });
@@ -5540,6 +5577,9 @@ ${timeline.map(e => `<tr><td>${new Date(e.createdAt).toLocaleDateString()}</td><
       if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Database unavailable' });
       const [comment] = await db.select().from(caseComments).where(eq(caseComments.id, input.commentId)).limit(1);
       if (!comment) throw new TRPCError({ code: 'NOT_FOUND', message: 'Comment not found' });
+      // Tenant isolation: the parent case must belong to the caller's tenant
+      const commentCase = await findCaseByIdForTenant(db, comment.caseId, ctx.tenantId);
+      if (!commentCase) throw new TRPCError({ code: 'NOT_FOUND', message: 'Comment not found' });
       if (comment.authorId !== ctx.user?.id && ctx.user?.role !== 'admin') {
         throw new TRPCError({ code: 'FORBIDDEN', message: 'You can only delete your own comments' });
       }
@@ -5557,7 +5597,8 @@ ${timeline.map(e => `<tr><td>${new Date(e.createdAt).toLocaleDateString()}</td><
     .mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR' });
-      await db.update(cases).set({ status: input.status, updatedAt: new Date() }).where(inArray(cases.ref, input.refs));
+      await db.update(cases).set({ status: input.status, updatedAt: new Date() })
+        .where(and(inArray(cases.ref, input.refs), caseTenantCondition(ctx.tenantId)));
       await writeAuditLog(db, { userId: ctx.user.id, category: 'case' as any, action: `Bulk status → ${input.status}: ${input.refs.length} cases`, targetRef: input.refs.join(',') });
       return { updated: input.refs.length };
     }),
@@ -5570,7 +5611,8 @@ ${timeline.map(e => `<tr><td>${new Date(e.createdAt).toLocaleDateString()}</td><
     .mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR' });
-      await db.update(cases).set({ leadAnalystId: input.leadAnalystId, updatedAt: new Date() }).where(inArray(cases.ref, input.refs));
+      await db.update(cases).set({ leadAnalystId: input.leadAnalystId, updatedAt: new Date() })
+        .where(and(inArray(cases.ref, input.refs), caseTenantCondition(ctx.tenantId)));
       await writeAuditLog(db, { userId: ctx.user.id, category: 'case' as any, action: `Bulk assign to analyst #${input.leadAnalystId}: ${input.refs.length} cases`, targetRef: input.refs.join(',') });
       return { updated: input.refs.length };
     }),
@@ -5587,13 +5629,14 @@ ${timeline.map(e => `<tr><td>${new Date(e.createdAt).toLocaleDateString()}</td><
         const canClose = await permifyCheck("case", ref, "close", String(ctx.user.id));
         if (!canClose) throw new TRPCError({ code: 'FORBIDDEN', message: `Insufficient permissions to close case ${ref}` });
       }
-      await db.update(cases).set({ status: 'closed', updatedAt: new Date() }).where(inArray(cases.ref, input.refs));
+      await db.update(cases).set({ status: 'closed', updatedAt: new Date() })
+        .where(and(inArray(cases.ref, input.refs), caseTenantCondition(ctx.tenantId)));
       await writeAuditLog(db, { userId: ctx.user.id, category: 'case' as any, action: `Bulk close: ${input.refs.length} cases`, targetRef: input.refs.join(',') });
       return { closed: input.refs.length };
     }),
   getSLABreaches: protectedProcedure
     .input(z.object({ limit: z.number().min(1).max(50).default(10) }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) return { count: 0, breaches: [] };
       const now = new Date();
@@ -5611,7 +5654,8 @@ ${timeline.map(e => `<tr><td>${new Date(e.createdAt).toLocaleDateString()}</td><
         .where(
           and(
             lt(cases.dueAt, now),
-            sql`${cases.status} NOT IN ('closed','archived')`
+            sql`${cases.status} NOT IN ('closed','archived')`,
+            caseTenantCondition(ctx.tenantId)
           )
         )
         .orderBy(asc(cases.dueAt))

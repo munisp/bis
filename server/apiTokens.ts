@@ -90,10 +90,17 @@ export const apiTokensRouter = router({
       if (!db) return { items: [], total: 0 };
 
       const conditions = [];
+      // Ownership filter is mandatory for non-admin callers and must NEVER be
+      // replaced by a caller-supplied tenantId — the tenant filter is ANDed on
+      // top of it so a non-admin can never list tokens they do not own.
+      if (ctx.user!.role !== "admin") {
+        conditions.push(eq(apiTokens.createdBy, ctx.user!.id));
+        if (ctx.user!.tenantId != null) {
+          conditions.push(eq(apiTokens.tenantId, ctx.user!.tenantId));
+        }
+      }
       if (input.tenantId !== undefined) {
         conditions.push(eq(apiTokens.tenantId, input.tenantId));
-      } else if (ctx.user!.role !== "admin") {
-        conditions.push(eq(apiTokens.createdBy, ctx.user!.id));
       }
 
       const where = conditions.length > 0 ? and(...conditions) : undefined;

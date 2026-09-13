@@ -331,14 +331,11 @@ func handleComplianceStatus(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "MISSING_REF", "compliance ref required in path")
 		return
 	}
-	// In production this would query the compliance_decisions table.
-	// For now return a deterministic sandbox response.
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"ref":    ref,
-		"status": "completed",
-		"mode":   "sandbox",
-		"note":   "Set DATABASE_URL and MOJALOOP_HUB_URL for live compliance status lookup",
-	})
+	// Fail closed: without a configured compliance decision store there is no
+	// authoritative status to report. Never return a synthetic "completed"
+	// sandbox response — callers must treat an unknown status as unavailable.
+	writeError(w, http.StatusServiceUnavailable, "mojaloop_compliance_unavailable",
+		"No authoritative Mojaloop compliance status store is configured; compliance status lookup is unavailable.")
 }
 
 // ─── Route registration ───────────────────────────────────────────────────────
