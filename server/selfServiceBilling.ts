@@ -14,7 +14,9 @@
  *     existing `tenant_subscriptions` / `billing_entitlements` tables.
  *
  * Fail-closed: any payment or ledger failure raises a typed TRPCError and NO
- * subscription, entitlement, or plan_signups success row is created.
+ * subscription or entitlement is created; the attempt is durably recorded as a
+ * plan_signups row with status 'payment_failed' so replays of the same
+ * idempotency key return that original failure result.
  *
  * Idempotent: the client-supplied idempotency key is backed by a UNIQUE
  * constraint on plan_signups.idempotency_key; a replay returns the original
@@ -188,6 +190,15 @@ export const selfServiceBillingRouter = router({
           // TigerBeetle transfer. Any failure throws and nothing is activated.
           await settlePaystackPayment(input.paymentReference);
         } catch (error) {
+          // Durable failed-attempt record: a replay of this idempotency key
+          // returns this original failure result instead of re-settling. The
+          // row is best-effort; a concurrent attempt wins on the UNIQUE key.
+          await pool.query(
+            `INSERT INTO plan_signups (id, tenant_id, plan_code, status, billing_ref, idempotency_key, created_by)
+             VALUES ($1, $2, $3, 'payment_failed', $4, $5, $6)
+             ON CONFLICT (idempotency_key) DO NOTHING`,
+            [randomUUID(), tenantId, input.planCode, input.paymentReference, input.idempotencyKey, userId],
+          ).catch(() => undefined);
           await writeAuditLog(pool, {
             tenantId, userId, action: `Self-service signup payment failed for plan ${input.planCode}`,
             targetRef: input.paymentReference, result: "failure",
