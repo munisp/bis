@@ -176,6 +176,13 @@
       "when": 1788638400000,
       "tag": "0024_share_links_and_plan_signups",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1788642000000,
+      "tag": "0025_monitoring",
+      "breakpoints": true
     }
   ]
 }

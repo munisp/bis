@@ -42,6 +42,7 @@ import { validateEnv } from "../envValidation";
 import { ENV } from "./env";
 import { startWebhookRetryScheduler } from "../webhookRetry";
 import { startPaymentIntentOutboxDispatcher } from "../paymentIntentOutbox";
+import { startMonitoringScheduler } from "../monitoringScheduler";
 import { FORENSIC_EXPORT_MAX_EVENTS, iterateVerifiedForensicExport } from "../piiForensicExport";
 import { forensicIncidentReferenceSchema, serializeForensicExportRecord } from "../forensicExportProtocol";
 
@@ -558,7 +559,7 @@ async function startServer() {
   app.post("/api/consumer-disputes/:caseRef/evidence/initiate", async (req: Request, res: Response) => {
     const caseRef = consumerDisputeCaseRef(req.params.caseRef);
     if (!caseRef) {
-      res.status(400).json({ error: "A valid consumer dispute case reference is required", code: "BAD_REQUEST" });
+      res.status(400).json({ error: "A valid consumer dispute and evidence reference are required", code: "BAD_REQUEST" });
       return;
     }
     try {
@@ -1852,6 +1853,8 @@ startServer()
     startBroadcastScheduler(); // 1-min poll for overdue scheduled broadcasts
     startWebhookRetryScheduler(); // 10s poll for failed Paystack webhook credits (exponential backoff)
     startPaymentIntentOutboxDispatcher(); // 5s leased PostgreSQL dispatch for payment workflow starts
+    // 60s continuous re-screening of ongoing-monitoring enrollments (default on; set MONITORING_SCHEDULER_ENABLED=false to disable)
+    if (process.env.MONITORING_SCHEDULER_ENABLED !== "false") startMonitoringScheduler();
     void import("../platform").then(async ({ migrateLegacyTotpSeedsAtRest }) => {
       const migrated = await migrateLegacyTotpSeedsAtRest();
       if (migrated > 0) log("info", "Encrypted legacy TOTP seeds", { migrated });
