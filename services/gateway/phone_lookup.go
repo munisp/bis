@@ -169,6 +169,13 @@ func (p *hlrProvider) Lookup(ctx context.Context, msisdn string) (rec *PhoneReco
 
 	resp, err := p.client.Do(req)
 	if err != nil {
+		// *url.Error embeds the request URL, which carries the full MSISDN
+		// query parameter — strip it so chained/logged errors never leak the
+		// phone number.
+		var urlErr *url.Error
+		if errors.As(err, &urlErr) {
+			return nil, fmt.Errorf("hlr http call: %w", urlErr.Err)
+		}
 		return nil, fmt.Errorf("hlr http call: %w", err)
 	}
 	defer resp.Body.Close()

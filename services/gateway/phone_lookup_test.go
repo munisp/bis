@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -349,5 +350,51 @@ func TestPhoneCircuitBreakerHalfOpenRecovery(t *testing.T) {
 	_, _ = p.Lookup(context.Background(), "+2348031234567")
 	if *calls != 3 {
 		t.Fatalf("half-open probe must reach upstream, calls = %d", *calls)
+	}
+}
+
+func TestPhoneChainErrorDoesNotLeakMSISDN(t *testing.T) {
+	// Unroutable endpoint forces a *url.Error transport failure, which embeds
+	// the request URL (and therefore the msisdn query param) unless stripped.
+	p := newHLRProvider("http://127.0.0.1:1", "k", 500*time.Millisecond)
+	chain := &phoneLookupChain{providers: []PhoneProvider{p}}
+
+	msisdn := "+2348031234567"
+	_, err := chain.Lookup(context.Background(), msisdn)
+	if err == nil {
+		t.Fatal("expected transport error")
+	}
+	msg := err.Error()
+	for _, leak := range []string{msisdn, "2348031234567", "%2B2348031234567", "msisdn="} {
+		if strings.Contains(msg, leak) {
+			t.Fatalf("chained error leaks MSISDN (%q) in: %s", leak, msg)
+		}
+	}
+}
+
+func TestPhoneLookupFailureLogDoesNotLeakMSISDN(t *testing.T) {
+	// End-to-end through the handler: the WARN log line must carry only the
+	// masked number even when the provider error used to embed the URL.
+	prev := log.Writer()
+	defer log.SetOutput(prev)
+	var buf strings.Builder
+	log.SetOutput(&buf)
+
+	p := newHLRProvider("http://127.0.0.1:1", "k", 500*time.Millisecond)
+	withPhoneChain(t, &phoneLookupChain{providers: []PhoneProvider{p}})
+
+	rr := httptest.NewRecorder()
+	handlePhoneLookup(rr, httptest.NewRequest(http.MethodGet, "/v1/phone/08031234567", nil))
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d", rr.Code)
+	}
+	logs := buf.String()
+	for _, leak := range []string{"+2348031234567", "2348031234567", "%2B234", "08031234567"} {
+		if strings.Contains(logs, leak) {
+			t.Fatalf("handler logs leak MSISDN (%q) in: %s", leak, logs)
+		}
+	}
+	if !strings.Contains(logs, maskMSISDN("+2348031234567")) {
+		t.Errorf("expected masked MSISDN in logs, got: %s", logs)
 	}
 }
