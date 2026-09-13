@@ -224,48 +224,31 @@ describe("compensateTransfer activity", () => {
   });
 });
 
-// ── Saga orchestration: dev-mode startPaymentTransferWorkflow ─────────────────
+// ── Saga orchestration: startPaymentTransferWorkflow (WP6 FIX B — fail closed) ─
+//
+// No worker registers PaymentTransferWorkflow on 'bis-payment' anywhere in the
+// fleet, so the starter is guarded: it must reject with a typed
+// TemporalWorkflowUnavailableError instead of reporting a phantom start.
 
-describe("startPaymentTransferWorkflow", () => {
-  it("returns a deterministic workflowId when Temporal gateway responds 200", async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ workflow_id: "payment-TXN-SAGA-001", run_id: "run-abc" }),
+describe("startPaymentTransferWorkflow (fail-closed guard)", () => {
+  it("rejects with a typed TEMPORAL_WORKFLOW_UNAVAILABLE error", async () => {
+    await expect(startPaymentTransferWorkflow(BASE_INPUT)).rejects.toMatchObject({
+      code: "TEMPORAL_WORKFLOW_UNAVAILABLE",
+      workflowType: "PaymentTransferWorkflow",
+      taskQueue: "bis-payment",
     });
-
-    const result = await startPaymentTransferWorkflow(BASE_INPUT);
-
-    expect(result.workflowId).toBe("payment-TXN-SAGA-001");
-    expect(result.mode).toBe("temporal");
   });
 
-  it("workflowId is idempotent — same txRef always produces same workflow_id", async () => {
-    mockFetch
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ workflow_id: "payment-TXN-SAGA-001", run_id: "run-1" }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ workflow_id: "payment-TXN-SAGA-001", run_id: "run-2" }),
-      });
-
-    const r1 = await startPaymentTransferWorkflow(BASE_INPUT);
-    const r2 = await startPaymentTransferWorkflow(BASE_INPUT);
-
-    expect(r1.workflowId).toBe(r2.workflowId);
+  it("never contacts the gateway — no phantom execution is created", async () => {
+    await expect(startPaymentTransferWorkflow(BASE_INPUT)).rejects.toThrow();
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it("throws when Temporal gateway returns non-2xx", async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
-      status: 500,
-      text: async () => "Internal Server Error",
-    });
-
-    await expect(startPaymentTransferWorkflow(BASE_INPUT)).rejects.toThrow(
-      /PaymentTransferWorkflow start failed/
-    );
+  it("rejects deterministically on replay (same txRef, same typed error)", async () => {
+    const e1 = await startPaymentTransferWorkflow(BASE_INPUT).catch((e: unknown) => e);
+    const e2 = await startPaymentTransferWorkflow(BASE_INPUT).catch((e: unknown) => e);
+    expect((e1 as Error).message).toBe((e2 as Error).message);
+    expect((e1 as { code: string }).code).toBe("TEMPORAL_WORKFLOW_UNAVAILABLE");
   });
 });
 
