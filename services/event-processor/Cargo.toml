@@ -26,7 +26,7 @@ bis-transport-policy = { path = "../../crates/bis-transport-policy" }
 # Native Kafka consumer/producer — requires librdkafka-dev in the Docker build image.
 # Enable with: cargo build --features kafka-native
 # Docker: RUN apt-get install -y librdkafka-dev cmake
-rdkafka = { version = "0.36", features = ["cmake-build", "ssl"], optional = true }
+rdkafka = { version = "0.39", features = ["cmake-build", "ssl"], optional = true }
 # Redis async client — for pub/sub fan-out and alert caching
 # Enable with: cargo build --features redis-pubsub
 redis = { version = "0.25", features = ["tokio-comp", "connection-manager"], optional = true }
