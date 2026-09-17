@@ -13,5 +13,5 @@ Pillow==11.0.0
 redis[asyncio]==5.2.1
 kafka-python==2.0.2
 prometheus-client==0.21.1
-python-multipart==0.0.19
+python-multipart==0.0.32
 httpx==0.28.1
